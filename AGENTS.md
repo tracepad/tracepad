@@ -673,12 +673,15 @@ reason in a comment; adding a dialect should be a table edit.
   budget.
 - `make sdk-js-test` — the Node package's type check and unit suite, then
   its end-to-end suite against a binary it builds. `SDK_SKIP_E2E=1` runs the
-  unit half alone. `make sdk-js-lines` reports its budget. Any Node from 22,
+  unit half alone, which is `make sdk-js-unit`, and the gate runs it, as it
+  runs `make sdk-py-unit` for the Python package. `make sdk-js-lines` reports its budget. Any Node from 22,
   the package's floor; CI runs 22, 24 and 26.
 - `make sdk-go-test` — the Go package's vet and unit suite inside its module,
   then its end-to-end package against a binary it builds; `make sdk-go-unit`
   is the unit half alone, which the gate runs. `make sdk-go-lines` reports
   its budget.
+- `make race` — the store and the server under the race detector: about eleven
+  minutes. Not in the gate; CI runs it once per merge to `main`, and on demand.
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
   deliberate mapping change. Review the golden diff; it *is* the change. The
   three bodies that are not synthetic are rewritten from the packages first:
