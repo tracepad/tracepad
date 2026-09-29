@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { createProject, signIn as enter, state, WIRE_TRACE } from './harness';
+import { createProject, inviteViewer, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // Scores where their target is (spec 022, Testing — e2e), against the real
 // binary. The corpus is seeded through the API in a project of its own
@@ -109,6 +109,8 @@ test('the trace header shows its own scores and counts the ones on observations'
 	const chip = page.getByRole('button', { name: /helpfulness/ });
 	await expect(chip).toContainText('0.875');
 	await expect(chip).toContainText('api');
+	// Seeded with the project's key, so the key is its author (spec 048 #10).
+	await expect(chip).toContainText(/key \S+/);
 	// One, not two: the stray below names an observation as well, but it is on
 	// this header rather than behind a panel, so counting it would send the
 	// reader hunting for a score they are looking at (Decision 11).
@@ -181,6 +183,37 @@ test('a score written by hand appears, is corrected in place, and is retracted',
 
 	await expect(page.getByRole('button', { name: /verdict/ })).toHaveCount(0);
 	expect(await ids('verdict')).toHaveLength(0);
+});
+
+// Who wrote it (spec 048 #10, #5): the editor who scores by hand is named on
+// the chip with the email as its tooltip; a viewer of the same project reads
+// the chip without the email, and an account with no name is "a member".
+test('the author is named, and the email is an editor\'s to read', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/traces/${TRACE}`);
+	await page.getByRole('button', { name: 'Score', exact: true }).click();
+	await page.getByLabel('Name').selectOption('verdict');
+	await page.getByLabel('Value').selectOption('correct');
+	await page.getByRole('button', { name: 'Save' }).click();
+
+	const { account } = await project();
+	const author = page.getByRole('button', { name: /verdict/ }).getByText(`by ${account.email}`);
+	await expect(author).toBeVisible();
+	await expect(author).toHaveAttribute('title', account.email);
+});
+
+test('a viewer reads the author without the email', async ({ page }) => {
+	const { baseURL } = state();
+	const { id, name, account } = await project();
+	await enter(page, await inviteViewer(baseURL, id, name));
+	await page.goto(`/traces/${TRACE}`);
+
+	const chip = page.getByRole('button', { name: /verdict/ });
+	await expect(chip).toContainText('by a member');
+	await expect(chip).not.toContainText(account.email);
+	await expect(chip.locator(`[title="${account.email}"]`)).toHaveCount(0);
+
+	for (const score of await ids('verdict')) await must('DELETE', `/api/v1/scores/${score}`);
 });
 
 test('the free-name path scores a name the project never declared', async ({ page }) => {

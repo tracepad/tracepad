@@ -247,11 +247,19 @@
 		</span>
 	{/if}
 	<div class="ml-auto flex items-center gap-1.5">
-		<!-- Changeable from the header (#12): a shared machine is where the
-		     wrong name gets written into forty verdicts. -->
-		<Button onclick={() => (naming = true)} title="Change who is reviewing">
-			{annotator.name ?? 'Who?'}
-		</Button>
+		{#if annotator.fromAccount}
+			<!-- The account's own name (spec 048 #11): who is reviewing is who
+			     is signed in, and changing it is signing in as somebody else. -->
+			<span class="text-muted max-w-48 truncate text-sm" title="Reviewing as your account">
+				{annotator.name}
+			</span>
+		{:else}
+			<!-- Changeable from the header (#12): a shared machine is where the
+			     wrong name gets written into forty verdicts. -->
+			<Button onclick={() => (naming = true)} title="Change who is reviewing">
+				{annotator.name ?? 'Who?'}
+			</Button>
+		{/if}
 	</div>
 </header>
 

@@ -9,6 +9,7 @@
 	import {
 		boundsLabel,
 		isCut,
+		scoreAuthor,
 		scoreSource,
 		scoreValue,
 		type HeaderScore,
@@ -125,6 +126,7 @@
 	>
 		{#each scores as { score, unknown } (score.id)}
 			{@const shown = open.has(score.id)}
+			{@const author = scoreAuthor(score)}
 			<div class="border-border bg-surface max-w-full rounded-md border text-sm">
 				<button
 					type="button"
@@ -146,6 +148,17 @@
 						{scoreValue(score)}
 					</span>
 					<span class="text-subtle shrink-0 text-xs">{scoreSource(score)}</span>
+					{#if author}
+						<!-- Beside the chip, which says what kind of judgement
+						     it is; this says whose (spec 048 #10). An author who
+						     is gone is muted, not hidden: the judgement stands. -->
+						<span
+							class={['max-w-40 shrink-0 truncate text-xs', author.gone ? 'text-subtle' : 'text-muted']}
+							title={author.title}
+						>
+							{author.text}
+						</span>
+					{/if}
 					<span class="text-subtle shrink-0 text-xs" title={timestampPrecise(score.timestamp)}>
 						{relative(score.timestamp)}
 					</span>

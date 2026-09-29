@@ -166,9 +166,12 @@ holds. When nothing is claimable the answer is `{"item": null, "pending": N}`,
 and `pending` is then what other people are holding — come back, the claims
 expire.
 
-`annotator` is a name the client sends, 1–200 characters. The store has no
-users and this does not invent them: it is a signature, so that a team can
-read "who said this".
+`annotator` is a name the client sends, 1–200 characters: a signature, so
+that a team can read "who said this" on the queue. The web desk sends the
+signed-in account's name and asks for nothing. A program working a queue with
+a key has a name but no account, so it stays free text. Who wrote each verdict
+is also on the score itself, as its [author](scores.md#who-wrote-a-score),
+which the server records and nobody types.
 
 ### Posting the verdict
 

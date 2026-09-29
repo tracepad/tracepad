@@ -1,11 +1,14 @@
-// Who is annotating (spec 024 #6). The store has no users and this spec does
-// not invent them: the desk asks for a name once and keeps it in the browser,
-// which is what a small team needs to read "who said this" and nothing it
-// could not fake by other means.
+// Who is annotating (spec 024 #6). It is a signature, not a credential: it
+// travels in the body of the writes that finish an item and in the metadata of
+// the scores they check.
 //
-// Kept like the two credentials beside it — its own key, its own lifetime —
-// but it is not a credential: it is a signature, and it travels in the body of
-// the writes that finish an item and in the metadata of the scores they check.
+// Signed in, it is the account's name, and nobody types it (spec 048 #11): the
+// server already puts the account on every score as its author, and asking the
+// same person to type what the server knows is a second source of truth. The
+// name asked for once and kept in the browser is what is left for a desk with
+// no account behind it.
+
+import { auth } from './auth.svelte';
 
 const STORAGE_KEY = 'tracepad.annotator';
 
@@ -16,11 +19,17 @@ class Annotator {
 
 	/** The name this browser annotates under, or null when nobody said. */
 	get name() {
+		if (this.fromAccount) return auth.displayName;
 		if (!this.#restored) {
 			this.#restored = true;
 			this.#name = read();
 		}
 		return this.#name;
+	}
+
+	/** Whether the name is the signed-in account's, which is not changed here. */
+	get fromAccount() {
+		return auth.displayName !== '';
 	}
 
 	/** Stores the name the desk asked for; an empty one is not a name. */

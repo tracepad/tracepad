@@ -59,6 +59,36 @@ export function scoreSource(score: Score): string {
 	return typeof source === 'string' && source !== '' ? source : API_SOURCE;
 }
 
+/** What the chip says about who wrote a score (spec 048 #10). */
+export interface AuthorLabel {
+	/** `by Ada`, `key nightly-judge`. */
+	text: string;
+	/** The email when the reader may see it (#5), and the standing of an author who is gone. */
+	title?: string;
+	/** The author is no longer here: removed, disabled, deleted or revoked. */
+	gone: boolean;
+}
+
+const GONE = new Set(['removed', 'disabled', 'deleted', 'revoked']);
+
+/**
+ * Who wrote it (spec 048 #10), or null for a score from before the server
+ * recorded authors, which shows nothing rather than a guess (#6). An account
+ * without a display name reads as its email where the reader may see one, and
+ * as *a member* where not (#5).
+ */
+export function scoreAuthor(score: Score): AuthorLabel | null {
+	const author = score.author;
+	if (!author) return null;
+	const gone = GONE.has(author.standing);
+	const title = [author.email, gone ? author.standing : ''].filter(Boolean).join(' · ') || undefined;
+	if (author.kind === 'key') {
+		return { text: `key ${author.name || author.id}`, title, gone };
+	}
+	const name = author.name.trim() || author.email || 'a member';
+	return { text: `by ${name}`, title, gone };
+}
+
 /**
  * What the value's tooltip says about the name's declared range, or nothing
  * when the name has no config or the config bounds neither end.

@@ -197,6 +197,15 @@ itself, a text score cut at 120 characters. The source is `metadata.source`
 when the writer set one — `web` for this screen, whatever the SDK or the
 widget wrote otherwise — and `api` when it did not.
 
+Beside the source, the [author](scores.md#who-wrote-a-score): *by Ada* for an
+account, *key nightly-judge* for a program's key. The source says what kind of
+judgement it is, the author whose. Its tooltip is the account's email for an
+editor or an owner; a viewer reads the name alone, and an account that never
+set one is *a member*. An author who is gone — removed from the project,
+disabled, deleted, a revoked key — is muted, with the reason in the tooltip:
+the judgement stands. A score from before the server recorded authors shows
+none.
+
 The trace header carries the scores of the *trace*; a score that names an
 observation belongs to that observation's panel, and the header says how many
 went there. That count is what opening the panels will find, so it can be
@@ -441,10 +450,12 @@ wears, and its note says the part that matters: the scores written while
 annotating stay.
 
 **The desk** (`/queues/{name}/annotate`) is the point of the section: read,
-judge, next, with nothing to navigate. It asks once for a name to sign
-verdicts with and keeps it in the browser — a signature, not a credential,
-changeable from the header, which is what a shared machine needs. Then the
-trace on the left, exactly as every other screen shows it, and on the right
+judge, next, with nothing to navigate. It signs verdicts with the signed-in
+account's name, or its email when it has none, and asks nobody who they are:
+the header shows the name and does not offer to change it, because reviewing
+as somebody else is signing in as them. Every score it writes has the account
+as its [author](scores.md#who-wrote-a-score) as well. Then the trace on the
+left, exactly as every other screen shows it, and on the right
 one control per score the queue asks for, built by the same rule the *Score*
 dialog uses: the config decides the field.
 
