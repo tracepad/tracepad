@@ -34,7 +34,8 @@ pair — then prints them, once:
 ```
 Project "default" created. Connect your app with either:
 
-  # OpenTelemetry SDK
+  # OpenTelemetry SDK (Tracepad has no gRPC: the protocol line is required if your SDK defaults to it)
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 
@@ -61,27 +62,38 @@ password, and nothing is written down anywhere but this database:
 
   http://localhost:4318/setup#token=…
 
-The link is good until this process stops. Restart to have a new one printed.
+The link is good for 24 hours, or until this process stops. Restart to have a
+new one printed.
 ```
 
 The key is for your application; the account is for you. Open the link, pick a
 password, and that is the last credential you type into a browser here — see
 [accounts.md](accounts.md). The token in it is minted per start and held in
-memory, so if you lose the link, restart and a new one is printed.
+memory and works for 24 hours, so if you lose the link, restart and a new one
+is printed.
 
 Data lives in `~/.local/share/tracepad` by default (`/data` in the Docker
 image, which is where the volume goes); `TRACEPAD_DATA_DIR` moves it.
 
 ## 2. Point an application at it
 
-Any OpenTelemetry SDK, in any language, with the two variables above. In
-Python, with the OpenTelemetry SDK's automatic exporter configuration:
+Any OpenTelemetry SDK, in any language, with the three variables above. **The
+protocol line is required wherever an SDK defaults to gRPC** — Python's
+auto-configured exporter does — since Tracepad speaks OTLP over HTTP and has no gRPC
+receiver, and an exporter left to choose for itself may pick gRPC — the
+application runs, reports nothing, and the trace list stays empty. In Python,
+with the OpenTelemetry distro's automatic configuration (`pip install
+opentelemetry-distro opentelemetry-exporter-otlp-proto-http`):
 
 ```sh
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
-python your_app.py
+opentelemetry-instrument python your_app.py
 ```
+
+A plain `python your_app.py` configures nothing; the distro's launcher (or
+your own code) is what reads these variables.
 
 The Langfuse SDKs work too, against the same endpoint under their own path —
 set `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead.

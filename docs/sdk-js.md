@@ -673,8 +673,9 @@ drift apart without a test saying so.
   provider is a release per provider release. The OpenTelemetry GenAI
   instrumentations are the answer, and they work because the transport is
   shared: point them at the same endpoint and their spans join yours.
-- **No browser build**, and no `using` — `Observation`s are handed to
-  callbacks, which is the shape that guarantees the span ends.
+- **No browser build**, and no `using` on the span helpers — `Observation`s are
+  handed to callbacks, which is the shape that guarantees the span ends. (The
+  `Run` and `Capture` objects are disposable, and `using` works on those.)
 - **No price table**, no prompt templating beyond `{placeholders}`.
 - **No client of its own.** The REST calls are the global `fetch`; the one
   thing written from inside a request handler — a score — is queued instead.

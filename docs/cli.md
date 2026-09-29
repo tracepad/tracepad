@@ -641,8 +641,8 @@ traces that name a case its dataset version does not have.
 
 `datasets rm` is destructive — it takes the dataset's runs with it and releases
 every trace they were keeping out of retention — so it shows the preview and
-asks you to type the name back, and needs `--yes` off a terminal. `runs rm` and
-`score-configs rm` do not: one row each, and the traces of a deleted run are
+asks you to type the name back, and needs `--yes` off a terminal. `runs rm`,
+`score-configs rm` and `datasets rm-item` do not: one row each, and the traces of a deleted run are
 released, not deleted.
 
 ### `queues`
@@ -960,9 +960,9 @@ page on the wrong port looks like.
 
 ```sh
 $ tracepad health
-0.2.0
+0.1.0
 $ tracepad health --json
-{"version": "0.2.0", "ok": true}
+{"version":"0.1.0","ok":true}
 $ tracepad health --url http://localhost:9999 ; echo $?
 tracepad: cannot reach http://localhost:9999: … connection refused
 1

@@ -26,7 +26,8 @@ tracepad.init()  # or init(host="http://localhost:4318", key="tp-sk-…")
 ```
 
 `TRACEPAD_URL` and `TRACEPAD_API_KEY` are the two variables it reads;
-`TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` are the two it can also use. If
+`TRACEPAD_ENVIRONMENT`, `TRACEPAD_RELEASE` and `TRACEPAD_EXPORT_TIMEOUT` are the
+ones it can also use. If
 the application already has a `TracerProvider` — FastAPI instrumentation,
 another SDK — `init` adds an exporter to it rather than replacing it.
 

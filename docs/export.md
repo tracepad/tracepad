@@ -319,8 +319,9 @@ columns, the payloads, the trace and span ids. Two things to know:
   [datasets.md](datasets.md)). Push the datasets and open the runs first if you
   want the links to survive.
 - **Scores and prompts do not move either.** They were never in an OTLP body.
-  `tracepad scores ls --json` and `tracepad prompts get --json` are their export;
-  see [cli.md](cli.md).
+  `tracepad scores ls --json` (one page of at most 500 — follow `next_cursor` for
+  the rest) and `tracepad prompts get NAME --json` (one version; `--version`
+  picks it) read them out, and there is no bulk command; see [cli.md](cli.md).
 
 ## The endpoints underneath
 

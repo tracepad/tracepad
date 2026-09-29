@@ -23,6 +23,9 @@ describe('the secret dialog', () => {
 		const tracepad = screen.getByText(/TRACEPAD_API_KEY=tp-sk-new/).textContent;
 		expect(tracepad).not.toContain('TRACEPAD_HOST');
 		expect(tracepad).toContain('TRACEPAD_URL=http://tracepad.test');
+		// Tracepad has no gRPC receiver: an exporter left to its own default
+		// reports nothing, so the block names the protocol.
+		expect(screen.getByText(/OTEL_EXPORTER_OTLP_PROTOCOL=http\/protobuf/)).toBeTruthy();
 		expect(screen.getByText(/OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http:\/\/tracepad.test\/v1\/traces/))
 			.toBeTruthy();
 		expect(screen.getByText(/LANGFUSE_SECRET_KEY=tp-sk-new/)).toBeTruthy();

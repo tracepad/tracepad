@@ -14,7 +14,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Tracepad" }]
 keywords = ["opentelemetry", "otlp", "llm", "observability", "tracing", "evals"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -34,6 +34,8 @@ dynamic = ["version"]
 Homepage = "https://github.com/tracepad/tracepad"
 Documentation = "https://github.com/tracepad/tracepad/blob/main/docs/sdk-python.md"
 Source = "https://github.com/tracepad/tracepad"
+Issues = "https://github.com/tracepad/tracepad/issues"
+Changelog = "https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md"
 
 # No `[project.scripts]`: `tracepad` on a PATH is the Go binary, and a console
 # script of the same name inside a virtualenv would shadow it (spec 017 #1).

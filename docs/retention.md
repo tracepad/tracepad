@@ -46,7 +46,7 @@ tracepad retention show
 tracepad retention set --days 90               # traces: 90 days
 tracepad retention set --raw-days 14 --yes     # raw bodies: 14 days
 tracepad retention set --stats-days 730 --yes  # statistics: two years
-tracepad retention set --forever               # back to keeping everything
+tracepad retention set --forever               # traces: keep them all again (the other two windows stay as set)
 ```
 
 `retention show` reads the project, which any key may do. `retention set` is

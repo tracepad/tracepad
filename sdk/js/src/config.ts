@@ -27,7 +27,8 @@ export interface ConfigOptions {
 
 /** Build a Config, throwing when the two required values are nowhere. */
 export function resolve(options: ConfigOptions = {}): Config {
-  const host = pickHost(options.host).replace(/\/+$/, '');
+  const [picked, deprecated] = pickHost(options.host);
+  const host = picked.replace(/\/+$/, '');
   const key = pick(options.key, 'TRACEPAD_API_KEY');
   const missing = [
     ['host', host],
@@ -39,6 +40,10 @@ export function resolve(options: ConfigOptions = {}): Config {
     throw new TracepadConfigError(
       `tracepad: no ${missing.join(' and no ')}; pass them to init() or set TRACEPAD_URL and TRACEPAD_API_KEY`,
     );
+  }
+  if (deprecated && !hostWarned) {
+    hostWarned = true;
+    warn('TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too');
   }
   const config: { -readonly [K in keyof Config]: Config[K] } = { host, key };
   const environment = pick(options.environment, 'TRACEPAD_ENVIRONMENT');
@@ -87,17 +92,14 @@ export function rearmHostWarning(): void {
 
 /** The option, then TRACEPAD_URL — the name the CLI and the server read too
  * (spec 032 #23) — then TRACEPAD_HOST, this package's first name for it: it
- * still works, and says once that it is going away. */
-function pickHost(argument: string | undefined): string {
-  if (argument != null) return argument.trim();
+ * still works. The flag says it was the one used; `resolve` warns, once, when
+ * the configuration is complete. */
+function pickHost(argument: string | undefined): [host: string, deprecated: boolean] {
+  if (argument != null) return [argument.trim(), false];
   const url = (process.env.TRACEPAD_URL ?? '').trim();
-  if (url) return url;
+  if (url) return [url, false];
   const legacy = (process.env.TRACEPAD_HOST ?? '').trim();
-  if (legacy && !hostWarned) {
-    hostWarned = true;
-    warn('TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too');
-  }
-  return legacy;
+  return [legacy, legacy !== ''];
 }
 
 function pick(argument: string | undefined, variable: string): string {

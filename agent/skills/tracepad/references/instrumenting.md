@@ -20,7 +20,7 @@ second SDK: two exporters to the same store send every span twice.
 
 | The service has | Do this |
 |---|---|
-| OpenTelemetry | Environment only — `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` set to the server's URL plus `/v1/traces`, and `OTEL_EXPORTER_OTLP_HEADERS` set to `authorization=Bearer <key>`. |
+| OpenTelemetry | Environment only — `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (never gRPC), `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` set to the server's URL plus `/v1/traces`, and `OTEL_EXPORTER_OTLP_HEADERS` set to `authorization=Bearer <key>`. |
 | The Langfuse SDK | The bridge — `LANGFUSE_HOST` set to the Tracepad URL, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to a Tracepad key pair (`tp-pk-…`, `tp-sk-…`). No code changes. |
 | Nothing, in Python, Node or Go | The `tracepad` package for that language (below). |
 | Nothing, in another language | That language's OpenTelemetry SDK with its OTLP/HTTP exporter, configured as in the first row. |
@@ -93,8 +93,8 @@ there after half a minute — check, in this order:
 
 What makes a trace answer questions later, roughly in order of value:
 
-- The **environment** and **release** on every process: filters, statistics
-  and retention are per environment, and a release ties a change in cost or
+- The **environment** and **release** on every process: filters and statistics
+  are per environment (retention is per project), and a release ties a change in cost or
   quality to a deploy.
 - A **trace version** when two variants of the logic run in one release, so
   the listing can set one against the other.

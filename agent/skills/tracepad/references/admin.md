@@ -13,8 +13,9 @@ and add `--yes` only on the human's word about that preview.
   user and deleting traces take a key with `write`. Not the keys: no project
   key lists, mints or revokes keys, whatever its scopes.
 - The **admin token** (`TRACEPAD_ADMIN_TOKEN` on the server) reaches every
-  project, and is the only credential for creating, renaming or deleting a
-  project and for managing accounts. It rides where a key does:
+  project, and is the credential for creating, renaming or deleting a
+  project and for managing accounts (an owner's session does the same in the
+  web interface). It rides where a key does:
   `TRACEPAD_API_KEY="$TRACEPAD_ADMIN_TOKEN" tracepad projects ls`. Do not ask
   for it unless the task needs it.
 - `tracepad help` marks the commands that need the admin token.
@@ -29,7 +30,7 @@ tracepad system
 
 `projects show` with a project key is that key's project: its id, name and
 retention windows, and a last line naming the key and its scopes. `retention show` is the three windows — traces, raw
-bodies, statistics — in days, or forever.
+bodies, statistics — in days, or forever — and the project's media setting.
 
 ## Keys
 

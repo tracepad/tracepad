@@ -37,6 +37,7 @@
 			{
 				label: 'OpenTelemetry SDK',
 				body:
+					`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n` +
 					`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${origin}/v1/traces\n` +
 					`OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer ${pair.secret_key}"`
 			},

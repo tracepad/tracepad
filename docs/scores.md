@@ -211,7 +211,7 @@ is accepted, and deleting a config touches no score.
 `limit` and no cursor — a project has as many configs as it has score names,
 and a loop over a list that only a person can grow would be ceremony.
 
-`direction` is also what a run comparison will read to say *improved* or
+`direction` is also what a run comparison reads to say *improved* or
 *regressed* rather than merely *changed* — see [datasets.md](datasets.md).
 
 ## Reading scores

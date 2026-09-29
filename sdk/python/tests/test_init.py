@@ -86,6 +86,13 @@ def test_tracepad_host_is_a_deprecated_synonym_for_tracepad_url(
     # works, says so once, and loses to the new one.
     monkeypatch.setenv("TRACEPAD_URL", "http://from-url:4318/")
     monkeypatch.setenv("TRACEPAD_HOST", "http://from-host:4318")
+    with caplog.at_level("WARNING", logger="tracepad"):
+        # A configuration that does not resolve says nothing and spends nothing.
+        monkeypatch.delenv("TRACEPAD_URL")
+        with pytest.raises(tracepad.TracepadConfigError):
+            tracepad._config.resolve()
+        assert not caplog.records
+        monkeypatch.setenv("TRACEPAD_URL", "http://from-url:4318/")
     monkeypatch.setenv("TRACEPAD_API_KEY", KEY)
     with caplog.at_level("WARNING", logger="tracepad"):
         assert tracepad._config.resolve().host == "http://from-url:4318"

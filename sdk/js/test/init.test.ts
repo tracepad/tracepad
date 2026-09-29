@@ -200,9 +200,12 @@ describe('configuration', () => {
   });
 
   test('TRACEPAD_HOST is a deprecated synonym for TRACEPAD_URL: it works, warns once, and loses to it', () => {
+    process.env.TRACEPAD_HOST = 'http://from-host:4318';
+    // A configuration that does not resolve says nothing and spends nothing.
+    expect(() => resolve()).toThrow('no key');
+    expect(warnings).toEqual([]);
     process.env.TRACEPAD_API_KEY = KEY;
     process.env.TRACEPAD_URL = 'http://from-url:4318/';
-    process.env.TRACEPAD_HOST = 'http://from-host:4318';
     expect(resolve().host).toBe('http://from-url:4318');
     expect(warnings).toEqual([]);
 

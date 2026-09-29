@@ -44,6 +44,7 @@ docker logs tracepad
 Project "default" created. Connect your app with either:
 
   # OpenTelemetry SDK
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
   …
@@ -224,8 +225,8 @@ sudo find ./tracepad-data -maxdepth 1 -name 'tracepad.db*' -exec chmod 0600 {} \
 
 ## Configuration
 
-Every `TRACEPAD_*` variable the binary understands ([quickstart](quickstart.md)
-and `tracepad help`) is passed with `-e`:
+Every `TRACEPAD_*` variable the binary understands ([configuration.md](configuration.md)
+lists them all, and `tracepad help` prints the server's) is passed with `-e`:
 
 ```sh
 docker run -d --name tracepad \
@@ -454,10 +455,16 @@ tracepad health --url http://tracepad.internal:4318
 
 ## Compose
 
+The image is published under three kinds of tag: an exact release (`0.1.0`),
+its minor line (`0.1`, which moves with each patch) and `latest` (the newest
+stable release). A pre-release such as `0.1.0-rc.1` has its exact tag and
+nothing else. A deployment that wants patches without surprises pins the minor
+line; one that wants to choose the day pins the exact version.
+
 ```yaml
 services:
   tracepad:
-    image: ghcr.io/tracepad/tracepad:0.2
+    image: ghcr.io/tracepad/tracepad:0.1    # a minor line: it moves with its patches; X.Y.Z pins one release
     restart: unless-stopped
     ports:
       - "127.0.0.1:4318:4318"
@@ -509,8 +516,8 @@ Back the volume up by tarring it from a throwaway container:
 docker stop tracepad
 docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
   sh -c 'umask 077 && tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .'
-docker pull ghcr.io/tracepad/tracepad:0.3
-docker rm -f tracepad && docker run -d --name tracepad … ghcr.io/tracepad/tracepad:0.3
+docker pull ghcr.io/tracepad/tracepad:X.Y.Z        # the release you are moving to
+docker rm -f tracepad && docker run -d --name tracepad … ghcr.io/tracepad/tracepad:X.Y.Z
 ```
 
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
@@ -560,7 +567,7 @@ from the sources in the checkout, so a fork or a patched tree produces the same
 kind of artifact the releases do:
 
 ```sh
-docker build --build-arg VERSION=0.2.0-mine -t tracepad:mine .
+docker build --build-arg VERSION=0.1.0-mine -t tracepad:mine .
 ```
 
 Without `--build-arg VERSION`, the image reports `dev`. `make image` and `make

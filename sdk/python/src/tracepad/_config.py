@@ -47,7 +47,8 @@ def resolve(
     release: str | None = None,
 ) -> Config:
     """Build a Config, raising when the two required values are nowhere."""
-    host = _pick_host(host).rstrip("/")
+    host, deprecated = _pick_host(host)
+    host = host.rstrip("/")
     key = _pick(key, "TRACEPAD_API_KEY")
     missing = [name for name, value in (("host", host), ("key", key)) if not value]
     if missing:
@@ -56,6 +57,9 @@ def resolve(
             + " and no ".join(missing)
             + "; pass them to tracepad.init() or set TRACEPAD_URL and TRACEPAD_API_KEY"
         )
+    if deprecated and _first_host_warning():
+        logger.warning("tracepad: TRACEPAD_HOST is deprecated; "
+                       "set TRACEPAD_URL, which the CLI and the server read too")
     return Config(
         host=host,
         key=key,
@@ -88,22 +92,18 @@ _host_warned = False
 _host_warned_lock = threading.Lock()
 
 
-def _pick_host(argument: str | None) -> str:
+def _pick_host(argument: str | None) -> tuple[str, bool]:
     """The argument, then TRACEPAD_URL — the name the CLI and the server read
     too (spec 017 #21) — then TRACEPAD_HOST, this package's first name for it:
-    it still works, and says once that it is going away."""
+    it still works. The flag says it was the one used; `resolve` warns, once,
+    when the configuration is complete."""
     if argument is not None:
-        return argument.strip()
+        return argument.strip(), False
     url = os.environ.get("TRACEPAD_URL", "").strip()
     if url:
-        return url
+        return url, False
     legacy = os.environ.get("TRACEPAD_HOST", "").strip()
-    if legacy and _first_host_warning():
-        logger.warning(
-            "tracepad: TRACEPAD_HOST is deprecated; "
-            "set TRACEPAD_URL, which the CLI and the server read too"
-        )
-    return legacy
+    return legacy, bool(legacy)
 
 
 def _first_host_warning() -> bool:
