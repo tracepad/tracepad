@@ -45,6 +45,9 @@ type UserRow struct {
 	Sessions  int64
 	FirstSeen int64
 	LastSeen  int64
+	// Tokens are the five classes summed over the user's traces (spec 049
+	// #5), each nil when nothing the user ran carried it.
+	Tokens Tokens
 }
 
 // UserSummary is a user with the latency the page reports beside the counts.
@@ -55,19 +58,27 @@ type UserSummary struct {
 	Latency Histogram
 }
 
-// The sorts the listing offers (spec 023 #5). Four, because they are the four
-// questions a listing of users is opened with — recent, heavy, costly,
-// failing — and ascending order of any of them is nobody's question.
+// The sorts the listing offers (spec 023 #5, spec 049 #6): the questions a
+// listing of users is opened with — recent, heavy, costly, hungry, failing —
+// and ascending order of any of them is nobody's question.
 const (
 	UsersByLastSeen = "last_seen"
 	UsersByTraces   = "traces"
 	UsersByCost     = "cost"
+	UsersByTokens   = "tokens"
 	UsersByErrors   = "errors"
 )
 
 // UserSorts is every accepted value of `sort`, in the order the error message
 // and `openapi.json` list them. The first is the default.
-var UserSorts = []string{UsersByLastSeen, UsersByTraces, UsersByCost, UsersByErrors}
+var UserSorts = []string{UsersByLastSeen, UsersByTraces, UsersByCost, UsersByTokens, UsersByErrors}
+
+// userTokensKey is the tokens sort's key: the headline number of spec 049 #3
+// with a user who has none read as 0, so they sort at the bottom of "who uses
+// the most" and the keyset needs no NULL shape (#6). Migration 0033's
+// `idx_users_tokens` is built on this exact expression, which is what lets
+// the planner read the order off it.
+const userTokensKey = `(coalesce(input_tokens, 0) + coalesce(output_tokens, 0))`
 
 // userSortColumn is the column each sort reads. `cost` is the only nullable
 // one, which is the whole reason the keyset below has two shapes.
@@ -75,6 +86,7 @@ var userSortColumn = map[string]string{
 	UsersByLastSeen: "last_seen",
 	UsersByTraces:   "traces",
 	UsersByCost:     "total_cost",
+	UsersByTokens:   userTokensKey,
 	UsersByErrors:   "error_count",
 }
 
@@ -114,6 +126,12 @@ func UserCursorKey(sortBy string, row *UserRow) string {
 		return strconv.FormatInt(row.Traces, 10)
 	case UsersByErrors:
 		return strconv.FormatInt(row.ErrorCount, 10)
+	case UsersByTokens:
+		var billed int64
+		if sum := row.Tokens.Billed(); sum != nil {
+			billed = *sum
+		}
+		return strconv.FormatInt(billed, 10)
 	case UsersByCost:
 		if row.TotalCost == nil {
 			return ""
@@ -147,7 +165,8 @@ func ParseUserCursorKey(sortBy, key string) (any, error) {
 	return value, nil
 }
 
-const userColumns = `user_id, traces, error_count, total_cost, sessions, first_seen, last_seen`
+var userColumns = `user_id, traces, error_count, total_cost, sessions, first_seen, last_seen, ` +
+	tokenColumnList("")
 
 // userConditions is everything the filter says about *which* users match,
 // cursor excluded — the split spec 009 #4 made so that the listing and the
@@ -303,16 +322,18 @@ func (s *Store) CountUsers(ctx context.Context, projectID string, filter UserFil
 
 func scanUserRow(row scanner) (*UserRow, error) {
 	var (
-		out  UserRow
-		cost sql.NullFloat64
+		out    UserRow
+		cost   sql.NullFloat64
+		tokens tokenScan
 	)
-	if err := row.Scan(&out.UserID, &out.Traces, &out.ErrorCount, &cost,
-		&out.Sessions, &out.FirstSeen, &out.LastSeen); err != nil {
+	if err := row.Scan(tokens.into([]any{&out.UserID, &out.Traces, &out.ErrorCount, &cost,
+		&out.Sessions, &out.FirstSeen, &out.LastSeen})...); err != nil {
 		return nil, fmt.Errorf("scan a user: %w", err)
 	}
 	if cost.Valid {
 		out.TotalCost = &cost.Float64
 	}
+	out.Tokens = tokens.tokens()
 	return &out, nil
 }
 
@@ -336,7 +357,7 @@ func (s *Store) UserRollup(ctx context.Context, projectID, userID string, before
 	rows, err := s.db.QueryContext(ctx,
 		// Trace-unit rows only: an observation row is one model of one of
 		// those traces, and summing both would count every trace twice.
-		`SELECT hour, count, error_count, total_cost, latency, sessions_started
+		`SELECT hour, count, error_count, total_cost, latency, sessions_started, `+tokenColumnList("")+`
 		 FROM users_hourly
 		 WHERE project_id = ? AND user_id = ? AND hour < ? AND model = ''
 		 ORDER BY hour`, projectID, userID, beforeHour)
@@ -350,15 +371,18 @@ func (s *Store) UserRollup(ctx context.Context, projectID, userID string, before
 		held      bool
 		totalCost CostSum
 	)
+	var (
+		hour, count, errored, sessions int64
+		cost                           sql.NullFloat64
+		latency                        string
+		tokens                         tokenScan
+	)
+	dest := tokens.into([]any{&hour, &count, &errored, &cost, &latency, &sessions})
 	for rows.Next() {
-		var (
-			hour, count, errored, sessions int64
-			cost                           sql.NullFloat64
-			latency                        string
-		)
-		if err := rows.Scan(&hour, &count, &errored, &cost, &latency, &sessions); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan a user's rolled hour: %w", err)
 		}
+		summary.Tokens.Add(tokens.tokens())
 		if !held {
 			summary.FirstSeen, held = hour, true
 		}
@@ -409,7 +433,7 @@ func (s *Store) UserSummaryRow(ctx context.Context, projectID, userID string) (*
 func (s *Store) UserTail(ctx context.Context, projectID, userID string, fromNanos int64) (*UserSummary, error) {
 	summary := &UserSummary{UserRow: UserRow{UserID: userID}}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT error_count > 0, total_cost, latency_ms, timestamp
+		`SELECT error_count > 0, total_cost, latency_ms, timestamp, `+tokenColumnList("")+`
 		 FROM traces
 		 WHERE project_id = ? AND user_id = ? AND timestamp >= ?`,
 		projectID, userID, fromNanos)
@@ -418,17 +442,22 @@ func (s *Store) UserTail(ctx context.Context, projectID, userID string, fromNano
 	}
 	defer rows.Close()
 	var totalCost CostSum
+	var (
+		errored   int
+		cost      sql.NullFloat64
+		latency   sql.NullInt64
+		timestamp int64
+		tokens    tokenScan
+	)
+	dest := tokens.into([]any{&errored, &cost, &latency, &timestamp})
 	for rows.Next() {
-		var (
-			errored   int
-			cost      sql.NullFloat64
-			latency   sql.NullInt64
-			timestamp int64
-		)
-		if err := rows.Scan(&errored, &cost, &latency, &timestamp); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan a tail trace: %w", err)
 		}
 		summary.Traces++
+		// The trace's own columns: the same counting rule the rollup applies
+		// to its observations (spec 049 #2), so the two halves agree.
+		summary.Tokens.Add(tokens.tokens())
 		if errored != 0 {
 			summary.ErrorCount++
 		}
@@ -539,7 +568,7 @@ func (s *Store) UserSessionStarts(ctx context.Context, projectID, userID string,
 func (s *Store) UsersRollupRows(ctx context.Context, projectID, userID string, fromHour, toHour int64,
 	environment []string, yield func(UserStatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count,
-	                 total_cost, latency, sessions_started
+	                 total_cost, latency, sessions_started, ` + tokenColumnList("") + `
 	          FROM users_hourly
 	          WHERE project_id = ? AND user_id = ? AND hour >= ? AND hour < ?`
 	args := []any{projectID, userID, fromHour, toHour}
@@ -554,19 +583,25 @@ func (s *Store) UsersRollupRows(ctx context.Context, projectID, userID string, f
 		return fmt.Errorf("read the user rollup: %w", err)
 	}
 	defer rows.Close()
+	var (
+		row     UserStatsRow
+		cost    sql.NullFloat64
+		latency string
+		tokens  tokenScan
+	)
+	dest := tokens.into([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
+		&row.Count, &row.ErrorCount, &cost, &latency, &row.SessionsStarted})
 	for rows.Next() {
-		var (
-			row     = UserStatsRow{UserID: userID}
-			cost    sql.NullFloat64
-			latency string
-		)
-		if err := rows.Scan(&row.Hour, &row.Environment, &row.Release, &row.Model,
-			&row.Count, &row.ErrorCount, &cost, &latency, &row.SessionsStarted); err != nil {
+		row = UserStatsRow{UserID: userID}
+		if err := rows.Scan(dest...); err != nil {
 			return fmt.Errorf("scan a user rollup row: %w", err)
 		}
 		if cost.Valid {
-			row.TotalCost = &cost.Float64
+			// A copy: `cost` is the next row's destination too.
+			total := cost.Float64
+			row.TotalCost = &total
 		}
+		row.Tokens = tokens.tokens()
 		if row.Latency, err = decodeHistogram(latency); err != nil {
 			return err
 		}
@@ -629,14 +664,17 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 	}
 
 	// The observation-unit rows: the same join the statistics rollup makes,
-	// with the user carried down from the trace.
+	// with the user carried down from the trace. The same rows carry the
+	// tokens, into both cells the observation's trace falls in, as `rollHour`
+	// does (spec 049 #5).
 	observations, err := tx.Query(
 		`SELECT t.user_id, t.environment, COALESCE(t.release, ''), o.model,
 		        o.level = 'ERROR',
 		        CASE WHEN o.provided_cost = 1
 		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
-		             THEN (o.end_time - o.start_time) / 1000000 END
+		             THEN (o.end_time - o.start_time) / 1000000 END,
+		        o.usage
 		 FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE o.project_id = ? AND t.timestamp >= ? AND t.timestamp < ?
@@ -647,18 +685,22 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 		return nil, fmt.Errorf("read the hour's observations by user: %w", err)
 	}
 	defer observations.Close()
+	var (
+		user, environment, release, model string
+		errored                           int
+		cost                              sql.NullFloat64
+		latency                           sql.NullInt64
+		usage                             sql.RawBytes
+	)
 	for observations.Next() {
-		var (
-			user, environment, release, model string
-			errored                           int
-			cost                              sql.NullFloat64
-			latency                           sql.NullInt64
-		)
 		if err := observations.Scan(&user, &environment, &release, &model,
-			&errored, &cost, &latency); err != nil {
+			&errored, &cost, &latency, &usage); err != nil {
 			return nil, fmt.Errorf("scan an observation of the hour by user: %w", err)
 		}
 		add(&cell(user, environment, release, model).StatsRow, errored != 0, cost, latency)
+		tokens := usageTokens(usage)
+		cell(user, environment, release, model).Tokens.Add(tokens)
+		cell(user, environment, release, "").Tokens.Add(tokens)
 	}
 	if err := observations.Err(); err != nil {
 		return nil, err
@@ -769,8 +811,8 @@ func writeUserHour(tx *sql.Tx, projectID string, hour int64, rows []UserStatsRow
 	insert, err := tx.Prepare(
 		`INSERT INTO users_hourly
 		   (project_id, hour, user_id, environment, release, model,
-		    count, error_count, total_cost, latency, sessions_started)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		    count, error_count, total_cost, latency, sessions_started, ` + tokenColumnList("") + `)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare the user rollup insert: %w", err)
 	}
@@ -780,9 +822,10 @@ func writeUserHour(tx *sql.Tx, projectID string, hour int64, rows []UserStatsRow
 		if err != nil {
 			return nil, err
 		}
-		if _, err := insert.Exec(
+		if _, err := insert.Exec(append([]any{
 			projectID, hour, row.UserID, row.Environment, row.Release, row.Model,
-			row.Count, row.ErrorCount, row.TotalCost, latency, row.SessionsStarted); err != nil {
+			row.Count, row.ErrorCount, row.TotalCost, latency, row.SessionsStarted},
+			row.Tokens.values()...)...); err != nil {
 			return nil, fmt.Errorf("write a user rollup row for hour %d: %w", hour, err)
 		}
 		touched[row.UserID] = true
@@ -832,9 +875,10 @@ func recomputeUsers(tx *sql.Tx, projectID string, userIDs []string) error {
 		if _, err := tx.Exec(
 			`INSERT INTO users
 			   (project_id, user_id, traces, error_count, total_cost,
-			    sessions, first_seen, last_seen)
+			    sessions, first_seen, last_seen, `+tokenColumnList("")+`)
 			 SELECT project_id, user_id, SUM(count), SUM(error_count),
-			        SUM(total_cost), SUM(sessions_started), MIN(hour), MAX(hour)
+			        SUM(total_cost), SUM(sessions_started), MIN(hour), MAX(hour),
+			        `+columnTokenSums()+`
 			 FROM users_hourly
 			 WHERE project_id = ? AND model = '' AND user_id IN `+list+`
 			 GROUP BY project_id, user_id`, args...); err != nil {

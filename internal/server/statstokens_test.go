@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,17 +12,38 @@ import (
 	"github.com/tracepad/tracepad/internal/store"
 )
 
-// Tokens per bucket (spec 031 #4): a `tokens` object with only the keys
-// something in the bucket carried, and no object at all when none did.
+// Tokens per bucket (spec 031 #4, spec 049 #7): a `tokens` object with only
+// the keys something in the bucket carried, and no object at all when none
+// did.
+
+type tokensJSON struct {
+	Input      *int64 `json:"input"`
+	Output     *int64 `json:"output"`
+	CacheRead  *int64 `json:"cache_read"`
+	Reasoning  *int64 `json:"reasoning"`
+	CacheWrite *int64 `json:"cache_write"`
+}
+
+// String spells the five classes in order, NULL for an absent one.
+func (t *tokensJSON) String() string {
+	if t == nil {
+		return "absent"
+	}
+	var parts []string
+	for _, n := range []*int64{t.Input, t.Output, t.CacheRead, t.Reasoning, t.CacheWrite} {
+		if n == nil {
+			parts = append(parts, "NULL")
+		} else {
+			parts = append(parts, strconv.FormatInt(*n, 10))
+		}
+	}
+	return "{" + strings.Join(parts, " ") + "}"
+}
 
 type tokensBucket struct {
-	Key    string `json:"key"`
-	Count  int    `json:"count"`
-	Tokens *struct {
-		Input     *int64 `json:"input"`
-		Output    *int64 `json:"output"`
-		CacheRead *int64 `json:"cache_read"`
-	} `json:"tokens"`
+	Key    string      `json:"key"`
+	Count  int         `json:"count"`
+	Tokens *tokensJSON `json:"tokens"`
 }
 
 func (h *harness) tokensBuckets(t *testing.T, path string) []tokensBucket {
@@ -60,14 +83,12 @@ func TestStatsTokens(t *testing.T) {
 			t.Fatalf("buckets = %+v, want both environments", byEnvironment)
 		}
 		production, staging := byEnvironment[0], byEnvironment[1]
-		if production.Tokens == nil || production.Tokens.Input == nil || *production.Tokens.Input != 300 ||
-			production.Tokens.Output == nil || *production.Tokens.Output != 30 ||
-			production.Tokens.CacheRead == nil || *production.Tokens.CacheRead != 5 {
-			t.Errorf("production tokens = %+v, want 300 in, 30 out, 5 cached", production.Tokens)
+		if got := production.Tokens.String(); got != "{300 30 5 NULL NULL}" {
+			t.Errorf("production tokens = %s, want 300 in, 30 out, 5 cached", got)
 		}
-		// Nothing in staging carried a count: no object, not three zeroes.
+		// Nothing in staging carried a count: no object, not five zeroes.
 		if staging.Tokens != nil {
-			t.Errorf("staging tokens = %+v, want the object absent", staging.Tokens)
+			t.Errorf("staging tokens = %s, want the object absent", staging.Tokens)
 		}
 
 		byModel := h.tokensBuckets(t, "/api/v1/stats?group_by=model")
@@ -77,9 +98,8 @@ func TestStatsTokens(t *testing.T) {
 		// Only the keys that have something: the OpenAI spelling carried no
 		// cache-read count, so `cache_read` is absent on its bucket.
 		mini := byModel[1]
-		if mini.Key != "gpt-4o-mini" || mini.Tokens == nil || mini.Tokens.CacheRead != nil ||
-			mini.Tokens.Input == nil || *mini.Tokens.Input != 200 {
-			t.Errorf("gpt-4o-mini bucket = %+v, want input and output only", mini)
+		if mini.Key != "gpt-4o-mini" || mini.Tokens.String() != "{200 20 NULL NULL NULL}" {
+			t.Errorf("gpt-4o-mini bucket = %s %s, want input and output only", mini.Key, mini.Tokens)
 		}
 	}
 
@@ -99,7 +119,7 @@ func TestStatsTokens(t *testing.T) {
 		}
 		production := byEnvironment[0]
 		if production.Tokens == nil || production.Tokens.Input == nil || *production.Tokens.Input != 300 {
-			t.Errorf("production tokens = %+v across the seam, want the rolled 300 in", production.Tokens)
+			t.Errorf("production tokens = %s across the seam, want the rolled 300 in", production.Tokens)
 		}
 		byHour := h.tokensBuckets(t, "/api/v1/stats?group_by=hour")
 		if len(byHour) != 2 || byHour[1].Tokens != nil {
@@ -107,37 +127,54 @@ func TestStatsTokens(t *testing.T) {
 		}
 	})
 
-	// A `user_id` answer never carries tokens: its rolled half is the
-	// per-user rollup, which holds none, and a live tail that reported them
-	// would show the seam.
-	t.Run("not for one user", func(t *testing.T) {
+	// A `user_id` answer carries tokens on every grouping since the per-user
+	// rollup rolls them (spec 049 #5, amending spec 031 #11): the rolled hour
+	// from `users_hourly`, the live one from the raw rows, and a bucket that
+	// straddles the watermark adds the two.
+	t.Run("for one user, across the seam", func(t *testing.T) {
 		h.seedTokens(t, statsHour+3*3600, 5, "production", "claude-sonnet-5",
-			map[string]any{"input_tokens": 7})
-		for _, groupBy := range []string{"hour", "model"} {
+			map[string]any{"input_tokens": 7, "reasoning_tokens": 3})
+		for groupBy, want := range map[string]map[string]string{
+			"hour": {
+				"2026-08-26T10:00:00Z": "{300 30 5 NULL NULL}",
+				"2026-08-26T13:00:00Z": "{7 NULL NULL 3 NULL}",
+			},
+			"model": {
+				"claude-sonnet-5": "{107 10 5 3 NULL}",
+				"gpt-4o-mini":     "{200 20 NULL NULL NULL}",
+			},
+			"total": {"": "{307 30 5 3 NULL}"},
+		} {
 			buckets := h.tokensBuckets(t, "/api/v1/stats?group_by="+groupBy+"&user_id=u1")
-			if len(buckets) == 0 {
-				t.Fatalf("no %s buckets for the user, so the test proves nothing", groupBy)
-			}
+			got := map[string]string{}
 			for _, bucket := range buckets {
-				if bucket.Tokens != nil {
-					t.Errorf("%s bucket %s = %+v, want no tokens on a user's timeline",
-						groupBy, bucket.Key, bucket.Tokens)
+				got[bucket.Key] = bucket.Tokens.String()
+			}
+			for key, tokens := range want {
+				if got[key] != tokens {
+					t.Errorf("%s bucket %q = %s, want %s (all: %v)", groupBy, key, got[key], tokens, got)
 				}
 			}
 		}
 	})
 }
 
-// Every key a bucket can carry is in openapi.json's bucket schema, and the
-// `tokens` object's keys are the three the handler writes — the generated
-// UI types are made from this document, so a key it does not name is a key
-// the interface cannot read.
+// Every key a bucket can carry is in openapi.json, and the `tokens` object's
+// keys are the five the handler writes — the generated UI types are made from
+// this document, so a key it does not name is a key the interface cannot read.
+// The object is declared once and referenced by every row that carries it
+// (spec 049, API contract).
 func TestStatsTokensAreDocumented(t *testing.T) {
 	body, err := os.ReadFile("openapi.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
 		Paths map[string]struct {
 			Get struct {
 				Responses map[string]struct {
@@ -146,9 +183,7 @@ func TestStatsTokensAreDocumented(t *testing.T) {
 							Properties struct {
 								Buckets struct {
 									Items struct {
-										Properties map[string]struct {
-											Properties map[string]json.RawMessage `json:"properties"`
-										} `json:"properties"`
+										Properties map[string]json.RawMessage `json:"properties"`
 									} `json:"items"`
 								} `json:"buckets"`
 							} `json:"properties"`
@@ -167,9 +202,22 @@ func TestStatsTokensAreDocumented(t *testing.T) {
 	if !ok {
 		t.Fatal("openapi.json does not document `tokens` on a stats bucket")
 	}
-	for _, key := range []string{"input", "output", "cache_read"} {
-		if _, ok := tokens.Properties[key]; !ok {
+	const ref = `"#/components/schemas/Tokens"`
+	if !strings.Contains(string(tokens), ref) {
+		t.Errorf("a stats bucket's `tokens` does not reference the Tokens schema: %s", tokens)
+	}
+	for _, schema := range []string{"TraceRow", "SessionRow", "UserRow"} {
+		if !strings.Contains(string(doc.Components.Schemas[schema].Properties["tokens"]), ref) {
+			t.Errorf("%s's `tokens` does not reference the Tokens schema", schema)
+		}
+	}
+	declared := doc.Components.Schemas["Tokens"].Properties
+	for _, key := range []string{"input", "output", "cache_read", "reasoning", "cache_write"} {
+		if _, ok := declared[key]; !ok {
 			t.Errorf("openapi.json does not document `tokens.%s`", key)
 		}
+	}
+	if len(declared) != 5 {
+		t.Errorf("the Tokens schema declares %d classes, the handler writes 5", len(declared))
 	}
 }

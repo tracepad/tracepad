@@ -288,7 +288,6 @@ func (s *Server) liveStats(ctx context.Context, projectID string, filter store.S
 	if to == math.MaxInt64 {
 		window.To = nil
 	}
-	tokens := carriesTokens(filter)
 	if err := s.store.StatsSamples(ctx, projectID, window, func(sample store.StatsSample) {
 		b := at(sample.Key)
 		b.count++
@@ -301,9 +300,7 @@ func (s *Server) liveStats(ctx context.Context, projectID string, filter store.S
 		if sample.LatencyMs != nil {
 			b.latency.Add(*sample.LatencyMs)
 		}
-		if tokens {
-			b.tokens.Add(sample.Tokens)
-		}
+		b.tokens.Add(sample.Tokens)
 	}); err != nil {
 		return err
 	}
@@ -312,29 +309,19 @@ func (s *Server) liveStats(ctx context.Context, projectID string, filter store.S
 	// grouping, whose samples carried their own above — and nothing for a
 	// key whose traces had no observation with a count, so a bucket is
 	// never created here that the scan did not.
-	if tokens {
-		if err := s.store.StatsTokens(ctx, projectID, window, func(sum store.StatsTokenSum) {
-			at(sum.Key).tokens.Add(sum.Tokens)
-		}); err != nil {
-			return err
-		}
+	if err := s.store.StatsTokens(ctx, projectID, window, func(sum store.StatsTokenSum) {
+		at(sum.Key).tokens.Add(sum.Tokens)
+	}); err != nil {
+		return err
 	}
 	return s.liveSessions(ctx, projectID, filter, from, to, at)
 }
 
-// carriesTokens reports whether an answer to this filter carries `tokens`.
-// A `user_id` answer does not: its rolled half is `users_hourly`, which holds
-// no token sums (spec 031 leaves the per-user rollup alone), and a live tail
-// that reported them would be a chart whose tokens appear at the watermark —
-// the seam made visible, which spec 013 #5 forbids.
-func carriesTokens(filter store.StatsFilter) bool {
-	return filter.UserID == ""
-}
-
-// tokensObject is a bucket's `tokens`: each key present only when something
-// in the bucket carried that count, and no object at all when none did
-// (spec 031 #4). Absent rather than zero is the rule for cost and the rows
-// behind it.
+// tokensObject is the `tokens` of a bucket, a trace, a session or a user:
+// each class present only when something carried that count, and no object at
+// all when none did (spec 031 #4, spec 049 #6). Absent rather than zero is the
+// rule for cost and the rows behind it. Since spec 049 #5 a `user_id` answer
+// carries it too: `users_hourly` rolls the classes as `stats_hourly` does.
 func tokensObject(t store.Tokens) object {
 	var out object
 	for _, count := range []struct {
@@ -344,6 +331,8 @@ func tokensObject(t store.Tokens) object {
 		{"input", t.Input},
 		{"output", t.Output},
 		{"cache_read", t.CacheRead},
+		{"reasoning", t.Reasoning},
+		{"cache_write", t.CacheWrite},
 	} {
 		if count.value == nil {
 			continue

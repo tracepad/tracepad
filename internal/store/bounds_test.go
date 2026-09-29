@@ -896,11 +896,18 @@ func TestMigration0025SpellsTheCountingRule(t *testing.T) {
 	if !strings.Contains(migration, normal(`u.value NOT BETWEEN 0 AND `+maxCountedTokens)) {
 		t.Errorf("the migration does not read token counts with the store's range %s", maxCountedTokens)
 	}
-	for _, keys := range tokenClasses {
-		for _, key := range keys {
-			if !strings.Contains(migration, `'`+key+`'`) {
-				t.Errorf("the migration does not stamp traces whose %q is out of range", key)
-			}
+	// The keys of spec 031's three classes, as they stood when 0025 was
+	// written. The classes have grown since (spec 049 #1), and the keys they
+	// gained need no repair: nothing summed them before the counting rule
+	// did, and migration 0033 fills their columns under it
+	// (TestMigration0033SpellsTheTraceSums).
+	for _, key := range []string{
+		"input_tokens", "prompt_tokens", "input",
+		"output_tokens", "completion_tokens", "output",
+		"cache_read_input_tokens", "cache_read_tokens", "input_cached_tokens",
+	} {
+		if !strings.Contains(migration, `'`+key+`'`) {
+			t.Errorf("the migration does not stamp traces whose %q is out of range", key)
 		}
 	}
 }

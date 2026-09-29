@@ -1,11 +1,12 @@
 <script lang="ts" module>
 	import { facetChip, readList } from '$lib/api/facets';
-	import { TRACE_FILTERS, type FilterName, type TraceFilters } from '$lib/api/traces';
+	import { sendable, TRACE_FILTERS, type FilterName, type TraceFilters } from '$lib/api/traces';
 	import { OBSERVATION_TYPES } from '$lib/observations';
 
 	type Field = {
 		label: string;
-		kind: 'text' | 'number' | 'status' | 'tags' | 'choice' | 'facet';
+		/** `count` is a whole number: the browser steps it by one. */
+		kind: 'text' | 'number' | 'count' | 'status' | 'tags' | 'choice' | 'facet';
 		placeholder?: string;
 		hint?: string;
 		/** For `choice`: the values, offered beside an "Any" that clears it. */
@@ -43,6 +44,7 @@
 		},
 		status: { label: 'Status', kind: 'status' },
 		min_cost: { label: 'Min cost', kind: 'number', placeholder: '0.01' },
+		min_tokens: { label: 'Min tokens', kind: 'count', placeholder: '1000', hint: 'Input plus output' },
 		release: { label: 'Release', kind: 'facet' },
 		version: { label: 'Version', kind: 'text', placeholder: 'checkout-v9' },
 		type: {
@@ -217,7 +219,7 @@
 			if (Array.isArray(value)) {
 				const tags = value.map((tag) => tag.trim()).filter(Boolean);
 				if (tags.length) next.tag = tags;
-			} else if (typeof value === 'string' && value.trim()) {
+			} else if (typeof value === 'string' && value.trim() && sendable(name, value.trim())) {
 				if (name === 'status') next.status = value as 'error' | 'ok';
 				else (next as Record<string, string>)[name] = value.trim();
 			}
@@ -341,9 +343,9 @@
 								{:else}
 									<input
 										id="filter-{name}"
-										type={field.kind === 'number' ? 'number' : 'text'}
-										step={field.kind === 'number' ? 'any' : undefined}
-										min={field.kind === 'number' ? '0' : undefined}
+										type={field.kind === 'text' ? 'text' : 'number'}
+										step={field.kind === 'number' ? 'any' : field.kind === 'count' ? '1' : undefined}
+										min={field.kind === 'text' ? undefined : '0'}
 										value={text(name)}
 										oninput={(event) => set(name, event.currentTarget.value)}
 										placeholder={field.placeholder}

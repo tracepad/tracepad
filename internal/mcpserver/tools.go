@@ -81,6 +81,9 @@ func traceFilterProperties() map[string]*jsonschema.Schema {
 		"status": oneOf("\"error\" keeps traces with at least one failed observation, \"ok\" keeps the rest.",
 			"error", "ok"),
 		"min_cost": atLeast(0, "Only traces costing at least this much. A trace whose client reported no cost never matches."),
+		"min_tokens": &jsonschema.Schema{Type: "integer", Minimum: pointer(0.0), Description: "Use when the user asks " +
+			"about heavy or expensive traces and the traffic reports no cost — most does not. Only traces whose input " +
+			"plus output tokens are at least this many; a trace that reported neither never matches."},
 		// Descriptions are triggers, not field lists (spec 004 #17): they
 		// say when to reach for the filter, because a model choosing
 		// between nine of them is answering "which one does this
@@ -111,6 +114,7 @@ type traceFilterInput struct {
 	Tag         []string `json:"tag"`
 	Status      string   `json:"status"`
 	MinCost     *float64 `json:"min_cost"`
+	MinTokens   *int64   `json:"min_tokens"`
 	Release     string   `json:"release"`
 	Version     string   `json:"version"`
 	Type        string   `json:"type"`
@@ -137,6 +141,9 @@ func (f traceFilterInput) query() url.Values {
 	}
 	if f.MinCost != nil {
 		query.Set("min_cost", strconv.FormatFloat(*f.MinCost, 'f', -1, 64))
+	}
+	if f.MinTokens != nil {
+		query.Set("min_tokens", strconv.FormatInt(*f.MinTokens, 10))
 	}
 	return query
 }
@@ -231,7 +238,7 @@ func register(server *mcp.Server, api API) {
 		Annotations: readOnly("List traces"),
 		Description: "Find traces by filter — the user asks what ran recently, which runs failed, " +
 			"what a given user or session did, or how much something cost. " +
-			"Returns a page of trace summaries (id, name, environment, timestamp, latency, cost, error count), newest first. " +
+			"Returns a page of trace summaries (id, name, environment, timestamp, latency, cost, tokens, error count), newest first. " +
 			"Does NOT return the observations inside a trace, or any prompt or completion text: call get_trace with an id for that, " +
 			"or get_last_trace to go straight to the newest match without listing first. " +
 			"Page by passing the returned next_cursor back as cursor, or prev_cursor with direction=prev to go back.",
@@ -319,7 +326,7 @@ func register(server *mcp.Server, api API) {
 		Annotations: readOnly("List sessions"),
 		Description: "Find conversations or agent sessions — the user asks which sessions ran, which were busiest or most expensive, " +
 			"or what a given user has been doing lately. " +
-			"Returns a page of session roll-ups (id, trace count, how many of those traces failed, cost, first and last activity), " +
+			"Returns a page of session roll-ups (id, trace count, how many of those traces failed, cost, tokens, first and last activity), " +
 			"most recently active first. Every number counts traces, not observations. " +
 			"Does NOT return the traces themselves: follow with get_session for one session's traces, then get_trace for what happened inside one. " +
 			"Page by passing the returned next_cursor back as cursor.",
@@ -354,6 +361,7 @@ func register(server *mcp.Server, api API) {
 			"id":          text("The session id."),
 			"trace_count": integer("How many traces name this session."),
 			"total_cost":  number("Summed over the traces that reported a cost; absent when none did."),
+			"tokens":      tokens("Summed per class over the session's traces."),
 			"error_count": integer("How many of the session's traces have a failed observation."),
 			"first_seen":  timestamp("When the session's earliest trace started."),
 			"last_seen":   timestamp("When its latest trace started."),
@@ -365,17 +373,18 @@ func register(server *mcp.Server, api API) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_users",
 		Annotations: readOnly("List users"),
-		Description: "Find end users — the user asks who the heaviest, most expensive or most error-prone users are, " +
+		Description: "Find end users — the user asks who the heaviest, most expensive, most token-hungry or most error-prone users are, " +
 			"or who has been active lately. " +
-			"Returns a page of user roll-ups (id, traces, sessions, how many of those traces failed, cost, first and last activity), " +
+			"Returns a page of user roll-ups (id, traces, sessions, how many of those traces failed, cost, tokens, first and last activity), " +
 			"sorted by the chosen key, always descending. Every number counts traces, not observations. " +
 			"Answered from an hourly rollup, so it trails live traffic by a few minutes: a user first seen just now may not be listed, " +
 			"and get_user is exact for any id. " +
 			"Does NOT return the traces themselves: follow with list_traces filtered by user_id, or get_user for one user's totals. " +
 			"Page by passing the returned next_cursor back as cursor.",
 		InputSchema: object(walkProperties(pagingProperties(map[string]*jsonschema.Schema{
-			"sort": oneOf("Which question this is. Default \"last_seen\".",
-				"last_seen", "traces", "cost", "errors"),
+			"sort": oneOf("Which question this is. Default \"last_seen\". \"tokens\" ranks by input plus output "+
+				"tokens, a user with none last — the one to use when the traffic reports no cost.",
+				"last_seen", "traces", "cost", "tokens", "errors"),
 			"prefix": text("Keeps ids starting with this, case-sensitively. A prefix, not a substring, and not a search."),
 		}), true)),
 		OutputSchema: object(map[string]*jsonschema.Schema{
@@ -472,7 +481,7 @@ func register(server *mcp.Server, api API) {
 		Annotations: readOnly("Aggregate traffic, cost and latency"),
 		Description: "Aggregate traffic, failures, cost and latency — the user asks how many runs there were, how much they cost, how slow they are, " +
 			"or how any of that changed over time or differs per model. " +
-			"Returns buckets with count, error_count, total_cost and exact p50/p95 latency. " +
+			"Returns buckets with count, error_count, total_cost, tokens and exact p50/p95 latency. " +
 			"Read the `unit` field before comparing counts: grouping by hour, day, environment, release or total " +
 			"counts traces, grouping by model counts observations, because a trace has no model. " +
 			"Group by release when the user asks whether a deployment moved cost or latency. " +
@@ -500,6 +509,7 @@ func register(server *mcp.Server, api API) {
 				"count":       integer("How many of `unit` fell in this bucket."),
 				"error_count": integer("How many of those failed."),
 				"total_cost":  number("Summed over what reported a cost; absent when nothing did."),
+				"tokens":      tokens("Summed per class over the bucket's observations, on every grouping, with user_id too."),
 				"sessions": integer("Only with `user_id` and an \"hour\", \"day\" or \"total\" grouping: how many of that " +
 					"user's sessions began in this bucket. A session is counted where it starts, so a sum is exact."),
 				"latency_ms": object(map[string]*jsonschema.Schema{
@@ -628,6 +638,7 @@ func traceRowSchema() *jsonschema.Schema {
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost; absent when none did."),
+		"tokens":            tokens("Summed per class over the trace's observations."),
 		"latency_ms":        integer("End to end, in milliseconds."),
 		"ttft_ms":           integer("The wait before the first token of its earliest completion; absent when no observation reported one."),
 		"error_count":       integer("How many of its observations failed."),
@@ -662,6 +673,7 @@ func sessionRowSchema() *jsonschema.Schema {
 		"trace_count": integer("How many traces name this session."),
 		"error_count": integer("How many of those traces have a failed observation."),
 		"total_cost":  number("Summed over the traces that reported a cost; absent when none did."),
+		"tokens":      tokens("Summed per class over the session's traces."),
 		"first_seen":  timestamp("When the session's earliest trace started."),
 		"last_seen":   timestamp("When its latest trace started."),
 	}, "id", "trace_count", "error_count")
@@ -675,6 +687,7 @@ func userRowSchema() *jsonschema.Schema {
 		"traces":      integer("How many traces are attributed to this user."),
 		"error_count": integer("How many of those traces have a failed observation."),
 		"total_cost":  number("Summed over the traces that reported a cost; absent when none did."),
+		"tokens":      tokens("Summed per class over the user's traces."),
 		"sessions":    integer("How many sessions of this user have begun."),
 		"first_seen":  timestamp("When the earliest hour the rollup still holds for them starts."),
 		"last_seen":   timestamp("When they were last active."),
@@ -737,6 +750,7 @@ func traceDetailSchema() *jsonschema.Schema {
 		"tags":              list(text("A tag."), "Tags the application set."),
 		"timestamp":         timestamp("When its earliest observation started."),
 		"total_cost":        number("Summed over observations whose client reported a cost."),
+		"tokens":            tokens("Summed per class over the trace's observations."),
 		"latency_ms":        integer("End to end, in milliseconds."),
 		"ttft_ms":           integer("The wait before the first token of its earliest completion; absent when no observation reported one."),
 		"error_count":       integer("How many of its observations failed."),

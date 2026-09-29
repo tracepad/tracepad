@@ -114,9 +114,12 @@ TTFT and how many observations failed. TTFT sits beside latency because the
 two answer the same question from opposite ends — how long the whole run took,
 and how long somebody waited before anything appeared. The filter bar offers
 exactly the filters the endpoint accepts (`q`, `from`, `to`, `environment`,
-`user_id`, `session_id`, `name`, `tag`, `status`, `min_cost`, `release`,
-`version`, `type`, `prompt`) — a test reads `openapi.json` and fails if the
-two ever disagree. The bar underneath turns the pages.
+`user_id`, `session_id`, `name`, `tag`, `status`, `min_cost`, `min_tokens`,
+`release`, `version`, `type`, `prompt`) — a test reads `openapi.json` and fails
+if the two ever disagree. The bar underneath turns the pages. **Min tokens**
+is input plus output tokens, a whole number: a fraction typed into it, or
+carried by a hand-edited link, is dropped rather than sent
+([api.md](api.md#tokens)).
 
 Three of them — **environment**, **release** and **name** — are checkbox lists
 rather than boxes to type in. The values come from
@@ -708,8 +711,9 @@ who: a user is a set of sessions, and their page is the dashboard's charts
 for one of them.
 
 The listing is `GET /api/v1/users`: id, traces, sessions, errors, cost, first
-and last seen. A sort select offers the four questions the endpoint answers —
-last seen, traces, cost, errors, always descending — and a box narrows by a
+and last seen. A sort select offers the questions the endpoint answers —
+last seen, traces, cost, tokens (input plus output, a user with none last),
+errors, always descending — and a box narrows by a
 **case-sensitive prefix** of the id; both live in the URL. A long id is cut in
 the middle, with the whole of it in the title and a copy button beside it.
 

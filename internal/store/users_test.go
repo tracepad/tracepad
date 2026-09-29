@@ -963,6 +963,7 @@ func TestUserSortsRideTheirIndexes(t *testing.T) {
 		UsersByLastSeen: "idx_users_last_seen",
 		UsersByTraces:   "idx_users_traces",
 		UsersByCost:     "idx_users_cost",
+		UsersByTokens:   "idx_users_tokens",
 		UsersByErrors:   "idx_users_errors",
 	} {
 		query, args := userQuery(project.ID, UserFilter{

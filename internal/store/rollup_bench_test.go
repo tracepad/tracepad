@@ -69,6 +69,7 @@ func seedMonth(b *testing.B) (*Store, *Project) {
 					Type: model.TypeGeneration, Name: "call", Level: model.LevelDefault,
 					Model: "claude-sonnet-5", StartTime: at, EndTime: at + int64(200+i)*1e6,
 					CostDetails: map[string]any{"total": cost},
+					Usage:       benchUsage,
 				})
 			}
 		}

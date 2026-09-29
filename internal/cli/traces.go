@@ -212,6 +212,7 @@ type traceFilterFlags struct {
 	since       string
 	until       string
 	minCost     string
+	minTokens   string
 	release     string
 	version     string
 	kind        string
@@ -245,6 +246,7 @@ func (f *traceFilterFlags) registerFollowing(fs *flag.FlagSet) {
 	fs.Var(&f.tag, "tag", "")
 	fs.StringVar(&f.since, "since", "", "")
 	fs.StringVar(&f.minCost, "min-cost", "", "")
+	fs.StringVar(&f.minTokens, "min-tokens", "", "")
 	fs.StringVar(&f.release, "release", "", "")
 	fs.StringVar(&f.version, "version", "", "")
 	// `--type`, not `--kind`: the parameter is `type` and the CLI's flags
@@ -275,6 +277,7 @@ func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 		query.Add("tag", tag)
 	}
 	addSome(query, "min_cost", f.minCost)
+	addSome(query, "min_tokens", f.minTokens)
 	addSome(query, "release", f.release)
 	addSome(query, "version", f.version)
 	addSome(query, "type", f.kind)

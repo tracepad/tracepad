@@ -16,7 +16,9 @@ import (
 //
 // The corpus is synthetic and built here, the way `otlptest` builds the OTLP
 // one: a batch is one trace and twenty observations carrying prompts and
-// completions of the size real ones are. Nothing captured, nothing real.
+// completions of the size real ones are, and the usage a generation reports,
+// which the trace's token columns are summed from on every batch (spec 049
+// #8). Nothing captured, nothing real.
 //
 //	go test ./internal/store -run '^$' -bench BenchmarkIngestBatch -benchtime 200x
 
@@ -44,9 +46,16 @@ func benchBatch(projectID string, n int, indexed bool) *IngestBatch {
 			Input:    map[string]any{"messages": prompt[:min(len(prompt), benchPayloadBytes)]},
 			Output:   map[string]any{"content": completion[:min(len(completion), benchPayloadBytes)]},
 			Metadata: map[string]any{"deployment": "eu-central", "attempt": 1},
+			Usage:    benchUsage,
 		})
 	}
 	return batch
+}
+
+// benchUsage is what a reasoning model's generation reports: four of the five
+// token classes, under the spellings the Python package writes.
+var benchUsage = map[string]any{
+	"input_tokens": 1200, "output_tokens": 300, "cache_read_input_tokens": 800, "reasoning_tokens": 64,
 }
 
 func BenchmarkIngestBatch(b *testing.B) {

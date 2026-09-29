@@ -77,8 +77,8 @@ holds what the model was actually sent and what it answered. Work down:
 
 1. **Find it.** `tracepad traces ls` narrows by filter (`--search "text"`
    for what was said); its rows carry totals, never payloads. It runs newest
-   first and cannot sort: to rank, narrow with `--min-cost` and sort the page
-   with `jq`. `--name` is the trace's name — a step's name (a generation
+   first and cannot sort: to rank, narrow with `--min-cost` (`--min-tokens`
+   when nothing reports a cost) and sort the page with `jq`. `--name` is the trace's name — a step's name (a generation
    called `chat-completion`) is found in the trees, not filtered on. Before
    guessing how an environment, release or trace name is spelled, list them:
 

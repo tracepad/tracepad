@@ -267,9 +267,9 @@ func TestTracesListBothModes(t *testing.T) {
 			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 		}
 		want := strings.Join([]string{
-			"TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST",
-			"2026-08-31 23:50:00  " + traceHex(2) + "  nightly-eval  staging     1    1    1.5s     -      -",
-			"2026-08-31 23:00:00  " + traceHex(1) + "  support-chat  production  2    0    820ms    300ms  $0.001000",
+			"TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST       TOKENS",
+			"2026-08-31 23:50:00  " + traceHex(2) + "  nightly-eval  staging     1    1    1.5s     -      -          -",
+			"2026-08-31 23:00:00  " + traceHex(1) + "  support-chat  production  2    0    820ms    300ms  $0.001000  169",
 			"",
 		}, "\n")
 		if got.stdout != want {
@@ -712,9 +712,9 @@ func TestSessionsListBothModes(t *testing.T) {
 			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 		}
 		want := strings.Join([]string{
-			"LAST SEEN            SESSION  TRACES  ERRORS  COST       FIRST SEEN",
-			"2026-08-31 23:59:00  s2       1       1       -          2026-08-31 23:59:00",
-			"2026-08-31 23:00:00  s1       1       0       $0.001000  2026-08-31 23:00:00",
+			"LAST SEEN            SESSION  TRACES  ERRORS  COST       TOKENS  FIRST SEEN",
+			"2026-08-31 23:59:00  s2       1       1       -          -       2026-08-31 23:59:00",
+			"2026-08-31 23:00:00  s1       1       0       $0.001000  169     2026-08-31 23:00:00",
 			"",
 		}, "\n")
 		if got.stdout != want {

@@ -65,6 +65,10 @@ func (o object) putSome(key string, value any) object {
 		if v == nil {
 			return o
 		}
+	case object:
+		if len(v) == 0 {
+			return o
+		}
 	case nil:
 		return o
 	}

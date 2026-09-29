@@ -140,6 +140,7 @@ func renderUserRow(row *store.UserRow) object {
 		put("traces", row.Traces).
 		put("error_count", row.ErrorCount).
 		putSome("total_cost", row.TotalCost).
+		putSome("tokens", tokensObject(row.Tokens)).
 		put("sessions", row.Sessions).
 		putSome("first_seen", formatInstant(row.FirstSeen*int64(time.Second))).
 		putSome("last_seen", formatInstant(row.LastSeen*int64(time.Second)))
@@ -220,6 +221,7 @@ func (s *Server) readUser(ctx context.Context, projectID, userID string) (*store
 		if tail.TotalCost != nil {
 			merged.TotalCost = store.AddCost(merged.TotalCost, *tail.TotalCost)
 		}
+		merged.Tokens.Add(tail.Tokens)
 		merged.Latency.Merge(tail.Latency)
 		first, last := tail.FirstSeen/int64(time.Second), tail.LastSeen/int64(time.Second)
 		if rolled == nil || first < merged.FirstSeen {
