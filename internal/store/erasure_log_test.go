@@ -741,9 +741,9 @@ func TestAScrubsLinesNameTheErasure(t *testing.T) {
 // words. errors.Is and errors.As still reach what failed, which is how every
 // classifier of a failure reads it; a job that does not redact is its own error.
 func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
-	var logged bytes.Buffer
+	var buf bytes.Buffer
 	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&buf, nil)) }
 	t.Cleanup(func() { logger = old })
 	const erasure = "4f0c9d3e8a1b2c3d4e5f60718293a4b5"
 
@@ -753,20 +753,25 @@ func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
 	if !errors.As(wrapped, &rejection) || rejection != inner || !rejected(wrapped) {
 		t.Errorf("the wrap of %v does not reach the refusal it carries", wrapped)
 	}
-	if text := wrapped.Error(); strings.Contains(text, "4711") || !strings.Contains(text, "erasure "+erasure) ||
-		!strings.Contains(text, causeOther) {
-		t.Errorf("the text %q, want the erasure and the cause without the error's words", text)
+	if text := wrapped.Error(); strings.Contains(text, "4711") ||
+		!strings.Contains(text, "a write of erasure "+erasure+" was refused (invalid)") {
+		t.Errorf("the text %q, want the erasure and the kind of the refusal without its words", text)
 	}
 	logFailure(wrapped, slog.LevelError, "a line")
-	out := logged.String()
-	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "erasure="+erasure) ||
-		!strings.Contains(out, "refusal=invalid") || strings.Contains(out, "4711") || strings.Contains(out, "the caller") {
-		t.Errorf("the line %q, want the refusal's facts at Info, not the wrap's text", out)
+	// The facts are the failure's value, grouped under err.
+	out := buf.String()
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "err.erasure="+erasure) ||
+		!strings.Contains(out, "err.refusal=invalid") || !strings.Contains(out, "err.cause=") ||
+		strings.Contains(out, "4711") || strings.Contains(out, "the caller") {
+		t.Errorf("the line %q, want the refusal's facts under err at Info, not the wrap's text", out)
 	}
 
 	full := failedAt(hostileJob{}, fmt.Errorf("write for user-4711: %w", codedError{13}))
 	if code, ok := sqliteCode(full); !ok || code != 13 || failureCause(full) != sqliteCauses[13] {
 		t.Errorf("the failure %v lost its code", full)
+	}
+	if text := full.Error(); text != "a write of erasure "+erasure+" failed: "+sqliteCauses[13] {
+		t.Errorf("the text %q, want the erasure and the cause", text)
 	}
 	if value := full.(slog.LogValuer).LogValue(); value.Kind() != slog.KindString || strings.Contains(value.String(), erasure) {
 		t.Errorf("a condition says %v, want its name alone", value)

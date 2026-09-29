@@ -530,20 +530,31 @@ func redacts(job WriteJob) (string, bool) {
 
 // jobFailure is what fails at a job that redacts its failure: its own error,
 // or the window's met at it (spec 047 #36) — or a window's that holds such
-// jobs, when erasure names each of their erasures, separated by spaces. The writer wraps it once, where it
-// meets it, and from there it says only its facts, to a log line and to
-// anything that prints it: its LogValue is the erasure, the cause, the types
-// and the code (failureFacts), and its Error a sentence of the erasure and the
-// cause. The error itself is reached by errors.Is and errors.As, which every
-// classifier of a failure uses, never by its text. A database condition says
-// its name alone and not the erasure: the writer's paced line counts the
-// condition's failures of every job (spec 043 #2).
+// jobs, when erasure names each of their erasures, separated by spaces. The
+// writer wraps it once, where it meets it, and from there it says only its
+// facts, to a log line and to anything that prints it: its LogValue is the
+// erasure, the cause, the types and the code (failureFacts), and its Error a
+// sentence of the erasure and the cause, or the kind of a refusal. The error
+// itself is reached by errors.Is and errors.As, which every classifier of a
+// failure uses, never by its text. A database condition says its name alone
+// and not the erasure: the writer's paced line counts the condition's
+// failures of every job (spec 043 #2).
+//
+// It names an erasure because the jobs of an erasure's task are the only ones
+// that redact their failure (spec 047 #33); a second kind of such job would
+// rename it to what the two have in common.
 type jobFailure struct {
 	erasure string
 	err     error
 }
 
 func (f *jobFailure) Error() string {
+	// A refusal's kind, since the causes are the record's list (spec 047
+	// #32), which has none for one.
+	var refusal *Rejection
+	if errors.As(f.err, &refusal) {
+		return fmt.Sprintf("a write of erasure %s was refused (%s)", f.erasure, refusal.Kind)
+	}
 	return fmt.Sprintf("a write of erasure %s failed: %s", f.erasure, failureCause(f.err))
 }
 
@@ -644,7 +655,10 @@ func logFailure(err error, level slog.Level, message string, args ...any) {
 
 // logged is err as a log line gives it: the facts of a jobFailure anywhere in
 // its chain — a wrap above one would print the wrap's text, not the failure's
-// value (spec 047 #36) — and err itself otherwise.
+// value (spec 047 #36) — and err itself otherwise. The facts stand for the
+// whole of err: the wrap's own words and the errors joined beside it are text
+// the writer cannot vouch for, and a line about an erasure's job gives none
+// (#33).
 func logged(err error) any {
 	var redacted *jobFailure
 	if errors.As(err, &redacted) {
@@ -735,10 +749,10 @@ func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused [
 		own, err := applyOne(tx, sub.job, many && savepoints)
 		// Met at a job whose words the writer does not log, either says only
 		// its facts and what the job was a step of (spec 047 #33, #36).
-		own, err = failedAt(sub.job, own), failedAt(sub.job, err)
 		if err != nil {
-			return nil, err
+			return nil, failedAt(sub.job, err)
 		}
+		own = failedAt(sub.job, own)
 		if own == nil {
 			written = true
 			continue

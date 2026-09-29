@@ -934,12 +934,11 @@ type runError struct {
 func (e *runError) Error() string { return e.err.Error() }
 func (e *runError) Unwrap() error { return e.err }
 
-// An erasure's jobs do not have their errors logged by the writer (#33): its
-// "write commit failed" line would give an error's text whole, and a refusal
-// of a chunk quoted the user it erases. The erasure and the writer both say
-// the facts of a failure and never its text, and the writer says only that
-// the write did not commit. A chunk or a scrub of the erasure task is one;
-// the same jobs outside it are not.
+// An erasure's jobs redact their failure (#33, #36): the writer wraps what
+// fails at one in a jobFailure, which answers the erasure and says the facts of
+// the failure, never its text, to every line that logs it and to whatever
+// prints it — an error's text may quote the user the erasure erases. A chunk or
+// a scrub of the erasure task is one; the same jobs outside it are not.
 func (j *UserDataErase) failureRedacted() (string, bool) {
 	if j.Erasure == nil {
 		return "", false
