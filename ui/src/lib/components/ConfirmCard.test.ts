@@ -14,7 +14,7 @@ import ConfirmCard from './ConfirmCard.svelte';
 const PLAN: DryRun = {
 	dry_run: true,
 	would_delete: { traces: 412, observations: 1900 },
-	oldest: '2026-08-01T09:00:00Z',
+	oldest_ingested: '2026-08-01T09:00:00Z',
 	confirm: 'my-project',
 	note: 'the shorter window takes effect on the next sweep'
 };
@@ -44,7 +44,7 @@ describe('the confirm card', () => {
 		expect(await screen.findByText('412')).toBeInTheDocument();
 		expect(screen.getByText('1,900')).toBeInTheDocument();
 		expect(screen.getByText(/next sweep/)).toBeInTheDocument();
-		expect(screen.getByText(/Reaching back to/)).toBeInTheDocument();
+		expect(screen.getByText(/The oldest of it was ingested/)).toBeInTheDocument();
 	});
 
 	it('names the datasets an erasure takes items from, beside the runs', async () => {

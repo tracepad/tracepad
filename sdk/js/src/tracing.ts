@@ -34,7 +34,7 @@ import {
 } from '@opentelemetry/sdk-trace-node';
 
 import * as attrs from './attributes.js';
-import { type Config, type ConfigOptions, adopt, current, exportTimeout, resolve } from './config.js';
+import { type Config, type ConfigOptions, adopt, current, exportTimeout, rearmHostWarning, resolve } from './config.js';
 import { type Fields, type Usage, Stream, readResponse } from './generation.js';
 import { stamp } from './harness.js';
 import { VERSION, describe } from './http.js';
@@ -231,6 +231,7 @@ function resourceFor(config: Config) {
  * without a warning.
  */
 export function spanProcessor(options: InitOptions = {}): SpanProcessor {
+  if (options.logger !== undefined) setLogger(options.logger);
   const config = resolve(options);
   if (config.environment !== undefined || config.release !== undefined) refuseResource('spanProcessor');
   adopt(config);
@@ -964,6 +965,7 @@ function rethrow<S extends Iterator<unknown> | AsyncIterator<unknown>>(steps: S,
  * and leave nothing registered and the follower behind the API's proxy. */
 export function reset(): void {
   initialized = false;
+  rearmHostWarning();
   warnedKinds.clear();
   handedOut = false;
   exiting = undefined;

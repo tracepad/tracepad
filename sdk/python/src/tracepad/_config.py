@@ -10,6 +10,7 @@ implementation would be a second set of answers.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 
 from ._errors import TracepadConfigError
@@ -46,14 +47,14 @@ def resolve(
     release: str | None = None,
 ) -> Config:
     """Build a Config, raising when the two required values are nowhere."""
-    host = _pick(host, "TRACEPAD_HOST").rstrip("/")
+    host = _pick_host(host).rstrip("/")
     key = _pick(key, "TRACEPAD_API_KEY")
     missing = [name for name, value in (("host", host), ("key", key)) if not value]
     if missing:
         raise TracepadConfigError(
             "tracepad: no "
             + " and no ".join(missing)
-            + "; pass them to tracepad.init() or set TRACEPAD_HOST and TRACEPAD_API_KEY"
+            + "; pass them to tracepad.init() or set TRACEPAD_URL and TRACEPAD_API_KEY"
         )
     return Config(
         host=host,
@@ -83,6 +84,36 @@ def resolve_timeout(argument: float | None) -> float | None:
     return EXPORT_TIMEOUT
 
 
+_host_warned = False
+_host_warned_lock = threading.Lock()
+
+
+def _pick_host(argument: str | None) -> str:
+    """The argument, then TRACEPAD_URL — the name the CLI and the server read
+    too (spec 017 #21) — then TRACEPAD_HOST, this package's first name for it:
+    it still works, and says once that it is going away."""
+    if argument is not None:
+        return argument.strip()
+    url = os.environ.get("TRACEPAD_URL", "").strip()
+    if url:
+        return url
+    legacy = os.environ.get("TRACEPAD_HOST", "").strip()
+    if legacy and _first_host_warning():
+        logger.warning(
+            "tracepad: TRACEPAD_HOST is deprecated; "
+            "set TRACEPAD_URL, which the CLI and the server read too"
+        )
+    return legacy
+
+
+def _first_host_warning() -> bool:
+    """True for the one caller that gets to warn, however many resolve at once."""
+    global _host_warned
+    with _host_warned_lock:
+        first, _host_warned = not _host_warned, True
+    return first
+
+
 def _pick(argument: str | None, variable: str) -> str:
     return (argument if argument is not None else os.environ.get(variable, "")).strip()
 
@@ -110,6 +141,9 @@ def current() -> Config:
 
 
 def forget() -> None:
-    """Drop the process-wide configuration. For tests."""
-    global _current
+    """Drop the process-wide configuration, and re-arm the deprecated-host warning.
+    For tests."""
+    global _current, _host_warned
     _current = None
+    with _host_warned_lock:
+        _host_warned = False

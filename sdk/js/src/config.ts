@@ -27,7 +27,7 @@ export interface ConfigOptions {
 
 /** Build a Config, throwing when the two required values are nowhere. */
 export function resolve(options: ConfigOptions = {}): Config {
-  const host = pick(options.host, 'TRACEPAD_HOST').replace(/\/+$/, '');
+  const host = pickHost(options.host).replace(/\/+$/, '');
   const key = pick(options.key, 'TRACEPAD_API_KEY');
   const missing = [
     ['host', host],
@@ -37,7 +37,7 @@ export function resolve(options: ConfigOptions = {}): Config {
     .map(([name]) => name);
   if (missing.length > 0) {
     throw new TracepadConfigError(
-      `tracepad: no ${missing.join(' and no ')}; pass them to init() or set TRACEPAD_HOST and TRACEPAD_API_KEY`,
+      `tracepad: no ${missing.join(' and no ')}; pass them to init() or set TRACEPAD_URL and TRACEPAD_API_KEY`,
     );
   }
   const config: { -readonly [K in keyof Config]: Config[K] } = { host, key };
@@ -75,6 +75,29 @@ export function exportTimeout(millis: number | undefined): number | undefined {
   }
   if (process.env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT || process.env.OTEL_EXPORTER_OTLP_TIMEOUT) return undefined;
   return EXPORT_TIMEOUT_MILLIS;
+}
+
+let hostWarned = false;
+
+/** Forget that the deprecated-host warning was given; `tracepad/testing`'s
+ * `reset` calls it, and the package's index does not export it. */
+export function rearmHostWarning(): void {
+  hostWarned = false;
+}
+
+/** The option, then TRACEPAD_URL — the name the CLI and the server read too
+ * (spec 032 #23) — then TRACEPAD_HOST, this package's first name for it: it
+ * still works, and says once that it is going away. */
+function pickHost(argument: string | undefined): string {
+  if (argument != null) return argument.trim();
+  const url = (process.env.TRACEPAD_URL ?? '').trim();
+  if (url) return url;
+  const legacy = (process.env.TRACEPAD_HOST ?? '').trim();
+  if (legacy && !hostWarned) {
+    hostWarned = true;
+    warn('TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too');
+  }
+  return legacy;
 }
 
 function pick(argument: string | undefined, variable: string): string {

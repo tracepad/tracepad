@@ -208,9 +208,9 @@
 					{/each}
 				</dl>
 			{/if}
-			{#if showing.oldest}
+			{#if showing.oldest_ingested}
 				<p class="text-muted mt-1.5 text-sm">
-					Reaching back to {timestamp(showing.oldest)}.
+					The oldest of it was ingested {timestamp(showing.oldest_ingested)}.
 				</p>
 			{/if}
 			{#if runs.length > 0}

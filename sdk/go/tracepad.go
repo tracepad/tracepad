@@ -48,8 +48,8 @@ func (o options) String() string {
 
 func (o options) GoString() string { return o.String() }
 
-// WithHost names the store, e.g. "http://localhost:4318". TRACEPAD_HOST
-// otherwise.
+// WithHost names the store, e.g. "http://localhost:4318". TRACEPAD_URL
+// otherwise (TRACEPAD_HOST, deprecated, after that).
 func WithHost(host string) Option { return func(o *options) { o.host = host } }
 
 // WithKey is a secret key ("tp-sk-…"), sent as Bearer. TRACEPAD_API_KEY
@@ -148,7 +148,11 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 		d.log().Warn("tracepad.Init has already run; this call is a no-op")
 		return d.shutdown, nil
 	}
-	c, err := resolve(o.host, o.key, o.environment, o.release)
+	log := d.log()
+	if o.logger != nil {
+		log = o.logger
+	}
+	c, err := resolveWith(log, &hostWarned, o.host, o.key, o.environment, o.release)
 	if err != nil {
 		return nil, err
 	}
@@ -472,4 +476,6 @@ func reset() {
 	warnedKinds.Lock()
 	clear(warnedKinds.seen)
 	warnedKinds.Unlock()
+	hostWarned.Store(false)
+	implicitHostWarned.Store(false)
 }

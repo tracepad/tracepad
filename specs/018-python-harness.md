@@ -95,7 +95,7 @@ sees the attributes on every span it batches.
 ```python
 import tracepad
 
-tracepad.init()  # TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+tracepad.init()  # TRACEPAD_URL / TRACEPAD_API_KEY from the environment
 
 tracepad.score_configs([
     {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},

@@ -2,7 +2,7 @@
 
     import tracepad
 
-    tracepad.init()  # TRACEPAD_HOST / TRACEPAD_API_KEY
+    tracepad.init()  # TRACEPAD_URL / TRACEPAD_API_KEY
 
     @tracepad.observe
     def answer(question: str) -> str:

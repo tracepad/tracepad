@@ -21,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2600}"
+BUDGET="${1:-2620}"
 
 cd "$ROOT"
 

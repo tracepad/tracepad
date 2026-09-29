@@ -32,11 +32,11 @@ import (
 // preview is the dry-run answer every destructive endpoint gives before it is
 // confirmed (spec 005 #8).
 type preview struct {
-	DryRun      bool             `json:"dry_run"`
-	WouldDelete map[string]int64 `json:"would_delete"`
-	Oldest      string           `json:"oldest"`
-	Confirm     string           `json:"confirm"`
-	Note        string           `json:"note"`
+	DryRun         bool             `json:"dry_run"`
+	WouldDelete    map[string]int64 `json:"would_delete"`
+	OldestIngested string           `json:"oldest_ingested"`
+	Confirm        string           `json:"confirm"`
+	Note           string           `json:"note"`
 	// Runs are the eval runs an erasure would take traces from
 	// (spec 014 #14). Only the user-data preview carries them; every other
 	// destructive endpoint leaves the field absent, and an absent field
@@ -832,8 +832,8 @@ func (r *run) renderPreview(dry preview, what string) {
 	for _, kind := range kinds {
 		fmt.Fprintf(out, "  %-14s %d\n", termsafe.String(kind), dry.WouldDelete[kind])
 	}
-	if dry.Oldest != "" {
-		fmt.Fprintf(out, "  %-14s %s\n", "oldest", shortTime(dry.Oldest))
+	if dry.OldestIngested != "" {
+		fmt.Fprintf(out, "  %-14s %s\n", "oldest arrival", shortTime(dry.OldestIngested))
 	}
 	// A dataset deletion counts its own three things rather than a table of
 	// stores, and the third is the one that matters: the traces its runs

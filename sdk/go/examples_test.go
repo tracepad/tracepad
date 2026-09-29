@@ -42,7 +42,7 @@ func params() any                                          { return nil }
 
 func Example() {
 	ctx := context.Background()
-	shutdown, err := tracepad.Init(ctx) // TRACEPAD_HOST, TRACEPAD_API_KEY
+	shutdown, err := tracepad.Init(ctx) // TRACEPAD_URL, TRACEPAD_API_KEY
 	if err != nil {
 		log.Fatal(err)
 	}

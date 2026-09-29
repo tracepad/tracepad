@@ -21,7 +21,7 @@ describe('the secret dialog', () => {
 		show(['ingest']);
 
 		const tracepad = screen.getByText(/TRACEPAD_API_KEY=tp-sk-new/).textContent;
-		expect(tracepad).toContain('TRACEPAD_HOST=http://tracepad.test');
+		expect(tracepad).not.toContain('TRACEPAD_HOST');
 		expect(tracepad).toContain('TRACEPAD_URL=http://tracepad.test');
 		expect(screen.getByText(/OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http:\/\/tracepad.test\/v1\/traces/))
 			.toBeTruthy();

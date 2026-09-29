@@ -230,7 +230,7 @@ this would delete every trace matching these filters that started before 2026-09
   observations   36000
   scores         0
   traces         12000
-  oldest         2026-09-16 09:12:40
+  oldest arrival 2026-09-16 09:12:40
 raw OTLP bodies are not deleted; they expire on the raw retention window
 type "checkout-service" to confirm:
 ```
@@ -828,7 +828,7 @@ this would delete project 9f2c…:
   observations   180114
   raw_batches    812
   traces         41203
-  oldest         2026-03-14 08:21:00
+  oldest arrival 2026-03-14 08:21:00
 the keys stop working immediately; the data is restorable for seven days
 type "checkout-service" to confirm:
 ```

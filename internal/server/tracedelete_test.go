@@ -20,7 +20,7 @@ type deletePreview struct {
 	DryRun      bool             `json:"dry_run"`
 	Matched     *int64           `json:"matched"`
 	WouldDelete map[string]int64 `json:"would_delete"`
-	Oldest      string           `json:"oldest"`
+	Oldest      string           `json:"oldest_ingested"`
 	Runs        []struct {
 		ID      string `json:"id"`
 		Dataset string `json:"dataset"`

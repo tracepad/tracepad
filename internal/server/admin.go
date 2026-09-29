@@ -856,7 +856,7 @@ func (s *Server) handleEraseUserData(w http.ResponseWriter, r *http.Request) {
 		answer := object{}.
 			put("dry_run", true).
 			put("would_delete", erasureCounts(preview.Counts, false)).
-			putSome("oldest", oldestTime(preview.Counts)).
+			putSome("oldest_ingested", oldestTime(preview.Counts)).
 			put("affected_runs", affectedRuns(preview.Runs)).
 			put("affected_datasets", affectedDatasets(preview.Datasets)).
 			put("raw", object{}.
@@ -940,12 +940,13 @@ func dryRun(confirm string, counts store.DeleteCounts, wouldDelete object) objec
 	return object{}.
 		put("dry_run", true).
 		put("would_delete", wouldDelete).
-		putSome("oldest", oldestTime(counts)).
+		putSome("oldest_ingested", oldestTime(counts)).
 		put("confirm", confirm)
 }
 
-// oldestTime renders the arrival of the oldest affected row, or nothing when
-// the operation affects nothing.
+// oldestTime renders the arrival of the oldest affected row — `oldest_ingested`
+// on the wire, because it is when the row arrived and not when the trace
+// started (spec 005 #24) — or nothing when the operation affects nothing.
 func oldestTime(counts store.DeleteCounts) string {
 	if counts.Oldest == 0 {
 		return ""

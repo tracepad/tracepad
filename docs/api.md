@@ -552,7 +552,7 @@ curl -X DELETE … "http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b
 {
   "dry_run": true,
   "would_delete": {"traces": 1, "observations": 7, "scores": 2, "annotation_items": 1},
-  "oldest": "2026-09-01T10:00:00Z",
+  "oldest_ingested": "2026-09-01T10:00:00Z",
   "affected_runs": [],
   "confirm": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",
   "note": "raw OTLP bodies are not deleted; they expire on the raw retention window"

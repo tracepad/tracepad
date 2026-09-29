@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -70,8 +72,19 @@ const redacted = "[redacted]"
 // resolve builds a config, failing with ErrConfig when the two required
 // values are nowhere.
 func resolve(host, key, environment, release string) (config, error) {
+	return resolveWith(def.log(), &implicitHostWarned, host, key, environment, release)
+}
+
+// resolveWith is resolve with the logger the deprecation warning goes to — the
+// one Init was handed, which is not stored until the configuration is known —
+// and the flag that makes it once: Init has its own, so a Score or a Prompt
+// before it, which can only use the default logger, does not spend Init's
+// chance to say it where the application asked. Only a configuration that
+// resolves warns.
+func resolveWith(log *slog.Logger, warned *atomic.Bool, host, key, environment, release string) (config, error) {
+	host, deprecated := pickHost(host)
 	c := config{
-		host:        strings.TrimRight(pick(host, "TRACEPAD_HOST"), "/"),
+		host:        strings.TrimRight(host, "/"),
 		key:         pick(key, "TRACEPAD_API_KEY"),
 		environment: pick(environment, "TRACEPAD_ENVIRONMENT"),
 		release:     pick(release, "TRACEPAD_RELEASE"),
@@ -85,10 +98,31 @@ func resolve(host, key, environment, release string) (config, error) {
 	}
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("%w: no %s; pass tracepad.WithHost and tracepad.WithKey to Init "+
-			"or set TRACEPAD_HOST and TRACEPAD_API_KEY", ErrConfig, strings.Join(missing, " and no "))
+			"or set TRACEPAD_URL and TRACEPAD_API_KEY", ErrConfig, strings.Join(missing, " and no "))
+	}
+	if deprecated && warned.CompareAndSwap(false, true) {
+		log.Warn("TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too")
 	}
 	return c, nil
 }
+
+// pickHost is the option, then TRACEPAD_URL — the name the CLI and the server
+// read too (spec 033 #20) — then TRACEPAD_HOST, this package's first name for
+// it, which still works; deprecated says it was the one used.
+func pickHost(given string) (host string, deprecated bool) {
+	if given != "" {
+		return strings.TrimSpace(given), false
+	}
+	if fromURL := strings.TrimSpace(os.Getenv("TRACEPAD_URL")); fromURL != "" {
+		return fromURL, false
+	}
+	legacy := strings.TrimSpace(os.Getenv("TRACEPAD_HOST"))
+	return legacy, legacy != ""
+}
+
+// The TRACEPAD_HOST warning is once a process for Init and once for the
+// calls that resolve the environment without it; reset re-arms both.
+var hostWarned, implicitHostWarned atomic.Bool
 
 func pick(given, variable string) string {
 	if given != "" {

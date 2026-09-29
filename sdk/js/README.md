@@ -13,7 +13,7 @@ npm install tracepad @opentelemetry/api
 ```ts
 import * as tracepad from 'tracepad';
 
-tracepad.init(); // TRACEPAD_HOST and TRACEPAD_API_KEY from the environment
+tracepad.init(); // TRACEPAD_URL and TRACEPAD_API_KEY from the environment
 
 const answer = tracepad.observe(async (question: string) => {
   tracepad.updateTrace({ userId: 'u-42', tags: ['support'] });

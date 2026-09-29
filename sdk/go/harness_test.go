@@ -316,7 +316,7 @@ func TestFailWithoutAnErrorStillCloses(t *testing.T) {
 func TestARunWithoutInitSaysItStampsNothing(t *testing.T) {
 	fresh(t)
 	fs := serveStore(t)
-	t.Setenv("TRACEPAD_HOST", fs.URL)
+	t.Setenv("TRACEPAD_URL", fs.URL)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	logs := &bytes.Buffer{}
 	previous := slog.Default()

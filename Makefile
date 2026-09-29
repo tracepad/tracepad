@@ -177,8 +177,8 @@ py-lint: ## Lint the Python package and scripts/ with the ruff sdk/python pins (
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
 # for `tracepad.testing` (spec 040 #13), for the cost and bounds of spec 042
 # for `compile`'s own substitution (spec 017 #18), and for the key and the path
-# (spec 017 #19).
-SDK_BUDGET := 2100
+# (spec 017 #19), and for the deprecated host variable (spec 017 #21).
+SDK_BUDGET := 2120
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
@@ -198,8 +198,9 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 # The budget spec 033 #11 set, raised for the harness (spec 033 #17), for
 # trace deletion (spec 036 #8), for `tracepadtest` (spec 040 #13), for the
 # cost and bounds of spec 042, for the key and the path (spec 033 #18), and for
-# writing a long item list in batches (spec 033 #19).
-SDK_GO_BUDGET := 2600
+# writing a long item list in batches (spec 033 #19), and for the deprecated
+# host variable (spec 033 #20).
+SDK_GO_BUDGET := 2620
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
@@ -231,8 +232,8 @@ sdk-js-unit: ## The Node package's type check and unit suite alone (part of the 
 # raised for the harness (spec 032 #16), for trace deletion (spec 036 #8), for
 # `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, for
 # the key and the path (spec 032 #17), and for writing a long item list in
-# batches (spec 032 #21).
-SDK_JS_BUDGET := 2325
+# batches (spec 032 #21), and for the deprecated host variable (spec 032 #23).
+SDK_JS_BUDGET := 2345
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)

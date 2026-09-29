@@ -28,6 +28,7 @@ const intoWarnings = { warn: (message: string) => warnings.push(message) };
 export function fresh(): void {
   beforeEach(() => {
     for (const variable of [
+      'TRACEPAD_URL',
       'TRACEPAD_HOST',
       'TRACEPAD_API_KEY',
       'TRACEPAD_ENVIRONMENT',

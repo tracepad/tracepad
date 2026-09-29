@@ -12,8 +12,9 @@
 	// instead of pretending the key is somewhere to be found later.
 	//
 	// The lines follow the key's scopes (spec 045 #14): every key gets the
-	// variables the Tracepad packages (`TRACEPAD_HOST`), the CLI and the MCP
-	// server (`TRACEPAD_URL`) read, since the packages export with it too; and
+	// variables the Tracepad packages, the CLI and the MCP server read
+	// (`TRACEPAD_URL`, one name for all three, spec 017 #21), since the
+	// packages export with it too; and
 	// only a key that can ingest gets the exporter formats — a `read` key
 	// pasted into an exporter's headers is a mistake this can prevent by not
 	// suggesting it. A pair without scopes is a new project's first, which
@@ -27,7 +28,6 @@
 		const tracepad = {
 			label: 'Tracepad packages, CLI and MCP',
 			body:
-				`TRACEPAD_HOST=${origin}\n` +
 				`TRACEPAD_URL=${origin}\n` +
 				`TRACEPAD_API_KEY=${pair.secret_key}`
 		};

@@ -50,7 +50,7 @@ const chatPrompt = `{"name":"chat","version":1,"type":"chat","prompt":[{"role":"
 func TestAPromptIsFetchedAndCached(t *testing.T) {
 	fresh(t)
 	ps := servePrompts(t, textPrompt)
-	t.Setenv("TRACEPAD_HOST", ps.URL)
+	t.Setenv("TRACEPAD_URL", ps.URL)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	// No Init: a script that only fetches a prompt configures through the
 	// environment.

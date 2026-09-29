@@ -23,6 +23,7 @@ pytest_plugins = ["pytester"]
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for variable in (
+        "TRACEPAD_URL",
         "TRACEPAD_HOST",
         "TRACEPAD_API_KEY",
         "TRACEPAD_ENVIRONMENT",

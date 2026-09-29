@@ -64,7 +64,7 @@ def test_export_false_attaches_no_exporter_and_still_stamps() -> None:
 
 
 def test_the_environment_supplies_host_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TRACEPAD_HOST", HOST + "/")
+    monkeypatch.setenv("TRACEPAD_URL", HOST + "/")
     monkeypatch.setenv("TRACEPAD_API_KEY", KEY)
     monkeypatch.setenv("TRACEPAD_ENVIRONMENT", "staging")
     monkeypatch.setenv("TRACEPAD_RELEASE", "2026.9.4")
@@ -77,6 +77,26 @@ def test_the_environment_supplies_host_and_key(monkeypatch: pytest.MonkeyPatch) 
     resource = otel_api.get_tracer_provider().resource.attributes
     assert resource["deployment.environment.name"] == "staging"
     assert resource["service.version"] == "2026.9.4"
+
+
+def test_tracepad_host_is_a_deprecated_synonym_for_tracepad_url(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Spec 017 #21: the CLI and the server say TRACEPAD_URL; the old name still
+    # works, says so once, and loses to the new one.
+    monkeypatch.setenv("TRACEPAD_URL", "http://from-url:4318/")
+    monkeypatch.setenv("TRACEPAD_HOST", "http://from-host:4318")
+    monkeypatch.setenv("TRACEPAD_API_KEY", KEY)
+    with caplog.at_level("WARNING", logger="tracepad"):
+        assert tracepad._config.resolve().host == "http://from-url:4318"
+        assert not caplog.records
+
+        monkeypatch.delenv("TRACEPAD_URL")
+        assert tracepad._config.resolve().host == "http://from-host:4318"
+        assert tracepad._config.resolve().host == "http://from-host:4318"
+    warnings = [r for r in caplog.records if "TRACEPAD_HOST is deprecated" in r.getMessage()]
+    assert len(warnings) == 1
+    assert tracepad._config.resolve("http://argument:4318").host == "http://argument:4318"
 
 
 def test_no_host_and_no_key_raise() -> None:

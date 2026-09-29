@@ -116,7 +116,7 @@ Python ([sdk-python.md](sdk-python.md)) and in Node ([sdk-js.md](sdk-js.md)):
 
 ```sh
 pip install tracepad        # or: npm install tracepad @opentelemetry/api
-export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_URL=http://localhost:4318
 export TRACEPAD_API_KEY=tp-sk-…
 ```
 
