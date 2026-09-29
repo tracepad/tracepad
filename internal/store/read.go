@@ -41,6 +41,9 @@ type TraceRow struct {
 	TTFTMs           *int64
 	ErrorCount       int
 	ObservationCount int
+	// Tokens are the five classes summed over the trace's observations that
+	// name a model, maintained on write like the cost (spec 049 #2).
+	Tokens Tokens
 }
 
 // ObservationRow is a stored span. Input, Output and Metadata are resolved
@@ -140,10 +143,11 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		totalCost sql.NullFloat64
 		latency   sql.NullInt64
 		ttft      sql.NullInt64
+		tokens    tokenScan
 	)
-	targets := []any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
+	targets := append([]any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
 		&release, &version, &runID, &itemID, &tags, &timestamp, &totalCost, &latency, &ttft,
-		&row.ErrorCount, &row.ObservationCount}
+		&row.ErrorCount, &row.ObservationCount}, tokens.targets()...)
 	if err := rows.Scan(append(targets, extra...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -154,6 +158,7 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 	row.Release, row.Version = release.String, version.String
 	row.RunID, row.ItemID = runID.String, itemID.String
 	row.Timestamp = timestamp.Int64
+	row.Tokens = tokens.tokens()
 	if totalCost.Valid {
 		row.TotalCost = &totalCost.Float64
 	}

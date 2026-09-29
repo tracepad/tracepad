@@ -38,7 +38,7 @@ func TestUsersListRendersTheRollup(t *testing.T) {
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
-	for _, want := range []string{"USER", "SESSIONS", "u1"} {
+	for _, want := range []string{"USER", "SESSIONS", "TOKENS", "u1"} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("output does not mention %q:\n%s", want, got.stdout)
 		}
@@ -64,6 +64,7 @@ func TestUsersCommandsAreTheEndpoint(t *testing.T) {
 	}{
 		{"users ls", []string{"users", "ls"}, "/api/v1/users"},
 		{"users ls --sort", []string{"users", "ls", "--sort", "cost"}, "/api/v1/users?sort=cost"},
+		{"users ls --sort tokens", []string{"users", "ls", "--sort", "tokens"}, "/api/v1/users?sort=tokens"},
 		{"users show", []string{"users", "show", "u1"}, "/api/v1/users/u1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,7 +107,9 @@ func TestUsersShowRendersTheSummary(t *testing.T) {
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
-	for _, want := range []string{"user u1", "traces", "sessions", "latency", "window"} {
+	// Tokens are input plus output, with every other class reported beside
+	// them (spec 049 #11): the corpus's generation sent 128 in and 41 out.
+	for _, want := range []string{"user u1", "traces", "sessions", "latency", "window", "tokens    169\n"} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("output does not report %q:\n%s", want, got.stdout)
 		}
@@ -145,5 +148,51 @@ func TestUsersRejectsAnUnknownSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(got.stderr, "ls, show, rm-data, erasure or erasures") {
 		t.Errorf("stderr = %q, want it to name the five subcommands", got.stderr)
+	}
+}
+
+// The tree's `N tokens` reads the classes every listing reads (spec 049 #11):
+// an OpenAI-style usage with no `total` shows input plus output, and a usage
+// that names no class still shows the total it sent.
+func TestTreeTokensReadTheClasses(t *testing.T) {
+	for _, tc := range []struct {
+		usage map[string]any
+		want  string
+	}{
+		{map[string]any{"prompt_tokens": 120.0, "completion_tokens": 30.0, "total_tokens": 150.0}, "150 tokens"},
+		{map[string]any{"input_tokens": 10.0, "output_tokens": 5.0, "reasoning_tokens": 400.0}, "15 tokens"},
+		{map[string]any{"input": 128.0, "output": 41.0, "total": 999.0}, "169 tokens"},
+		{map[string]any{"total_tokens": 77.0}, "77 tokens"},
+		{map[string]any{"cache_read_input_tokens": 9.0}, ""},
+		{nil, ""},
+	} {
+		if got := totalTokens(tc.usage); got != tc.want {
+			t.Errorf("totalTokens(%v) = %q, want %q", tc.usage, got, tc.want)
+		}
+	}
+}
+
+// `--min-tokens` is the endpoint's `min_tokens`, passed through as typed.
+func TestMinTokensIsTheEndpoint(t *testing.T) {
+	h := newHarness(t)
+	seedCorpus(t, h)
+	for flag, rows := range map[string]int{"169": 1, "170": 0} {
+		got := h.run(t.Context(), false, "traces", "ls", "--min-tokens", flag, "--json")
+		if got.code != ExitOK {
+			t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+		}
+		var listing struct {
+			Traces []json.RawMessage `json:"traces"`
+		}
+		if err := json.Unmarshal([]byte(got.stdout), &listing); err != nil {
+			t.Fatal(err)
+		}
+		if len(listing.Traces) != rows {
+			t.Errorf("--min-tokens %s listed %d traces, want %d", flag, len(listing.Traces), rows)
+		}
+	}
+	bad := h.run(t.Context(), false, "traces", "ls", "--min-tokens", "lots")
+	if bad.code == ExitOK || !strings.Contains(bad.stderr, "min_tokens") {
+		t.Errorf("--min-tokens lots: exit %d, stderr %s", bad.code, bad.stderr)
 	}
 }

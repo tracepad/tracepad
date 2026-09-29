@@ -175,6 +175,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
       "tags": ["beta", "support"],
       "timestamp": "2026-09-01T10:00:00Z",
       "total_cost": 0.001,
+      "tokens": {"input": 1840, "output": 212, "cache_read": 1024},
       "latency_ms": 820,
       "ttft_ms": 388,
       "error_count": 1,
@@ -192,7 +193,8 @@ choosing what to fetch.
 `release` and `version` are what the deployment called itself and what the
 trace's own logic called itself; `ttft_ms` is the wait before the first token
 — the earliest completion start among the trace's observations, minus when the
-trace began. Each is absent when nothing reported it.
+trace began. `tokens` is the trace's observations' usage summed per class —
+see [Tokens](#tokens). Each is absent when nothing reported it.
 
 A trace produced by an eval also carries `run_id` and `item_id` — the run it
 belongs to and the case it answered, from the `tracepad.run_id` and
@@ -211,6 +213,7 @@ traffic, and `item_id` never appears without `run_id`. See
 | `tag` | Repeatable; a trace must carry **every** tag given. At most 50 distinct values — duplicates collapse first — since a trace keeps at most 50 tags; more is a `400` (`tag: at most 50 values`). |
 | `status` | `error` (at least one failed observation) or `ok`. |
 | `min_cost` | Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches. |
+| `min_tokens` | Traces whose input plus output tokens are at least this many — a whole number. A trace that reported neither has none and never matches, not even `min_tokens=0`. See [Tokens](#tokens). |
 | `q` | Full-text search over what the observations carried. See [Search](#search). |
 | `release` | The deployment the trace ran in, or a comma-separated list matching any of them. See [Lists](#lists). |
 | `version` | Exact match on the version of the trace's own logic. |
@@ -816,6 +819,7 @@ curl … "http://localhost:4318/api/v1/sessions/session-77"
   "id": "session-77",
   "trace_count": 12,
   "total_cost": 0.043,
+  "tokens": {"input": 22480, "output": 3105, "cache_read": 12288},
   "error_count": 1,
   "first_seen": "2026-09-01T10:00:00Z",
   "last_seen": "2026-09-01T10:14:22Z",
@@ -825,7 +829,8 @@ curl … "http://localhost:4318/api/v1/sessions/session-77"
 ```
 
 Every number counts traces: `error_count` is how many of the session's traces
-failed, not how many spans did. `traces` pages with the same `limit`/`cursor`
+failed, not how many spans did. `tokens` is summed per class over the
+session's traces, on the listing's rows and here. `traces` pages with the same `limit`/`cursor`
 as the listing.
 
 ## Users
@@ -834,7 +839,7 @@ The two endpoints and everything they promise are on their own page:
 [users.md](users.md). In short:
 
 ```sh
-curl … "http://localhost:4318/api/v1/users?sort=cost&limit=3"
+curl … "http://localhost:4318/api/v1/users?sort=tokens&limit=3"
 ```
 
 ```json
@@ -845,18 +850,20 @@ curl … "http://localhost:4318/api/v1/users?sort=cost&limit=3"
       "traces": 312,
       "error_count": 4,
       "total_cost": 6.10,
+      "tokens": {"input": 1840220, "output": 201544, "reasoning": 40960},
       "sessions": 28,
       "first_seen": "2026-08-14T09:00:00Z",
       "last_seen": "2026-09-01T10:00:00Z"
     }
   ],
-  "next_cursor": "Ni4xOnVzZXItNDgyMQ",
+  "next_cursor": "MjA0MTc2NDp1c2VyLTQ4MjE",
   "prev_cursor": null
 }
 ```
 
-`sort` is `last_seen` (the default), `traces`, `cost` or `errors`, always
-descending, with the user id as the tie-break; `prefix` keeps ids starting
+`sort` is `last_seen` (the default), `traces`, `cost`, `tokens` (input plus
+output, a user with none as 0) or `errors`, always descending, with the user
+id as the tie-break; `prefix` keeps ids starting
 with it, case-sensitively. `limit`, `cursor`, `direction` and `count` are the
 same as on every other listing.
 
@@ -882,7 +889,8 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
       "count": 412,
       "error_count": 7,
       "total_cost": 1.82,
-      "tokens": {"input": 1284930, "output": 96410, "cache_read": 402118},
+      "tokens": {"input": 1284930, "output": 96410, "cache_read": 402118,
+                 "reasoning": 20480, "cache_write": 51200},
       "latency_ms": {"p50": 640, "p95": 2310}
     }
   ]
@@ -932,28 +940,56 @@ and is absent when none did. A
 range with nothing in it comes back with no buckets rather than with
 fabricated zeroes.
 
-`tokens` is the same idea for the one number every provider reports: the
-sums of **input**, **output** and **cache-read** tokens over the generations
-in the bucket, on every grouping and both units. Each count is read off an
-observation's `usage` under the first spelling present of a short list —
-`input_tokens`, `prompt_tokens` or `input`; `output_tokens`,
-`completion_tokens` or `output`; `cache_read_input_tokens`,
-`cache_read_tokens` or `input_cached_tokens` — so the OpenAI, Anthropic and
-Langfuse spellings land in the same three numbers. A count is a number from
-0 to 10⁹; a spelling that holds anything else — a string, a negative number,
-one past that — is not a count, and that class is left out rather than read
-from the next spelling. A key is present only when
-something in the bucket carried that count, and the object is absent when
-none of the three is: a bucket whose calls reported no usage says nothing
-rather than zero. With `user_id` the object is always absent — the per-user
-rollup holds no token sums. Cache-read tokens are the input tokens a provider reported
-as served from its cache; a bill is made of input and output, and cache read
-is what explains one that is smaller than the tokens suggest. Reasoning and
-cache-creation counts are not summed — they stay on the observation, where
-the interface shows them. Hours that were rolled up before this store learned
-about tokens are re-rolled on the next pass, except an hour past the
-project's `retention_days`, whose observations are gone: it keeps no tokens
-for ever.
+`tokens` is the same idea for the one number every provider reports, on
+every grouping and both units, with `user_id` too: the sums of each token
+class over the generations in the bucket. The classes, how they are read and
+what the one headline number is are the same everywhere a row carries
+`tokens` — see [Tokens](#tokens).
+
+### Tokens
+
+Traces, sessions, users and statistics buckets carry a `tokens` object:
+
+```json
+"tokens": {"input": 1200, "output": 340, "cache_read": 800, "reasoning": 128, "cache_write": 64}
+```
+
+There are five classes, each read off an observation's `usage` under the first
+spelling present of a short list, so the OpenAI, Anthropic, Langfuse and
+OpenTelemetry spellings land in the same numbers:
+
+| Class | Spellings, first present wins |
+|---|---|
+| `input` | `input_tokens`, `prompt_tokens`, `input` |
+| `output` | `output_tokens`, `completion_tokens`, `output` |
+| `cache_read` | `cache_read_input_tokens`, `cache_read_tokens`, `input_cached_tokens`, `input_cache_read`, `cache_read.input_tokens` |
+| `reasoning` | `reasoning_tokens`, `output_reasoning_tokens`, `reasoning.output_tokens` |
+| `cache_write` | `cache_creation_input_tokens`, `cache_creation_tokens`, `input_cache_creation`, `input_cache_write_tokens`, `cache_write_tokens`, `cache_creation.input_tokens` |
+
+The dotted spellings are the `gen_ai.usage.*` attribute names without their
+prefix, as the store keeps them — one key, not a nested object. A count is a
+number from 0 to 10⁹; a spelling that holds anything else — a string, a
+negative number, one past that — is not a count, and that class is left out
+rather than read from the next spelling. Only observations that **name a
+model** count: a span with usage and no model is usually a parent's sum over
+the calls beneath it, and counting it would count them twice.
+
+**No class is ever added to another.** Providers disagree about whether
+cached tokens are inside the input and reasoning tokens inside the output, so
+a sum across classes would double-count for some and under-count for others.
+Where one number is needed — the Tokens column, `min_tokens`, `sort=tokens`,
+the CLI's `TOKENS` — it is **input plus output**, a missing class read as 0,
+and absent when both are. A provider that reports reasoning beside the output
+is under-counted by that number, and `reasoning` says by how much.
+
+A key is present only when something carried that count, and the object is
+absent when nothing did: a trace whose calls reported no usage says nothing
+rather than zero. A trace's classes are kept on the trace as its spans arrive,
+a session's are summed over its traces, and a user's are rolled with the rest
+of the per-user rollup. Data stored before this store learned the classes is
+filled in on upgrade — the traces by the migration, the statistics and users
+on the next pass — except an hour past the project's `retention_days`, whose
+observations are gone: it keeps the classes it had for ever.
 
 ### Where the numbers come from
 

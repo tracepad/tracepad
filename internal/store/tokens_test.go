@@ -78,7 +78,8 @@ func tokensEqual(a, b *int64) bool {
 
 func describeTokens(t Tokens) string {
 	var parts []string
-	for _, n := range []*int64{t.Input, t.Output, t.CacheRead} {
+	for _, n := range t.fields() {
+		n := *n
 		if n == nil {
 			parts = append(parts, "NULL")
 		} else {
@@ -90,8 +91,12 @@ func describeTokens(t Tokens) string {
 
 func expectTokens(t *testing.T, what string, got, want Tokens) {
 	t.Helper()
-	if !tokensEqual(got.Input, want.Input) || !tokensEqual(got.Output, want.Output) ||
-		!tokensEqual(got.CacheRead, want.CacheRead) {
+	gotFields, wantFields := got.fields(), want.fields()
+	same := true
+	for i := range gotFields {
+		same = same && tokensEqual(*gotFields[i], *wantFields[i])
+	}
+	if !same {
 		t.Errorf("%s: tokens %s, want %s", what, describeTokens(got), describeTokens(want))
 	}
 }
@@ -107,16 +112,16 @@ func TestTokensRollIntoBothCells(t *testing.T) {
 	rows := rolledRows(t, s, project.ID, rollupHour)
 	for key, want := range map[string]Tokens{
 		// The model cells.
-		"production|2026.8.30|claude-sonnet-5": {count(101), count(11), count(5)},
-		"production|2026.8.30|gpt-4o-mini":     {count(200), count(20), count(7)},
-		"staging||claude-sonnet-5":             {count(300), count(30), count(9)},
-		"staging||gpt-4o-mini":                 {nil, count(40), nil},
-		"dev||claude-sonnet-5":                 {nil, nil, nil},
+		"production|2026.8.30|claude-sonnet-5": {count(101), count(11), count(5), nil, nil},
+		"production|2026.8.30|gpt-4o-mini":     {count(200), count(20), count(7), nil, nil},
+		"staging||claude-sonnet-5":             {count(300), count(30), count(9), nil, nil},
+		"staging||gpt-4o-mini":                 {nil, count(40), nil, nil, nil},
+		"dev||claude-sonnet-5":                 {nil, nil, nil, nil, nil},
 		// The trace-unit cells: the same observations, summed over the
 		// traces of the environment and release.
-		"production|2026.8.30|": {count(301), count(31), count(12)},
-		"staging||":             {count(300), count(70), count(9)},
-		"dev||":                 {nil, nil, nil},
+		"production|2026.8.30|": {count(301), count(31), count(12), nil, nil},
+		"staging||":             {count(300), count(70), count(9), nil, nil},
+		"dev||":                 {nil, nil, nil, nil, nil},
 	} {
 		row, ok := rows[key]
 		if !ok {
@@ -254,7 +259,7 @@ func TestResettingLastPassBackfillsTheTokens(t *testing.T) {
 	passAt(t, s, base.Add(4*DefaultRollupInterval))
 
 	row := rolledRows(t, s, project.ID, rollupHour)["production|2026.8.30|"]
-	expectTokens(t, "the backfilled hour", row.Tokens, Tokens{count(301), count(31), count(12)})
+	expectTokens(t, "the backfilled hour", row.Tokens, Tokens{count(301), count(31), count(12), nil, nil})
 }
 
 // The known limit of Decision 3: an hour past the retention window whose

@@ -574,12 +574,24 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 // `total_cost` sums what the counting rule counts (spec 043 #4), so no string
 // and no value near the largest double reaches the sum.
 //
+// The five token columns are the statistics' counting rule applied to one
+// trace (spec 049 #2): only observations that name a model (spec 031 #12),
+// only counts within the domain (spec 043 #4), each class its own sum and
+// NULL when nothing carried it. One subquery assigns all five, so the trace's
+// observations are read once for them rather than once per class; migration
+// 0033 fills the columns of the traces stored before it with the same
+// expressions (`traceTokenSums`).
+//
 // Like every aggregate it is recomputed on each delivery, so a trace whose
 // generations arrive in several batches converges on the earliest completion
 // start seen so far (spec 002 #22).
 func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 	_, err := tx.Exec(
 		`UPDATE traces SET
+		   (`+tokenColumnList("")+`) = (SELECT `+traceTokenSums()+`
+		                        FROM observations o
+		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
+		                          AND o.model IS NOT NULL AND o.model != ''),
 		   observation_count = (SELECT COUNT(*) FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id),
 		   error_count       = (SELECT COUNT(*) FROM observations o

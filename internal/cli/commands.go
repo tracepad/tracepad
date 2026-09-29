@@ -99,12 +99,13 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	}
 	listing, err := decode[struct {
 		Sessions []struct {
-			ID         string   `json:"id"`
-			TraceCount int      `json:"trace_count"`
-			ErrorCount int      `json:"error_count"`
-			TotalCost  *float64 `json:"total_cost"`
-			FirstSeen  string   `json:"first_seen"`
-			LastSeen   string   `json:"last_seen"`
+			ID         string       `json:"id"`
+			TraceCount int          `json:"trace_count"`
+			ErrorCount int          `json:"error_count"`
+			TotalCost  *float64     `json:"total_cost"`
+			Tokens     *tokenCounts `json:"tokens"`
+			FirstSeen  string       `json:"first_seen"`
+			LastSeen   string       `json:"last_seen"`
 		} `json:"sessions"`
 		NextCursor  *string `json:"next_cursor"`
 		PrevCursor  *string `json:"prev_cursor"`
@@ -121,11 +122,11 @@ func (r *run) sessionsList(ctx context.Context, args []string) error {
 	if len(listing.Sessions) == 0 {
 		fmt.Fprintln(r.opt.Stdout, "no sessions")
 	} else {
-		t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "FIRST SEEN")
+		t := newTable(r.opt.Stdout, "LAST SEEN", "SESSION", "TRACES", "ERRORS", "COST", "TOKENS", "FIRST SEEN")
 		for _, session := range listing.Sessions {
 			t.row(shortTime(session.LastSeen), session.ID,
 				strconv.Itoa(session.TraceCount), strconv.Itoa(session.ErrorCount),
-				cost(session.TotalCost), shortTime(session.FirstSeen))
+				cost(session.TotalCost), session.Tokens.billed(), shortTime(session.FirstSeen))
 		}
 		t.flush()
 	}
@@ -157,13 +158,14 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 		return r.emit(body)
 	}
 	session, err := decode[struct {
-		ID         string     `json:"id"`
-		TraceCount int        `json:"trace_count"`
-		TotalCost  *float64   `json:"total_cost"`
-		ErrorCount int        `json:"error_count"`
-		FirstSeen  string     `json:"first_seen"`
-		LastSeen   string     `json:"last_seen"`
-		Traces     []traceRow `json:"traces"`
+		ID         string       `json:"id"`
+		TraceCount int          `json:"trace_count"`
+		TotalCost  *float64     `json:"total_cost"`
+		Tokens     *tokenCounts `json:"tokens"`
+		ErrorCount int          `json:"error_count"`
+		FirstSeen  string       `json:"first_seen"`
+		LastSeen   string       `json:"last_seen"`
+		Traces     []traceRow   `json:"traces"`
 	}](body)
 	if err != nil {
 		return err
@@ -171,6 +173,7 @@ func (r *run) sessionsShow(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "session %s\n", termsafe.String(session.ID))
 	fmt.Fprintf(r.opt.Stdout, "  traces  %d (%d with errors)\n", session.TraceCount, session.ErrorCount)
 	fmt.Fprintf(r.opt.Stdout, "  cost    %s\n", cost(session.TotalCost))
+	fmt.Fprintf(r.opt.Stdout, "  tokens  %s\n", session.Tokens.detail())
 	fmt.Fprintf(r.opt.Stdout, "  window  %s .. %s\n\n",
 		shortTime(session.FirstSeen), shortTime(session.LastSeen))
 	renderTraceTable(r.opt.Stdout, session.Traces, r.opt.TTY)
@@ -241,10 +244,10 @@ func (r *run) usersList(ctx context.Context, args []string) error {
 		fmt.Fprintln(r.opt.Stdout, "no users")
 	} else {
 		t := newTable(r.opt.Stdout,
-			"USER", "TRACES", "SESSIONS", "ERRORS", "COST", "FIRST SEEN", "LAST SEEN")
+			"USER", "TRACES", "SESSIONS", "ERRORS", "COST", "TOKENS", "FIRST SEEN", "LAST SEEN")
 		for _, user := range listing.Users {
 			t.row(user.UserID, strconv.Itoa(user.Traces), strconv.Itoa(user.Sessions),
-				strconv.Itoa(user.ErrorCount), cost(user.TotalCost),
+				strconv.Itoa(user.ErrorCount), cost(user.TotalCost), user.Tokens.billed(),
 				shortTime(user.FirstSeen), shortTime(user.LastSeen))
 		}
 		t.flush()
@@ -252,7 +255,7 @@ func (r *run) usersList(ctx context.Context, args []string) error {
 	if listing.Total != nil {
 		fmt.Fprintf(r.opt.Stdout, "\n%s matching\n", matchCount(*listing.Total, listing.TotalCapped))
 	}
-	// "older" would be a lie under three of the four sorts: the listing runs
+	// "older" would be a lie under every sort but one: the listing runs
 	// down whatever key was asked for, and only `last_seen` makes that a
 	// timeline.
 	walkOn(r, "next", listing.NextCursor, listing.PrevCursor)
@@ -262,13 +265,14 @@ func (r *run) usersList(ctx context.Context, args []string) error {
 // userRow is what both user endpoints render, which is the point of the shape
 // being one shape (spec 023 #5).
 type userRow struct {
-	UserID     string   `json:"user_id"`
-	Traces     int      `json:"traces"`
-	ErrorCount int      `json:"error_count"`
-	TotalCost  *float64 `json:"total_cost"`
-	Sessions   int      `json:"sessions"`
-	FirstSeen  string   `json:"first_seen"`
-	LastSeen   string   `json:"last_seen"`
+	UserID     string       `json:"user_id"`
+	Traces     int          `json:"traces"`
+	ErrorCount int          `json:"error_count"`
+	TotalCost  *float64     `json:"total_cost"`
+	Tokens     *tokenCounts `json:"tokens"`
+	Sessions   int          `json:"sessions"`
+	FirstSeen  string       `json:"first_seen"`
+	LastSeen   string       `json:"last_seen"`
 }
 
 func (r *run) usersShow(ctx context.Context, args []string) error {
@@ -298,6 +302,7 @@ func (r *run) usersShow(ctx context.Context, args []string) error {
 	fmt.Fprintf(r.opt.Stdout, "  traces    %d (%d with errors)\n", user.Traces, user.ErrorCount)
 	fmt.Fprintf(r.opt.Stdout, "  sessions  %d\n", user.Sessions)
 	fmt.Fprintf(r.opt.Stdout, "  cost      %s\n", cost(user.TotalCost))
+	fmt.Fprintf(r.opt.Stdout, "  tokens    %s\n", user.Tokens.detail())
 	fmt.Fprintf(r.opt.Stdout, "  latency   p50 %s, p95 %s\n",
 		duration(user.LatencyMs.P50), duration(user.LatencyMs.P95))
 	fmt.Fprintf(r.opt.Stdout, "  window    %s .. %s\n",
@@ -1095,10 +1100,7 @@ func (r *run) stats(ctx context.Context, args []string) error {
 			Sessions *int `json:"sessions"`
 			// Tokens is absent when nothing in the bucket reported usage,
 			// and each key when nothing reported that class (spec 031 #4).
-			Tokens *struct {
-				Input  *int64 `json:"input"`
-				Output *int64 `json:"output"`
-			} `json:"tokens"`
+			Tokens    *tokenCounts `json:"tokens"`
 			LatencyMs struct {
 				P50 *int64 `json:"p50"`
 				P95 *int64 `json:"p95"`
@@ -1129,18 +1131,7 @@ func (r *run) stats(ctx context.Context, args []string) error {
 		if sessions {
 			cells = append(cells, strconv.Itoa(deref(bucket.Sessions)))
 		}
-		tokens := "-"
-		if bucket.Tokens != nil && (bucket.Tokens.Input != nil || bucket.Tokens.Output != nil) {
-			var billed int64
-			if bucket.Tokens.Input != nil {
-				billed += *bucket.Tokens.Input
-			}
-			if bucket.Tokens.Output != nil {
-				billed += *bucket.Tokens.Output
-			}
-			tokens = strconv.FormatInt(billed, 10)
-		}
-		t.row(append(cells, strconv.Itoa(bucket.ErrorCount), cost(bucket.TotalCost), tokens,
+		t.row(append(cells, strconv.Itoa(bucket.ErrorCount), cost(bucket.TotalCost), bucket.Tokens.billed(),
 			duration(bucket.LatencyMs.P50), duration(bucket.LatencyMs.P95))...)
 	}
 	t.flush()

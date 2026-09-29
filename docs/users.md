@@ -33,6 +33,7 @@ roll-up follows:
 | `traces` | How many traces are attributed to this user |
 | `error_count` | How many of *those traces* carry at least one failed observation |
 | `total_cost` | Summed over the traces whose client reported a cost; **absent** when none did, which is not the same as zero |
+| `tokens` | The five token classes summed over this user's traces — input, output, cache read, reasoning, cache write — each **absent** when nothing reported it ([api.md](api.md#tokens)) |
 | `sessions` | How many of this user's sessions have begun |
 | `first_seen`, `last_seen` | The hours the rollup holds for them, at either end |
 
@@ -68,8 +69,9 @@ Traces screen, which is live.
 ### On an upgrade
 
 An existing install already has its statistics rolled up to now, so nothing
-about the history would look "changed" and these two tables would stay empty.
-The migration therefore asks the aggregator to walk the rolled history once:
+about the history would look "changed" and these two tables would stay empty —
+or, on the upgrade that taught them the token classes, without tokens. The
+migration therefore asks the aggregator to walk the rolled history once:
 the first pass after the upgrade re-rolls every hour it holds, which fills the
 per-user tables and rewrites the identical statistics rows. It is background
 work, it happens once, and the statistics keep answering from the rollup
@@ -96,16 +98,18 @@ in three hours of a day costs three hours of rows however many traces they ran
 in them.
 
 In numbers, for one environment and two models, at 24 rolled hours per row and
-roughly 120 bytes a row:
+roughly 130 bytes a row (the five token classes are about 10 of them):
 
 | Shape | Active user-hours a day | Rows a day | A month |
 |---|---|---|---|
-| 1,000 users, ~4 active hours each | 4,000 | 12,000 | ~43 MB |
-| 100,000 users, ~2 active hours each | 200,000 | 600,000 | ~2.2 GB |
-| 1,000,000 users, ~1 active hour each | 1,000,000 | 3,000,000 | ~11 GB |
+| 1,000 users, ~4 active hours each | 4,000 | 12,000 | ~47 MB |
+| 100,000 users, ~2 active hours each | 200,000 | 600,000 | ~2.4 GB |
+| 1,000,000 users, ~1 active hour each | 1,000,000 | 3,000,000 | ~12 GB |
 
-The summary table beside it is one row per user the project has ever seen, at
-about 60 bytes: a million users is ~60 MB, once, not per day.
+The summary table beside it is one row per user the project has ever seen:
+about 80 bytes, and about 50 more in each of the five indexes the listing
+sorts by — for ids of ten characters or so, a million users is ~330 MB, once,
+not per day.
 
 Two knobs bound all of it. `stats_retention_days` sweeps these rows on the
 same schedule as the statistics rollup ([retention.md](retention.md)), and a
@@ -139,6 +143,7 @@ visible in the page's environment breakdown.
 ```sh
 tracepad users ls                          # by last seen
 tracepad users ls --sort cost --limit 20   # the expensive ones
+tracepad users ls --sort tokens            # the heavy ones, when nothing reports a cost
 tracepad users ls --prefix acme:           # case-sensitive prefix
 tracepad users show user-4821
 tracepad stats --user user-4821 --group-by day --since 168h

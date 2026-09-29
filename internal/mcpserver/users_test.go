@@ -36,6 +36,7 @@ func TestUserToolsAreTheirEndpoints(t *testing.T) {
 	}{
 		{"list_users", map[string]any{}, "/api/v1/users"},
 		{"list_users", map[string]any{"sort": "cost"}, "/api/v1/users?sort=cost"},
+		{"list_users", map[string]any{"sort": "tokens"}, "/api/v1/users?sort=tokens"},
 		{"get_user", map[string]any{"user_id": "u1"}, "/api/v1/users/u1"},
 		{"get_stats", map[string]any{"group_by": "hour", "user_id": "u1"},
 			"/api/v1/stats?group_by=hour&user_id=u1"},

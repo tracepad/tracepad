@@ -94,3 +94,19 @@ const (
 	minLimit = 1
 	maxLimit = 500
 )
+
+// tokens is the `tokens` object every row and bucket that carries tokens
+// renders (spec 049): five classes, summed per class and never into each other.
+func tokens(description string) *jsonschema.Schema {
+	schema := object(map[string]*jsonschema.Schema{
+		"input":       integer("Input tokens."),
+		"output":      integer("Output tokens."),
+		"cache_read":  integer("Input tokens the provider served from its cache."),
+		"reasoning":   integer("Reasoning tokens — inside output for some providers, beside it for others, so never added to it."),
+		"cache_write": integer("Input tokens the provider wrote to its cache."),
+	})
+	schema.Description = description + " Each class is present only when something reported it, and the object " +
+		"is absent when nothing did. Input plus output is the one number to compare by; the other three are never " +
+		"added to it. Only observations that name a model count."
+	return schema
+}

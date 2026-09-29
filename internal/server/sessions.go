@@ -109,6 +109,7 @@ func renderSessionRow(row *store.SessionRow) object {
 		put("trace_count", row.TraceCount).
 		put("error_count", row.ErrorCount).
 		putSome("total_cost", row.TotalCost).
+		putSome("tokens", tokensObject(row.Tokens)).
 		putSome("first_seen", formatInstant(row.FirstSeen)).
 		putSome("last_seen", formatInstant(row.LastSeen))
 }
@@ -225,6 +226,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		put("id", session.ID).
 		put("trace_count", session.TraceCount).
 		putSome("total_cost", session.TotalCost).
+		putSome("tokens", tokensObject(session.Tokens)).
 		// Counted in traces, like everything else about a session: this
 		// is how many of its traces failed, not how many spans did.
 		put("error_count", session.ErrorCount).

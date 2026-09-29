@@ -36,7 +36,7 @@ var traceID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var traceRowFields = []string{
 	"id", "name", "user_id", "session_id", "environment", "release", "version",
 	"run_id", "item_id", "tags",
-	"timestamp", "total_cost", "latency_ms", "ttft_ms", "error_count", "observation_count",
+	"timestamp", "total_cost", "tokens", "latency_ms", "ttft_ms", "error_count", "observation_count",
 	"match",
 }
 
@@ -44,7 +44,7 @@ var traceRowFields = []string{
 // accepts the same set (#7) plus the two that shape a single trace.
 var traceListFilters = []string{
 	"from", "to", "environment", "user_id", "session_id", "name", "tag",
-	"status", "min_cost", "q", "release", "version", "type", "prompt",
+	"status", "min_cost", "min_tokens", "q", "release", "version", "type", "prompt",
 	"run_id", "item_id",
 }
 
@@ -372,6 +372,7 @@ func renderTraceRow(row *store.TraceRow) object {
 		putSome("tags", row.Tags).
 		putSome("timestamp", formatInstant(row.Timestamp)).
 		putSome("total_cost", row.TotalCost).
+		putSome("tokens", tokensObject(row.Tokens)).
 		putSome("latency_ms", row.LatencyMs).
 		putSome("ttft_ms", row.TTFTMs).
 		put("error_count", row.ErrorCount).
@@ -668,6 +669,13 @@ func traceFilter(values url.Values) (store.TraceFilter, error) {
 			return filter, fmt.Errorf("min_cost must be a non-negative number, got %q", raw)
 		}
 		filter.MinCost = &cost
+	}
+	if raw := values.Get("min_tokens"); raw != "" {
+		tokens, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || tokens < 0 {
+			return filter, fmt.Errorf("min_tokens must be a non-negative integer, got %q", raw)
+		}
+		filter.MinTokens = &tokens
 	}
 	return filter, nil
 }

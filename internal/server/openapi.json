@@ -611,6 +611,8 @@
             "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
             "description": "Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches."},
+          {"name": "min_tokens", "in": "query", "schema": {"type": "integer", "minimum": 0},
+            "description": "Keeps traces whose input plus output tokens are at least this many — the one number the Tokens column shows. A trace that carried neither class has none and never matches, not even `min_tokens=0`. Cache-read, reasoning and cache-write tokens are never added in"},
           {"$ref": "#/components/parameters/Search"},
           {"$ref": "#/components/parameters/Release"},
           {"$ref": "#/components/parameters/Version"},
@@ -661,6 +663,8 @@
             "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
             "description": "Keeps traces whose total cost is at least this much"},
+          {"name": "min_tokens", "in": "query", "schema": {"type": "integer", "minimum": 0},
+            "description": "Keeps traces whose input plus output tokens are at least this many"},
           {"$ref": "#/components/parameters/Search"},
           {"$ref": "#/components/parameters/Release"},
           {"$ref": "#/components/parameters/Version"},
@@ -704,6 +708,7 @@
             "description": "Repeatable; every tag given. At most 50 distinct values"},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["error", "ok"]}},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0}},
+          {"name": "min_tokens", "in": "query", "schema": {"type": "integer", "minimum": 0}},
           {"$ref": "#/components/parameters/Search"},
           {"$ref": "#/components/parameters/Release"},
           {"$ref": "#/components/parameters/Version"},
@@ -959,6 +964,7 @@
               "id": {"type": "string"},
               "trace_count": {"type": "integer"},
               "total_cost": {"type": "number", "description": "Absent when no trace of the session carried a cost"},
+              "tokens": {"allOf": [{"$ref": "#/components/schemas/Tokens"}], "description": "Summed per class over the session's traces"},
               "error_count": {"type": "integer"},
               "first_seen": {"type": "string", "format": "date-time"},
               "last_seen": {"type": "string", "format": "date-time"},
@@ -1004,13 +1010,8 @@
                   "count": {"type": "integer"},
                   "error_count": {"type": "integer"},
                   "total_cost": {"type": "number", "description": "Absent when nothing in the bucket carried a cost"},
-                  "tokens": {"type": "object",
-                    "description": "Token sums over the observations in the bucket, on every grouping and both units. Each key is present only when something in the bucket carried that count, and the object is absent when none of the three is — absent, never zero, like `total_cost` — and always absent with `user_id`, whose rollup holds no token sums. Cache-read tokens are the input tokens a provider reported as served from its cache; reasoning and cache-creation counts are not summed",
-                    "properties": {
-                      "input": {"type": "integer"},
-                      "output": {"type": "integer"},
-                      "cache_read": {"type": "integer"}
-                    }},
+                  "tokens": {"allOf": [{"$ref": "#/components/schemas/Tokens"}],
+                    "description": "Token sums over the observations in the bucket that name a model, on every grouping and both units, with `user_id` too"},
                   "sessions": {"type": "integer",
                     "description": "Present only with `user_id` and an `hour`, `day` or `total` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact"},
                   "latency_ms": {"type": "object", "properties": {
@@ -1109,14 +1110,14 @@
     "/api/v1/users": {
       "get": {
         "tags": ["stats"],
-        "summary": "List users by last seen, traffic, cost or errors, cursor-paginated",
-        "description": "Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`.",
+        "summary": "List users by last seen, traffic, cost, tokens or errors, cursor-paginated",
+        "description": "Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`, and a user with no tokens sorts as 0 under `sort=tokens`.",
         "operationId": "listUsers",
         "x-tracepad-scope": "read",
         "parameters": [
           {"name": "sort", "in": "query",
-            "schema": {"type": "string", "enum": ["last_seen", "traces", "cost", "errors"], "default": "last_seen"},
-            "description": "Which of the four questions this listing is answering: who was here recently, who runs the most, who costs the most, who fails the most"},
+            "schema": {"type": "string", "enum": ["last_seen", "traces", "cost", "tokens", "errors"], "default": "last_seen"},
+            "description": "Which question this listing is answering: who was here recently, who runs the most, who costs the most, who uses the most tokens (input plus output), who fails the most"},
           {"name": "prefix", "in": "query", "schema": {"type": "string"},
             "description": "Keeps ids starting with this, case-sensitively. A prefix rather than a substring, because an index answers a prefix; the listing is not search"},
           {"$ref": "#/components/parameters/Limit"},
@@ -2147,6 +2148,8 @@
             "description": "`error` keeps traces with at least one failed observation, `ok` keeps the rest"},
           {"name": "min_cost", "in": "query", "schema": {"type": "number", "minimum": 0},
             "description": "Keeps traces whose total cost is at least this much"},
+          {"name": "min_tokens", "in": "query", "schema": {"type": "integer", "minimum": 0},
+            "description": "Keeps traces whose input plus output tokens are at least this many"},
           {"$ref": "#/components/parameters/Search"},
           {"$ref": "#/components/parameters/Release"},
           {"$ref": "#/components/parameters/Version"},
@@ -3114,6 +3117,7 @@
           "tags": {"type": "array", "items": {"type": "string"}},
           "timestamp": {"type": "string", "format": "date-time", "description": "When the earliest observation of the trace started"},
           "total_cost": {"type": "number", "description": "Summed over the observations whose client provided cost; absent when none did"},
+          "tokens": {"allOf": [{"$ref": "#/components/schemas/Tokens"}], "description": "Summed per class over the trace's observations that name a model"},
           "latency_ms": {"type": "integer"},
           "ttft_ms": {"type": "integer", "description": "The wait before the first token: the earliest completion start among the trace's observations, minus the trace's own start. Absent when no observation carried one, and negative when a client's completion start precedes its span"},
           "error_count": {"type": "integer"},
@@ -3134,6 +3138,17 @@
         },
         "required": ["observation_id", "field", "snippet"]
       },
+      "Tokens": {
+        "type": "object",
+        "description": "Token counts in five classes, each read off an observation's `usage` under a closed list of spellings and summed per class — no class is ever added to another, because providers disagree about whether cached tokens are inside `input` and reasoning inside `output`. The one headline number, where a listing shows, filters or sorts on one, is `input + output`. Each key is present only when something carried that count, and the object is absent when none did: absent, never zero, like `total_cost`. Only observations that name a model count",
+        "properties": {
+          "input": {"type": "integer"},
+          "output": {"type": "integer"},
+          "cache_read": {"type": "integer", "description": "Input tokens the provider reported as served from its cache"},
+          "reasoning": {"type": "integer", "description": "Reasoning tokens. Inside `output` for some providers and beside it for others; never added to it"},
+          "cache_write": {"type": "integer", "description": "Input tokens the provider reported as written to its cache"}
+        }
+      },
       "SessionRow": {
         "type": "object",
         "description": "The roll-up over the traces of one session. Every number counts traces, not observations: `error_count` is how many of the session's traces failed.",
@@ -3142,6 +3157,7 @@
           "trace_count": {"type": "integer"},
           "error_count": {"type": "integer"},
           "total_cost": {"type": "number", "description": "Summed over the traces that carried a cost; absent when none did"},
+          "tokens": {"allOf": [{"$ref": "#/components/schemas/Tokens"}], "description": "Summed per class over the session's traces"},
           "first_seen": {"type": "string", "format": "date-time"},
           "last_seen": {"type": "string", "format": "date-time"}
         },
@@ -3156,6 +3172,7 @@
           "error_count": {"type": "integer"},
           "total_cost": {"type": "number",
             "description": "Summed over the traces that carried a cost; absent when none did"},
+          "tokens": {"allOf": [{"$ref": "#/components/schemas/Tokens"}], "description": "Summed per class over the user's traces"},
           "sessions": {"type": "integer",
             "description": "How many sessions of this user have begun. A session with no user id on its traces belongs to no user and is not counted here"},
           "first_seen": {"type": "string", "format": "date-time",

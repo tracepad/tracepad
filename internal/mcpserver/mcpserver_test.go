@@ -85,8 +85,11 @@ func (h *harness) seed(t *testing.T, projectID string) {
 					Type: model.TypeGeneration, Name: "chat", Model: "claude-sonnet-5",
 					Level: model.LevelDefault, StartTime: seedBase + 40*ms, EndTime: seedBase + 780*ms,
 					CostDetails: map[string]any{"total": 0.001},
-					Input:       []any{map[string]any{"role": "user", "content": "how do I reset my password?"}},
-					Output:      map[string]any{"role": "assistant", "content": "Open Settings."}},
+					// Every row and bucket over this trace carries `tokens`,
+					// so each tool's output schema is held to one (spec 049).
+					Usage:  map[string]any{"input_tokens": 120, "output_tokens": 30, "reasoning_tokens": 8},
+					Input:  []any{map[string]any{"role": "user", "content": "how do I reset my password?"}},
+					Output: map[string]any{"role": "assistant", "content": "Open Settings."}},
 			},
 		},
 		{
@@ -422,6 +425,7 @@ func TestEveryToolMatchesItsEndpoint(t *testing.T) {
 			"/api/v1/traces?environment=production"},
 		{"list_traces", map[string]any{"status": "error", "limit": 10},
 			"/api/v1/traces?limit=10&status=error"},
+		{"list_traces", map[string]any{"min_tokens": 150}, "/api/v1/traces?min_tokens=150"},
 		{"search", map[string]any{"q": "password"}, "/api/v1/traces?q=password"},
 		{"search", map[string]any{"q": "password", "environment": "production", "limit": 5},
 			"/api/v1/traces?environment=production&limit=5&q=password"},

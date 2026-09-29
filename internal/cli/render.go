@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
@@ -52,20 +53,21 @@ func (t *table) flush() { t.writer.Flush() }
 // traceRow is a listing row as the API renders it. Absent fields stay absent,
 // so every pointer here means "the trace never carried this".
 type traceRow struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	UserID           string   `json:"user_id"`
-	SessionID        string   `json:"session_id"`
-	Environment      string   `json:"environment"`
-	Release          string   `json:"release"`
-	Version          string   `json:"version"`
-	Tags             []string `json:"tags"`
-	Timestamp        string   `json:"timestamp"`
-	TotalCost        *float64 `json:"total_cost"`
-	LatencyMs        *int64   `json:"latency_ms"`
-	TTFTMs           *int64   `json:"ttft_ms"`
-	ErrorCount       int      `json:"error_count"`
-	ObservationCount int      `json:"observation_count"`
+	ID               string       `json:"id"`
+	Name             string       `json:"name"`
+	UserID           string       `json:"user_id"`
+	SessionID        string       `json:"session_id"`
+	Environment      string       `json:"environment"`
+	Release          string       `json:"release"`
+	Version          string       `json:"version"`
+	Tags             []string     `json:"tags"`
+	Timestamp        string       `json:"timestamp"`
+	TotalCost        *float64     `json:"total_cost"`
+	Tokens           *tokenCounts `json:"tokens"`
+	LatencyMs        *int64       `json:"latency_ms"`
+	TTFTMs           *int64       `json:"ttft_ms"`
+	ErrorCount       int          `json:"error_count"`
+	ObservationCount int          `json:"observation_count"`
 	// Match is where a search hit, present only with `--search` (spec 011).
 	Match *traceMatch `json:"match"`
 }
@@ -138,7 +140,7 @@ func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 		fmt.Fprintln(out, "no traces")
 		return
 	}
-	t := newTable(out, "TIME", "ID", "NAME", "ENV", "OBS", "ERR", "LATENCY", "TTFT", "COST")
+	t := newTable(out, "TIME", "ID", "NAME", "ENV", "OBS", "ERR", "LATENCY", "TTFT", "COST", "TOKENS")
 	for _, row := range rows {
 		t.row(
 			shortTime(row.Timestamp),
@@ -153,6 +155,7 @@ func renderTraceTable(out io.Writer, rows []traceRow, colour bool) {
 			// CLI contract).
 			duration(row.TTFTMs),
 			cost(row.TotalCost),
+			row.Tokens.billed(),
 		)
 		if row.Match != nil {
 			// A line with no tab in it is one trailing cell, which
@@ -397,12 +400,69 @@ func detailCost(details map[string]any) string {
 	return fmt.Sprintf("$%.6f", total)
 }
 
+// totalTokens is the tree's `N tokens` beside an observation: input plus
+// output under the classes every listing reads (spec 049 #11), so the tree
+// agrees with the Tokens column. A usage that names no class — a bare
+// `total` or `total_tokens` — still shows the total it sent.
 func totalTokens(usage map[string]any) string {
-	total, ok := usage["total"].(float64)
-	if !ok {
-		return ""
+	if billed := store.UsageTokens(usage).Billed(); billed != nil {
+		return fmt.Sprintf("%d tokens", *billed)
 	}
-	return fmt.Sprintf("%d tokens", int64(total))
+	for _, key := range []string{"total", "total_tokens"} {
+		if total, ok := usage[key].(float64); ok {
+			return fmt.Sprintf("%d tokens", int64(total))
+		}
+	}
+	return ""
+}
+
+// tokenCounts is a `tokens` object as the API renders it: five classes, each
+// absent when nothing carried it, and the object absent when none did
+// (spec 049 #6).
+type tokenCounts struct {
+	Input      *int64 `json:"input"`
+	Output     *int64 `json:"output"`
+	CacheRead  *int64 `json:"cache_read"`
+	Reasoning  *int64 `json:"reasoning"`
+	CacheWrite *int64 `json:"cache_write"`
+}
+
+// billed is the one number a table shows (spec 049 #3): input plus output, a
+// dash when neither was reported, the way COST is a dash when nothing was
+// priced. Cache read, reasoning and cache write are never added in: whether a
+// provider counts them inside input and output or beside them differs.
+func (t *tokenCounts) billed() string {
+	if t == nil {
+		return "-"
+	}
+	sum := store.Tokens{Input: t.Input, Output: t.Output}.Billed()
+	if sum == nil {
+		return "-"
+	}
+	return strconv.FormatInt(*sum, 10)
+}
+
+// detail is the headline number with every other class that was reported,
+// for the `show` pages: `1500 (cache read 800, reasoning 128)`.
+func (t *tokenCounts) detail() string {
+	if t == nil {
+		return "-"
+	}
+	var more []string
+	for _, class := range []struct {
+		name  string
+		count *int64
+	}{
+		{"cache read", t.CacheRead}, {"reasoning", t.Reasoning}, {"cache write", t.CacheWrite},
+	} {
+		if class.count != nil {
+			more = append(more, class.name+" "+strconv.FormatInt(*class.count, 10))
+		}
+	}
+	if len(more) == 0 {
+		return t.billed()
+	}
+	return t.billed() + " (" + strings.Join(more, ", ") + ")"
 }
 
 // timeOrNever renders an instant that is null until something first happens —

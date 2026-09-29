@@ -38,39 +38,83 @@ type StatsRow struct {
 	// not the same claim as zero (spec 002 #14).
 	TotalCost *float64
 	Latency   Histogram
-	// Tokens are the three sums of spec 031, on both units: an observation
-	// row carries its own, a trace-unit row the sum over the observations
-	// of its traces (spec 031 #2).
+	// Tokens are the five sums of spec 031 and spec 049, on both units: an
+	// observation row carries its own, a trace-unit row the sum over the
+	// observations of its traces (spec 031 #2).
 	Tokens Tokens
 }
 
-// Tokens are the three token sums a statistics cell carries (spec 031 #1):
-// input, output and cache read. Each is nil when nothing in the cell carried
-// that count, which is not the claim that it carried zero — `total_cost`'s
-// rule (spec 002 #14), one column further.
+// Tokens are the five token classes (spec 031 #1, spec 049 #1): input,
+// output, cache read, reasoning and cache write. Each is nil when nothing
+// carried that count, which is not the claim that it carried zero —
+// `total_cost`'s rule (spec 002 #14), one column further.
+//
+// No class is ever added to another (spec 049 #1): reasoning is inside
+// `output` for some providers and beside it for others, cached tokens inside
+// `input` for some and beside it for others, so every sum is per class. The
+// one headline number is Billed's.
 type Tokens struct {
-	Input     *int64
-	Output    *int64
-	CacheRead *int64
+	Input      *int64
+	Output     *int64
+	CacheRead  *int64
+	Reasoning  *int64
+	CacheWrite *int64
 }
 
-// tokenClasses is the closed list of spec 031 #1: for each of the three sums,
-// the keys of an observation's `usage` it is read under, first present wins.
-// The store keeps usage keys as sent (spec 002 #19, spec 030 #1), so the same
-// fact arrives under a Langfuse spelling, a `gen_ai.usage.*` suffix or a bare
-// key, and the statistics have to pick a spelling per class — here, once, for
-// the rollup and the live scan alike. It grows by a Decision on spec 031, not
-// by a hunch: a collision with somebody's unrelated `input` is visible in this
-// list where a prefix scan would make it an accident.
+// Billed is the one number a listing shows, filters and sorts on (spec 049
+// #3): input plus output, a missing class read as zero, and nil when both are
+// missing.
+func (t Tokens) Billed() *int64 {
+	if t.Input == nil && t.Output == nil {
+		return nil
+	}
+	var sum *int64
+	addCount(&sum, t.Input)
+	addCount(&sum, t.Output)
+	return sum
+}
+
+// tokenClasses is the closed list of spec 031 #1 and spec 049 #1: for each of
+// the five classes, the keys of an observation's `usage` it is read under,
+// first present wins. The store keeps usage keys as sent (spec 002 #19, spec
+// 030 #1), so the same fact arrives under a Langfuse spelling, a
+// `gen_ai.usage.*` suffix or a bare key, and every reader has to pick a
+// spelling per class — here, once, for the trace's columns, the rollups and
+// the live scan alike. It grows by a Decision on spec 049, not by a hunch: a
+// collision with somebody's unrelated `input` is visible in this list where a
+// prefix scan would make it an accident.
 //
-// Reasoning and cache-creation counts are deliberately not here: reasoning is
-// inside `output` for most providers and beside it for some, so a sum would
-// double-count or under-count depending on who sent it, and cache creation
-// is a fact about one provider's billing that the observation panel shows.
+// The dotted keys are the OpenTelemetry conventions' `gen_ai.usage.*` names,
+// kept as the suffix the mapper stores (`cache_read.input_tokens`): one key
+// with a dot in it, not a nested object. The list is read by `UsageTokens`,
+// which SQL reaches as `tracepad_token` (tokens.go).
 var tokenClasses = [...][]string{
 	{"input_tokens", "prompt_tokens", "input"},
 	{"output_tokens", "completion_tokens", "output"},
-	{"cache_read_input_tokens", "cache_read_tokens", "input_cached_tokens"},
+	{"cache_read_input_tokens", "cache_read_tokens", "input_cached_tokens",
+		"input_cache_read", "cache_read.input_tokens"},
+	{"reasoning_tokens", "output_reasoning_tokens", "reasoning.output_tokens"},
+	{"cache_creation_input_tokens", "cache_creation_tokens", "input_cache_creation",
+		"input_cache_write_tokens", "cache_write_tokens", "cache_creation.input_tokens"},
+}
+
+// tokenColumnNames are the columns every table that carries the classes
+// names them by, in the order of `tokenClasses`.
+var tokenColumnNames = [len(tokenClasses)]string{
+	"input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens", "cache_write_tokens",
+}
+
+// tokenColumnList is those columns as a SELECT or INSERT list, each prefixed
+// with `alias` when one is given.
+func tokenColumnList(alias string) string {
+	names := make([]string, len(tokenColumnNames))
+	for i, name := range tokenColumnNames {
+		if alias != "" {
+			name = alias + "." + name
+		}
+		names[i] = name
+	}
+	return strings.Join(names, ", ")
 }
 
 // The counting rule's domain (spec 043 #4): the largest cost one observation
@@ -111,42 +155,14 @@ func costExpr(details string) string {
 	             THEN CAST((` + number + `) AS REAL) END`
 }
 
-// tokenExprs is the three counts read off one observation's `usage`, as SQL
-// expressions in the order of `tokenClasses`, given the column expression
-// `usage` holds it under. The first key *present* decides (spec 031 #1): a
-// key that is there but does not hold a count — a string, an object, a number
-// outside 0 to 10^9 (spec 043 #4) — is not a count, and the class is NULL
-// rather than read from the next spelling or coerced. `CAST` would read
-// "lots" as zero, which is a claim nobody made, and `1e300` as the largest
-// int64, whose sum overflowed; falling through to a second spelling would
-// make a collision on the first one silently disappear. The keys are this
-// package's own constants, never anything a request carries.
-func tokenExprs(usage string) [len(tokenClasses)]string {
-	var out [len(tokenClasses)]string
-	for i, keys := range tokenClasses {
-		var arms []string
-		for _, key := range keys {
-			path := "'$." + key + "'"
-			kind := `json_type(` + usage + `, ` + path + `)`
-			value := `json_extract(` + usage + `, ` + path + `)`
-			arms = append(arms, `WHEN `+kind+` IS NOT NULL THEN
-			     CASE WHEN `+kind+` IN ('integer', 'real')
-			               AND `+value+` BETWEEN 0 AND `+maxCountedTokens+`
-			          THEN CAST(`+value+` AS INTEGER) END`)
-		}
-		out[i] = "CASE " + strings.Join(arms, " ") + " END"
-	}
-	return out
-}
-
-// tokenColumns is `tokenExprs` as a SELECT list: one observation's three
-// counts, in the order `scanTokens` reads them.
+// tokenColumns is `tokenExprs` as a SELECT list: one observation's five
+// counts, in the order a `tokenScan` reads them.
 func tokenColumns(usage string) string {
 	exprs := tokenExprs(usage)
 	return strings.Join(exprs[:], ", ")
 }
 
-// tokenSums is the same three as aggregates: `SUM` over rows that carried no
+// tokenSums is the same five as aggregates: `SUM` over rows that carried no
 // count is NULL, which is what a cell with none should say.
 func tokenSums(usage string) string {
 	exprs := tokenExprs(usage)
@@ -156,27 +172,56 @@ func tokenSums(usage string) string {
 	return strings.Join(exprs[:], ", ")
 }
 
-// scanTokens turns the three scanned columns into a Tokens.
-func scanTokens(input, output, cacheRead sql.NullInt64) Tokens {
+// tokenScan is the five scanned columns of one row, in the order of
+// `tokenClasses`: `targets` goes into a Scan, `tokens` comes out of it.
+type tokenScan [len(tokenClasses)]sql.NullInt64
+
+func (s *tokenScan) targets() []any {
+	out := make([]any, len(s))
+	for i := range s {
+		out[i] = &s[i]
+	}
+	return out
+}
+
+func (s *tokenScan) tokens() Tokens {
 	var t Tokens
-	if input.Valid {
-		t.Input = &input.Int64
-	}
-	if output.Valid {
-		t.Output = &output.Int64
-	}
-	if cacheRead.Valid {
-		t.CacheRead = &cacheRead.Int64
+	for i, field := range t.fields() {
+		if s[i].Valid {
+			n := s[i].Int64
+			*field = &n
+		}
 	}
 	return t
 }
 
-// Add folds another cell's sums in: a nil contributes nothing and does not
-// make the sum zero, which is how the bucket adds cost (spec 031 #5).
+// fields are the five classes in the order of `tokenClasses`.
+func (t *Tokens) fields() [len(tokenClasses)]**int64 {
+	return [...]**int64{&t.Input, &t.Output, &t.CacheRead, &t.Reasoning, &t.CacheWrite}
+}
+
+// values are the five classes as SQL arguments, NULL where nil, in the order
+// of `tokenColumnNames`.
+func (t Tokens) values() []any {
+	out := make([]any, 0, len(tokenClasses))
+	for _, field := range t.fields() {
+		if *field == nil {
+			out = append(out, nil)
+			continue
+		}
+		out = append(out, **field)
+	}
+	return out
+}
+
+// Add folds another cell's sums in, class by class: a nil contributes nothing
+// and does not make the sum zero, which is how the bucket adds cost (spec 031
+// #5), and no class is added to another (spec 049 #1).
 func (t *Tokens) Add(other Tokens) {
-	addCount(&t.Input, other.Input)
-	addCount(&t.Output, other.Output)
-	addCount(&t.CacheRead, other.CacheRead)
+	mine, theirs := t.fields(), other.fields()
+	for i := range mine {
+		addCount(mine[i], *theirs[i])
+	}
 }
 
 // addCount folds one count into a sum that holds at the int64 limits rather
@@ -315,7 +360,7 @@ func rollupState(ctx context.Context, q querier, projectID string) (RollupState,
 // before it groups: a filter is not a grouping.
 func (s *Store) StatsRollupRows(ctx context.Context, projectID string, fromHour, toHour int64, environment []string, yield func(StatsRow)) error {
 	query := `SELECT hour, environment, release, model, count, error_count, total_cost, latency,
-	                 input_tokens, output_tokens, cache_read_tokens
+	                 ` + tokenColumnList("") + `
 	          FROM stats_hourly
 	          WHERE project_id = ? AND hour >= ? AND hour < ?`
 	args := []any{projectID, fromHour, toHour}
@@ -333,20 +378,19 @@ func (s *Store) StatsRollupRows(ctx context.Context, projectID string, fromHour,
 
 	for rows.Next() {
 		var (
-			row                      StatsRow
-			cost                     sql.NullFloat64
-			latency                  string
-			input, output, cacheRead sql.NullInt64
+			row     StatsRow
+			cost    sql.NullFloat64
+			latency string
+			tokens  tokenScan
 		)
-		if err := rows.Scan(&row.Hour, &row.Environment, &row.Release, &row.Model,
-			&row.Count, &row.ErrorCount, &cost, &latency,
-			&input, &output, &cacheRead); err != nil {
+		if err := rows.Scan(append([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
+			&row.Count, &row.ErrorCount, &cost, &latency}, tokens.targets()...)...); err != nil {
 			return fmt.Errorf("scan a rollup row: %w", err)
 		}
 		if cost.Valid {
 			row.TotalCost = &cost.Float64
 		}
-		row.Tokens = scanTokens(input, output, cacheRead)
+		row.Tokens = tokens.tokens()
 		if row.Latency, err = decodeHistogram(latency); err != nil {
 			return err
 		}
@@ -575,12 +619,10 @@ func (r *statsRoll) rollStats(tx *sql.Tx) error {
 		if _, err := tx.Exec(
 			`INSERT INTO stats_hourly
 			   (project_id, hour, environment, release, model,
-			    count, error_count, total_cost, latency,
-			    input_tokens, output_tokens, cache_read_tokens)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.ProjectID, r.Hour, row.Environment, row.Release, row.Model,
-			row.Count, row.ErrorCount, row.TotalCost, latency,
-			row.Tokens.Input, row.Tokens.Output, row.Tokens.CacheRead); err != nil {
+			    count, error_count, total_cost, latency, `+tokenColumnList("")+`)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			append([]any{r.ProjectID, r.Hour, row.Environment, row.Release, row.Model,
+				row.Count, row.ErrorCount, row.TotalCost, latency}, row.Tokens.values()...)...); err != nil {
 			return fmt.Errorf("write a rollup row for hour %d: %w", r.Hour, err)
 		}
 	}
@@ -718,14 +760,14 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 			errored                     int
 			cost                        sql.NullFloat64
 			latency                     sql.NullInt64
-			input, output, cacheRead    sql.NullInt64
+			counts                      tokenScan
 		)
-		if err := observations.Scan(&environment, &release, &model,
-			&errored, &cost, &latency, &input, &output, &cacheRead); err != nil {
+		if err := observations.Scan(append([]any{&environment, &release, &model,
+			&errored, &cost, &latency}, counts.targets()...)...); err != nil {
 			return nil, fmt.Errorf("scan an observation of the hour: %w", err)
 		}
 		add(cell(environment, release, model), errored != 0, cost, latency)
-		tokens := scanTokens(input, output, cacheRead)
+		tokens := counts.tokens()
 		cell(environment, release, model).Tokens.Add(tokens)
 		cell(environment, release, "").Tokens.Add(tokens)
 	}
@@ -808,4 +850,12 @@ func (a *statsRollupAdvance) apply(tx *sql.Tx) error {
 		return fmt.Errorf("advance the rollup watermark: %w", err)
 	}
 	return nil
+}
+
+// traceTokenSums is the five sums a trace's columns hold, over its
+// observations' `usage` (spec 049 #2). `refreshAggregates` assigns them on
+// every write, and migration 0033 carries the same expressions to fill the
+// traces it finds; a test holds the migration to this text.
+func traceTokenSums() string {
+	return tokenSums("o.usage")
 }

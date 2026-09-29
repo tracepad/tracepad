@@ -20,14 +20,16 @@ export const USER_FILTERS = ['sort', 'prefix'] as const;
 export type UserFilterName = (typeof USER_FILTERS)[number];
 
 /**
- * The four questions the listing answers, in the order the endpoint declares
- * them; the first is its default. Always descending — ascending order of any
- * of them is nobody's question (spec 023 #5).
+ * The questions the listing answers, in the order the endpoint declares them;
+ * the first is its default. Always descending — ascending order of any of them
+ * is nobody's question (spec 023 #5). `tokens` is input plus output, a user
+ * with none last (spec 049 #6).
  */
 export const USER_SORTS = [
 	{ key: 'last_seen', label: 'Last seen' },
 	{ key: 'traces', label: 'Traces' },
 	{ key: 'cost', label: 'Cost' },
+	{ key: 'tokens', label: 'Tokens' },
 	{ key: 'errors', label: 'Errors' }
 ] as const;
 

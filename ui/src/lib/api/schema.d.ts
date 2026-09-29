@@ -567,8 +567,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List users by last seen, traffic, cost or errors, cursor-paginated
-         * @description Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`.
+         * List users by last seen, traffic, cost, tokens or errors, cursor-paginated
+         * @description Answered from the per-user rollup alone, so it trails the raw data by up to twice the rollup interval: a user first seen minutes ago is not listed yet, and `GET /api/v1/users/{id}` is exact for any id. Every number counts traces, not observations, and `sessions` counts sessions where they started. Sorting is always descending, with ties broken by `user_id`; a user with no costed trace sorts last under `sort=cost`, and a user with no tokens sorts as 0 under `sort=tokens`.
          */
         get: operations["listUsers"];
         put?: never;
@@ -1636,6 +1636,8 @@ export interface components {
             timestamp?: string;
             /** @description Summed over the observations whose client provided cost; absent when none did */
             total_cost?: number;
+            /** @description Summed per class over the trace's observations that name a model */
+            tokens?: components["schemas"]["Tokens"];
             latency_ms?: number;
             /** @description The wait before the first token: the earliest completion start among the trace's observations, minus the trace's own start. Absent when no observation carried one, and negative when a client's completion start precedes its span */
             ttft_ms?: number;
@@ -1652,6 +1654,17 @@ export interface components {
             /** @description At most 160 characters, cut on word boundaries */
             snippet: string;
         };
+        /** @description Token counts in five classes, each read off an observation's `usage` under a closed list of spellings and summed per class — no class is ever added to another, because providers disagree about whether cached tokens are inside `input` and reasoning inside `output`. The one headline number, where a listing shows, filters or sorts on one, is `input + output`. Each key is present only when something carried that count, and the object is absent when none did: absent, never zero, like `total_cost`. Only observations that name a model count */
+        Tokens: {
+            input?: number;
+            output?: number;
+            /** @description Input tokens the provider reported as served from its cache */
+            cache_read?: number;
+            /** @description Reasoning tokens. Inside `output` for some providers and beside it for others; never added to it */
+            reasoning?: number;
+            /** @description Input tokens the provider reported as written to its cache */
+            cache_write?: number;
+        };
         /** @description The roll-up over the traces of one session. Every number counts traces, not observations: `error_count` is how many of the session's traces failed. */
         SessionRow: {
             /** @description The session id, as the application set it */
@@ -1660,6 +1673,8 @@ export interface components {
             error_count: number;
             /** @description Summed over the traces that carried a cost; absent when none did */
             total_cost?: number;
+            /** @description Summed per class over the session's traces */
+            tokens?: components["schemas"]["Tokens"];
             /** Format: date-time */
             first_seen?: string;
             /** Format: date-time */
@@ -1673,6 +1688,8 @@ export interface components {
             error_count: number;
             /** @description Summed over the traces that carried a cost; absent when none did */
             total_cost?: number;
+            /** @description Summed per class over the user's traces */
+            tokens?: components["schemas"]["Tokens"];
             /** @description How many sessions of this user have begun. A session with no user id on its traces belongs to no user and is not counted here */
             sessions: number;
             /**
@@ -3518,6 +3535,8 @@ export interface operations {
                 status?: "error" | "ok";
                 /** @description Keeps traces whose total cost is at least this much. A trace whose client provided no cost has none and never matches. */
                 min_cost?: number;
+                /** @description Keeps traces whose input plus output tokens are at least this many — the one number the Tokens column shows. A trace that carried neither class has none and never matches, not even `min_tokens=0`. Cache-read, reasoning and cache-write tokens are never added in */
+                min_tokens?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
@@ -3594,6 +3613,8 @@ export interface operations {
                 status?: "error" | "ok";
                 /** @description Keeps traces whose total cost is at least this much */
                 min_cost?: number;
+                /** @description Keeps traces whose input plus output tokens are at least this many */
+                min_tokens?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
@@ -3651,6 +3672,7 @@ export interface operations {
                 tag?: string[];
                 status?: "error" | "ok";
                 min_cost?: number;
+                min_tokens?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
@@ -3987,6 +4009,8 @@ export interface operations {
                         trace_count: number;
                         /** @description Absent when no trace of the session carried a cost */
                         total_cost?: number;
+                        /** @description Summed per class over the session's traces */
+                        tokens?: components["schemas"]["Tokens"];
                         error_count: number;
                         /** Format: date-time */
                         first_seen?: string;
@@ -4040,12 +4064,8 @@ export interface operations {
                             error_count: number;
                             /** @description Absent when nothing in the bucket carried a cost */
                             total_cost?: number;
-                            /** @description Token sums over the observations in the bucket, on every grouping and both units. Each key is present only when something in the bucket carried that count, and the object is absent when none of the three is — absent, never zero, like `total_cost` — and always absent with `user_id`, whose rollup holds no token sums. Cache-read tokens are the input tokens a provider reported as served from its cache; reasoning and cache-creation counts are not summed */
-                            tokens?: {
-                                input?: number;
-                                output?: number;
-                                cache_read?: number;
-                            };
+                            /** @description Token sums over the observations in the bucket that name a model, on every grouping and both units, with `user_id` too */
+                            tokens?: components["schemas"]["Tokens"];
                             /** @description Present only with `user_id` and an `hour`, `day` or `total` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
                             sessions?: number;
                             latency_ms: {
@@ -4158,8 +4178,8 @@ export interface operations {
     listUsers: {
         parameters: {
             query?: {
-                /** @description Which of the four questions this listing is answering: who was here recently, who runs the most, who costs the most, who fails the most */
-                sort?: "last_seen" | "traces" | "cost" | "errors";
+                /** @description Which question this listing is answering: who was here recently, who runs the most, who costs the most, who uses the most tokens (input plus output), who fails the most */
+                sort?: "last_seen" | "traces" | "cost" | "tokens" | "errors";
                 /** @description Keeps ids starting with this, case-sensitively. A prefix rather than a substring, because an index answers a prefix; the listing is not search */
                 prefix?: string;
                 /** @description Out of range is a 400, not a silent clamp */
@@ -5639,6 +5659,8 @@ export interface operations {
                 status?: "error" | "ok";
                 /** @description Keeps traces whose total cost is at least this much */
                 min_cost?: number;
+                /** @description Keeps traces whose input plus output tokens are at least this many */
+                min_tokens?: number;
                 /** @description Full-text search over one field of one observation — input, output, metadata, name or status message — or over the trace name. Words (all must occur), `"quoted phrases"`, `prefix*`. Words, not substrings: `error` does not find `errors`, `err*` finds both. Case and diacritics are folded, identifiers split on punctuation, and only the first 64 KiB of each payload is indexed. A `q` with no word in it is a 400 */
                 q?: components["parameters"]["Search"];
                 /** @description The deployment the trace ran in, from `langfuse.release` or the resource's `service.version`. A comma-separated list matches **any** of them; items are trimmed, duplicates collapse, an empty item is a 400, repeating the parameter is a 400, at most 100 items, and a release whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */

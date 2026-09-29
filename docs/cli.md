@@ -91,6 +91,7 @@ tracepad traces ls --env production --error --since 1h
 | `--name` | The trace name, or a comma-separated list of them. See [Lists](#lists). |
 | `--tag` | A tag the trace must carry; give the flag again for more, and a trace must carry every one. |
 | `--min-cost` | Traces costing at least this much. |
+| `--min-tokens` | Traces whose input plus output tokens are at least this many — the TOKENS column's number. A trace that reported neither never matches. |
 | `--release` | The deployment, or a comma-separated list of them. See [Lists](#lists). |
 | `--version` | The version of the trace's own logic. Exact match. |
 | `--type` | Traces containing a step of this kind: `span`, `generation`, `event`, `agent`, `tool`, `chain`, `retriever`, `guardrail`, `evaluator`, `embedding`. Exact — `generation` does not match `embedding`. |
@@ -154,8 +155,8 @@ tracepad traces ls --search "refund failed"
 ```
 
 ```
-TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST
-2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000
+TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST       TOKENS
+2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000  169
     2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
 ```
 
@@ -191,6 +192,10 @@ Each observation's line names its kind, and — where the client sent them —
 ```
 · generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
 ```
+
+`N tokens` is that observation's input plus output, read under the spellings
+every listing reads ([api.md](api.md#tokens)); a usage that names neither
+shows the `total` it sent, if any.
 
 The header above the tree carries the trace's release and version when it
 named them, beside its latency, TTFT and cost. `ttft` is the wait before the
@@ -283,7 +288,7 @@ tracepad sessions ls --since 24h --env production
 ```
 
 One row per session, most recent activity first: last seen, id, how many
-traces, how many of those failed, cost and when the session started.
+traces, how many of those failed, cost, tokens and when the session started.
 
 Filters: `--since`, `--until`, `--env` (one or a comma-separated list —
 [Lists](#lists)), `--user`, `--limit`, `--cursor`,
@@ -299,21 +304,24 @@ next page.
 tracepad sessions show session-77
 ```
 
-The session's totals — traces, how many failed, cost, the window it
-spans — and its traces.
+The session's totals — traces, how many failed, cost, tokens, the window it
+spans — and its traces. The tokens line is input plus output, with every
+other class that was reported beside it: `2052 (cache read 1024, reasoning 128)`.
 
 ### `users ls`
 
 ```sh
 tracepad users ls
 tracepad users ls --sort cost --limit 20
+tracepad users ls --sort tokens
 tracepad users ls --prefix acme:
 ```
 
 One row per end user: id, traces, sessions, how many of those traces failed,
-cost, first and last seen. `--sort` is `last_seen` (the default), `traces`,
-`cost` or `errors` — always descending, with the user id as the tie-break, and
-a user with no costed trace sorting last under `cost`. `--prefix` keeps ids
+cost, tokens, first and last seen. `--sort` is `last_seen` (the default),
+`traces`, `cost`, `tokens` or `errors` — always descending, with the user id as
+the tie-break, a user with no costed trace sorting last under `cost` and a
+user with no tokens sorting as 0 under `tokens`. `--prefix` keeps ids
 starting with it, case-sensitively; it is a prefix, not a search.
 
 Paging is `traces ls`'s: `--limit`, `--cursor`, `--oldest`, `--newer`, and
@@ -329,8 +337,8 @@ exact for any id. Both are explained in [users.md](users.md).
 tracepad users show user-4821
 ```
 
-That user's totals — traces, sessions, cost, p50/p95 latency and the window
-they span — merged with the traffic too recent for the roll-up. An id nothing
+That user's totals — traces, sessions, cost, tokens, p50/p95 latency and the
+window they span — merged with the traffic too recent for the roll-up. An id nothing
 was ever filed under exits 1 with the server's `404`.
 
 For their activity over time, or a split by model or environment, use
@@ -511,10 +519,12 @@ is arithmetic the caller does.
 
 TOKENS is input plus output — what a bill is made of — summed over the
 generations in the bucket, and a dash when none of them reported usage, the
-way COST is a dash when nothing was priced. Cache-read tokens are not in it
-(a provider that reports cached tokens inside the input would be counted
-twice); `--json` carries all three under `tokens`
-([api.md](api.md#statistics)).
+way COST is a dash when nothing was priced. It is the same number the TOKENS
+column of `traces ls`, `sessions ls` and `users ls` shows. Cache-read,
+reasoning and cache-write tokens are never added in (a provider that reports
+cached tokens inside the input, or reasoning inside the output, would be
+counted twice); `--json` carries all five under `tokens`
+([api.md](api.md#tokens)).
 
 `--env` takes the list every other command takes it as
 ([Lists](#lists)): `--env production,staging` counts both.

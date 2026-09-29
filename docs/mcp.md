@@ -110,7 +110,7 @@ tracepad is a later question.
 | `get_observation_io` | `GET /api/v1/observations/{id}/io` | Following a truncation marker |
 | `list_sessions` | `GET /api/v1/sessions` | Finding conversations by filter |
 | `get_session` | `GET /api/v1/sessions/{id}` | Summarizing a conversation |
-| `list_users` | `GET /api/v1/users` | "Who are my heaviest users" |
+| `list_users` | `GET /api/v1/users` | "Who are my heaviest users", by traces, cost or tokens |
 | `get_user` | `GET /api/v1/users/{id}` | "What does this account cost me" |
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
 | `list_scores` | `GET /api/v1/scores` | Reading eval results; "what did I score" with `author: "me"` |
@@ -188,7 +188,7 @@ meanings — with the constraints stated in the schema: enums for `status`,
 inside that summary — a name, an id — has its control characters shown as
 escapes (`\x1b`), the way the CLI's tables show them; the JSON is the API's.
 
-`list_traces`, `search` and `get_last_trace` take four filters for what the
+`list_traces`, `search` and `get_last_trace` take five filters for what the
 wire already carries:
 
 | Parameter | Reach for it when |
@@ -196,6 +196,7 @@ wire already carries:
 | `release`, `version` | The user names a deployment, or asks whether a release changed something. |
 | `type` | The user asks about a kind of step — a tool call, a guardrail, a retrieval — and wants the traces that contain one. One of ten values, exact: `generation` does not match `embedding`. |
 | `prompt` | The user names a prompt and wants what it produced. `"support-answer"` for every version, `"support-answer@7"` for one. A version is a number, so a name that contains an `@` is passed as it stands. |
+| `min_tokens` | The user asks about heavy or expensive traces and the traffic reports no cost — most does not. Input plus output tokens at least this many. |
 
 The rows they return carry `release`, `version` and `ttft_ms`; the tree from
 `get_trace` and `get_last_trace` carries each observation's kind,
@@ -206,6 +207,12 @@ of its payloads — the last of these whether or not `expand` inlined them, so
 p95 is merged over every hour rather than averaged, which is the answer to
 "how much did it cost this week" in one call; last week beside this week is
 the tool called twice ([api.md](api.md#statistics)).
+
+Every trace, session and user row, and every `get_stats` bucket — with
+`user_id` too — carries `tokens`: five classes, input, output, cache read,
+reasoning and cache write, each summed on its own and never into another
+([api.md](api.md#tokens)). `list_users` sorts by `tokens`, input plus output,
+which is the question "who uses the most" when nothing reports a cost.
 
 Every tool is annotated `readOnlyHint: true` with a display title, so a host
 can auto-approve reads instead of prompting for them. `tools/list` is returned

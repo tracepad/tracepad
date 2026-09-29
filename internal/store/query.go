@@ -53,6 +53,10 @@ type TraceFilter struct {
 	// with no provided cost has no total cost and never matches (spec 002
 	// #14: absent cost stays absent, it is not zero).
 	MinCost *float64
+	// MinTokens keeps traces whose headline token number (input plus
+	// output, spec 049 #3) is at least this many. A trace that carried
+	// neither class has no number and never matches, as MinCost's rule is.
+	MinTokens *int64
 	// Search keeps traces one of whose observations has a field matching
 	// every word of the query — or whose own name does (spec 011 #5). It is
 	// one more condition, not an ordering: rows stay newest first and the
@@ -99,9 +103,21 @@ type TraceCursor struct {
 // traceColumns is the row shape both the listing and the single-trace read
 // scan. Payload columns are absent on purpose: a list row never carries a
 // payload (spec 004, API contract).
-const traceColumns = `project_id, id, name, user_id, session_id, environment,
+var traceColumns = `project_id, id, name, user_id, session_id, environment,
 	        release, version, run_id, item_id, tags,
-	        timestamp, total_cost, latency_ms, ttft_ms, error_count, observation_count`
+	        timestamp, total_cost, latency_ms, ttft_ms, error_count, observation_count, ` +
+	tokenColumnList("")
+
+// billedTokens is the headline number of spec 049 #3 over a row's own token
+// columns: input plus output, a missing class read as zero, and NULL when both
+// are missing — `Tokens.Billed` in SQL.
+func billedTokens(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	in, out := alias+"input_tokens", alias+"output_tokens"
+	return `COALESCE(` + in + ` + ` + out + `, ` + in + `, ` + out + `)`
+}
 
 // matchAny renders one column's *any of* condition (spec 027 #1), and nothing
 // at all for an empty list.
@@ -212,6 +228,12 @@ func traceConditions(projectID string, filter TraceFilter) ([]string, []any) {
 	if filter.MinCost != nil {
 		add("total_cost >= ?", *filter.MinCost)
 	}
+	// No index, as `min_cost` has none (spec 049 #6): the filter runs inside
+	// the page's window, and an index would be a write on every trace for a
+	// filter a person applies by hand.
+	if filter.MinTokens != nil {
+		add(billedTokens("")+" >= ?", *filter.MinTokens)
+	}
 	if filter.Search != nil {
 		// The index is one table across every project, and the side
 		// table's `project_id` is the only scope there is: a hit in
@@ -317,6 +339,20 @@ type SessionRow struct {
 	ErrorCount int
 	FirstSeen  int64
 	LastSeen   int64
+	// Tokens are summed per class over the session's traces on read, as
+	// the cost is (spec 049 #6).
+	Tokens Tokens
+}
+
+// columnTokenSums is the five token columns summed per class — a session's
+// traces, a user's hours. `SUM` over rows that carried none is NULL, which is
+// what a session or a user with none says.
+func columnTokenSums() string {
+	sums := make([]string, len(tokenColumnNames))
+	for i, name := range tokenColumnNames {
+		sums[i] = "SUM(" + name + ")"
+	}
+	return strings.Join(sums, ", ")
 }
 
 // Session returns the roll-up, or nil when the project has no trace filed
@@ -330,11 +366,14 @@ func (s *Store) Session(ctx context.Context, projectID, id string) (*SessionRow,
 		errorCount sql.NullInt64
 		firstSeen  sql.NullInt64
 		lastSeen   sql.NullInt64
+		tokens     tokenScan
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*), SUM(total_cost), SUM(error_count > 0), MIN(timestamp), MAX(timestamp)
+		`SELECT COUNT(*), SUM(total_cost), SUM(error_count > 0), MIN(timestamp), MAX(timestamp),
+		        `+columnTokenSums()+`
 		 FROM traces WHERE project_id = ? AND session_id = ?`, projectID, id).
-		Scan(&row.TraceCount, &totalCost, &errorCount, &firstSeen, &lastSeen)
+		Scan(append([]any{&row.TraceCount, &totalCost, &errorCount, &firstSeen, &lastSeen},
+			tokens.targets()...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read session %s: %w", id, err)
 	}
@@ -346,6 +385,7 @@ func (s *Store) Session(ctx context.Context, projectID, id string) (*SessionRow,
 	}
 	row.ErrorCount = int(errorCount.Int64)
 	row.FirstSeen, row.LastSeen = firstSeen.Int64, lastSeen.Int64
+	row.Tokens = tokens.tokens()
 	return &row, nil
 }
 
@@ -427,7 +467,7 @@ func sessionQuery(projectID string, filter SessionFilter) (string, []any) {
 	}
 	args = append(args, filter.Limit)
 	return `SELECT session_id, COUNT(*), SUM(total_cost), SUM(error_count > 0),
-	               MIN(timestamp), MAX(timestamp)
+	               MIN(timestamp), MAX(timestamp), ` + columnTokenSums() + `
 	 FROM traces WHERE ` + strings.Join(where, " AND ") + `
 	 GROUP BY session_id` + having + `
 	 ORDER BY MAX(timestamp) ` + order + `, session_id ` + order + ` LIMIT ?`, args
@@ -466,9 +506,10 @@ func (s *Store) Sessions(ctx context.Context, projectID string, filter SessionFi
 			errorCount sql.NullInt64
 			firstSeen  sql.NullInt64
 			lastSeen   sql.NullInt64
+			tokens     tokenScan
 		)
-		if err := rows.Scan(&row.ID, &row.TraceCount, &totalCost, &errorCount,
-			&firstSeen, &lastSeen); err != nil {
+		if err := rows.Scan(append([]any{&row.ID, &row.TraceCount, &totalCost, &errorCount,
+			&firstSeen, &lastSeen}, tokens.targets()...)...); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		// A cost nobody reported is absent, not zero (spec 002 #14).
@@ -477,6 +518,7 @@ func (s *Store) Sessions(ctx context.Context, projectID string, filter SessionFi
 		}
 		row.ErrorCount = int(errorCount.Int64)
 		row.FirstSeen, row.LastSeen = firstSeen.Int64, lastSeen.Int64
+		row.Tokens = tokens.tokens()
 		out = append(out, &row)
 	}
 	if err := rows.Err(); err != nil {
@@ -630,13 +672,13 @@ func (s *Store) StatsSamples(ctx context.Context, projectID string, filter Stats
 
 	for rows.Next() {
 		var (
-			key                      sql.NullString
-			errored                  int
-			cost                     sql.NullFloat64
-			latency                  sql.NullInt64
-			input, output, cacheRead sql.NullInt64
+			key     sql.NullString
+			errored int
+			cost    sql.NullFloat64
+			latency sql.NullInt64
+			tokens  tokenScan
 		)
-		if err := rows.Scan(&key, &errored, &cost, &latency, &input, &output, &cacheRead); err != nil {
+		if err := rows.Scan(append([]any{&key, &errored, &cost, &latency}, tokens.targets()...)...); err != nil {
 			return fmt.Errorf("scan stats row: %w", err)
 		}
 		sample := StatsSample{Key: key.String, Errored: errored != 0}
@@ -646,7 +688,7 @@ func (s *Store) StatsSamples(ctx context.Context, projectID string, filter Stats
 		if latency.Valid {
 			sample.LatencyMs = &latency.Int64
 		}
-		sample.Tokens = scanTokens(input, output, cacheRead)
+		sample.Tokens = tokens.tokens()
 		yield(sample)
 	}
 	return rows.Err()
@@ -673,13 +715,13 @@ func (s *Store) StatsTokens(ctx context.Context, projectID string, filter StatsF
 
 	for rows.Next() {
 		var (
-			key                      sql.NullString
-			input, output, cacheRead sql.NullInt64
+			key    sql.NullString
+			tokens tokenScan
 		)
-		if err := rows.Scan(&key, &input, &output, &cacheRead); err != nil {
+		if err := rows.Scan(append([]any{&key}, tokens.targets()...)...); err != nil {
 			return fmt.Errorf("scan stats tokens row: %w", err)
 		}
-		yield(StatsTokenSum{Key: key.String, Tokens: scanTokens(input, output, cacheRead)})
+		yield(StatsTokenSum{Key: key.String, Tokens: tokens.tokens()})
 	}
 	return rows.Err()
 }
@@ -703,10 +745,10 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 		        WHERE ` + strings.Join(where, " AND "), args
 	}
 
-	// A trace-unit row carries no tokens of its own: three NULLs keep the
-	// scan's shape, and StatsTokens sums them per bucket.
+	// A trace-unit row carries no tokens here: NULLs keep the scan's shape,
+	// and StatsTokens sums them per bucket.
 	return `SELECT ` + statsKey(filter.GroupBy) + `, t.error_count > 0, t.total_cost, t.latency_ms,
-	               NULL, NULL, NULL
+	               ` + strings.TrimSuffix(strings.Repeat("NULL, ", len(tokenClasses)), ", ") + `
 	        FROM traces t WHERE ` + strings.Join(where, " AND "), args
 }
 

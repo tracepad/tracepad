@@ -19,6 +19,7 @@ export const TRACE_FILTERS = [
 	'tag',
 	'status',
 	'min_cost',
+	'min_tokens',
 	'release',
 	'version',
 	'type',
@@ -42,6 +43,8 @@ export type TraceFilters = {
 	tag?: string[];
 	status?: 'error' | 'ok';
 	min_cost?: string;
+	/** Input plus output tokens at least this many (spec 049 #6). */
+	min_tokens?: string;
 	/** The deployment the trace ran in (spec 012 #4). */
 	release?: string;
 	/** The version of the trace's own logic. */

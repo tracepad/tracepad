@@ -7,7 +7,8 @@ earlier answer. Piped, every command prints JSON, so `jq` shapes it.
 The listing's filters are the same everywhere: `--since`/`--until` (a Go
 duration such as `24h` or an RFC 3339 instant — there is no day unit, a week
 is `168h`), `--env`, `--name` (the **trace** name), `--error`, `--user`,
-`--session`, `--release`, `--type`, `--prompt`, `--min-cost`, `--search`.
+`--session`, `--release`, `--type`, `--prompt`, `--min-cost`, `--min-tokens`,
+`--search`.
 `tracepad facets` lists the values the first ones can take.
 
 ## Which trace cost the most, and why
@@ -35,7 +36,9 @@ tracepad traces ls --since 24h --min-cost 0.05 --fields id,name,total_cost --lim
 
    An empty page: lower `--min-cost`. A full page (500 rows and a
    `next_cursor`): raise it — the most expensive trace is on the page only
-   when the page is not full.
+   when the page is not full. When the traces carry tokens and no cost, the
+   same with `--min-tokens 20000` and `sort_by(-(.tokens.input + .tokens.output))`
+   — input plus output, the number the `TOKENS` column shows.
 
 3. **Why.** Read the top one's tree:
 
