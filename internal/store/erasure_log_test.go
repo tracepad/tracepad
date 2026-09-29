@@ -332,6 +332,20 @@ func erasureLogPaths() []erasureLogPath {
 				runWindow(t, w, sharesAWindow(), rollsBackItself{err: fail}, sharesAWindow())
 				waitLine(t, log, "write window failed")
 			}},
+		{"a caller that wraps the writer's error and logs it",
+			[]string{"a caller printed the writer's error", "a caller logged the writer's error"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				err := f.writer.Submit(t.Context(), hostileJob{err: fail})
+				if err == nil {
+					t.Fatal("the job did not fail")
+				}
+				// A wrap above the writer's answer prints the wrap's text, not
+				// the failure's value (#36): through slog as it is, and
+				// through the writer's own line.
+				wrapped := fmt.Errorf("the caller: %w", err)
+				logger().Error("a caller printed the writer's error", "err", wrapped, "text", wrapped.Error())
+				logFailure(wrapped, slog.LevelError, "a caller logged the writer's error")
+			}},
 	}
 }
 
@@ -675,5 +689,47 @@ func TestAScrubsLinesNameTheErasure(t *testing.T) {
 	if out := logged.String(); !strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
 		!strings.Contains(out, "batch=") {
 		t.Errorf("the scrub's line %q does not name the erasure and the batch", out)
+	}
+}
+
+// A job's failure says its facts wherever it goes (#36): wrapped above, the
+// writer's line still gives the erasure, the cause and the kind of the refusal,
+// and its text is a sentence of the erasure and the cause, never the error's
+// words. errors.Is and errors.As still reach what failed, which is how every
+// classifier of a failure reads it; a job that does not redact is its own error.
+func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
+	var logged bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&logged, nil)) }
+	t.Cleanup(func() { logger = old })
+	const erasure = "4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+
+	inner := &Rejection{Kind: RejectInvalid, Message: "words of user-4711"}
+	wrapped := fmt.Errorf("the caller: %w", failedAt(hostileJob{}, inner))
+	var rejection *Rejection
+	if !errors.As(wrapped, &rejection) || rejection != inner || !rejected(wrapped) {
+		t.Errorf("the wrap of %v does not reach the refusal it carries", wrapped)
+	}
+	if text := wrapped.Error(); strings.Contains(text, "4711") || !strings.Contains(text, "erasure "+erasure) ||
+		!strings.Contains(text, causeOther) {
+		t.Errorf("the text %q, want the erasure and the cause without the error's words", text)
+	}
+	logFailure(wrapped, slog.LevelError, "a line")
+	out := logged.String()
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "erasure="+erasure) ||
+		!strings.Contains(out, "refusal=invalid") || strings.Contains(out, "4711") || strings.Contains(out, "the caller") {
+		t.Errorf("the line %q, want the refusal's facts at Info, not the wrap's text", out)
+	}
+
+	full := failedAt(hostileJob{}, fmt.Errorf("write for user-4711: %w", codedError{13}))
+	if code, ok := sqliteCode(full); !ok || code != 13 || failureCause(full) != sqliteCauses[13] {
+		t.Errorf("the failure %v lost its code", full)
+	}
+	if value := full.(slog.LogValuer).LogValue(); value.Kind() != slog.KindString || strings.Contains(value.String(), erasure) {
+		t.Errorf("a condition says %v, want its name alone", value)
+	}
+
+	if err := failedAt(sharesAWindow(), inner); err != error(inner) {
+		t.Errorf("a job that does not redact answers %v, want its own error", err)
 	}
 }

@@ -165,24 +165,20 @@ const (
 
 func (r *Rejection) Error() string { return r.Message }
 
-// routineRefusals are the refusals a job returns as a plain error rather than
-// a *Rejection: a link used twice, a race for the first owner, a password
-// typed wrong, a media body collected before the write. They are traffic, not
-// incidents, like any rejection.
-var routineRefusals = []error{ErrBadToken, ErrSetupDone, ErrWrongPassword, ErrPasswordChanged, ErrMediaGone}
+// routineRefusal is a refusal a job returns as a plain error rather than a
+// *Rejection, one the caller compares with errors.Is: a link used twice, a race
+// for the first owner, a password typed wrong, a media body collected before
+// the write. It is traffic, not an incident, like any rejection, and says so by
+// its type rather than by a list someone has to keep (spec 043 #39).
+type routineRefusal string
+
+func (r routineRefusal) Error() string { return string(r) }
 
 // rejected reports an error the caller caused rather than a storage failure.
 func rejected(err error) bool {
 	var rejection *Rejection
-	if errors.As(err, &rejection) {
-		return true
-	}
-	for _, routine := range routineRefusals {
-		if errors.Is(err, routine) {
-			return true
-		}
-	}
-	return false
+	var routine routineRefusal
+	return errors.As(err, &rejection) || errors.As(err, &routine)
 }
 
 // WriterOptions tunes the group-commit writer. Zero fields take defaults.
@@ -471,18 +467,12 @@ func (w *Writer) flush(pending []*submission) {
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
 	// (spec 043 #24). Anything else says why the window came apart — for a
-	// job whose words the writer does not log, without them (spec 047 #33).
+	// job whose words the writer does not log, its facts and not its words
+	// (spec 047 #33, #36): one that commits alone leaves this the only trace
+	// of why the window came apart.
 	if _, condition := Condition(err); !condition {
-		if id, redacted := redactedCulprit(err); redacted {
-			// Without the error, and without the retry's finding it again:
-			// one that commits alone leaves this the only trace of why the
-			// window came apart.
-			logRedacted(slog.LevelWarn, "write window failed, retrying jobs individually", id, err,
-				"jobs", len(pending))
-		} else {
-			logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
-				"jobs", len(pending))
-		}
+		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
+			"jobs", len(pending))
 	}
 	for _, sub := range pending {
 		one := []*submission{sub}
@@ -530,72 +520,72 @@ func redacts(job WriteJob) (string, bool) {
 	return redacting.failureRedacted()
 }
 
+// jobFailure is what fails at a job that redacts its failure: its own error,
+// or the window's met at it (spec 047 #36). The writer wraps it once, where it
+// meets it, and from there it says only its facts, to a log line and to
+// anything that prints it: its LogValue is the erasure, the cause, the types
+// and the code (failureFacts), and its Error a sentence of the erasure and the
+// cause. The error itself is reached by errors.Is and errors.As, which every
+// classifier of a failure uses, never by its text. A database condition says
+// its name alone and not the erasure: the writer's paced line counts the
+// condition's failures of every job (spec 043 #2).
+type jobFailure struct {
+	erasure string
+	err     error
+}
+
+func (f *jobFailure) Error() string {
+	return fmt.Sprintf("a write of erasure %s failed: %s", f.erasure, failureCause(f.err))
+}
+
+func (f *jobFailure) Unwrap() error { return f.err }
+
+func (f *jobFailure) LogValue() slog.Value {
+	if condition, ok := Condition(f.err); ok {
+		return slog.StringValue(condition)
+	}
+	facts := append([]any{"erasure", f.erasure}, failureFacts(f.err)...)
+	attrs := make([]slog.Attr, 0, len(facts)/2)
+	for i := 0; i+1 < len(facts); i += 2 {
+		attrs = append(attrs, slog.Any(facts[i].(string), facts[i+1]))
+	}
+	return slog.GroupValue(attrs...)
+}
+
+// failedAt is err as the writer answers and logs it when it failed at job: a
+// jobFailure for a job that redacts its failure, err itself for any other.
+func failedAt(job WriteJob, err error) error {
+	if err == nil {
+		return nil
+	}
+	if id, redacted := redacts(job); redacted {
+		return &jobFailure{erasure: id, err: err}
+	}
+	return err
+}
+
 // lost logs one write that did not commit: "write commit failed" for one whose
 // transaction failed, "write refused" for one that failed by itself (spec 043
 // #37). A job that logs its own failures (the aggregator's hour) is left to do
-// so. One that redacts its failure gets a line without the error, so that a
-// failure whose submitter has gone is still one the log has: the cause and what
-// it was a step of; and a database condition it met counts in the paced line,
-// which gives the condition and not the job's words, since a full disk is news
-// whoever met it.
+// so. One that redacts its failure says "a write of an erasure did not commit"
+// with its facts, so that a failure whose submitter has gone is still one the
+// log has; a database condition it met counts in the paced line, which gives
+// the condition and not the job, since a full disk is news whoever met it.
 func lost(sub *submission, err error, message string) {
-	if id, redacted := redacts(sub.job); redacted {
-		if code, ok := sqliteCode(err); ok {
-			if _, condition := conditionNames[code]; condition {
-				// Not labelled with the erasure: the pacing counts the
-				// condition's failures of every job.
-				logFailure(bareCondition(code), slog.LevelError, "write commit failed")
-				return
-			}
+	var redacted *jobFailure
+	if errors.As(err, &redacted) {
+		if _, condition := Condition(err); !condition {
+			message = "a write of an erasure did not commit"
 		}
-		logRedacted(slog.LevelError, "a write of an erasure did not commit", id, err)
-		return
-	}
-	if reports(sub.job) {
+	} else if reports(sub.job) {
 		return
 	}
 	logFailure(err, slog.LevelError, message)
 }
 
-// logRedacted is a line for a failure whose error the writer does not give:
-// what it was a step of, and the cause. At Info for a refusal, as a failed
-// write of any job is logged, and at level for anything else.
-func logRedacted(level slog.Level, message, id string, err error, args ...any) {
-	if rejected(err) {
-		level = slog.LevelInfo
-	}
-	logFacts(level, message, err, append([]any{"erasure", id}, args...)...)
-}
-
-// bareCondition is a database condition without the words of the error that
-// carried it.
-type bareCondition int
-
-func (c bareCondition) Error() string { return conditionNames[int(c)] }
-func (c bareCondition) Code() int     { return int(c) }
-
 func reports(job WriteJob) bool {
 	reporter, ok := job.(reportsItsFailure)
 	return ok && reporter.failureReported()
-}
-
-// failedJob is a window's failure with the job whose apply failed it.
-type failedJob struct {
-	job WriteJob
-	err error
-}
-
-func (f *failedJob) Error() string { return f.err.Error() }
-func (f *failedJob) Unwrap() error { return f.err }
-
-// redactedCulprit is the id a window's failure is a step of, when a job
-// whose words the writer does not log caused it.
-func redactedCulprit(err error) (string, bool) {
-	var failed *failedJob
-	if !errors.As(err, &failed) {
-		return "", false
-	}
-	return redacts(failed.job)
 }
 
 // logFailure reports a failed commit, demoting a rejection: a caller asking
@@ -618,7 +608,18 @@ func logFailure(err error, level slog.Level, message string, args ...any) {
 		}
 		args = append(args, "condition", condition, "failed_since_last_line", failed.SameKey)
 	}
-	logger().Log(context.Background(), level, message, append([]any{"err", err}, args...)...)
+	logger().Log(context.Background(), level, message, append([]any{"err", logged(err)}, args...)...)
+}
+
+// logged is err as a log line gives it: the facts of a jobFailure anywhere in
+// its chain — a wrap above one would print the wrap's text, not the failure's
+// value (spec 047 #36) — and err itself otherwise.
+func logged(err error) any {
+	var redacted *jobFailure
+	if errors.As(err, &redacted) {
+		return redacted
+	}
+	return err
 }
 
 // commit applies a window in one transaction and commits it. A window of two
@@ -661,23 +662,20 @@ var errJobFailed = errors.New("a job of the window failed by itself")
 
 // explainReplay says why a window was applied twice when it did not show:
 // a job failed the first pass and was committed by the second, which leaves no
-// refusal to log. It names the job's type and gives its error, unless the job
-// reports its failure itself or redacts it: a line that reports its own has the
-// type alone, since its error may name a user (spec 044 #15), and one that
-// redacts has the facts of the error and what the job was a step of, not its
-// words (spec 047 #33).
+// refusal to log. It names the job's type and gives its error — for a job that
+// redacts its failure, the facts of it and what the job was a step of (spec 047
+// #33) — unless the job reports its failure itself: that line has the type
+// alone, since its error may name a user (spec 044 #15). A refusal is Info, as
+// every refusal the writer logs is (spec 043 #39).
 func explainReplay(sub *submission, failed error) {
 	const message = "a job failed its window's first pass and passed the second"
 	job := fmt.Sprintf("%T", sub.job)
-	if id, redacted := redacts(sub.job); redacted {
-		logRedacted(slog.LevelWarn, message, id, failed, "job", job)
-		return
-	}
-	if reports(sub.job) {
+	var redacted *jobFailure
+	if !errors.As(failed, &redacted) && reports(sub.job) {
 		logger().Warn(message, "job", job)
 		return
 	}
-	logger().Warn(message, "job", job, "err", failed)
+	logFailure(failed, slog.LevelWarn, message, "job", job)
 }
 
 // commitWindow applies the window in one transaction and commits what was not
@@ -700,10 +698,11 @@ func (w *Writer) commitWindow(pending []*submission, savepoints bool) (refused [
 	written := false
 	for i, sub := range pending {
 		own, err := applyOne(tx, sub.job, many && savepoints)
+		// Met at a job whose words the writer does not log, either says only
+		// its facts and what the job was a step of (spec 047 #33, #36).
+		own, err = failedAt(sub.job, own), failedAt(sub.job, err)
 		if err != nil {
-			// With the job it was met at, for a line that names what a job
-			// whose words the writer does not log was a step of (spec 047 #33).
-			return nil, &failedJob{job: sub.job, err: err}
+			return nil, err
 		}
 		if own == nil {
 			written = true

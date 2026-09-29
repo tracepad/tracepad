@@ -881,7 +881,7 @@ func errorTypes(err error) string {
 		}
 		switch name := fmt.Sprintf("%T", next); name {
 		case "*fmt.wrapError", "*fmt.wrapErrors", "*errors.joinError",
-			"*store.runError", "*store.reportedError", "*store.failedJob", "*store.rawBatchError":
+			"*store.runError", "*store.reportedError", "*store.jobFailure", "*store.rawBatchError":
 		default:
 			names = append(names, name)
 		}

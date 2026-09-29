@@ -725,12 +725,12 @@ func (s *SessionsEnd) apply(tx *sql.Tx) error {
 // not match. It is a sentinel rather than a Rejection because the status it
 // earns — 403, not 400 — is this one endpoint's, and the handler is what knows
 // that.
-var ErrWrongPassword = errors.New("wrong current password")
+var ErrWrongPassword error = routineRefusal("wrong current password")
 
 // ErrPasswordChanged is a password change whose current password was checked
 // against a hash that is no longer the stored one: another change landed
 // between the check and the write (spec 028 #31).
-var ErrPasswordChanged = errors.New("the password was changed while this request was on its way; sign in again")
+var ErrPasswordChanged error = routineRefusal("the password was changed while this request was on its way; sign in again")
 
 // PasswordChange replaces an account's password, and ends every other session
 // of that account (Decision 4).
@@ -839,7 +839,7 @@ func (i *InviteMint) apply(tx *sql.Tx) error {
 // ErrBadToken is a setup, invitation or reset token that is unknown, spent or
 // expired. One error for all three, because the difference is not something
 // the person holding a link can act on.
-var ErrBadToken = errors.New("this link is not valid any more")
+var ErrBadToken error = routineRefusal("this link is not valid any more")
 
 // InviteTokenLive reports whether an invitation or reset token would be
 // accepted now. It is the question a handler asks before it spends a quarter
@@ -936,7 +936,7 @@ type SetupOwner struct {
 
 // ErrSetupDone is the answer to a setup request on a server that already has
 // an owner.
-var ErrSetupDone = errors.New("this server already has an owner")
+var ErrSetupDone error = routineRefusal("this server already has an owner")
 
 func (s *SetupOwner) apply(tx *sql.Tx) error {
 	var owners int

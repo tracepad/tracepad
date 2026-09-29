@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -358,4 +359,22 @@ func spanHex(i int) string {
 	const digits = "0123456789abcdef"
 	out := []byte("000000000000000")
 	return string(out) + string(digits[i%16])
+}
+
+// A refusal a job returns as a plain error is routine by its type (spec 043
+// #39), wrapped or not, and still the sentinel its caller compares with; an
+// error that merely has the same words is not one.
+func TestARoutineRefusalIsKnownByItsType(t *testing.T) {
+	for _, refusal := range []error{ErrBadToken, ErrSetupDone, ErrWrongPassword, ErrPasswordChanged, ErrMediaGone} {
+		wrapped := fmt.Errorf("a job: %w", refusal)
+		if !rejected(refusal) || !rejected(wrapped) || !errors.Is(wrapped, refusal) {
+			t.Errorf("%q is not a routine refusal wrapped and unwrapped", refusal)
+		}
+		if rejected(errors.New(refusal.Error())) {
+			t.Errorf("a plain error with the words of %q reads as a refusal", refusal)
+		}
+	}
+	if errors.Is(ErrBadToken, ErrSetupDone) {
+		t.Error("two refusals compare equal")
+	}
 }
