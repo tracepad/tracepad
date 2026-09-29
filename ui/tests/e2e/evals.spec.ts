@@ -469,6 +469,8 @@ test('a score config is written, edited and removed through the form', async ({ 
 	// The same form edits it, and the name is not a thing an edit changes.
 	await openDialog(row.getByRole('button', { name: 'Edit' }));
 	await expect(form.getByLabel('Name')).toHaveAttribute('readonly', '');
+	// The focus starts past the read-only name (spec 006 #26).
+	await expect(form.getByLabel('Type')).toBeFocused();
 	await form.getByLabel('Description').fill('Whether the answer helped');
 	await form.getByRole('button', { name: 'Save' }).click();
 	await expect(row).toContainText('Whether the answer helped');

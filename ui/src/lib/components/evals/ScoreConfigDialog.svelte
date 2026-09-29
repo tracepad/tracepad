@@ -79,11 +79,11 @@
 	 */
 	function focusFirstEditable(event: Event) {
 		const field = content?.querySelector<HTMLElement>(
-			'input:not([readonly]):not([disabled]), select:not([disabled]), textarea:not([readonly]):not([disabled])'
+			'input:not([readonly]):not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([readonly]):not([disabled])'
 		);
-		if (!field) return;
-		event.preventDefault();
-		field.focus();
+		field?.focus();
+		// Only when the focus took: otherwise the primitive's own choice stands.
+		if (field && document.activeElement === field) event.preventDefault();
 	}
 
 	async function save() {

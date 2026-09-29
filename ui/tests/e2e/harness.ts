@@ -200,11 +200,10 @@ export async function signInAsOwner(page: Page, project?: string) {
  */
 export async function openDialog(
 	opener: Locator,
-	name?: string,
-	role: 'dialog' | 'alertdialog' = 'dialog'
+	name?: string
 ): Promise<Locator> {
 	await opener.click();
-	const dialog = opener.page().getByRole(role, name ? { name } : {});
+	const dialog = opener.page().getByRole('dialog', name ? { name } : {});
 	await expect
 		.poll(() => dialog.evaluate((el) => el.contains(document.activeElement)))
 		.toBe(true);
