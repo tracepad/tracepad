@@ -4,7 +4,7 @@
 	import { Fold } from '$lib/fold.svelte';
 	import { ABSENT, cost, count, counted, middleEllipsis, timestamp } from '$lib/format';
 	import { href } from '$lib/project.svelte';
-	import { billedTokens, compact, tokenClasses } from '$lib/tokens';
+	import { billedTokens, compact, tokenClasses, tokensText } from '$lib/tokens';
 	import CopyButton from './CopyButton.svelte';
 	import Folded from './Folded.svelte';
 
@@ -27,10 +27,6 @@
 	// and its `min-width`.
 	const fold = new Fold(944);
 	const narrow = $derived(fold.narrow);
-	const tokensText = (row: UserRow) => {
-		const tokens = billedTokens(row.tokens);
-		return tokens === null ? null : `${compact(tokens)} tokens`;
-	};
 </script>
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
@@ -78,7 +74,7 @@
 										counted(row.traces, 'trace'),
 										counted(row.sessions, 'session'),
 										cost(row.total_cost),
-										tokensText(row)
+										{ text: tokensText(row.tokens), title: tokenClasses(row.tokens) }
 									]}
 								/>
 							</div>

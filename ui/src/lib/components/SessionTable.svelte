@@ -5,7 +5,7 @@
 	import { ABSENT, cost, count, counted, timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
 	import { href } from '$lib/project.svelte';
-	import { billedTokens, compact, tokenClasses } from '$lib/tokens';
+	import { billedTokens, compact, tokenClasses, tokensText } from '$lib/tokens';
 	import Folded from './Folded.svelte';
 
 	// The session listing, one row per session, mapping 1:1 onto what
@@ -43,10 +43,6 @@
 	// unfolded table's width and its `min-width`.
 	const fold = new Fold(816);
 	const narrow = $derived(fold.narrow);
-	const tokensText = (row: SessionRow) => {
-		const tokens = billedTokens(row.tokens);
-		return tokens === null ? null : `${compact(tokens)} tokens`;
-	};
 </script>
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
@@ -100,7 +96,7 @@
 						<td class="max-w-0 px-3 py-1.5">
 							<div class="truncate font-mono" title={row.id}>{row.id}</div>
 							<div class="text-muted text-xs tabular-nums">
-								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost), tokensText(row)]} />
+								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost), { text: tokensText(row.tokens), title: tokenClasses(row.tokens) }]} />
 							</div>
 							<!-- Not a `Folded` line: this column is the narrowest on a phone, and
 							     a value of its own is cut where a line of text is not. -->

@@ -656,7 +656,9 @@ Traces live toggle is the one poller in the app.
 
 The **charts** — traces, cost, tokens (input, output and cache read as three
 lines, with reasoning and cache write in the legend, hidden until their entry
-is clicked, so the drawn lines stay the ones that do not double-count), latency (p50 and p95) and errors — share one x cursor, and the
+is clicked, so the drawn lines stay the ones that do not double-count; where
+they are the only lines with data they are drawn, and a click on the legend
+survives a redraw), latency (p50 and p95) and errors — share one x cursor, and the
 **breakdown tables** by model, by environment and by release carry proportion
 bars and a **Tokens** column of input plus output, what a bill is made of;
 the cell's tooltip lists every class the group reported, reasoning and cache

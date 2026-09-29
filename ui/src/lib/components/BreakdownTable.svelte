@@ -97,9 +97,14 @@
 								<td class="max-w-0 px-3 py-1.5 text-xs">
 									<div class="truncate font-mono" title={row.key}>{row.key}</div>
 									<div class="text-muted tabular-nums">
-										<span title={tokens ? row.tokenClasses : undefined}>
-											<Folded values={[cost(row.cost), tokens ? counted(row.tokens, 'token') : null]} />
-										</span>
+										<Folded
+											values={[
+												cost(row.cost),
+												tokens
+													? { text: counted(row.tokens, 'token'), title: row.tokenClasses }
+													: null
+											]}
+										/>
 									</div>
 								</td>
 							{:else}

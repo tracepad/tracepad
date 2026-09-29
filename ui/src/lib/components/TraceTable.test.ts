@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TraceRow } from '$lib/api/client.svelte';
 import TraceTable from './TraceTable.svelte';
 import { boxWidth } from '../../tests/box';
+import { tooltipOver } from '../../tests/tooltip';
 
 // The trace listing at the two widths it has (spec 006 #18): every column on a
 // screen with room for them, and on a phone the three that say when, what and
@@ -63,6 +64,17 @@ describe('the trace table', () => {
 		expect(cell).toHaveAttribute('title', 'Input 12,000\nOutput 400\nReasoning 90\nCache write 5');
 		// No tokens is a dash and no tooltip, not a zero.
 		expect(screen.getAllByRole('cell', { name: '—' })[0]).not.toHaveAttribute('title');
+	});
+
+	it('gives the folded tokens the class breakdown as their tooltip', () => {
+		narrow = true;
+		render(TraceTable, { rows: [ROW] });
+
+		expect(tooltipOver(screen.getByText(/12\.4k tokens/))).toBe(
+			'Input 12,000\nOutput 400\nReasoning 90\nCache write 5'
+		);
+		// The rest of the line keeps repeating itself for the sake of a cut value.
+		expect(tooltipOver(screen.getByText(/^\$0\.0054/))).toBe('$0.0054');
 	});
 
 	it('keeps three columns on a phone and folds the rest under the name', () => {

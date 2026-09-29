@@ -3,7 +3,7 @@
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
-	import { billedTokens, compact, tokenClasses } from '$lib/tokens';
+	import { billedTokens, compact, tokenClasses, tokensText } from '$lib/tokens';
 	import { Fold } from '$lib/fold.svelte';
 	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
@@ -51,10 +51,6 @@
 	// its `min-width`: ten columns at the widths their usual values take.
 	const fold = new Fold(992);
 	const narrow = $derived(fold.narrow);
-	const tokensText = (row: TraceRow) => {
-		const tokens = billedTokens(row.tokens);
-		return tokens === null ? null : `${compact(tokens)} tokens`;
-	};
 	const firstToken = (row: TraceRow) =>
 		row.ttft_ms == null ? null : `TTFT ${wait(row.ttft_ms)}`;
 
@@ -222,7 +218,7 @@
 										duration(row.latency_ms),
 										firstToken(row),
 										cost(row.total_cost),
-										tokensText(row)
+										{ text: tokensText(row.tokens), title: tokenClasses(row.tokens) }
 									]}
 								/>
 							</div>

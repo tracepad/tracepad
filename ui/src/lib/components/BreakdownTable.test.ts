@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { breakdown } from '$lib/api/stats';
 import { boxWidth } from '../../tests/box';
+import { tooltipOver } from '../../tests/tooltip';
 import BreakdownTable from './BreakdownTable.svelte';
 
 // The Tokens column (spec 031 #6): input plus output per row, and a dash —
@@ -61,6 +62,18 @@ describe('the breakdown table', () => {
 				'3',
 				'0'
 			]);
+		});
+
+		it('shows the class breakdown over the folded tokens, not the number repeated', () => {
+			boxWidth(356);
+			render(BreakdownTable, { title: 'By model', label: 'Model', unit: 'observation', rows, tokens: true });
+
+			expect(tooltipOver(screen.getByText('1,234 tokens'))).toBe(
+				'Input 1,200\nOutput 34\nCache read 500\nReasoning 20'
+			);
+			// The cost beside it keeps saying itself.
+			const none = within(screen.getByRole('row', { name: /local-llama/ }));
+			expect(none.queryByText(/tokens/)).not.toBeInTheDocument();
 		});
 
 		it('is the whole table in a box as wide as it: 480 px, or 400 without the tokens', () => {

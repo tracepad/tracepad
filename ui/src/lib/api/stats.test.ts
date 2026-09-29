@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { billedTokens, breakdown, buildSeries, key, NEW, summarize, type StatsBucket } from './stats';
+import { breakdown, buildSeries, key, NEW, summarize, type StatsBucket } from './stats';
+import { billedTokens } from '$lib/tokens';
 
 /**
  * What the Stats screen draws (spec 007 #6). Two things are worth pinning

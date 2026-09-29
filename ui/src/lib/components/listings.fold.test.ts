@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatasetItem, SessionRow, UserRow } from '$lib/api/client.svelte';
 import { boxWidth } from '../../tests/box';
+import { tooltipOver } from '../../tests/tooltip';
 import ItemTable from './evals/ItemTable.svelte';
 import SessionTable from './SessionTable.svelte';
 import UserTable from './UserTable.svelte';
@@ -53,6 +54,7 @@ describe('the sessions', () => {
 		expect(heads()).toEqual(['Last seen', 'Session', 'Errors']);
 		expect(screen.getByText('3 traces ·').parentElement).toHaveTextContent('3 traces · $0.0123 · 3.1k tokens');
 		expect(screen.getByText(/^first seen /)).toBeInTheDocument();
+		expect(tooltipOver(screen.getByText(/3\.1k tokens/))).toBe('Input 3,000\nOutput 100');
 		expect(screen.getByText('1 trace')).toBeInTheDocument();
 	});
 
@@ -83,6 +85,7 @@ describe('the users', () => {
 		expect(heads()).toEqual(['User', 'Errors']);
 		expect(screen.getByText('1 trace ·').parentElement).toHaveTextContent('1 trace · 1 session · $2.50 · 950 tokens');
 		expect(screen.getByText(/^last seen /)).toBeInTheDocument();
+		expect(tooltipOver(screen.getByText(/950 tokens/))).toBe('Input 900\nOutput 50\nCache read 700');
 		expect(screen.getByRole('link', { name: 'user-1137' })).toHaveAttribute('href', '/users/user-1137');
 	});
 });

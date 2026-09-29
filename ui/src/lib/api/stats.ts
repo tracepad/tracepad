@@ -171,8 +171,6 @@ export type BreakdownRow = {
 	tokensShare: number;
 };
 
-export { billedTokens };
-
 /**
  * Turns categorical buckets into table rows with proportion bars, biggest
  * first (spec 007 #6).

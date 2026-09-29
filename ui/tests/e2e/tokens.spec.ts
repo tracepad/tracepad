@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createProject, signIn as enter, state } from './harness';
 
 // Tokens on the screens (spec 049 PR 2, Testing — E2E), against the real
@@ -16,6 +16,22 @@ const HOUR = 3_600_000_000_000n;
 const HOUR_A = (BigInt(Date.now()) * 1_000_000n / HOUR - 6n) * HOUR;
 const iso = (nanos: bigint) => new Date(Number(nanos / 1_000_000n)).toISOString();
 const WINDOW = `from=${iso(HOUR_A - 24n * HOUR)}&to=${iso(HOUR_A + 24n * HOUR)}`;
+
+/**
+ * The tooltip a pointer over `text` gets: hovered, and read off the nearest
+ * element with a title. A wrapper's own attribute says nothing when a
+ * descendant carries a title of its own.
+ */
+async function tooltipOver(text: Locator): Promise<string | null> {
+	await text.hover();
+	return text.evaluate((node) => node.closest('[title]')?.getAttribute('title') ?? null);
+}
+
+/** The cell under the Tokens header, by position, in a row of the visible table. */
+async function tokensCell(page: Page, row: Locator): Promise<Locator> {
+	const heads = await page.getByRole('columnheader').allTextContents();
+	return row.getByRole('cell').nth(heads.map((one) => one.trim()).indexOf('Tokens'));
+}
 
 let own: ReturnType<typeof createProject> | null = null;
 const project = () => (own ??= createProject('tokens'));
@@ -153,6 +169,9 @@ test('the traces table shows input plus output, with every class in the tooltip'
 	if (testInfo.project.name === 'mobile') {
 		// Folded under the name, with the same number (spec 006 #22).
 		await expect(heavy).toContainText('1.2k tokens');
+		expect(await tooltipOver(heavy.getByText('1.2k tokens'))).toMatch(
+			/^Input 1,000\nOutput 200\nCache read 30\nReasoning 50\nCache write 10$/
+		);
 		await expect(silent).not.toContainText('tokens');
 		return;
 	}
@@ -162,8 +181,11 @@ test('the traces table shows input plus output, with every class in the tooltip'
 	await expect(cell).toBeVisible();
 	await expect(cell).toHaveAttribute('title', /Input 1,000\nOutput 200\nCache read 30\nReasoning 50\nCache write 10/);
 	await expect(light.getByRole('cell', { name: '10', exact: true })).toBeVisible();
-	// A trace with no class is a dash with no tooltip, not a zero.
-	await expect(silent.getByRole('cell', { name: '—' }).last()).not.toHaveAttribute('title', /.+/);
+	// A trace with no class is a dash with no tooltip, not a zero: the Tokens
+	// cell itself, found by its header.
+	const none = await tokensCell(page, silent);
+	await expect(none).toHaveText('—');
+	await expect(none).not.toHaveAttribute('title', /.+/);
 });
 
 test('Min tokens keeps the traces at or above the number, and is in the URL', async ({ page }) => {
@@ -183,6 +205,7 @@ test('the sessions table has the column, summed over the session', async ({ page
 	const row = page.getByRole('row').filter({ hasText: 'sess-heavy' });
 	if (testInfo.project.name === 'mobile') {
 		await expect(row).toContainText('1.2k tokens');
+		expect(await tooltipOver(row.getByText('1.2k tokens'))).toMatch(/Reasoning 50/);
 		return;
 	}
 	await expect(page.getByRole('columnheader', { name: 'Tokens' })).toBeVisible();
@@ -242,6 +265,35 @@ test('the dashboard names reasoning and cache write, in the legend and the toolt
 	const models = page.getByRole('table').filter({ has: page.getByText('Model') });
 	const row = models.getByRole('row').filter({ hasText: 'tokens-model' });
 	// The headline is input plus output; reasoning is only in the tooltip.
-	const cell = testInfo.project.name === 'mobile' ? row.locator('[title*="Reasoning"]').first() : row.getByRole('cell', { name: '1,210' });
-	await expect(cell).toHaveAttribute('title', /Reasoning 50\nCache write 10/);
+	if (testInfo.project.name === 'mobile') {
+		expect(await tooltipOver(row.getByText('1,210 tokens'))).toMatch(/Reasoning 50\nCache write 10/);
+		return;
+	}
+	await expect(row.getByRole('cell', { name: '1,210' })).toHaveAttribute(
+		'title',
+		/Reasoning 50\nCache write 10/
+	);
+});
+
+test('a legend toggle survives the chart being rebuilt', async ({ page }) => {
+	await signIn(page);
+	await page.goto(`/dashboard?${WINDOW}&group_by=day`);
+
+	const legend = page
+		.locator('.uplot', { has: page.locator('.u-title', { hasText: 'Tokens' }) })
+		.locator('.u-legend');
+	const reasoning = legend.locator('.u-series', { hasText: 'Reasoning' });
+	// Hidden until clicked (spec 049 #20)…
+	await expect(reasoning).toHaveClass(/u-off/);
+	await reasoning.click();
+	await expect(reasoning).not.toHaveClass(/u-off/);
+
+	// …and a rebuild — here the system scheme flipping, which redraws every
+	// chart — does not hide it again.
+	const before = await legend.elementHandle();
+	await page.emulateMedia({ colorScheme: 'dark' });
+	// The legend on screen is a new one: the chart really was rebuilt.
+	await expect.poll(() => before!.evaluate((node) => node.isConnected)).toBe(false);
+	await expect(legend.locator('.u-series', { hasText: 'Input' })).toBeVisible();
+	await expect(legend.locator('.u-series', { hasText: 'Reasoning' })).not.toHaveClass(/u-off/);
 });

@@ -27,6 +27,12 @@ export function compact(value: number | null | undefined): string {
 		.replace('K', 'k');
 }
 
+/** The folded form of the headline number: `12.4k tokens`, or null when there is none. */
+export function tokensText(tokens: Tokens | null | undefined): string | null {
+	const headline = billedTokens(tokens);
+	return headline === null ? null : `${compact(headline)} tokens`;
+}
+
 const CLASSES: readonly [keyof Tokens, string][] = [
 	['input', 'Input'],
 	['output', 'Output'],
