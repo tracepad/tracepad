@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +69,9 @@ func formsOf(id string) []string {
 func hostileError(id string) error {
 	return errors.New("ERRTEXT refused " + strings.Join(formsOf(id), " "))
 }
+
+// mintedID is an id the store made: 32 lowercase hex digits.
+var mintedID = regexp.MustCompile(`\b[0-9a-f]{32}\b`)
 
 // leaks lists what of an id or an error is in a log: the id and each of its
 // forms whole, any four characters of any form, and the error's own words.
@@ -566,6 +570,12 @@ func TestNoErasureLineQuotesAnErrorOrItsUser(t *testing.T) {
 						}
 						time.Sleep(5 * time.Millisecond)
 					}
+					// The ids the store mints — an erasure's, a project's — are
+					// 32 random hex digits, and any four characters of the
+					// hostile id ("00e9" in the é of `\u00e9`) are in one of
+					// them about once in 25 runs. They are the line's own,
+					// not the user's: taken out before the search.
+					out = mintedID.ReplaceAllString(out, "<id>")
 					if found := leaks(out, id); len(found) > 0 {
 						t.Errorf("the log gives %s:\n%s", strings.Join(found, ", "), out)
 					}
