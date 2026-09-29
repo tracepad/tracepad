@@ -1,46 +1,9 @@
-Tracepad
+Tracepad packages
 Copyright (c) 2026 The Tracepad Authors
 
-This product includes software developed by third parties, as follows.
+Licensed under the Apache License, Version 2.0; see LICENSE.
 
---------------------------------------------------------------------------
-
-Attribute-mapping semantics for the langfuse.* dialect derived from Langfuse
-(MIT License, Copyright (c) Langfuse GmbH; the upstream LICENSE file now
-reads "Copyright (c) 2023-2026 ClickHouse, Inc.").
-
-No Langfuse source code is included in this repository. The priority chains,
-attribute names and normalization rules implemented in internal/mapping were
-derived from the behaviour of
-
-  packages/shared/src/server/otel/OtelIngestionProcessor.ts
-  packages/shared/src/server/otel/attributes.ts
-
-in https://github.com/langfuse/langfuse, whose MIT license text is reproduced
-in third_party/langfuse/LICENSE.
-
---------------------------------------------------------------------------
-
-The web interface draws its icons from Lucide (ISC License, Copyright (c)
-Lucide Icons and Contributors, https://github.com/lucide-icons/lucide), used
-through the @lucide/svelte package and tree-shaken to the icons the interface
-imports. The license text is reproduced in third_party/lucide/LICENSE.
-
---------------------------------------------------------------------------
-
-The web interface bundles two fonts, both under the SIL Open Font License,
-Version 1.1. They are shipped inside the binary rather than fetched from a
-CDN so that a self-hosted install renders identically offline and makes no
-request to any external origin (spec 006 #5).
-
-  Inter
-  Copyright (c) 2016 The Inter Project Authors
-  https://github.com/rsms/inter — license in third_party/inter/LICENSE
-  ui/src/lib/fonts/inter-latin.woff2 is the upstream latin subset, unmodified.
-
-  JetBrains Mono
-  Copyright 2020 The JetBrains Mono Project Authors
-  https://github.com/JetBrains/JetBrainsMono — license in
-  third_party/jetbrains-mono/LICENSE
-  ui/src/lib/fonts/jetbrains-mono-latin.woff2 is the upstream latin subset,
-  unmodified.
+This package contains only code written for Tracepad. It bundles no software
+from third parties: the OpenTelemetry packages it builds on are dependencies,
+installed separately by your package manager and distributed under their own
+licences.
