@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # A push to a pull-request branch makes the run already going for its previous
 # head obsolete — the review will look at the new one — so the newer run
@@ -180,6 +181,26 @@ jobs:
           cache-to: type=gha,mode=max
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
+
+  # The store and the server under the race detector (spec 020 #24). It costs
+  # about eight times the plain run — measured at 278 s for the store and 677 s
+  # for the server, against 35 s and 60 s — so it is not part of the gate and
+  # not a step of every pull request: it runs once per merge, like `multiarch`,
+  # and on demand. A race it finds is a race in the tree that was merged, and
+  # the run of the next merge cancels this one, the newer tree containing the
+  # older.
+  race:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: make race
 
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so

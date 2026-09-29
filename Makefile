@@ -27,6 +27,14 @@ dev: ## Run the server locally, mirroring output to .dev.log
 test: ## Run all tests
 	go test ./...
 
+# The store and the server under the race detector. Not in the gate: it costs
+# about eight times the plain run, minutes against seconds (spec 020 #24), and
+# CI runs it as a job of its own. The two packages are where the goroutines
+# are: the writer, the sweeper, the aggregator, the erasure worker and the
+# handlers that wait on them.
+race: ## Run the store and server tests under the race detector (slow; CI runs it, the gate does not)
+	go test -race -count=1 -timeout 45m ./internal/store ./internal/server
+
 vet: ## Static checks
 	go vet ./...
 
@@ -149,6 +157,9 @@ ui-lines: ## Report the interface's application lines against its budget, and it
 sdk-test: ## Unit-test the Python package, and end-to-end against a real binary
 	scripts/sdk-test.sh
 
+sdk-py-unit: ## The Python package's unit suite alone (part of the gate)
+	SDK_SKIP_E2E=1 scripts/sdk-test.sh
+
 # One rule set for every Python file in the repository, named rather than
 # discovered: the scripts sit outside the package that configures it. The ruff
 # is the one the package's dev group pins, run through `uvx`, so the gate and a
@@ -213,6 +224,9 @@ sdk-js-build: sdk-js-deps ## Build the Node package into sdk/js/dist
 sdk-js-test: ## Type-check and unit-test the Node package, and end-to-end against a real binary
 	scripts/sdk-js-test.sh
 
+sdk-js-unit: ## The Node package's type check and unit suite alone (part of the gate)
+	SDK_SKIP_E2E=1 scripts/sdk-js-test.sh
+
 # The budget spec 032 #11 set, shared with the harness of the same spec;
 # raised for the harness (spec 032 #16), for trace deletion (spec 036 #8), for
 # `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, for
@@ -237,7 +251,7 @@ sdk-notices: ## Fail if a package's copy of LICENSE or NOTICE is not the root's
 		cmp -s "$$(basename $$copy)" "$$copy" || { echo "sdk-notices: $$copy differs from ./$$(basename $$copy); copy it again"; exit 1; }; \
 	done
 
-gate: ensure-hooks format-check vet test sdk-go-unit doc-anchors sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -284,7 +298,7 @@ install-hooks: ## (Re)install both hooks
 
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
-	e2e sdk-test sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
-	sdk-js-deps sdk-js-build sdk-js-test sdk-js-lines sdk-notices \
+	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
+	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices race \
 	doc-anchors doc-anchors-self-test gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
