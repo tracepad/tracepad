@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // Deleting traces (spec 035, Testing — store): everything attached to a trace
@@ -319,6 +321,73 @@ func TestTraceDeletionStaysInItsProject(t *testing.T) {
 	}
 	if got := f.count(t, `SELECT COUNT(*) FROM traces`); got != 2 {
 		t.Errorf("traces = %d, want both untouched", got)
+	}
+}
+
+// TestADeletionTakesEveryPayloadOfAnObservation: a trace's payloads are its
+// content — prompts, completions, metadata — and they go with it (spec 005 #4,
+// spec 035 #3), which for an erasure is the person's text (spec 044). All three
+// payload columns of an observation and the trace's own, on each door that
+// removes traces: an erasure's chunk, a deletion and the retention sweep. A
+// span with none is passed over, and another trace's payloads stay.
+func TestADeletionTakesEveryPayloadOfAnObservation(t *testing.T) {
+	for _, door := range []string{"erasure", "deletion", "sweep"} {
+		t.Run(door, func(t *testing.T) {
+			f := newSweepFixture(t)
+			f.arrive(t, f.project.ID, hexTrace(2), daysAgo(0))
+			batch := &IngestBatch{ProjectID: f.project.ID, IngestedAt: daysAgo(3),
+				Traces: []*model.Trace{{ID: hexTrace(1), UserID: "u-own", Metadata: map[string]any{"trace": "own"}}},
+				Observations: []*model.Observation{{
+					TraceID: hexTrace(1), ID: hexTrace(1)[16:], Type: model.TypeSpan, Level: model.LevelDefault,
+					StartTime: daysAgo(3), EndTime: daysAgo(3) + 1_000_000,
+					Input: map[string]any{"prompt": "own input"}, Output: map[string]any{"completion": "own output"},
+					Metadata: map[string]any{"step": "own metadata"},
+				}, {
+					// A span with no payload at all.
+					TraceID: hexTrace(1), ID: hexTrace(3)[16:], Type: model.TypeSpan, Level: model.LevelDefault,
+					StartTime: daysAgo(3), EndTime: daysAgo(3) + 1_000_000,
+				}}}
+			if err := f.writer.Submit(t.Context(), batch); err != nil {
+				t.Fatal(err)
+			}
+			before := f.count(t, `SELECT COUNT(*) FROM payloads`)
+
+			var traces, observations, payloads int64
+			switch door {
+			case "erasure":
+				chunk := &UserDataErase{ProjectID: f.project.ID, UserID: "u-own", Confirm: "u-own", Limit: 500}
+				if err := f.writer.Submit(t.Context(), chunk); err != nil {
+					t.Fatal(err)
+				}
+				traces, observations, payloads = chunk.Counts.Traces, chunk.Counts.Observations, chunk.Counts.Payloads
+			case "deletion":
+				del := &TraceDelete{ProjectID: f.project.ID, IDs: []string{hexTrace(1)}, Confirm: hexTrace(1)}
+				if err := f.writer.Submit(t.Context(), del); err != nil {
+					t.Fatal(err)
+				}
+				traces, observations, payloads = del.Counts.Traces, del.Counts.Observations, del.Counts.Payloads
+			default:
+				f.setRetention(t, f.project.ID, days(1), nil)
+				sweep := &traceSweep{ProjectID: f.project.ID, Now: sweepNow.UnixNano(), Limit: 100}
+				if err := f.writer.Submit(t.Context(), sweep); err != nil {
+					t.Fatal(err)
+				}
+				traces, observations, payloads = sweep.Traces, sweep.Observations, sweep.Payloads
+			}
+			if traces != 1 || observations != 2 || payloads != 4 {
+				t.Errorf("removed %d traces, %d observations, %d payloads; want the trace, its two spans, "+
+					"and its metadata with its span's input, output and metadata", traces, observations, payloads)
+			}
+			if got := f.count(t, `SELECT COUNT(*) FROM payloads`); got != before-4 {
+				t.Errorf("payloads = %d after the removal, want %d", got, before-4)
+			}
+			// The four were the trace's own: every payload the other trace
+			// and its span point at is still there.
+			if got := f.count(t, `SELECT COUNT(*) FROM pragma_foreign_key_check`); got != 0 {
+				t.Errorf("%d rows point at a payload that is gone", got)
+			}
+			checkIntegrity(t, f.store)
+		})
 	}
 }
 
