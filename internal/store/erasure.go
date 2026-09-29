@@ -667,6 +667,15 @@ func (s *Store) runErasure(ctx context.Context, writer jobSubmitter, id string, 
 			}
 		}
 	}()
+	// Registered last, so that it runs first: a panic becomes the run's error
+	// before the two above look at err, and the line that reports the run
+	// still names its phase and gives a stopped run's start back (spec 043
+	// #42). The erasure's id is in the label; it is a random token, not a user.
+	defer func() {
+		if value := recover(); value != nil {
+			err = recovered("erasure "+id, value)
+		}
+	}()
 	begin := &erasureBegin{ID: id, Run: token}
 	if err := submitErasureJob(ctx, writer, begin); err != nil {
 		return run, err

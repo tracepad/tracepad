@@ -61,6 +61,9 @@ type SweepStatus struct {
 	Since             int64
 	TracesDeleted     int64
 	RawBatchesDeleted int64
+	// GaveUp says the retention of this project is left out until the
+	// process restarts, its sweep having panicked in every pass (spec 043 #42).
+	GaveUp bool
 }
 
 // jobSubmitter is the writer as the sweeper needs it.
@@ -93,7 +96,12 @@ type Sweeper struct {
 
 	// running and runStart say a pass is under way, so that a deletion
 	// committed now is told the pass after it (spec 044 #11).
-	running  bool
+	running bool
+	// beforeProject is a test seam, told which project a pass is about to
+	// sweep; a panic in it is a fault in the sweep of that project.
+	beforeProject func(*Project)
+	// panics counts the passes in a row a project's sweep panicked in.
+	panics   panicLedger
 	runStart time.Time
 
 	// afterMergeStep is a test seam: it runs after every merge step of a
@@ -149,7 +157,7 @@ func (sw *Sweeper) Start() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := sw.Pass(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				if err := guard("retention sweep", func() error { return sw.Pass(ctx) }); err != nil && !errors.Is(err, context.Canceled) {
 					logger().Error("retention sweep failed", "err", err)
 				}
 			}
@@ -197,6 +205,7 @@ func (sw *Sweeper) Status(projectID string) SweepStatus {
 	if !sw.lastRun.IsZero() {
 		status.LastRun = sw.lastRun.UnixNano()
 	}
+	status.GaveUp = sw.panics.skip(projectID)
 	if counters := sw.deleted[projectID]; counters != nil {
 		status.TracesDeleted = counters.traces
 		status.RawBatchesDeleted = counters.raw
@@ -228,11 +237,19 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sweep: list projects: %w", err)
 	}
+	live := make(map[string]bool, len(projects))
+	for _, project := range projects {
+		live[project.ID] = true
+	}
+	sw.panics.forget(live)
 
 	var freed bool
 	var failures []error
 	for _, project := range projects {
-		removed, err := sw.sweepProject(ctx, project, start)
+		removed, err := tryLedger(&sw.panics, project.ID, "retention sweep of a project",
+			"retention sweep of project "+project.Name, func() (bool, error) {
+				return sw.sweepProject(ctx, project, start)
+			})
 		if removed {
 			freed = true
 		}
@@ -244,7 +261,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		}
 	}
 
-	orphans, err := sw.sweepOrphanPayloads(ctx)
+	orphans, err := tryLedger(&sw.panics, stepKey+"orphaned payloads", "orphaned payloads sweep", "orphaned payloads sweep",
+		func() (int64, error) { return sw.sweepOrphanPayloads(ctx) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -255,7 +273,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
-	media, err := sw.sweepOrphanMedia(ctx, start.UnixNano())
+	media, err := tryLedger(&sw.panics, stepKey+"orphaned media", "orphaned media sweep", "orphaned media sweep",
+		func() (int64, error) { return sw.sweepOrphanMedia(ctx, start.UnixNano()) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -270,14 +289,17 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// Not counted as freed: a row per trace, gone within the hour.
 	// On the wall clock, as the rows are stamped and read (#29), not on the
 	// pass's own clock.
-	if err := sw.sweepVoidedUploads(ctx, time.Now().UnixNano()); err != nil {
+	if err := sw.panics.run(stepKey+"voided uploads", "voided uploads sweep", "voided uploads sweep", func() error {
+		return sw.sweepVoidedUploads(ctx, time.Now().UnixNano())
+	}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
 		}
 		failures = append(failures, fmt.Errorf("voided uploads: %w", err))
 	}
 
-	entries, err := sw.sweepOrphanSearchEntries(ctx)
+	entries, err := tryLedger(&sw.panics, stepKey+"orphaned search entries", "orphaned search entries sweep", "orphaned search entries sweep",
+		func() (int64, error) { return sw.sweepOrphanSearchEntries(ctx) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -292,7 +314,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// #10). Once per pass rather than once per project: an account belongs
 	// to the deployment, not to a project. A lookup already ignores an
 	// expired row, so this is about the disk and not about access.
-	accounts, err := sw.sweepAccounts(ctx, start.UnixNano())
+	accounts, err := tryLedger(&sw.panics, stepKey+"expired sessions", "expired sessions sweep", "expired sessions sweep",
+		func() (int64, error) { return sw.sweepAccounts(ctx, start.UnixNano()) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -307,7 +330,10 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// so that a purge finished above is compacted in the same pass
 	// (spec 044 #11). A compaction drains the whole freelist; a pass without
 	// one hands back one bounded job's worth of what its own deletions freed.
-	_, drained, err := sw.compact(ctx)
+	drained, err := tryLedger(&sw.panics, stepKey+"compaction", "compaction", "compaction", func() (bool, error) {
+		_, drained, err := sw.compact(ctx)
+		return drained, err
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -315,14 +341,16 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("compaction: %w", err))
 	}
 	if freed && !drained {
-		if err := sw.drainFreelist(ctx, false); err != nil {
+		if err := sw.panics.run(stepKey+"vacuum", "incremental vacuum", "incremental vacuum", func() error { return sw.drainFreelist(ctx, false) }); err != nil {
 			failures = append(failures, fmt.Errorf("incremental vacuum: %w", err))
 		}
 	}
 
 	// The newest pre-migration backup, seven days after it was written
 	// (spec 044 #12). Files, not rows: nothing here goes through the writer.
-	sw.store.expireBackups(start)
+	if err := sw.panics.run(stepKey+"backups", "backup expiry", "backup expiry", func() error { sw.store.expireBackups(start); return nil }); err != nil {
+		failures = append(failures, fmt.Errorf("backup expiry: %w", err))
+	}
 
 	// The records of erasures that ended more than 30 days ago (spec 047
 	// #15), last: they name no one, and nothing above waits for them.
@@ -343,6 +371,9 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 // sweepProject applies one project's windows. It reports whether anything was
 // deleted, so the pass knows whether a vacuum has anything to reclaim.
 func (sw *Sweeper) sweepProject(ctx context.Context, project *Project, at time.Time) (bool, error) {
+	if sw.beforeProject != nil {
+		sw.beforeProject(project)
+	}
 	now := at.UnixNano()
 	purging := project.Deleted() && now >= project.PurgeAt()
 

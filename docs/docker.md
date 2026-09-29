@@ -453,6 +453,19 @@ command works from a load balancer, a systemd unit or your own script:
 tracepad health --url http://tracepad.internal:4318
 ```
 
+A bug in one write or one background pass does not stop the server. The
+writer recovers a panic in a job it is applying, and the retention sweeper, the
+statistics rollup and the erasure worker recover one in a project's, an hour's
+or a run's work: an `ERROR` line, `a panic was recovered`, says where and
+carries the stack; the write that hit it is answered with an error and refused
+alone, and the others in its window commit; the next tick tries the project
+again, and gives up on one that panics three passes in a row until the next
+start, which [`GET /api/v1/system`](api.md#system) shows in `worker_panics`. The line carries the panic's own words only when it is a runtime fault (an
+index out of range, a nil pointer), never a value the code chose to panic with,
+so the stack is what to report. A panic anywhere else — the writer's own loop, the WAL checkpoint —
+ends the process, as a Go program's does; run the server under something that
+restarts it, such as `restart: unless-stopped` below.
+
 ## Compose
 
 The image is published under three kinds of tag: an exact release (`0.1.0`),

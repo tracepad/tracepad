@@ -175,3 +175,21 @@ func TestOpenAPINamesTheLimitsOfTheCounters(t *testing.T) {
 		}
 	}
 }
+
+// /system says what the process recovered from, and the asking project's own
+// retention, so that a panic that is handled is not a panic that is hidden
+// (spec 043 #42).
+func TestSystemReportsRecoveredPanics(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	rec := h.call(t, "GET", "/api/v1/system", nil)
+	expectStatus(t, rec, 200)
+	body := decodeJSON[struct {
+		WorkerPanics map[string]any `json:"worker_panics"`
+		Sweeper      map[string]any `json:"sweeper"`
+	}](t, rec)
+	for _, key := range []string{"recovered", "given_up", "last_where", "last_at"} {
+		if _, ok := body.WorkerPanics[key]; !ok {
+			t.Errorf("worker_panics has no %q: %v", key, body.WorkerPanics)
+		}
+	}
+}

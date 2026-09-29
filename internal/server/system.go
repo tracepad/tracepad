@@ -366,6 +366,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("size_bytes", s.store.FileSize()).
 			put("rows", rows)).
 		put("writer_queue", queue).
+		// Panics the process recovered and went on from (spec 043 #42): the
+		// deployment's, and naming no project.
+		put("worker_panics", workerPanics(store.Panics())).
 		// Request bodies held in memory now against
 		// TRACEPAD_BODY_BUDGET_BYTES — the deployment's, like the queue
 		// (spec 043 #21).
@@ -430,7 +433,8 @@ func (s *Server) sweeperStatus(projectID string) object {
 		put("next_run", formatTime(status.NextRun)).
 		put("since", formatTime(status.Since)).
 		put("traces_deleted", status.TracesDeleted).
-		put("raw_batches_deleted", status.RawBatchesDeleted)
+		put("raw_batches_deleted", status.RawBatchesDeleted).
+		put("given_up", status.GaveUp)
 	// A sweeper that has not run yet says so rather than reporting the
 	// epoch, which would read as "ran in 1970".
 	if status.LastRun == 0 {
@@ -485,4 +489,17 @@ func (s *Server) backupAnswer() any {
 // queue for the endpoint to work.
 type queueReporter interface {
 	QueueDepth() (waiting, capacity int)
+}
+
+// workerPanics renders the panics recovered since start. last_at is null for
+// none.
+func workerPanics(p store.PanicStats) object {
+	body := object{}.
+		put("recovered", p.Recovered).
+		put("given_up", p.GivenUp).
+		put("last_where", p.LastWhere)
+	if p.LastAt == 0 {
+		return body.put("last_at", nil)
+	}
+	return body.put("last_at", formatTime(p.LastAt))
 }

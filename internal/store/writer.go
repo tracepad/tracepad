@@ -70,6 +70,10 @@ type background struct{}
 
 func (background) commitsAlone() {}
 
+// errNilJob is a submission of nothing. Refused where it is made, so that no
+// method of a job is ever called on a nil one by the writer's loop (spec 043 #42).
+var errNilJob = errors.New("store: a nil write job")
+
 // ErrWriterBusy means the submission queue is full. Callers turn it into a
 // 429 with Retry-After, which OTLP exporters retry natively (spec 002 #15).
 var ErrWriterBusy = errors.New("writer is saturated")
@@ -281,6 +285,9 @@ func (w *Writer) QueueDepth() (waiting, capacity int) {
 // A job that reaches its transaction and is refused there comes back as a
 // *Rejection; the handler renders it rather than retrying it.
 func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
+	if isNilJob(job) {
+		return errNilJob
+	}
 	sub := &submission{job: job, done: make(chan error, 1)}
 
 	w.mu.RLock()
@@ -315,6 +322,9 @@ func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 // with ErrWriterClosed; ctx ends the wait, and once queued, the wait for the
 // commit, as it does Submit's.
 func (w *Writer) SubmitWaiting(ctx context.Context, job WriteJob) error {
+	if isNilJob(job) {
+		return errNilJob
+	}
 	sub := &submission{job: job, done: make(chan error, 1)}
 
 	w.mu.RLock()
@@ -826,7 +836,9 @@ func applyOne(tx *sql.Tx, job WriteJob, savepoint bool) (own, windowErr error) {
 			return nil, fmt.Errorf("open a job's savepoint: %w", err)
 		}
 	}
-	err := job.apply(tx)
+	// A panic in the job is that job failing by itself (spec 043 #42): the
+	// window is applied again with savepoints and the job is refused alone.
+	err := guardJob("write job", job, func() error { return job.apply(tx) })
 	if err != nil {
 		if _, condition := Condition(err); condition {
 			return nil, err

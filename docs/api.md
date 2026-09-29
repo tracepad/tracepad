@@ -1186,6 +1186,14 @@ arrays refused with `413` for carrying more than 10,000 scores or dataset
 items, and `queue_adds_over_target_cap` its queue adds refused with `400` for
 more than 1,000 targets — each its own counter, since the limits differ.
 
+`worker_panics` counts the panics the process recovered from since it started,
+for the whole deployment: `recovered`, `given_up` (projects and shared steps of
+the retention sweeper and the statistics rollup that panicked in each of three
+passes in a row and are left out until a restart), `last_where` (a kind of
+work, never a project's name) and `last_at`. The asking project's own retention
+is `sweeper.given_up`. Each recovered panic has an `ERROR` line with its stack
+in the server's log.
+
 `read_slots` is how many reads are being served now against
 `TRACEPAD_READ_CONCURRENCY`, deployment-wide like the writer queue:
 `{"busy": 3, "capacity": 16}`. Among the counters, `reads_timed_out` and

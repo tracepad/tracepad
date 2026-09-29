@@ -506,6 +506,14 @@
               "writer_queue": {"type": "object", "properties": {
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
               }},
+              "worker_panics": {"type": "object",
+                "description": "Panics in a write job or a background pass that the process recovered and went on from since it started, for the whole deployment; each has an `ERROR` line with its stack. `given_up` counts the projects and the shared steps of the sweeper and the rollup that panicked in every one of three passes and are left out until the process restarts (the asking project's own retention is `sweeper.given_up`). It names no project",
+                "properties": {
+                  "recovered": {"type": "integer"}, "given_up": {"type": "integer"},
+                  "last_where": {"type": "string", "description": "What the last one was in: a kind of work, never a project's name"},
+                  "last_at": {"type": ["string", "null"], "format": "date-time"}
+                },
+                "required": ["recovered", "given_up", "last_where", "last_at"]},
               "body_budget": {"type": "object",
                 "description": "Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429`",
                 "properties": {

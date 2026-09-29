@@ -48,6 +48,13 @@ type RollupOptions struct {
 
 // Aggregator rolls raw rows into the hourly statistics.
 type Aggregator struct {
+	// beforeProject is a test seam, told which project a pass is about to
+	// roll; a panic in it is a fault in the roll of that project.
+	beforeProject func(*Project)
+	// panics counts the passes in a row a project's roll panicked in outside
+	// an hour, which the hours' own holding does not see.
+	panics panicLedger
+
 	store    *Store
 	writer   jobSubmitter
 	interval time.Duration
@@ -106,7 +113,7 @@ func (a *Aggregator) Start() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := a.Pass(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				if err := guard("stats rollup", func() error { return a.Pass(ctx) }); err != nil && !errors.Is(err, context.Canceled) {
 					logger().Error("stats rollup failed", "err", err)
 				}
 			}
@@ -146,7 +153,10 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 	var failures []error
 	var rolled int
 	for _, project := range projects {
-		hours, err := a.rollProject(ctx, project, start)
+		hours, err := tryLedger(&a.panics, project.ID, "stats rollup of a project",
+			"statistics roll of project "+project.Name, func() (int, error) {
+				return a.rollProject(ctx, project, start)
+			})
 		rolled += hours
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
@@ -171,6 +181,9 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 // rollProject is one project's pass: correct what changed, roll forward what
 // closed, then move the watermark. It reports how many hours it wrote.
 func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.Time) (int, error) {
+	if a.beforeProject != nil {
+		a.beforeProject(project)
+	}
 	state, err := a.store.RollupState(ctx, project.ID)
 	if err != nil {
 		return 0, err
@@ -219,7 +232,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 			// inside its transaction (spec 013 #11); a pass that
 			// pre-filtered here would be a second opinion about the
 			// same rule.
-			job, err := a.rollOne(ctx, project.ID, hour, at)
+			job, err := try("stats rollup of an hour", func() (*statsRoll, error) {
+				return a.rollOne(ctx, project.ID, hour, at)
+			})
 			if err != nil {
 				if stopsThePass(err) {
 					return rolled, err
@@ -308,7 +323,9 @@ func (a *Aggregator) rollProject(ctx context.Context, project *Project, at time.
 		stopAt   int64
 	)
 	for _, hour := range hours {
-		job, err := a.rollOne(ctx, project.ID, hour, at)
+		job, err := try("stats rollup of an hour", func() (*statsRoll, error) {
+			return a.rollOne(ctx, project.ID, hour, at)
+		})
 		if err != nil {
 			if stopsThePass(err) {
 				return rolled, err
@@ -416,6 +433,7 @@ func (a *Aggregator) forgetGone(projects []*Project) {
 	for _, project := range projects {
 		live[project.ID] = true
 	}
+	a.panics.forget(live)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, held := range []map[string]holding{a.held, a.stuck} {
