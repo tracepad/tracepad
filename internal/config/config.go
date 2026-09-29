@@ -249,7 +249,8 @@ var knownEnv = map[string]bool{
 // still turn up in a shared .env: the server says what replaced them at Info,
 // not as the typo warning an unknown name gets.
 var deprecatedEnv = map[string]string{
-	// The packages' first name for the store's address (spec 017 #21).
+	// The packages' name for the store's address before TRACEPAD_URL (spec
+	// 017 #21). The server never read it; a shared .env carries it here.
 	"TRACEPAD_HOST": "TRACEPAD_URL",
 }
 

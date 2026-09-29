@@ -26,8 +26,11 @@ builds:
 archives:
   - formats: [tar.gz]
     # Named here so that docs/install.md can say what the files are called:
-    # tracepad_0.1.0_linux_amd64.tar.gz, and .zip on Windows.
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # tracepad_0.1.0_linux_amd64.tar.gz, and .zip on Windows. This is GoReleaser
+    # 2's own default spelled out, variant suffixes included, so a target that
+    # gains a variant later gets a new name by the same rule, not a collision.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}
     format_overrides:
       - goos: windows
         formats: [zip]

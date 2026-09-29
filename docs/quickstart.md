@@ -34,7 +34,7 @@ pair — then prints them, once:
 ```
 Project "default" created. Connect your app with either:
 
-  # OpenTelemetry SDK (the protocol line is not optional: Tracepad has no gRPC)
+  # OpenTelemetry SDK (Tracepad has no gRPC: the protocol line is required if your SDK defaults to it)
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
@@ -78,7 +78,8 @@ image, which is where the volume goes); `TRACEPAD_DATA_DIR` moves it.
 ## 2. Point an application at it
 
 Any OpenTelemetry SDK, in any language, with the three variables above. **The
-protocol line is not optional**: Tracepad speaks OTLP over HTTP and has no gRPC
+protocol line is required wherever an SDK defaults to gRPC** — Python's
+auto-configured exporter does — since Tracepad speaks OTLP over HTTP and has no gRPC
 receiver, and an exporter left to choose for itself may pick gRPC — the
 application runs, reports nothing, and the trace list stays empty. In Python,
 with the OpenTelemetry distro's automatic configuration (`pip install

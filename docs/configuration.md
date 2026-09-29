@@ -72,7 +72,7 @@ These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:
 
 | Variable | Value |
 |---|---|
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` — **not optional**: Tracepad has no gRPC receiver. `http/json` works too. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` — required wherever the SDK defaults to gRPC — Tracepad has no gRPC receiver. `http/json` works too. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://<server>/v1/traces` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | `authorization=Bearer <secret key>` |
 

@@ -110,8 +110,8 @@ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
 
-The first line is not optional: Tracepad has no gRPC receiver, and an SDK left
-to its own default may choose gRPC — the application runs, reports nothing and
+The first line is required wherever an SDK defaults to gRPC: Tracepad has no
+gRPC receiver, and an SDK left to its own default may choose it — the application runs, reports nothing and
 the trace list stays empty.
 
 In Python and in Node there is also a package — a thin layer over the same

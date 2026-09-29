@@ -18,6 +18,9 @@ type DataLock struct {
 	file *os.File
 }
 
+// takeLock is lockFile, a seam for the test that gives it a file system without locks.
+var takeLock = lockFile
+
 // LockDatabase takes the exclusive lock of the database at dbPath, creating
 // its directory and the lock file if they are missing, and returns at once:
 // when another process holds it, it says so, and gives the pid that process
@@ -26,8 +29,6 @@ type DataLock struct {
 // which a pid file would. A file system that cannot lock at all is a warning and
 // not a refusal to start (spec 001 #20): a deployment that ran on it yesterday
 // runs on it today, unguarded, and is told.
-// takeLock is lockFile, a seam for the test that gives it a file system without locks.
-var takeLock = lockFile
 
 func LockDatabase(dbPath string) (*DataLock, error) {
 	dir := filepath.Dir(dbPath)

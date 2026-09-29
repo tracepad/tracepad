@@ -36,8 +36,9 @@ make gate
 ```
 
 is what CI runs and what the pre-push hook runs: formatting, `go vet`, the Go
-tests (the server and the Go package), the anchor check for the docs, the
-Python lint, and the interface's type-check and unit tests. The first `make`
+tests (the server and the Go package), the unit suites of the Python and Node
+packages, the anchor check for the docs, the licence-file check, the Python
+lint, and the interface's type-check and unit tests. The first `make`
 installs the hooks, so a push that would fail CI fails on your machine first.
 
 The Playwright suite drives the real binary in a browser and is heavier:

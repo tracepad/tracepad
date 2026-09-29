@@ -104,8 +104,8 @@ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 ```
 
-The protocol line is not optional: Tracepad has no gRPC receiver, and an SDK
-left to its own default may choose gRPC — the application reports nothing and
+The protocol line is required wherever an SDK defaults to gRPC: Tracepad has no
+gRPC receiver, and an SDK left to its own default may choose it — the application reports nothing and
 the trace list stays empty. `http/json` works too ([below](#the-json-encoding)).
 
 **Langfuse SDK** — point it at Tracepad instead of Langfuse:

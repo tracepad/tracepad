@@ -80,7 +80,7 @@ func DeleteTrace(ctx context.Context, id string, confirm bool) (map[string]any, 
 
 // DeleteTraces deletes every trace the filter matches that started before
 // filter.To. With an empty confirm it is one dry run, and the answer is the
-// API's preview (matched, would_delete, affected_runs, oldest, confirm,
+// API's preview (matched, would_delete, affected_runs, oldest_ingested, confirm,
 // note). With the project's name it deletes in rounds of at most the limit,
 // repeating while the API says more, and answers the total —
 // {"deleted": {"traces", "observations", "scores", "payloads",

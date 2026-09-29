@@ -398,7 +398,7 @@ func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL str
 		fmt.Fprintf(w, `
 Project %q created%s
 
-  # OpenTelemetry SDK (the protocol line is not optional: Tracepad has no gRPC)
+  # OpenTelemetry SDK (Tracepad has no gRPC: the protocol line is required if your SDK defaults to it)
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://%s/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer %s"
