@@ -377,4 +377,9 @@ func TestARoutineRefusalIsKnownByItsType(t *testing.T) {
 	if errors.Is(ErrBadToken, ErrSetupDone) {
 		t.Error("two refusals compare equal")
 	}
+	// Each is its own sentinel, as errors.New's are: a refusal of the same
+	// words made elsewhere is not it.
+	if errors.Is(&routineRefusal{ErrBadToken.Error()}, ErrBadToken) {
+		t.Error("a refusal with the words of ErrBadToken is ErrBadToken")
+	}
 }

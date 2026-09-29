@@ -170,14 +170,16 @@ func (r *Rejection) Error() string { return r.Message }
 // for the first owner, a password typed wrong, a media body collected before
 // the write. It is traffic, not an incident, like any rejection, and says so by
 // its type rather than by a list someone has to keep (spec 043 #39).
-type routineRefusal string
+// A pointer, so that each is its own sentinel to errors.Is, as errors.New's
+// are, whatever its words.
+type routineRefusal struct{ text string }
 
-func (r routineRefusal) Error() string { return string(r) }
+func (r *routineRefusal) Error() string { return r.text }
 
 // rejected reports an error the caller caused rather than a storage failure.
 func rejected(err error) bool {
 	var rejection *Rejection
-	var routine routineRefusal
+	var routine *routineRefusal
 	return errors.As(err, &rejection) || errors.As(err, &routine)
 }
 
@@ -460,6 +462,9 @@ func (w *Writer) flush(pending []*submission) {
 		return
 	}
 	if len(pending) == 1 {
+		// BEGIN and COMMIT fail no job in particular; alone, the job is
+		// the one they failed (spec 047 #36).
+		err = failedAt(pending[0].job, err)
 		lost(pending[0], err, "write commit failed")
 		answer(pending, err)
 		return
@@ -478,6 +483,7 @@ func (w *Writer) flush(pending []*submission) {
 		one := []*submission{sub}
 		refused, err := w.commit(one)
 		if err != nil {
+			err = failedAt(sub.job, err)
 			lost(sub, err, "write commit failed")
 			answer(one, err)
 			continue
@@ -544,19 +550,16 @@ func (f *jobFailure) LogValue() slog.Value {
 	if condition, ok := Condition(f.err); ok {
 		return slog.StringValue(condition)
 	}
-	facts := append([]any{"erasure", f.erasure}, failureFacts(f.err)...)
-	attrs := make([]slog.Attr, 0, len(facts)/2)
-	for i := 0; i+1 < len(facts); i += 2 {
-		attrs = append(attrs, slog.Any(facts[i].(string), facts[i+1]))
-	}
-	return slog.GroupValue(attrs...)
+	return slog.Group("", append([]any{"erasure", f.erasure}, failureFacts(f.err)...)...).Value
 }
 
 // failedAt is err as the writer answers and logs it when it failed at job: a
-// jobFailure for a job that redacts its failure, err itself for any other.
+// jobFailure for a job that redacts its failure, err itself for any other or
+// for one already wrapped.
 func failedAt(job WriteJob, err error) error {
-	if err == nil {
-		return nil
+	var wrapped *jobFailure
+	if err == nil || errors.As(err, &wrapped) {
+		return err
 	}
 	if id, redacted := redacts(job); redacted {
 		return &jobFailure{erasure: id, err: err}
@@ -588,15 +591,18 @@ func reports(job WriteJob) bool {
 	return ok && reporter.failureReported()
 }
 
-// logFailure reports a failed commit, demoting a rejection: a caller asking
+// logFailure is the writer's line for a failure — a write lost or refused, a
+// window that came apart, a step, a job that failed a window's first pass and
+// was committed by its second — at level, demoting a rejection: a caller asking
 // for something the stored state does not allow is routine traffic, not an
 // incident, and it is already being told so in the response.
 //
 // A database condition is logged once a minute per condition, with the number
 // of writes it failed since the last line (spec 043 #2): it is the same news
 // every time until it passes, and every caller has already been answered with
-// a status that says to retry. It is only ever called for a write that was
-// lost, so the line is an error and the count counts failures.
+// a status that says to retry. Only a lost write or a failed step reaches here
+// with one — a window's condition is left to its retries, and a replay's first
+// failure was the job's own — so the count counts failures.
 func logFailure(err error, level slog.Level, message string, args ...any) {
 	if rejected(err) {
 		level = slog.LevelInfo
@@ -672,7 +678,11 @@ func explainReplay(sub *submission, failed error) {
 	job := fmt.Sprintf("%T", sub.job)
 	var redacted *jobFailure
 	if !errors.As(failed, &redacted) && reports(sub.job) {
-		logger().Warn(message, "job", job)
+		level := slog.LevelWarn
+		if rejected(failed) {
+			level = slog.LevelInfo
+		}
+		logger().Log(context.Background(), level, message, "job", job)
 		return
 	}
 	logFailure(failed, slog.LevelWarn, message, "job", job)

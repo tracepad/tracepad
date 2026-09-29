@@ -332,6 +332,28 @@ func erasureLogPaths() []erasureLogPath {
 				runWindow(t, w, sharesAWindow(), rollsBackItself{err: fail}, sharesAWindow())
 				waitLine(t, log, "write window failed")
 			}},
+		{"a lone write whose commit fails", []string{"a write of an erasure did not commit"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				if err := f.writer.Submit(t.Context(), failsAtCommit{}); err == nil {
+					t.Fatal("the commit did not fail")
+				}
+				waitLine(t, log, "a write of an erasure did not commit")
+				saysNoCommitText(t, log())
+			}},
+		{"a window whose commit fails, retried one by one", []string{"write window failed", "a write of an erasure did not commit"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// COMMIT fails no job in particular: the window is retried
+				// job by job, and the one whose commit fails alone says so
+				// by its facts (#36).
+				runWindow(t, w, sharesAWindow(), failsAtCommit{}, sharesAWindow())
+				waitLine(t, log, "a write of an erasure did not commit")
+				saysNoCommitText(t, log())
+			}},
 		{"a caller that wraps the writer's error and logs it",
 			[]string{"a caller printed the writer's error", "a caller logged the writer's error"}, false,
 			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
@@ -731,5 +753,38 @@ func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
 
 	if err := failedAt(sharesAWindow(), inner); err != error(inner) {
 		t.Errorf("a job that does not redact answers %v, want its own error", err)
+	}
+}
+
+// failsAtCommit is a job of an erasure's whose apply succeeds and whose commit
+// fails: a deferred foreign key it breaks is checked at COMMIT, which SQLite
+// refuses with a constraint, not a condition.
+type failsAtCommit struct{}
+
+func (failsAtCommit) apply(tx *sql.Tx) error {
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO erasure_tail (erasure_id, trace_id, arrived_from, arrived_to)
+		VALUES ('no such erasure', 'a trace', 0, 0)`)
+	return err
+}
+
+func (failsAtCommit) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// saysNoCommitText requires that each line of a write of an erasure that did
+// not commit names the erasure and gives no word of SQLite's refusal.
+func saysNoCommitText(t *testing.T, out string) {
+	t.Helper()
+	for line := range strings.Lines(out) {
+		if !strings.Contains(line, "a write of an erasure did not commit") {
+			continue
+		}
+		if !strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+			strings.Contains(line, "FOREIGN KEY") || strings.Contains(line, "commit write transaction") {
+			t.Errorf("the line %q, want the erasure and no text of the failed commit", line)
+		}
 	}
 }

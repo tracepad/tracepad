@@ -1185,6 +1185,48 @@ func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
 	}
 }
 
+// failsOnceReported is refused the first time it is applied, in a window, and
+// commits after; its owner logs its failures, as the aggregator's hour does.
+type failsOnceReported struct{ tries *atomic.Int32 }
+
+func (f failsOnceReported) apply(*sql.Tx) error {
+	if f.tries.Add(1) == 1 {
+		return &Rejection{Kind: RejectConflict, Message: "an hour of user-4711 moved"}
+	}
+	return nil
+}
+
+func (failsOnceReported) failureReported() bool { return true }
+
+// A replay whose first failure was a refusal is Info, for a job that reports
+// its own failure as for any other (spec 043 #39), and still without its words.
+func TestAReplayedRefusalIsInfo(t *testing.T) {
+	f := newErasureFixture(t)
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = old })
+	w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	var tries atomic.Int32
+	for _, err := range runWindow(t, w, sharesAWindow(), failsOnceReported{&tries}, sharesAWindow()) {
+		if err != nil {
+			t.Fatalf("a job of the window failed: %v", err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	out := logged.String()
+	if !strings.Contains(out, `level=INFO msg="a job failed its window's first pass and passed the second"`) ||
+		strings.Contains(out, "4711") {
+		t.Errorf("the writer's log %q, want the replay at Info without the job's words", out)
+	}
+}
+
 // The task's jobs are the ones whose failure the writer does not give (#33),
 // and each answers the erasure it is a step of; the same jobs outside a task
 // are not.
