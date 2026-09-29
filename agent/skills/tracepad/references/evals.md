@@ -126,6 +126,6 @@ records that it was reviewed.
 ## Deleting
 
 `datasets rm` and `queues rm` are dry runs until confirmed — the rule in
-SKILL.md applies. `runs rm`, `score-configs rm` and `scores rm` have no dry
+SKILL.md applies. `runs rm`, `score-configs rm`, `datasets rm-item` and `scores rm` have no dry
 run at all: each removes one row the moment it runs, so ask before running
 them, naming what will go.

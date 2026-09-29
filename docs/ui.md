@@ -215,7 +215,7 @@ must still be able to score. Saving posts one score stamped
 `metadata: {"source": "web"}` and no `timestamp`, so it is received now.
 
 **Edit** is the same dialog over an existing score, re-posted with its id:
-spec 003's correction, which replaces the row rather than adding a second one.
+the score API's correction, which replaces the row rather than adding a second one.
 It is offered on every score, not only the ones written here — a judge's
 verdict overruled by a person is the review the eval loop exists for. What the
 dialog does not show, it resends as it was: the score's `metadata`, its
@@ -248,7 +248,7 @@ hundreds of versions pages like everything else. The view is the body as it
 is: role-labelled blocks for a chat prompt, one block for a text one — prose,
 not an escaped JSON string — with `config` as a document, and two links that
 answer where it ran: *Traces with v7* and *Traces with any version*, which are
-the `prompt=` filter [spec 012 added](api.md#filters). A `?version=` the name
+the `prompt=` filter [the traces listing takes](api.md#filters). A `?version=` the name
 does not have says so, with the version list still beside it.
 
 **Labels** — the control lives on the version being read: the labels on it as

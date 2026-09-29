@@ -217,7 +217,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
 --env, --release and --name take a comma-separated list — --env production,staging
 keeps traces from either — and facets is what lists the values with their counts.
 
-Taking the data out (spec 019). The archive is every export body as it arrived,
+Taking the data out. The archive is every export body as it arrived,
 and this replays it into any OTLP receiver — this server included — or writes
 it to disk beside a manifest:
   tracepad export --otlp (--to <url> | --dir <path>)
@@ -236,7 +236,7 @@ machine holds for your Tracepad (--key, TRACEPAD_API_KEY, TRACEPAD_ADMIN_TOKEN
 or its _FILE, LANGFUSE_SECRET_KEY, OTEL_EXPORTER_OTLP_HEADERS) always, any other tp-sk-…
 unless --allow-tracepad-key says the receiver is a Tracepad server of yours.
 
-Evals (spec 014). The loop is: declare the configs, push the cases, open the
+Evals. The loop is: declare the configs, push the cases, open the
 run, stamp each trace with tracepad.run_id and tracepad.item_id, post the
 scores, finish, compare:
   tracepad datasets ls        [--limit N] [--cursor C]
@@ -256,7 +256,7 @@ scores, finish, compare:
   tracepad score-configs push <name> --file cfg.json
   tracepad score-configs rm   <name>
 
-Review programmes (spec 024). A queue is a named list of traces or observations
+Review programmes. A queue is a named list of traces or observations
 and the score names a reviewer must set on each of them; the loop is: declare
 the queue, fill it, take the next item, post the scores, complete:
   tracepad queues ls
@@ -293,14 +293,14 @@ answers with the whole run, so a script reads both the id and the version it
 pinned. runs ls without a dataset lists the whole project's runs, newest first.
 runs compare lists the items whose verdict is not "same"; --all lists them all.
 
-Administration (spec 005). Every destructive command shows what it would do
+Administration. Every destructive command shows what it would do
 and asks you to type the name back; --yes answers that for a script:
-  tracepad projects ls   [--deleted]
+  tracepad projects ls   [--deleted]                   (--deleted: admin token)
   tracepad projects show [<project-id> | --project ID]
   tracepad projects create  <name>                     (admin token)
   tracepad projects rename  <project-id> <new-name>    (admin token)
   tracepad projects rm      <project-id> [--yes]       (admin token)
-  tracepad projects restore <project-id>
+  tracepad projects restore <project-id>               (admin token)
   tracepad keys ls      [--project ID]                 (admin token)
   tracepad keys create  --scope ingest[,read,write] [--name NAME] [--project ID]
                                                        (admin token)
@@ -314,12 +314,12 @@ and asks you to type the name back; --yes answers that for a script:
   tracepad users erasure  <erasure-id> [--project ID]
   tracepad users erasures [--project ID]
 
-No project key lists, mints or revokes keys (spec 045): the keys commands take
+No project key lists, mints or revokes keys: the keys commands take
 the admin token, and an owner or editor can do the same in the web interface,
 under Settings, Project, API keys. keys ls says who minted each key and when it
 was last used, to within a minute.
 
-Accounts (spec 028). People sign in; programs use keys. These need the admin
+Accounts. People sign in; programs use keys. These need the admin
 token, and keeping it somewhere is how you get back in when every owner's
 password is lost — set it, run accounts invite, open the link:
   tracepad accounts ls
@@ -342,7 +342,7 @@ it would delete and asks for the email back; --confirm answers that for a
 script, and it is the email rather than a --yes because naming the account is
 the point.
 
-Liveness (spec 020). The one command that needs no key, because the route it
+Liveness. The one command that needs no key, because the route it
 calls needs none. It prints the server's version and exits 0, or says what went
 wrong on stderr and exits 1 — which is what a container's HEALTHCHECK, a
 systemd unit or a load balancer reads:
@@ -353,14 +353,14 @@ Connection:
   --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
                marked (admin token)   (env TRACEPAD_API_KEY)
 
-What the wire carried (spec 012): --type keeps traces containing one kind of
+What the wire carried: --type keeps traces containing one kind of
 step — span, generation, event, agent, tool, chain, retriever, guardrail,
 evaluator or embedding — and --prompt keeps the traces that ran a prompt, at
 any version or at name@7. A version is a number, so an @ inside a name is part
 of it. The listing's ttft column is the wait before the first token of the
 trace's earliest completion.
 
-Search (spec 011): --search takes words (all must occur), "quoted phrases" and
+Search: --search takes words (all must occur), "quoted phrases" and
 prefix*. Words, not substrings: error does not find errors, err* finds both.
 Each matching row gains a second line saying which observation and field it
 matched and what the text says around the hit.

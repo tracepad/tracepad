@@ -17,7 +17,7 @@ tracepad skills install
 ```
 
 ```
-installed 0.4.0 to /home/you/.claude/skills/tracepad
+installed 0.1.0 to /home/you/.claude/skills/tracepad
 ```
 
 That is the user-wide skills directory of Claude Code, which every session of
@@ -46,7 +46,7 @@ Neither command talks to a server or needs a key.
 Run the same command again after upgrading the binary:
 
 ```
-updated 0.3.1 → 0.4.0 in /home/you/.claude/skills/tracepad
+updated 0.1.0 → 0.1.1 in /home/you/.claude/skills/tracepad
 ```
 
 The directory is replaced whole, so a reference the new version dropped does

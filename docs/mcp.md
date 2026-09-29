@@ -3,7 +3,7 @@
 Tracepad serves the Model Context Protocol so an agent can read traces as
 tools rather than as HTTP. Twenty-two tools, all reads, each a thin wrapper over
 a [read API](api.md) endpoint; [the table below](#the-tools) is the whole list,
-in the order `tools/list` returns it.
+in the order the server registers them (`tools/list` itself returns them sorted by name).
 
 **The MCP surface cannot modify or delete anything.** Not "does not today" —
 cannot: the only thing a tool can reach the API with is a `GET`, and the

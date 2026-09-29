@@ -12,9 +12,9 @@ docs keep showing; what it adds is the one call that points an application at
 a store, and the handful of shapes a person writes the same way every time, in
 the shape Go gives them: a `context.Context` in, a `context.Context` out.
 
-Go 1.25 or newer — the floor the OTel SDK sets. Three dependencies:
-`go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/sdk` and the OTLP/HTTP
-trace exporter. It is a nested module, so `go get` brings none of the server's
+Go 1.25 or newer — the floor the OTel SDK sets. Four dependencies:
+`go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/trace`,
+`go.opentelemetry.io/otel/sdk` and the OTLP/HTTP trace exporter. It is a nested module, so `go get` brings none of the server's
 dependencies with it.
 
 > The module installs no command. `tracepad` on your `PATH` is the server

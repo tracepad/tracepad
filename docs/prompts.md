@@ -178,7 +178,8 @@ curl -H "Authorization: Bearer tp-sk-…" http://localhost:4318/api/v1/prompts
       "updated_at": "2026-08-27T09:58:11Z"
     }
   ],
-  "next_cursor": null
+  "next_cursor": null,
+  "prev_cursor": null
 }
 ```
 

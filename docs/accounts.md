@@ -88,6 +88,10 @@ and open the invitation link it prints.
 
 ## Signing in
 
+An invitation link opens the interface's password page, which calls `POST
+/api/v1/auth/accept-invite` with `{"token", "password"}`: it sets the password
+and signs in, and the token is single-use.
+
 `POST /api/v1/auth/login` takes `{"email", "password"}` and sets a session
 cookie:
 
@@ -307,8 +311,9 @@ locked out on a Friday.
 | `DELETE /api/v1/accounts/{id}/projects/{project_id}` | Take a project away. |
 | `GET /api/v1/projects/{id}/members` | The project side: who has a role here. Owners are not listed, because they are not rows — they have every project. |
 
-All of it is also `tracepad accounts …` from a terminal, on the admin token —
-`ls`, `show`, `create`, `invite`, `set`, `grant`, `revoke`, `rm`. The
+Everything above but the project-side member listing is also `tracepad
+accounts …` from a terminal, on the admin token — `ls`, `show`, `create`,
+`invite`, `set`, `grant`, `revoke`, `rm`. The
 [CLI page](cli.md) has the forms.
 
 Three rules worth knowing before you press something:

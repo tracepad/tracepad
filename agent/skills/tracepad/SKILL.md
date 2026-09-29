@@ -159,7 +159,7 @@ tracepad scores add --trace <trace-id> --name helpful --value 1
 Deleting traces, a prompt, a dataset, a queue or a project, shrinking
 retention, erasing a user's data: each is a dry run until confirmed, and
 **you never confirm on your own initiative.** A few removals have no dry run
-and act at once — deleting a run, a score config or a score, removing a
+and act at once — deleting a run, a score config, a dataset item or a score, removing a
 prompt label — so ask before running those at all, naming what will go.
 
 1. Run the command **without** `--yes` (over the API, without `?confirm=`).

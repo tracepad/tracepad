@@ -615,5 +615,7 @@ written.
 - **No price table**, no prompt templating beyond `{placeholders}`. The
   JavaScript twin is [sdk-js.md](sdk-js.md).
 - **The harness runs nothing.** No judge, no retries, no concurrency helpers,
-  no `pytest` plugin and no `tracepad eval …` command: the loop is your
+  no `tracepad eval …` command, and no pytest plugin for running one (the
+  opt-in plugin of [`tracepad.testing`](#testing-your-instrumentation) is for
+  asserting on spans): the loop is your
   program, and this is the part of it that talks to the store.

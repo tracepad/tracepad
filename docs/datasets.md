@@ -254,8 +254,8 @@ curl -H "$AUTH" $TP/api/v1/datasets/support-golden/runs -d '{
   the version it *ran* must be the same number, and handing it out here is
   what makes that true.
 - `metadata` is free-form: the dimensions of an experiment are yours. What
-  the run actually *did* — which models answered, which prompts ran — will be
-  derived from its traces when the summary lands, and is not declared here.
+  the run actually *did* — which models answered, which prompts ran — is
+  derived from its traces — the run's summary reports them — and is not declared here.
 - `status` is `running` until you say otherwise. A run left `running` is
   reported as such with its age; Tracepad never guesses from a timeout,
   because a slow judge and a crashed harness look the same from inside.
@@ -487,7 +487,8 @@ curl -X DELETE -H "$AUTH" $TP/api/v1/datasets/support-golden
 
 ```json
 {"dry_run": true, "dataset": "support-golden", "items": 200, "runs": 14,
- "pinned_traces": 2996, "confirm": "support-golden"}
+ "pinned_traces": 2996, "confirm": "support-golden",
+ "note": "the runs go with the dataset; their traces are not deleted but return to the retention window"}
 ```
 
 ```sh
