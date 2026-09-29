@@ -1185,6 +1185,73 @@ func TestAWindowAnErasureJobBrokeIsStillSaid(t *testing.T) {
 	}
 }
 
+// failsFirstPass fails the first time it is applied, in a window, with err, and
+// commits after.
+type failsFirstPass struct {
+	tries *atomic.Int32
+	err   error
+}
+
+func (f failsFirstPass) apply(*sql.Tx) error {
+	if f.tries.Add(1) == 1 {
+		return f.err
+	}
+	return nil
+}
+
+// failsOnceReported is failsFirstPass for a job whose owner logs its failures, as
+// the aggregator's hour does.
+type failsOnceReported struct{ failsFirstPass }
+
+func (failsOnceReported) failureReported() bool { return true }
+
+// A replay whose first failure was a refusal is Info and one whose first
+// failure was anything else a Warn, for a job that reports its own failure,
+// whose line has no words of it, as for any other, whose line gives its error
+// (spec 043 #39).
+func TestAReplayedRefusalIsInfo(t *testing.T) {
+	refusal := &Rejection{Kind: RejectConflict, Message: "an hour of user-4711 moved"}
+	broken := errors.New("a constraint of user-4711 the window hit")
+	for _, tc := range []struct {
+		name   string
+		job    func(*atomic.Int32) WriteJob
+		level  string
+		quoted bool
+	}{
+		{"a refused job that reports itself", func(n *atomic.Int32) WriteJob { return failsOnceReported{failsFirstPass{n, refusal}} }, "INFO", false},
+		{"a broken job that reports itself", func(n *atomic.Int32) WriteJob { return failsOnceReported{failsFirstPass{n, broken}} }, "WARN", false},
+		{"a refused job", func(n *atomic.Int32) WriteJob { return failsFirstPass{n, refusal} }, "INFO", true},
+		{"a broken job", func(n *atomic.Int32) WriteJob { return failsFirstPass{n, broken} }, "WARN", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newErasureFixture(t)
+			var buf bytes.Buffer
+			var mu sync.Mutex
+			old := logger
+			logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &buf, mu: &mu}, nil)) }
+			t.Cleanup(func() { logger = old })
+			w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			var tries atomic.Int32
+			for _, err := range runWindow(t, w, sharesAWindow(), tc.job(&tries), sharesAWindow()) {
+				if err != nil {
+					t.Fatalf("a job of the window failed: %v", err)
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			out := buf.String()
+			if !strings.Contains(out, "level="+tc.level+` msg="a job failed its window's first pass and passed the second"`) ||
+				strings.Contains(out, "4711") != tc.quoted {
+				t.Errorf("the writer's log %q, want the replay at %s, quoting the error: %v", out, tc.level, tc.quoted)
+			}
+		})
+	}
+}
+
 // The task's jobs are the ones whose failure the writer does not give (#33),
 // and each answers the erasure it is a step of; the same jobs outside a task
 // are not.

@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -190,7 +189,7 @@ func writeChannelRef(tx *sql.Tx, projectID, sha, traceID, mimeType string, now i
 // deletion collected after the rewrite read it. The caller takes the batch
 // again without resolving, so the client's reference string is kept rather
 // than a reference to nothing.
-var ErrMediaGone = errors.New("a resolved media body was collected before the write")
+var ErrMediaGone error = &routineRefusal{"a resolved media body was collected before the write"}
 
 // mediaStillThere checks, inside the ingest's transaction, that the project
 // still holds every body a Langfuse string was resolved to (Decision 26): a

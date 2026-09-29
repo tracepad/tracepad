@@ -331,6 +331,102 @@ func erasureLogPaths() []erasureLogPath {
 				// apart, and is retried job by job.
 				runWindow(t, w, sharesAWindow(), rollsBackItself{err: fail}, sharesAWindow())
 				waitLine(t, log, "write window failed")
+				// Met at the erasure's job, the window's failure is its: the
+				// line names it and gives no words of the savepoint (#36).
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(!strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || strings.Contains(line, "savepoint")) {
+						t.Errorf("the line %q, want the erasure and no text of the savepoint", line)
+					}
+				}
+			}},
+		{"a window a plain job broke beside an erasure's job", []string{"write window failed"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// Met at a job of no erasure's, the window's failure is that
+				// job's: the line gives its text and blames no erasure (#36).
+				runWindow(t, w, sharesAWindow(), quietStep{}, plainRollsBack{})
+				waitLine(t, log, "write window failed")
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(strings.Contains(line, "4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(line, "savepoint") ||
+							!strings.Contains(line, "jobs=2")) {
+						t.Errorf("the line %q, want the job's savepoint, no erasure, and the erasure's job in the window", line)
+					}
+				}
+			}},
+		{"a lone write whose commit fails", []string{"a write of an erasure did not commit"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				if err := f.writer.Submit(t.Context(), failsAtCommit{}); err == nil {
+					t.Fatal("the commit did not fail")
+				}
+				waitLine(t, log, "a write of an erasure did not commit")
+				saysNoCommitText(t, log())
+			}},
+		{"a window whose commit fails, retried one by one", []string{"write window failed", "a write of an erasure did not commit"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// COMMIT fails no job in particular: the window is retried
+				// job by job, and the one whose commit fails alone says so
+				// by its facts (#36).
+				runWindow(t, w, sharesAWindow(), failsAtCommit{}, sharesAWindow())
+				waitLine(t, log, "a write of an erasure did not commit")
+				saysNoCommitText(t, log())
+			}},
+		{"a window of an erasure's job that another job's commit fails", []string{"write window failed"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// The commit fails the window and no job in particular: the
+				// line of a window that holds an erasure's job gives the
+				// facts of it and the erasures, not SQLite's words (#36).
+				runWindow(t, w, sharesAWindow(), quietStep{}, commitFailsPlainly{})
+				waitLine(t, log, "write window failed")
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(!strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+							!strings.Contains(line, "sqlite=") || strings.Contains(line, "FOREIGN KEY") ||
+							strings.Contains(line, "commit write transaction")) {
+						t.Errorf("the line %q, want the erasure and the code, and no text of the failed commit", line)
+					}
+				}
+			}},
+		{"a step of an erasure's that runs alone", []string{"writer step failed"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				// A step runs outside any window: it is wrapped where it
+				// runs, and says its facts and its erasure (#36).
+				if err := f.writer.Submit(t.Context(), hostileStep{err: fail}); err == nil {
+					t.Fatal("the step did not fail")
+				}
+				waitLine(t, log, "writer step failed")
+				if !strings.Contains(log(), "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") {
+					t.Errorf("the step's line %q does not name its erasure", log())
+				}
+			}},
+		{"a caller that wraps the writer's error and logs it",
+			[]string{"a caller printed the writer's error", "a caller logged the writer's error"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				err := f.writer.Submit(t.Context(), hostileJob{err: fail})
+				if err == nil {
+					t.Fatal("the job did not fail")
+				}
+				// A wrap above the writer's answer prints the wrap's text, not
+				// the failure's value (#36): through slog as it is, and
+				// through the writer's own line.
+				wrapped := fmt.Errorf("the caller: %w", err)
+				logger().Error("a caller printed the writer's error", "err", wrapped, "text", wrapped.Error())
+				logFailure(wrapped, slog.LevelError, "a caller logged the writer's error")
 			}},
 	}
 }
@@ -676,4 +772,151 @@ func TestAScrubsLinesNameTheErasure(t *testing.T) {
 		!strings.Contains(out, "batch=") {
 		t.Errorf("the scrub's line %q does not name the erasure and the batch", out)
 	}
+}
+
+// A job's failure says its facts wherever it goes (#36): wrapped above, the
+// writer's line still gives the erasure, the cause and the kind of the refusal,
+// and its text is a sentence of the erasure and the cause, never the error's
+// words. errors.Is and errors.As still reach what failed, which is how every
+// classifier of a failure reads it; a job that does not redact is its own error.
+func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
+	var buf bytes.Buffer
+	old := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&buf, nil)) }
+	t.Cleanup(func() { logger = old })
+	const erasure = "4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+
+	inner := &Rejection{Kind: RejectInvalid, Message: "words of user-4711"}
+	wrapped := fmt.Errorf("the caller: %w", failedAt(hostileJob{}, inner))
+	var rejection *Rejection
+	if !errors.As(wrapped, &rejection) || rejection != inner || !rejected(wrapped) {
+		t.Errorf("the wrap of %v does not reach the refusal it carries", wrapped)
+	}
+	// The wraps are not what failed: the types name the refusal alone.
+	if types := errorTypes(wrapped); types != "*store.Rejection" {
+		t.Errorf("the types of %v are %q, want the refusal's alone", wrapped, types)
+	}
+	if text := wrapped.Error(); strings.Contains(text, "4711") ||
+		!strings.Contains(text, "a write of erasure "+erasure+" was rejected (invalid)") {
+		t.Errorf("the text %q, want the erasure and the kind of the refusal without its words", text)
+	}
+	logFailure(wrapped, slog.LevelError, "a line")
+	// The facts are the failure's value, grouped under err.
+	out := buf.String()
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "err.erasure="+erasure) ||
+		!strings.Contains(out, "err.refusal=invalid") || !strings.Contains(out, "err.cause=") ||
+		strings.Contains(out, "4711") || strings.Contains(out, "the caller") {
+		t.Errorf("the line %q, want the refusal's facts under err at Info, not the wrap's text", out)
+	}
+
+	full := failedAt(hostileJob{}, fmt.Errorf("write for user-4711: %w", codedError{13}))
+	if code, ok := sqliteCode(full); !ok || code != 13 || failureCause(full) != sqliteCauses[13] {
+		t.Errorf("the failure %v lost its code", full)
+	}
+	if text := full.Error(); text != "a write of erasure "+erasure+" failed: "+sqliteCauses[13] {
+		t.Errorf("the text %q, want the erasure and the cause", text)
+	}
+	if value := full.(slog.LogValuer).LogValue(); value.Kind() != slog.KindString || strings.Contains(value.String(), erasure) {
+		t.Errorf("a condition says %v, want its name alone", value)
+	}
+
+	if err := failedAt(sharesAWindow(), inner); err != error(inner) {
+		t.Errorf("a job that does not redact answers %v, want its own error", err)
+	}
+
+	// A routine refusal is a refusal too, with no kind to give.
+	if text := failedAt(hostileJob{}, fmt.Errorf("a job: %w", ErrBadToken)).Error(); text != "a write of erasure "+erasure+" was rejected" {
+		t.Errorf("a routine refusal says %q", text)
+	}
+
+	// A window that failed with no job to blame names each erasure it held a
+	// job of once, joined so that a search for either id finds it.
+	window := failedByWindow([]*submission{{job: stepOf{"aaa"}}, {job: sharesAWindow()}, {job: stepOf{"bbb"}},
+		{job: stepOf{"aaa"}}}, errors.New("words of the commit"))
+	if text := window.Error(); text != "a write of erasures aaa,bbb failed: "+causeOther {
+		t.Errorf("a window's failure says %q", text)
+	}
+	buf.Reset()
+	logFailure(window, slog.LevelWarn, "a window")
+	if out := buf.String(); !strings.Contains(out, "err.erasures=aaa,bbb ") || strings.Contains(out, "words of the commit") {
+		t.Errorf("the line %q, want the erasures unquoted and no words of the commit", out)
+	}
+	if err := failedByWindow([]*submission{{job: sharesAWindow()}}, inner); err != error(inner) {
+		t.Errorf("a window of no erasure's job answers %v, want its own error", err)
+	}
+}
+
+// failsAtCommit is a job of an erasure's whose apply succeeds and whose commit
+// fails: a deferred foreign key it breaks is checked at COMMIT, which SQLite
+// refuses with a constraint, not a condition.
+type failsAtCommit struct{}
+
+func (failsAtCommit) apply(tx *sql.Tx) error {
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO erasure_tail (erasure_id, trace_id, arrived_from, arrived_to)
+		VALUES ('no such erasure', 'a trace', 0, 0)`)
+	return err
+}
+
+func (failsAtCommit) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// saysNoCommitText requires that each line of a write of an erasure that did
+// not commit names the erasure and gives no word of SQLite's refusal.
+func saysNoCommitText(t *testing.T, out string) {
+	t.Helper()
+	for line := range strings.Lines(out) {
+		if !strings.Contains(line, "a write of an erasure did not commit") {
+			continue
+		}
+		if !strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+			strings.Contains(line, "FOREIGN KEY") || strings.Contains(line, "commit write transaction") {
+			t.Errorf("the line %q, want the erasure and no text of the failed commit", line)
+		}
+	}
+}
+
+// quietStep is a job of an erasure's that commits.
+type quietStep struct{}
+
+func (quietStep) apply(*sql.Tx) error { return nil }
+func (quietStep) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// commitFailsPlainly is a job of no erasure's whose commit fails, as
+// failsAtCommit's does.
+type commitFailsPlainly struct{}
+
+func (commitFailsPlainly) apply(tx *sql.Tx) error { return failsAtCommit{}.apply(tx) }
+
+// plainRollsBack is a job of no erasure's that ends the writer's transaction
+// itself, as rollsBackItself does.
+type plainRollsBack struct{}
+
+func (plainRollsBack) apply(tx *sql.Tx) error {
+	_, _ = tx.Exec(`ROLLBACK`)
+	return errors.New("a job of no erasure's rolled the window back")
+}
+
+// Its owner logs its failure, so that the only line of it is the window's.
+func (plainRollsBack) failureReported() bool { return true }
+
+// stepOf is a job of the erasure id that commits.
+type stepOf struct{ id string }
+
+func (stepOf) apply(*sql.Tx) error               { return nil }
+func (j stepOf) failureRedacted() (string, bool) { return j.id, true }
+
+// hostileStep is a step of an erasure's that runs alone, outside any window,
+// and fails with an error of its own words.
+type hostileStep struct{ err error }
+
+func (hostileStep) apply(*sql.Tx) error                         { return nil }
+func (j hostileStep) runAlone(context.Context, *sql.Conn) error { return j.err }
+func (hostileStep) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
 }
