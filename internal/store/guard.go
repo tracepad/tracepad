@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -65,10 +64,4 @@ func try[T any](where string, fn func() (T, error)) (T, error) {
 		return err
 	})
 	return out, err
-}
-
-// isPanic says an error is a recovered panic, however it was wrapped.
-func isPanic(err error) bool {
-	var panicked *PanicError
-	return errors.As(err, &panicked)
 }

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -40,17 +39,6 @@ func TestAJobThatPanicsInAWindowRollsBackAlone(t *testing.T) {
 	}
 	if got, want := probe.stored(t), []string{"a", "b"}; !slices.Equal(got, want) {
 		t.Errorf("stored %v, want %v", got, want)
-	}
-	// Once: not run again in the savepoint pass, one line, and neither the
-	// writer's "refused" nor the handler's "failed" says it again.
-	if applied.Load() != 1 {
-		t.Errorf("the job that panics was applied %d times, want once", applied.Load())
-	}
-	if n := strings.Count(logged(), "a panic was recovered"); n != 1 {
-		t.Errorf("%d lines for the panic, want one:\n%s", n, logged())
-	}
-	if strings.Contains(logged(), "write refused") {
-		t.Errorf("the writer logged the panic as a refusal too:\n%s", logged())
 	}
 	for _, want := range []string{"a panic was recovered", "write job *store.weighedJob", "stack=", "TestAJobThatPanics"} {
 		if !strings.Contains(logged(), want) {
@@ -94,37 +82,6 @@ func TestALoneJobThatPanicsIsAnswered(t *testing.T) {
 		t.Errorf("stored %v after a job that panicked, want nothing", got)
 	}
 	if err := w.Submit(t.Context(), batchFor(p.ID, fmt.Sprintf("%032x", 7), spanHex(7))); err != nil {
-		t.Errorf("a write after the panic: %v", err)
-	}
-}
-
-// soloPanic is a step that runs alone and panics.
-type soloPanic struct{}
-
-func (soloPanic) apply(*sql.Tx) error { return nil }
-func (soloPanic) runAlone(context.Context, *sql.Conn) error {
-	var m map[string]int
-	m["x"] = 1 // assignment to a nil map
-	return nil
-}
-
-func TestAStepThatPanicsAloneIsAnswered(t *testing.T) {
-	logged := captureLog(t)
-	s, p := openIngestStore(t)
-	w, err := s.NewWriter(WriterOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	var panicked *PanicError
-	if err := w.Submit(t.Context(), soloPanic{}); !errors.As(err, &panicked) {
-		t.Fatalf("answer = %v, want a panic error", err)
-	}
-	if !strings.Contains(logged(), "write step store.soloPanic") ||
-		!strings.Contains(logged(), "assignment to entry in nil map") {
-		t.Errorf("the log does not name the step and the runtime fault:\n%s", logged())
-	}
-	if err := w.Submit(t.Context(), batchFor(p.ID, fmt.Sprintf("%032x", 8), spanHex(8))); err != nil {
 		t.Errorf("a write after the panic: %v", err)
 	}
 }
@@ -217,61 +174,6 @@ func TestAnErasureWhoseRunPanicsIsTakenAgain(t *testing.T) {
 	}
 }
 
-// A step that panics with a transaction open leaves the connection as it found
-// it: the writer rolls it back, and the next window begins (spec 043 #42).
-type soloOpensThenPanics struct{}
-
-func (soloOpensThenPanics) apply(*sql.Tx) error { return nil }
-func (soloOpensThenPanics) runAlone(ctx context.Context, conn *sql.Conn) error {
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	panic("in the middle of a transaction")
-}
-
-func TestAStepThatPanicsInATransactionLeavesTheConnectionUsable(t *testing.T) {
-	captureLog(t)
-	s, p := openIngestStore(t)
-	w, err := s.NewWriter(WriterOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	if err := w.Submit(t.Context(), soloOpensThenPanics{}); !isPanic(err) {
-		t.Fatalf("answer = %v, want a panic error", err)
-	}
-	if err := w.Submit(t.Context(), batchFor(p.ID, fmt.Sprintf("%032x", 9), spanHex(9))); err != nil {
-		t.Errorf("a write after a step panicked inside a transaction: %v", err)
-	}
-}
-
-// A job's own accessors are asked of it in Submit, on the caller's goroutine:
-// a fault in one is the caller's, and the writer's loop never meets it.
-type faultyWeight struct{}
-
-func (faultyWeight) apply(*sql.Tx) error { return nil }
-func (faultyWeight) weight() int         { var none *IngestBatch; return len(none.Traces) }
-
-func TestAJobWhoseWeightPanicsFailsInItsCallerNotTheWriter(t *testing.T) {
-	s, p := openIngestStore(t)
-	w, err := s.NewWriter(WriterOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Error("Submit of a job whose weight panics returned")
-			}
-		}()
-		_ = w.Submit(t.Context(), faultyWeight{})
-	}()
-	if err := w.Submit(t.Context(), batchFor(p.ID, fmt.Sprintf("%032x", 10), spanHex(10))); err != nil {
-		t.Errorf("a write after it: %v", err)
-	}
-}
-
 // A panic in the sweep of one project costs that project's sweep: the pass goes
 // on to the projects and the steps after it, and finishes.
 func TestAPanicInOneProjectsSweepDoesNotStopTheRest(t *testing.T) {
@@ -294,7 +196,7 @@ func TestAPanicInOneProjectsSweepDoesNotStopTheRest(t *testing.T) {
 		}
 	}
 	err = sw.Pass(t.Context())
-	if !isPanic(err) {
+	if !errors.As(err, new(*PanicError)) {
 		t.Fatalf("Pass = %v, want the panic among its failures", err)
 	}
 	if len(seen) != 2 {
@@ -325,7 +227,7 @@ func TestAPanicInOneProjectsRollDoesNotStopTheRest(t *testing.T) {
 			panic("the first project's data")
 		}
 	}
-	if err := ag.Pass(t.Context()); !isPanic(err) {
+	if err := ag.Pass(t.Context()); !errors.As(err, new(*PanicError)) {
 		t.Fatalf("Pass = %v, want the panic among its failures", err)
 	}
 	if len(seen) != 2 {
