@@ -178,7 +178,7 @@ func TestScoresFilterByAuthor(t *testing.T) {
 
 	var plan, detail string
 	var id, parent, unused int
-	rows, err := f.db.Query(`EXPLAIN QUERY PLAN SELECT `+authoredScoreColumns+authoredScoreFrom+`
+	rows, err := f.db.Query(`EXPLAIN QUERY PLAN SELECT `+authoredScoreSelect+authoredScoreFrom+`
 		 WHERE s.project_id = ? AND s.author_id = ? ORDER BY s.timestamp DESC, s.id DESC LIMIT 3`,
 		f.project.ID, ada.ID)
 	if err != nil {
@@ -254,6 +254,31 @@ func TestScoresFromBeforeHaveNoAuthor(t *testing.T) {
 	}
 	assertAuthor(t, authorOf(t, s, "p1", "new"),
 		ScoreAuthor{Kind: AuthorKey, ID: "tp-pk-gone", Name: "ci", Standing: StandingRevoked})
+}
+
+// TestScoresAuthoredByCountsEveryProject: the deletion's dry run counts an
+// account's scores in every project it wrote in, a soft-deleted one included,
+// and a key whose public key happens to spell the account's id is not the
+// account (#7).
+func TestScoresAuthoredByCountsEveryProject(t *testing.T) {
+	f := newAccountFixture(t)
+	other, err := f.CreateProject("other", KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ada := f.invite(t, "ada@example.com", false,
+		Membership{ProjectID: f.project.ID, Role: RoleEditor},
+		Membership{ProjectID: other.ID, Role: RoleEditor})
+	f.submit(t, &ScoreWrite{ProjectID: f.project.ID, Scores: []*Score{authoredScore("s-1", AccountAuthor(ada))}})
+	f.submit(t, &ScoreWrite{ProjectID: other.ID, Scores: []*Score{authoredScore("s-2", AccountAuthor(ada))}})
+	f.submit(t, &ScoreWrite{ProjectID: other.ID, Scores: []*Score{
+		authoredScore("s-3", &ScoreAuthor{Kind: AuthorKey, ID: ada.ID, Name: "lookalike"})}})
+	f.submit(t, &ProjectDelete{ProjectID: other.ID, Confirm: "other", Now: time.Now().UnixNano()})
+
+	n, err := f.ScoresAuthoredBy(t.Context(), ada.ID)
+	if err != nil || n != 2 {
+		t.Errorf("ScoresAuthoredBy = %d, %v; want the two the account wrote, the soft-deleted project's included", n, err)
+	}
 }
 
 func ids(scores []*Score) []string {

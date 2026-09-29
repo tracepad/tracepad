@@ -351,7 +351,7 @@ func (s *Store) Scores(ctx context.Context, projectID string, filter ScoreFilter
 	args = append(args, filter.Limit)
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+authoredScoreColumns+authoredScoreFrom+`
+		`SELECT `+authoredScoreSelect+authoredScoreFrom+`
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY s.timestamp DESC, s.id DESC LIMIT ?`, args...)
 	if err != nil {
@@ -375,15 +375,17 @@ func (s *Store) Scores(ctx context.Context, projectID string, filter ScoreFilter
 const scoreColumns = `id, trace_id, observation_id, session_id, name, data_type, value,
 	        string_value, comment, metadata, timestamp, created_at`
 
+// authoredScoreSelect is scoreColumns for a query that names `scores` as `s`,
+// then the author's: the one list scanScore reads, spelled once.
+var authoredScoreSelect = prefixed("s", scoreColumns) + ",\n\t        " + authoredScoreColumns
+
 // authoredScoreColumns and authoredScoreFrom read a score with its author's
 // standing now (spec 048 #4), for a query that names `scores` as `s`: one
 // LEFT JOIN each to the account, its membership in the score's project and
 // the key, all by primary key. The run screens read scoreColumns alone: their
 // attempt scores carry no author (#10).
 const (
-	authoredScoreColumns = `s.id, s.trace_id, s.observation_id, s.session_id, s.name, s.data_type,
-	        s.value, s.string_value, s.comment, s.metadata, s.timestamp, s.created_at,
-	        s.author_kind, s.author_id, s.author_name, s.author_email,
+	authoredScoreColumns = `s.author_kind, s.author_id, s.author_name, s.author_email,
 	        a.id IS NOT NULL, COALESCE(a.owner, 0), COALESCE(a.disabled, 0),
 	        COALESCE(m.role, ''), COALESCE(a.name, ''), k.public_key IS NOT NULL`
 	authoredScoreFrom = `
@@ -398,7 +400,7 @@ const (
 // Score returns one score with its author, or nil when it does not exist.
 func (s *Store) Score(ctx context.Context, projectID, id string) (*Score, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+authoredScoreColumns+authoredScoreFrom+`
+		`SELECT `+authoredScoreSelect+authoredScoreFrom+`
 		 WHERE s.project_id = ? AND s.id = ?`, projectID, id)
 	if err != nil {
 		return nil, fmt.Errorf("read score %s: %w", id, err)
@@ -412,12 +414,14 @@ func (s *Store) Score(ctx context.Context, projectID, id string) (*Score, error)
 
 // ScoresAuthoredBy counts the scores an account wrote, in every project, soft
 // deleted ones included (spec 048 #7): what deleting the account leaves its
-// name on. One seek into idx_scores_author per project. The kind needs no
-// test: an account id is 32 hex characters and a public key starts `tp-pk-`.
+// name on. One seek into idx_scores_author per project. The kind is tested
+// too, rather than trusted to the two id shapes never meeting: nothing in the
+// schema keeps a public key from looking like an account id.
 func (s *Store) ScoresAuthoredBy(ctx context.Context, accountID string) (int64, error) {
 	var n int64
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*)
-	   FROM projects p JOIN scores s ON s.project_id = p.id AND s.author_id = ?`, accountID).Scan(&n)
+	   FROM projects p JOIN scores s ON s.project_id = p.id AND s.author_id = ?
+	  WHERE s.author_kind = 'account'`, accountID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count the scores an account wrote: %w", err)
 	}

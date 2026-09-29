@@ -82,6 +82,15 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Resolved before the body is read, since it depends on nothing in it.
+	// The route admits a session or a key and nothing else (spec 028 #3), so
+	// a caller that is neither is the server's own mistake.
+	author := scoreAuthor(callerFrom(r.Context()))
+	if author == nil {
+		slog.Error("a score write reached its handler without a session or a key", "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "internal error: the score has no author to record")
+		return
+	}
 	// The write routes take no query parameters at all, and one that was
 	// sent means the caller expected it to do something (#21, #23).
 	if _, err := queryParams(r); err != nil {
@@ -101,15 +110,6 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	if len(requests) == 0 {
 		// Nothing to write is a client bug, not a no-op (edge cases).
 		writeError(w, http.StatusBadRequest, "no scores in the request")
-		return
-	}
-
-	author := scoreAuthor(callerFrom(r.Context()))
-	if author == nil {
-		// The route admits a session or a key and nothing else (spec 028
-		// #3), so a caller that is neither never came through the guard.
-		slog.Error("a score write ran without a session or a key", "path", r.URL.Path)
-		writeError(w, http.StatusInternalServerError, "the request was not authorized")
 		return
 	}
 

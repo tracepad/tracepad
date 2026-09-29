@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/store"
 )
@@ -177,10 +178,23 @@ func TestTheAuthorFilter(t *testing.T) {
 func TestDeletingAnAccountKeepsItsScores(t *testing.T) {
 	h := newAccountHarness(t)
 	owner := h.owner(t)
+	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other-0123456789abcdef0123"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	helper := h.account(t, "helper@example.com", false,
-		store.Membership{ProjectID: h.project.ID, Role: store.RoleEditor})
+		store.Membership{ProjectID: h.project.ID, Role: store.RoleEditor},
+		store.Membership{ProjectID: other.ID, Role: store.RoleEditor})
 	id := h.scoreAs(t, scoreTraceID, asSession(helper), inProject(h.project.ID))
 	h.scoreAs(t, scoreTraceID, asSession(helper), inProject(h.project.ID))
+	// A third in another project, which is then soft-deleted: the count is
+	// every project's, a deleted one's included, since a restore brings its
+	// scores back.
+	h.scoreAs(t, scoreTraceID, asSession(helper), inProject(other.ID))
+	if err := h.writer.Submit(t.Context(), &store.ProjectDelete{ProjectID: other.ID, Confirm: "other",
+		Now: time.Now().UnixNano()}); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := h.call(t, "DELETE", "/api/v1/accounts/"+helper.account.ID, nil, asSession(owner))
 	expectStatus(t, rec, http.StatusOK)
@@ -188,8 +202,8 @@ func TestDeletingAnAccountKeepsItsScores(t *testing.T) {
 		ScoresAuthored *int64 `json:"scores_authored"`
 		Note           string `json:"note"`
 	}](t, rec)
-	if preview.ScoresAuthored == nil || *preview.ScoresAuthored != 2 {
-		t.Errorf("scores_authored = %v, want 2", preview.ScoresAuthored)
+	if preview.ScoresAuthored == nil || *preview.ScoresAuthored != 3 {
+		t.Errorf("scores_authored = %v, want 3", preview.ScoresAuthored)
 	}
 	if !strings.Contains(preview.Note, "scores") {
 		t.Errorf("the note does not say the scores stay: %q", preview.Note)

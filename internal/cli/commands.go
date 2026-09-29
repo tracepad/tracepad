@@ -686,26 +686,17 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 
 // scoreAuthor is the part of a score's author the listing prints.
 type scoreAuthor struct {
-	Kind string `json:"kind"`
 	Name string `json:"name"`
-	ID   string `json:"id"`
 }
 
-// scoreAuthorLabel is who wrote a score, in one cell (spec 048 #9): an
-// account's name, or its id when it has none; a key as `key NAME`; a dash for a
-// score from before authors were recorded.
+// scoreAuthorLabel is who wrote a score, in one cell (spec 048 #9): the
+// account's or the key's name, or a dash — for an author with none, and for a
+// score from before authors were recorded. `--json` has the id and the kind.
 func scoreAuthorLabel(author *scoreAuthor) string {
 	if author == nil {
 		return "-"
 	}
-	name := author.Name
-	if name == "" {
-		name = author.ID
-	}
-	if author.Kind == "key" {
-		return "key " + name
-	}
-	return name
+	return orDash(author.Name)
 }
 
 func (r *run) prompts(ctx context.Context, args []string) error {
