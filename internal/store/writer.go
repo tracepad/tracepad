@@ -439,7 +439,9 @@ func (w *Writer) runSolo(sub *submission) bool {
 	if !ok {
 		return false
 	}
-	err := job.runAlone(context.Background(), w.conn)
+	// A step runs outside any window, so pass does not see it: a step of a
+	// job that redacts its failure is wrapped here (spec 047 #36).
+	err := failedAt(sub.job, job.runAlone(context.Background(), w.conn))
 	if err != nil {
 		logFailure(err, slog.LevelError, "writer step failed")
 	}
@@ -615,8 +617,7 @@ func failedByWindow(pending []*submission, err error) error {
 // log has; a database condition it met counts in the paced line, which gives
 // the condition and not the job, since a full disk is news whoever met it.
 func lost(sub *submission, err error, message string) {
-	var redacted *jobFailure
-	if errors.As(err, &redacted) {
+	if _, redacted := asJobFailure(err); redacted {
 		if _, condition := Condition(err); !condition {
 			message = "a write of an erasure did not commit"
 		}
@@ -673,11 +674,17 @@ func levelFor(err error, level slog.Level) slog.Level {
 // (#33). The writer's own lines hand it a jobFailure unwrapped, so the search
 // is a guard, for a line that is handed one a caller wrapped.
 func logged(err error) any {
-	var redacted *jobFailure
-	if errors.As(err, &redacted) {
+	if redacted, ok := asJobFailure(err); ok {
 		return redacted
 	}
 	return err
+}
+
+// asJobFailure is the jobFailure in err's chain, if there is one.
+func asJobFailure(err error) (*jobFailure, bool) {
+	var redacted *jobFailure
+	ok := errors.As(err, &redacted)
+	return redacted, ok
 }
 
 // commit applies a window in one transaction and commits it. A window of two
@@ -714,7 +721,8 @@ func (w *Writer) commit(pending []*submission) (refused []error, err error) {
 }
 
 // pass applies a window once and gives what failed in it as the writer answers
-// and logs it — the one place the writer wraps a failure (spec 047 #36): each
+// and logs it — where the writer wraps a failure, with runSolo for a step that
+// runs outside any window (spec 047 #36): each
 // refusal by the job it refused, the window's failure by the job it was met at,
 // and one that no job met, a BEGIN or a COMMIT, by every erasure the window
 // holds a job of.
@@ -748,8 +756,7 @@ var errJobFailed = errors.New("a job of the window failed by itself")
 func explainReplay(sub *submission, failed error) {
 	const message = "a job failed its window's first pass and passed the second"
 	job := fmt.Sprintf("%T", sub.job)
-	var redacted *jobFailure
-	if !errors.As(failed, &redacted) && reports(sub.job) {
+	if _, redacted := asJobFailure(failed); !redacted && reports(sub.job) {
 		logger().Log(context.Background(), levelFor(failed, slog.LevelWarn), message, "job", job)
 		return
 	}

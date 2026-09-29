@@ -402,6 +402,18 @@ func erasureLogPaths() []erasureLogPath {
 					}
 				}
 			}},
+		{"a step of an erasure's that runs alone", []string{"writer step failed"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				// A step runs outside any window: it is wrapped where it
+				// runs, and says its facts and its erasure (#36).
+				if err := f.writer.Submit(t.Context(), hostileStep{err: fail}); err == nil {
+					t.Fatal("the step did not fail")
+				}
+				waitLine(t, log, "writer step failed")
+				if !strings.Contains(log(), "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") {
+					t.Errorf("the step's line %q does not name its erasure", log())
+				}
+			}},
 		{"a caller that wraps the writer's error and logs it",
 			[]string{"a caller printed the writer's error", "a caller logged the writer's error"}, false,
 			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
@@ -780,6 +792,10 @@ func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
 	if !errors.As(wrapped, &rejection) || rejection != inner || !rejected(wrapped) {
 		t.Errorf("the wrap of %v does not reach the refusal it carries", wrapped)
 	}
+	// The wraps are not what failed: the types name the refusal alone.
+	if types := errorTypes(wrapped); types != "*store.Rejection" {
+		t.Errorf("the types of %v are %q, want the refusal's alone", wrapped, types)
+	}
 	if text := wrapped.Error(); strings.Contains(text, "4711") ||
 		!strings.Contains(text, "a write of erasure "+erasure+" was rejected (invalid)") {
 		t.Errorf("the text %q, want the erasure and the kind of the refusal without its words", text)
@@ -894,3 +910,13 @@ type stepOf struct{ id string }
 
 func (stepOf) apply(*sql.Tx) error               { return nil }
 func (j stepOf) failureRedacted() (string, bool) { return j.id, true }
+
+// hostileStep is a step of an erasure's that runs alone, outside any window,
+// and fails with an error of its own words.
+type hostileStep struct{ err error }
+
+func (hostileStep) apply(*sql.Tx) error                         { return nil }
+func (j hostileStep) runAlone(context.Context, *sql.Conn) error { return j.err }
+func (hostileStep) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}

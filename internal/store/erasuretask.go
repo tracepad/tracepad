@@ -879,11 +879,17 @@ func errorTypes(err error) string {
 		if next == nil {
 			continue
 		}
-		switch name := fmt.Sprintf("%T", next); name {
-		case "*fmt.wrapError", "*fmt.wrapErrors", "*errors.joinError",
-			"*store.runError", "*store.reportedError", "*store.jobFailure", "*store.rawBatchError":
+		// The store's own by their types, so that a rename is the
+		// compiler's to catch; the standard library's wrappers are
+		// unexported, and known by their names.
+		switch next.(type) {
+		case *runError, *reportedError, *jobFailure, *rawBatchError:
 		default:
-			names = append(names, name)
+			switch name := fmt.Sprintf("%T", next); name {
+			case "*fmt.wrapError", "*fmt.wrapErrors", "*errors.joinError":
+			default:
+				names = append(names, name)
+			}
 		}
 		switch wrapped := next.(type) {
 		case interface{ Unwrap() error }:
