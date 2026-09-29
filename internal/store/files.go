@@ -52,7 +52,7 @@ func secureFiles(path string) error {
 			logger().Warn("could not create the database file owner-only; SQLite will create it", "path", path, "err", err)
 		}
 	}
-	for _, file := range append([]string{path, path + "-wal", path + "-shm"}, backupFiles(path)...) {
+	for _, file := range append([]string{path, path + "-wal", path + "-shm", path + LockSuffix}, backupFiles(path)...) {
 		tighten(file, dataFileMode)
 	}
 	return nil
@@ -105,7 +105,7 @@ func tightenDir(dir, db string) {
 // backup.
 func databaseFile(db string, entry fs.DirEntry) bool {
 	switch name := entry.Name(); name {
-	case db, db + "-wal", db + "-shm", db + "-journal":
+	case db, db + "-wal", db + "-shm", db + "-journal", db + LockSuffix:
 		return true
 	default:
 		return isBackup(db, entry)

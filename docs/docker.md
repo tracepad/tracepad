@@ -199,8 +199,8 @@ back to your host and runs a network service as root to do it.
 
 The database holds every prompt and completion, the accounts' password hashes
 and the key that signs media uploads, so the server keeps it to its owner: the
-data directory `0700`, the database, its `-wal` and `-shm` and the
-pre-migration backups `0600`. It creates them that way, and it tightens them
+data directory `0700`, the database, its `-wal` and `-shm`, its lock file
+(`tracepad.db.lock`) and the pre-migration backups `0600`. It creates them that way, and it tightens them
 **at every start** — an install from before this, whose files were `0644` in a
 `0755` directory, is closed by the first start of the new version. The image
 creates `/data` as `0700`, so a new named volume starts closed.
@@ -518,6 +518,19 @@ tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
 readable by its owner alone; it is the whole database, and without it the file
 lands in your directory as readable as that directory lets it be. Restoring is
 the same command with the arguments swapped, into a stopped container's volume.
+
+**One server per volume.** The server holds a lock on `tracepad.db.lock`, beside the
+database, for as long as it runs, and a second one started on the same
+directory exits at once, telling you a server is already running there and the
+pid that last recorded itself in the file, which may be stale (a crash leaves
+its pid behind, and two containers sharing a volume are both pid 1). That is
+what a `docker run` that overlaps the container it replaces, or a second
+`tracepad serve` on the same `--data-dir`, meets: stop the first, or give the
+second a directory of its own. A server that was killed leaves the database
+free at once; the file it leaves behind holds nothing that matters and is safe
+to delete or to include in a backup. On a file system that cannot lock at all
+(NFS without a lock daemon, some FUSE volumes) the server starts anyway and
+says in a `WARN` that nothing guards the directory: do not run two.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
 migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
