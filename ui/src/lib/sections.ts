@@ -11,7 +11,8 @@ import Settings from '@lucide/svelte/icons/settings';
 import Users from '@lucide/svelte/icons/users';
 import type { Component } from 'svelte';
 import { page } from '$app/state';
-import { within } from '$lib/project.svelte';
+import { within } from '$lib/paths';
+import { SCREENS, type Screen } from '$lib/screens';
 
 export type Item = {
 	href: string;
@@ -23,47 +24,37 @@ export type Item = {
 /** A labelled group of items (spec 016 #1): the label is not a link. */
 export type Group = { label: string; children: Item[] };
 
-/**
- * Navigation as data: spec 007 added three screens by adding three rows,
- * and spec 016 adds its first *section* — three screens that are one topic,
- * grouped under a label so a seven-item column says what four of them have
- * in common (#1). A group is a row too; the list nests once. The four marked
- * `tab` are a phone's tabs (spec 006 #20): the front page and the three
- * places a failure is read.
- */
-export const SECTIONS: (Item | Group)[] = [
-	// First, because it is the door (spec 034 #1): the screen that was
-	// Stats, seventh, is the project's front page.
-	{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, tab: true },
-	{ href: '/traces', label: 'Traces', icon: ListTree, tab: true },
-	{ href: '/sessions', label: 'Sessions', icon: MessagesSquare, tab: true },
-	// Between the two screens it joins (spec 023 #8): a user is a set of
-	// sessions, and the user page is the dashboard for one of them.
-	{ href: '/users', label: 'Users', icon: Users, tab: true },
-	// Top level, not under *Evals* (spec 021 #1): a prompt is what the
-	// application ships, and filing it under the test loop would say it
-	// belongs to the eval nouns.
-	{ href: '/prompts', label: 'Prompts', icon: ScrollText },
-	{
-		label: 'Evals',
-		children: [
-			{ href: '/datasets', label: 'Datasets', icon: Database },
-			{ href: '/runs', label: 'Runs', icon: FlaskConical },
-			{ href: '/score-configs', label: 'Score configs', icon: Ruler },
-			// Fourth, and last (spec 024 #10): a queue is an eval noun —
-			// the design lists it beside datasets and runs — and it is
-			// what the section was made to hold.
-			{ href: '/queues', label: 'Queues', icon: ClipboardCheck },
-			// Fifth, after the queue (spec 025 #9): quality is what evals
-			// produce, so it sits with the datasets, the runs and the
-			// annotation desk rather than with the traffic on Stats.
-			{ href: '/quality', label: 'Quality', icon: ChartSpline }
-		]
-	},
-	{ href: '/settings', label: 'Settings', icon: Settings }
-];
+/** Each screen's icon: a screen added to `SCREENS` without one does not compile. */
+const ICONS: Record<(typeof SCREENS)[number]['href'], Item['icon']> = {
+	'/dashboard': LayoutDashboard,
+	'/traces': ListTree,
+	'/sessions': MessagesSquare,
+	'/users': Users,
+	'/prompts': ScrollText,
+	'/datasets': Database,
+	'/runs': FlaskConical,
+	'/score-configs': Ruler,
+	'/queues': ClipboardCheck,
+	'/quality': ChartSpline,
+	'/settings': Settings
+};
 
 export const isGroup = (section: Item | Group): section is Group => 'children' in section;
+
+/**
+ * Navigation: the list of screens (`screens.ts`) with their icons, the ones
+ * filed under a label gathered into a group — a row too; the list nests once.
+ * The four marked `tab` are a phone's tabs (spec 006 #20): the front page and
+ * the three places a failure is read.
+ */
+export const SECTIONS: (Item | Group)[] = [];
+for (const { href, label, ...rest } of SCREENS as readonly Screen[]) {
+	const item: Item = { href, label, icon: ICONS[href as keyof typeof ICONS], ...(rest.tab && { tab: true }) };
+	const last = SECTIONS.at(-1);
+	if (!rest.group) SECTIONS.push(item);
+	else if (last && isGroup(last) && last.label === rest.group) last.children.push(item);
+	else SECTIONS.push({ label: rest.group, children: [item] });
+}
 
 /**
  * The active screen: the one whose path this URL is under, compared after

@@ -198,17 +198,6 @@ describe('the projects table', () => {
 	});
 });
 
-describe('within', () => {
-	it('takes the prefix off and leaves a bare path alone', async () => {
-		const { within } = await fresh();
-
-		expect(within(`/p/${P1}/settings/server`)).toBe('/settings/server');
-		expect(within(`/p/${P1}`)).toBe('/');
-		expect(within('/p')).toBe('/p');
-		expect(within('/login')).toBe('/login');
-	});
-});
-
 describe('switchTarget', () => {
 	const at = (path: string) => new URL(`http://tracepad.test${path}`);
 
@@ -248,6 +237,27 @@ describe('switchTarget', () => {
 		const { switchTarget } = await fresh();
 
 		expect(switchTarget(at(`/p/${P1}${from}`), P2)).toBe(`/p/${P2}${to}`);
+	});
+
+	// The sections a switch keeps are the navigation's own list, so a screen
+	// added there is kept with no second edit here — and `stats` besides, for
+	// its redirect (spec 034 #1).
+	it('keeps every screen the navigation lists, and the one it redirects', async () => {
+		const { switchTarget } = await fresh();
+		const { SCREENS } = await import('./screens');
+
+		for (const { href } of SCREENS.filter((screen) => screen.href !== '/settings')) {
+			expect(switchTarget(at(`/p/${P1}${href}/deeper`), P2), href).toBe(`/p/${P2}${href}`);
+		}
+		expect(switchTarget(at(`/p/${P1}/stats`), P2)).toBe(`/p/${P2}/stats`);
+		expect(switchTarget(at(`/p/${P1}/not-a-screen`), P2)).toBe(`/p/${P2}/dashboard`);
+	});
+
+	// Settings is the one section with a tab, and the tab is kept.
+	it('keeps the tab of Settings', async () => {
+		const { switchTarget } = await fresh();
+
+		expect(switchTarget(at(`/p/${P1}/settings/project/deeper`), P2)).toBe(`/p/${P2}/settings/project`);
 	});
 
 	// A project made from the Server tab is opened on the same tab (#15): the
