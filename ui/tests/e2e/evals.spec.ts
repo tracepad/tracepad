@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { clipped, createProject, foldsAt, section, sideways, signIn as enter, state } from './harness';
+import { clipped, createProject, foldsAt, openDialog, section, sideways, signIn as enter, state } from './harness';
 
 // The Evals screens (spec 016, Testing — e2e), against the real binary. The
 // corpus is not enough here: the suite creates a dataset, its items and a run
@@ -452,8 +452,7 @@ test('a score config is written, edited and removed through the form', async ({ 
 	await signIn(page);
 	await page.goto('/score-configs');
 
-	await page.getByRole('button', { name: 'New score config' }).click();
-	const form = page.getByRole('dialog');
+	const form = await openDialog(page.getByRole('button', { name: 'New score config' }));
 	await form.getByLabel('Name').fill(name);
 	await form.getByLabel('Type').selectOption('categorical');
 	// A categorical name has no direction and must have its categories: the
@@ -468,16 +467,8 @@ test('a score config is written, edited and removed through the form', async ({ 
 	await expect(row).toContainText('helpful, unhelpful');
 
 	// The same form edits it, and the name is not a thing an edit changes.
-	await row.getByRole('button', { name: 'Edit' }).click();
+	await openDialog(row.getByRole('button', { name: 'Edit' }));
 	await expect(form.getByLabel('Name')).toHaveAttribute('readonly', '');
-	// The dialog is open when it is in the DOM, but it takes its focus a frame
-	// later (bits-ui moves it to the first tabbable, here the read-only name,
-	// in a requestAnimationFrame). A `fill` that lands in that frame focuses
-	// Description, has the focus taken back, and types into a field that
-	// refuses it: the Save then sends the config unchanged. A person cannot
-	// click into a field within a frame of the dialog appearing, so the wait
-	// is the test's, not the screen's.
-	await expect(form.getByLabel('Name')).toBeFocused();
 	await form.getByLabel('Description').fill('Whether the answer helped');
 	await form.getByRole('button', { name: 'Save' }).click();
 	await expect(row).toContainText('Whether the answer helped');

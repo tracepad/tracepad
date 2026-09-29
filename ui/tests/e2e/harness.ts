@@ -190,6 +190,27 @@ export async function signInAsOwner(page: Page, project?: string) {
 	await signIn(page, owner);
 }
 
+/**
+ * Clicks what opens a dialog and returns the dialog once it has taken its
+ * focus. A dialog is in the DOM before it has focus: bits-ui moves the focus
+ * inside in the frame after it mounts, and a `fill` that focuses a field in
+ * that frame has the focus taken back and its text inserted into whatever the
+ * dialog chose. Nothing a person does can land in that frame, so it is the
+ * test that waits (found in a mobile flake of the score-config form).
+ */
+export async function openDialog(
+	opener: Locator,
+	name?: string,
+	role: 'dialog' | 'alertdialog' = 'dialog'
+): Promise<Locator> {
+	await opener.click();
+	const dialog = opener.page().getByRole(role, name ? { name } : {});
+	await expect
+		.poll(() => dialog.evaluate((el) => el.contains(document.activeElement)))
+		.toBe(true);
+	return dialog;
+}
+
 export function state(): State {
 	return JSON.parse(readFileSync(STATE, 'utf8')) as State;
 }

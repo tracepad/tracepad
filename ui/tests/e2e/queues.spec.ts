@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { clipped, createProject, foldsAt, sideways, signIn as enter, state, WIRE_TRACE } from './harness';
+import { clipped, createProject, foldsAt, openDialog, sideways, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // The annotation loop end to end (spec 024, Testing — e2e), against the real
 // binary: declare a queue, fill it by hand and by filter, work it at the desk,
@@ -94,7 +94,7 @@ test('a queue is declared over the two configs, and starts empty', async ({ page
 	await expect(page.getByText('No queues yet')).toBeVisible();
 	await expect(page.getByText(/tracepad queues put/)).toBeVisible();
 
-	await page.getByRole('button', { name: 'New queue' }).click();
+	await openDialog(page.getByRole('button', { name: 'New queue' }));
 	await page.getByLabel('Name').fill(QUEUE);
 	await page.getByLabel(/Description/).fill('Did support answer the question?');
 	// The gate wants at least one score: a queue is the scores it asks for.

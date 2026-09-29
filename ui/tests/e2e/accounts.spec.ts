@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { BCRYPT_WAIT, FAILING_TRACE, fromOwnAddress, PASSWORD } from './harness';
+import { BCRYPT_WAIT, FAILING_TRACE, fromOwnAddress, openDialog, PASSWORD } from './harness';
 
 // The whole of spec 028 as one story, against a server of its own: the setup
 // link the binary printed creates the first owner, that owner invites a
@@ -204,8 +204,7 @@ test.describe('accounts, from the link the server printed', () => {
 		await signIn(page, at, OWNER);
 		await page.goto(`${at.base}/settings/server`);
 
-		await page.getByRole('button', { name: 'Invite' }).click();
-		const dialog = page.getByRole('dialog');
+		const dialog = await openDialog(page.getByRole('button', { name: 'Invite' }));
 		await dialog.getByLabel('Email').fill(VIEWER.email);
 		await dialog.getByLabel('Display name').fill('The Helper');
 		await dialog.getByLabel(/^Role in /).selectOption('Viewer');
@@ -250,7 +249,7 @@ test.describe('accounts, from the link the server printed', () => {
 
 		// Scoring is a viewer's job — that is what the role is for (#3).
 		await page.goto(`${at.base}/traces/${FAILING_TRACE}`);
-		await page.getByRole('button', { name: 'Score', exact: true }).click();
+		await openDialog(page.getByRole('button', { name: 'Score', exact: true }));
 		// Exact: the free-name field beside it is labelled "Score name".
 		await page.getByLabel('Name', { exact: true }).selectOption('other…');
 		await page.getByLabel('Score name').fill('verdict');
