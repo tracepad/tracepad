@@ -3,6 +3,7 @@
 	import type { TraceRow } from '$lib/api/client.svelte';
 	import { ABSENT, cost, duration, timestamp, wait } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
+	import { billedTokens, compact, tokenClasses } from '$lib/tokens';
 	import { Fold } from '$lib/fold.svelte';
 	import { href } from '$lib/project.svelte';
 	import { highlight, searchTerms } from '$lib/search';
@@ -47,9 +48,13 @@
 	// failed, and the other columns fold under the name: where it ran, how
 	// long it took and what it cost on one line, whose and which session on
 	// the next (spec 006 #18, #22). The number is the unfolded table's width and
-	// its `min-width`: nine columns at the widths their usual values take.
-	const fold = new Fold(896);
+	// its `min-width`: ten columns at the widths their usual values take.
+	const fold = new Fold(992);
 	const narrow = $derived(fold.narrow);
+	const tokensText = (row: TraceRow) => {
+		const tokens = billedTokens(row.tokens);
+		return tokens === null ? null : `${compact(tokens)} tokens`;
+	};
 	const firstToken = (row: TraceRow) =>
 		row.ttft_ms == null ? null : `TTFT ${wait(row.ttft_ms)}`;
 
@@ -145,6 +150,9 @@
 					<th scope="col" class="w-36 px-3 py-2 font-medium">User</th>
 					<th scope="col" class="w-36 px-3 py-2 font-medium">Session</th>
 					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+					<!-- Input plus output, the one number every listing shows for
+					     tokens; the tooltip lists every class (spec 049 #9). -->
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Tokens</th>
 					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Latency</th>
 					<!-- Beside latency, because they answer the same question from two
 					     ends: how long the whole thing took, and how long the person
@@ -213,7 +221,8 @@
 										row.environment,
 										duration(row.latency_ms),
 										firstToken(row),
-										cost(row.total_cost)
+										cost(row.total_cost),
+										tokensText(row)
 									]}
 								/>
 							</div>
@@ -231,6 +240,9 @@
 						<td class="text-muted {cell} min-w-20">{@render user(row)}</td>
 						<td class="text-muted {cell} min-w-20">{@render session(row)}</td>
 						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+						<td class="text-muted {numeric}" title={tokenClasses(row.tokens)}>
+							{compact(billedTokens(row.tokens))}
+						</td>
 						<td class="text-muted {numeric}">{duration(row.latency_ms)}</td>
 						<td class="text-muted {numeric}">{wait(row.ttft_ms)}</td>
 					{/if}
@@ -262,7 +274,7 @@
 					>
 						<!-- A match is a piece of somebody's text: a URL or an id in it has no
 						     place to break, so it may break anywhere rather than widen the table. -->
-						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs wrap-anywhere" colspan={narrow ? 3 : 9}>
+						<td class="text-muted px-3 pt-0 pb-1.5 font-mono text-xs wrap-anywhere" colspan={narrow ? 3 : 10}>
 							<span class="text-subtle">{row.match.field}</span>
 							{#each highlight(row.match.snippet, terms) as piece, i (i)}
 								{#if piece.hit}<mark class="bg-accent-soft text-fg rounded-sm px-0.5"

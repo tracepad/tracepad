@@ -10,7 +10,7 @@ import BreakdownTable from './BreakdownTable.svelte';
 describe('the breakdown table', () => {
 	const rows = breakdown([
 		{ key: 'claude-sonnet-5', count: 3, error_count: 0, latency_ms: {},
-			tokens: { input: 1200, output: 34, cache_read: 500 } },
+			tokens: { input: 1200, output: 34, cache_read: 500, reasoning: 20 } },
 		{ key: 'local-llama', count: 1, error_count: 0, latency_ms: {} }
 	]);
 
@@ -24,6 +24,17 @@ describe('the breakdown table', () => {
 			within(screen.getByRole('row', { name: new RegExp(model) })).getAllByRole('cell').at(-1)!;
 		expect(tokensOf('claude-sonnet-5')).toHaveTextContent(/^1,234$/);
 		expect(tokensOf('local-llama')).toHaveTextContent(/^—$/);
+	});
+
+	it('lists every class the row reported in the cell tooltip, none added in', () => {
+		render(BreakdownTable, { title: 'By model', label: 'Model', unit: 'observation', rows, tokens: true });
+
+		const cell = within(screen.getByRole('row', { name: /claude-sonnet-5/ })).getAllByRole('cell').at(-1)!;
+		// 1,234 is input plus output; reasoning is beside it, not in it (spec 049 #1).
+		expect(cell).toHaveTextContent(/^1,234$/);
+		expect(cell).toHaveAttribute('title', 'Input 1,200\nOutput 34\nCache read 500\nReasoning 20');
+		const none = within(screen.getByRole('row', { name: /local-llama/ })).getAllByRole('cell').at(-1)!;
+		expect(none).not.toHaveAttribute('title');
 	});
 
 	it('has no Tokens column unless asked, for the screens whose answer carries none', () => {

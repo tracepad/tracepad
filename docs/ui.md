@@ -109,8 +109,8 @@ is rendered in the server's own words in the card or dialog it came from.
 whether the scores moved, at a glance. See [Dashboard](#dashboard).
 
 **Traces** — the listing. One row per trace, mapping onto
-`GET /api/v1/traces`: time, name, environment, user, session, cost, latency,
-TTFT and how many observations failed. TTFT sits beside latency because the
+`GET /api/v1/traces`: time, name, environment, user, session, cost, tokens,
+latency, TTFT and how many observations failed. TTFT sits beside latency because the
 two answer the same question from opposite ends — how long the whole run took,
 and how long somebody waited before anything appeared. The filter bar offers
 exactly the filters the endpoint accepts (`q`, `from`, `to`, `environment`,
@@ -119,7 +119,12 @@ exactly the filters the endpoint accepts (`q`, `from`, `to`, `environment`,
 if the two ever disagree. The bar underneath turns the pages. **Min tokens**
 is input plus output tokens, a whole number: a fraction typed into it, or
 carried by a hand-edited link, is dropped rather than sent
-([api.md](api.md#tokens)).
+([api.md](api.md#tokens)). The **Tokens** column shows the same number — input
+plus output, compact (`950`, `12.4k`, `3.1M`) — and a dash where the trace
+carried neither; its tooltip lists every class the trace reported, exact, so
+reasoning and cache tokens are read there and are never added to the figure
+(spec 049 #1, #3, #9). The Sessions and Users tables have the same column
+over their own sums, and fold it under the id on a narrow screen with the cost.
 
 Three of them — **environment**, **release** and **name** — are checkbox lists
 rather than boxes to type in. The values come from
@@ -167,7 +172,7 @@ points at the dashboard, where the exporter settings are; with a filter or a
 search set it says what matched nothing instead.
 
 **Sessions** — one row per session over `GET /api/v1/sessions`: last seen,
-id, how many traces, how many of them failed, cost, first seen. The filters
+id, how many traces, how many of them failed, cost, tokens, first seen. The filters
 are the endpoint's four (`from`, `to`, `environment`, `user_id`) — the
 environment as the same checkbox list the Traces panel offers, and the user id
 as a box, because a user id is not a short finite set — and a row
@@ -650,12 +655,15 @@ It is read with the rest of the page and by *Refresh*, never polled: the
 Traces live toggle is the one poller in the app.
 
 The **charts** — traces, cost, tokens (input, output and cache read as three
-lines), latency (p50 and p95) and errors — share one x cursor, and the
+lines, with reasoning and cache write in the legend, hidden until their entry
+is clicked, so the drawn lines stay the ones that do not double-count), latency (p50 and p95) and errors — share one x cursor, and the
 **breakdown tables** by model, by environment and by release carry proportion
 bars and a **Tokens** column of input plus output, what a bill is made of;
-cache read is on the chart, where it explains a bill that is smaller than the
-tokens suggest, and out of the column, where it would count the same tokens
-twice for the providers that report cached tokens inside the input. The
+the cell's tooltip lists every class the group reported, reasoning and cache
+write among them. Cache read is on the chart, where it explains a bill that is
+smaller than the tokens suggest, and out of the column, where it would count
+the same tokens twice for the providers that report cached tokens inside the
+input. The
 bucket switcher is hourly/daily and defaults to hours for windows up to 48
 hours, days above. In the release table, the traces that named none are one
 row called *(no release)* rather than a row that is missing.
@@ -710,8 +718,8 @@ a filter change and on the **Refresh** control.
 who: a user is a set of sessions, and their page is the dashboard's charts
 for one of them.
 
-The listing is `GET /api/v1/users`: id, traces, sessions, errors, cost, first
-and last seen. A sort select offers the questions the endpoint answers —
+The listing is `GET /api/v1/users`: id, traces, sessions, errors, cost,
+tokens, first and last seen. A sort select offers the questions the endpoint answers —
 last seen, traces, cost, tokens (input plus output, a user with none last),
 errors, always descending — and a box narrows by a
 **case-sensitive prefix** of the id; both live in the URL. A long id is cut in
@@ -728,7 +736,7 @@ errors, cost, p50/p95, first and last seen, exact including the traffic too
 recent for the listing — then a time window governing an **activity** chart
 (traces, sessions started and failing traces) and a **cost** chart, both over
 `GET /api/v1/stats?user_id=`, then the environment and model breakdowns with
-the same filter. Under them, two tabs (`?tab=sessions|traces`) hold the
+the same filter and the same **Tokens** column as the dashboard's. Under them, two tabs (`?tab=sessions|traces`) hold the
 Sessions and Traces tables filtered by this user, each with a ⤢ to the full
 listing with the filter set — so the peek panel and its `j`/`k` walk come
 along rather than being reimplemented.

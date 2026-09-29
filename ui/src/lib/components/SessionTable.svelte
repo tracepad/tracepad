@@ -5,6 +5,7 @@
 	import { ABSENT, cost, count, counted, timestamp } from '$lib/format';
 	import { modified, selecting } from '$lib/peek';
 	import { href } from '$lib/project.svelte';
+	import { billedTokens, compact, tokenClasses } from '$lib/tokens';
 	import Folded from './Folded.svelte';
 
 	// The session listing, one row per session, mapping 1:1 onto what
@@ -40,8 +41,12 @@
 	// session and whether any of it failed; how many traces, what they cost
 	// and when it began fold under the id (spec 006 #22). The number is the
 	// unfolded table's width and its `min-width`.
-	const fold = new Fold(720);
+	const fold = new Fold(816);
 	const narrow = $derived(fold.narrow);
+	const tokensText = (row: SessionRow) => {
+		const tokens = billedTokens(row.tokens);
+		return tokens === null ? null : `${compact(tokens)} tokens`;
+	};
 </script>
 
 <!-- The table scrolls inside its own box; the page never scrolls sideways
@@ -58,6 +63,7 @@
 				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-28']}>Errors</th>
 				{#if !narrow}
 					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Tokens</th>
 					<th scope="col" class="w-44 px-3 py-2 font-medium">First seen</th>
 				{/if}
 			</tr>
@@ -94,7 +100,7 @@
 						<td class="max-w-0 px-3 py-1.5">
 							<div class="truncate font-mono" title={row.id}>{row.id}</div>
 							<div class="text-muted text-xs tabular-nums">
-								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost)]} />
+								<Folded values={[counted(row.trace_count, 'trace'), cost(row.total_cost), tokensText(row)]} />
 							</div>
 							<!-- Not a `Folded` line: this column is the narrowest on a phone, and
 							     a value of its own is cut where a line of text is not. -->
@@ -121,6 +127,9 @@
 					</td>
 					{#if !narrow}
 						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+						<td class="text-muted {numeric}" title={tokenClasses(row.tokens)}>
+							{compact(billedTokens(row.tokens))}
+						</td>
 						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 							{timestamp(row.first_seen)}
 						</td>

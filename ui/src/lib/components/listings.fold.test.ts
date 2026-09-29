@@ -21,6 +21,7 @@ const SESSION = {
 	trace_count: 3,
 	error_count: 1,
 	total_cost: 0.0123,
+	tokens: { input: 3000, output: 100 },
 	first_seen: '2026-09-27T20:00:00Z',
 	last_seen: '2026-09-27T21:00:00Z'
 } as unknown as SessionRow;
@@ -31,6 +32,7 @@ const USER = {
 	sessions: 1,
 	error_count: 0,
 	total_cost: 2.5,
+	tokens: { input: 900, output: 50, cache_read: 700 },
 	first_seen: '2026-09-20T10:00:00Z',
 	last_seen: '2026-09-27T21:00:00Z'
 } as unknown as UserRow;
@@ -49,26 +51,37 @@ describe('the sessions', () => {
 		render(SessionTable, { rows: [SESSION] });
 
 		expect(heads()).toEqual(['Last seen', 'Session', 'Errors']);
-		expect(screen.getByText('3 traces ·').parentElement).toHaveTextContent('3 traces · $0.0123');
+		expect(screen.getByText('3 traces ·').parentElement).toHaveTextContent('3 traces · $0.0123 · 3.1k tokens');
 		expect(screen.getByText(/^first seen /)).toBeInTheDocument();
 		expect(screen.getByText('1 trace')).toBeInTheDocument();
 	});
 
 	it('are the whole table in a box as wide as it', () => {
-		boxWidth(720);
+		boxWidth(816);
 		render(SessionTable, { rows: [SESSION] });
 
-		expect(heads()).toHaveLength(6);
+		expect(heads()).toHaveLength(7);
 	});
 });
 
 describe('the users', () => {
+	it('are the whole table in a box as wide as it, with the tokens and their classes', () => {
+		boxWidth(944);
+		render(UserTable, { rows: [USER] });
+
+		expect(heads()).toHaveLength(8);
+		expect(screen.getByRole('cell', { name: '950' })).toHaveAttribute(
+			'title',
+			'Input 900\nOutput 50\nCache read 700'
+		);
+	});
+
 	it('keep who and whether it failed, and count in the singular where it is one', () => {
 		boxWidth(390);
 		render(UserTable, { rows: [USER] });
 
 		expect(heads()).toEqual(['User', 'Errors']);
-		expect(screen.getByText('1 trace ·').parentElement).toHaveTextContent('1 trace · 1 session · $2.50');
+		expect(screen.getByText('1 trace ·').parentElement).toHaveTextContent('1 trace · 1 session · $2.50 · 950 tokens');
 		expect(screen.getByText(/^last seen /)).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'user-1137' })).toHaveAttribute('href', '/users/user-1137');
 	});

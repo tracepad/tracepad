@@ -14,7 +14,13 @@
 	// unresolved pair — so the colours are read off a probe element, which is
 	// the only thing that resolves them the way the rest of the page does.
 
-	type Line = { label: string; values: (number | null)[]; token: string };
+	type Line = {
+		label: string;
+		values: (number | null)[];
+		token: string;
+		/** Drawn only once the legend entry is clicked; its live value shows either way. */
+		hidden?: boolean;
+	};
 
 	let {
 		title,
@@ -141,6 +147,7 @@
 					{ label: 'Time' },
 					...lines.map((line) => ({
 						label: line.label,
+						show: !line.hidden,
 						stroke: colours[line.token],
 						width: 1.5,
 						points: { show: x.length < 40 },
