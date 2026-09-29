@@ -188,3 +188,54 @@ func TestTracesRemoveByFilter(t *testing.T) {
 		t.Errorf("traces = %d, want none left", got)
 	}
 }
+
+// `--tag` is repeatable and an AND on every command that filters traces
+// (docs/cli.md, Lists): with two given, a trace must carry both. It used to
+// keep the last alone, which for `traces rm` meant deleting traces that
+// carried only that one.
+func TestRepeatedTagsFilterByAllOfThem(t *testing.T) {
+	h := newHarness(t)
+	batch := &store.IngestBatch{ProjectID: h.projectID(t)}
+	for n, tags := range [][]string{{"a", "b"}, {"a"}, {"b"}, {"a", "b", "c"}} {
+		start := seedBase - int64(n+1)*ms
+		batch.Traces = append(batch.Traces, &model.Trace{ID: traceHex(n + 1), Name: "chat", Tags: tags})
+		batch.Observations = append(batch.Observations, &model.Observation{
+			TraceID: traceHex(n + 1), ID: spanHex(n + 1), Type: model.TypeSpan, Level: model.LevelDefault,
+			StartTime: start, EndTime: start + ms})
+	}
+	if err := h.writer.Submit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+
+	// The listing: traces 1 and 4 carry both.
+	out := h.run(t.Context(), false, "traces", "ls", "--tag", "a", "--tag", "b", "--json")
+	if out.code != ExitOK {
+		t.Fatalf("traces ls exited %d: %s", out.code, out.stderr)
+	}
+	var listed struct {
+		Traces []struct {
+			ID string `json:"id"`
+		} `json:"traces"`
+	}
+	if err := json.Unmarshal([]byte(out.stdout), &listed); err != nil {
+		t.Fatalf("stdout is not the listing: %v (%q)", err, out.stdout)
+	}
+	if len(listed.Traces) != 2 {
+		t.Errorf("traces ls --tag a --tag b listed %d traces, want the two that carry both", len(listed.Traces))
+	}
+
+	// The deletion: unconfirmed it counts the same two, confirmed it takes
+	// exactly them.
+	out = h.run(t.Context(), false, "traces", "rm", "--to", "2026-09-02T00:00:00Z", "--tag", "a", "--tag", "b")
+	if !strings.Contains(out.stderr, "matched        2") {
+		t.Errorf("preview = %q, want 2 matched", out.stderr)
+	}
+	h.stdin = "test\n"
+	out = h.run(t.Context(), true, "traces", "rm", "--to", "2026-09-02T00:00:00Z", "--tag", "a", "--tag", "b", "--yes")
+	if out.code != ExitOK {
+		t.Fatalf("rm exited %d: %s", out.code, out.stderr)
+	}
+	if got := h.traceCount(t); got != 2 {
+		t.Errorf("traces = %d after the deletion, want the two that lacked a tag", got)
+	}
+}

@@ -89,7 +89,7 @@ tracepad traces ls --env production --error --since 1h
 | `--until` | The other end of the range, same spellings. |
 | `--user`, `--session` | Exact matches. |
 | `--name` | The trace name, or a comma-separated list of them. See [Lists](#lists). |
-| `--tag` | A tag the trace must carry. |
+| `--tag` | A tag the trace must carry; give the flag again for more, and a trace must carry every one. |
 | `--min-cost` | Traces costing at least this much. |
 | `--release` | The deployment, or a comma-separated list of them. See [Lists](#lists). |
 | `--version` | The version of the trace's own logic. Exact match. |
