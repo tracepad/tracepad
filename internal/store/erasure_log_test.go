@@ -354,6 +354,27 @@ func erasureLogPaths() []erasureLogPath {
 				waitLine(t, log, "a write of an erasure did not commit")
 				saysNoCommitText(t, log())
 			}},
+		{"a window of an erasure's job that another job's commit fails", []string{"write window failed"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// The commit fails the window and no job in particular: the
+				// line of a window that holds an erasure's job gives the
+				// facts of it and the erasures, not SQLite's words (#36).
+				runWindow(t, w, sharesAWindow(), quietStep{}, commitFailsPlainly{})
+				waitLine(t, log, "write window failed")
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(!strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") ||
+							!strings.Contains(line, "sqlite=") || strings.Contains(line, "FOREIGN KEY") ||
+							strings.Contains(line, "commit write transaction")) {
+						t.Errorf("the line %q, want the erasure and the code, and no text of the failed commit", line)
+					}
+				}
+			}},
 		{"a caller that wraps the writer's error and logs it",
 			[]string{"a caller printed the writer's error", "a caller logged the writer's error"}, false,
 			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
@@ -788,3 +809,17 @@ func saysNoCommitText(t *testing.T, out string) {
 		}
 	}
 }
+
+// quietStep is a job of an erasure's that commits.
+type quietStep struct{}
+
+func (quietStep) apply(*sql.Tx) error { return nil }
+func (quietStep) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// commitFailsPlainly is a job of no erasure's whose commit fails, as
+// failsAtCommit's does.
+type commitFailsPlainly struct{}
+
+func (commitFailsPlainly) apply(tx *sql.Tx) error { return failsAtCommit{}.apply(tx) }

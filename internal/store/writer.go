@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -472,11 +474,11 @@ func (w *Writer) flush(pending []*submission) {
 	// A database condition is left to the retries below: a write they
 	// commit is not lost, and one they cannot commit is logged as lost
 	// (spec 043 #24). Anything else says why the window came apart — for a
-	// job whose words the writer does not log, its facts and not its words
-	// (spec 047 #33, #36): one that commits alone leaves this the only trace
-	// of why the window came apart.
+	// window that holds a job whose words the writer does not log, its
+	// facts and not its words (spec 047 #33, #36): one that commits alone
+	// leaves this the only trace of why the window came apart.
 	if _, condition := Condition(err); !condition {
-		logFailure(err, slog.LevelWarn, "write window failed, retrying jobs individually",
+		logFailure(windowFailedAt(pending, err), slog.LevelWarn, "write window failed, retrying jobs individually",
 			"jobs", len(pending))
 	}
 	for _, sub := range pending {
@@ -527,7 +529,8 @@ func redacts(job WriteJob) (string, bool) {
 }
 
 // jobFailure is what fails at a job that redacts its failure: its own error,
-// or the window's met at it (spec 047 #36). The writer wraps it once, where it
+// or the window's met at it (spec 047 #36) — or a window's that holds such
+// jobs, when erasure names each of their erasures, separated by spaces. The writer wraps it once, where it
 // meets it, and from there it says only its facts, to a log line and to
 // anything that prints it: its LogValue is the erasure, the cause, the types
 // and the code (failureFacts), and its Error a sentence of the erasure and the
@@ -565,6 +568,28 @@ func failedAt(job WriteJob, err error) error {
 		return &jobFailure{erasure: id, err: err}
 	}
 	return err
+}
+
+// windowFailedAt is a window's failure as the writer logs it (spec 047 #36):
+// wrapped already when it was met at a job that redacts its failure, and when
+// it was not — a BEGIN or a COMMIT fails no job in particular — wrapped for
+// every erasure the window holds a job of, since any of them may be the one
+// it failed. A window that holds none is its own error.
+func windowFailedAt(pending []*submission, err error) error {
+	var wrapped *jobFailure
+	if errors.As(err, &wrapped) {
+		return err
+	}
+	var erasures []string
+	for _, sub := range pending {
+		if id, redacted := redacts(sub.job); redacted && !slices.Contains(erasures, id) {
+			erasures = append(erasures, id)
+		}
+	}
+	if len(erasures) == 0 {
+		return err
+	}
+	return &jobFailure{erasure: strings.Join(erasures, " "), err: err}
 }
 
 // lost logs one write that did not commit: "write commit failed" for one whose
