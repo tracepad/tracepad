@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"runtime"
 	"sort"
@@ -58,6 +59,10 @@ type projectCounters struct {
 	// #21).
 	exportsOverSpanCap     int64
 	bodiesRefusedForBudget int64
+	// overBatchCap, by batchKind, counts the array writes refused for carrying more values than their
+	// limit: 10,000 scores or dataset items, 1,000 queue targets (spec 043
+	// #40).
+	overBatchCap [numBatchKinds]int64
 }
 
 // counters holds every since-start number the system endpoint reports, kept
@@ -124,6 +129,46 @@ func (c *counters) observeOverSpanCap(projectID string) {
 	project := c.forProject(projectID)
 	project.rejectedBatches++
 	project.exportsOverSpanCap++
+}
+
+// batchKind is which array write a refusal for its number of values was
+// about.
+type batchKind int
+
+const (
+	batchScores batchKind = iota
+	batchDatasetItems
+	batchQueueTargets
+	numBatchKinds
+)
+
+// batchCounterNames is each kind's key in the system endpoint's counters, in
+// kind order: the one table the count and the snapshot both read.
+var batchCounterNames = [numBatchKinds]string{
+	batchScores:       "scores_over_row_cap",
+	batchDatasetItems: "dataset_items_over_row_cap",
+	batchQueueTargets: "queue_adds_over_target_cap",
+}
+
+// observeOverBatchCap records an array write refused for carrying more values
+// than its limit (spec 043 #40). Each route has a counter of its own, because
+// their limits are different ones and a client sending a thousand and one
+// targets is not one sending ten thousand and one scores.
+func (c *counters) observeOverBatchCap(projectID string, kind batchKind) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.forProject(projectID).overBatchCap[kind]++
+}
+
+// countOverBatchCap counts a refusal that decodeBatch made for the number of
+// values and reports whether it was one: any other error is not this counter's.
+func (s *Server) countOverBatchCap(projectID string, kind batchKind, err error) bool {
+	var over *overItemCap
+	if !errors.As(err, &over) {
+		return false
+	}
+	s.counters.observeOverBatchCap(projectID, kind)
+	return true
 }
 
 // observeBodyRefused records a body the budget could not hold, in the project
@@ -222,7 +267,7 @@ func (c *counters) snapshot(projectID string) object {
 	}
 	sort.Strings(versions)
 
-	return object{}.
+	out := object{}.
 		put("dialects", dialects).
 		put("rejected_batches", project.rejectedBatches).
 		put("unreadable_resource_spans", project.unreadableSpans).
@@ -231,6 +276,10 @@ func (c *counters) snapshot(projectID string) object {
 		put("bodies_refused_for_budget", project.bodiesRefusedForBudget).
 		put("reads_timed_out", project.readsTimedOut).
 		put("reads_refused_busy", project.readsRefusedBusy)
+	for kind, name := range batchCounterNames {
+		out = out.put(name, project.overBatchCap[kind])
+	}
+	return out
 }
 
 // orphanTraces reports one project's count of trace deliveries that named a
