@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
@@ -188,6 +189,18 @@ func renderDeleted(out io.Writer, deleted map[string]int64) {
 	fmt.Fprintln(out, "\nraw OTLP bodies are not deleted; they expire on the raw retention window")
 }
 
+// tagFlags is `--tag`, which may be given more than once (docs/cli.md, Lists):
+// the flag package's string flag keeps only the last, so `--tag a --tag b`
+// filtered by b alone — and `traces rm` deleted on that.
+type tagFlags []string
+
+func (t *tagFlags) String() string { return strings.Join(*t, ",") }
+
+func (t *tagFlags) Set(value string) error {
+	*t = append(*t, value)
+	return nil
+}
+
 // traceFilterFlags are the filters `traces ls`, `traces last` and `tail`
 // share, registered once so the three cannot drift apart.
 type traceFilterFlags struct {
@@ -195,7 +208,7 @@ type traceFilterFlags struct {
 	user        string
 	session     string
 	name        string
-	tag         string
+	tag         tagFlags
 	since       string
 	until       string
 	minCost     string
@@ -229,7 +242,7 @@ func (f *traceFilterFlags) registerFollowing(fs *flag.FlagSet) {
 	fs.StringVar(&f.user, "user", "", "")
 	fs.StringVar(&f.session, "session", "", "")
 	fs.StringVar(&f.name, "name", "", "")
-	fs.StringVar(&f.tag, "tag", "", "")
+	fs.Var(&f.tag, "tag", "")
 	fs.StringVar(&f.since, "since", "", "")
 	fs.StringVar(&f.minCost, "min-cost", "", "")
 	fs.StringVar(&f.release, "release", "", "")
@@ -256,7 +269,11 @@ func (f *traceFilterFlags) query(r *run) (url.Values, error) {
 	addSome(query, "user_id", f.user)
 	addSome(query, "session_id", f.session)
 	addSome(query, "name", f.name)
-	addSome(query, "tag", f.tag)
+	// Each tag is a parameter of its own, which the server reads as an AND
+	// (spec 004): a trace must carry every one given.
+	for _, tag := range f.tag {
+		query.Add("tag", tag)
+	}
 	addSome(query, "min_cost", f.minCost)
 	addSome(query, "release", f.release)
 	addSome(query, "version", f.version)
