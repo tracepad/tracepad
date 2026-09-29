@@ -331,6 +331,33 @@ func erasureLogPaths() []erasureLogPath {
 				// apart, and is retried job by job.
 				runWindow(t, w, sharesAWindow(), rollsBackItself{err: fail}, sharesAWindow())
 				waitLine(t, log, "write window failed")
+				// Met at the erasure's job, the window's failure is its: the
+				// line names it and gives no words of the savepoint (#36).
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(!strings.Contains(line, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || strings.Contains(line, "savepoint")) {
+						t.Errorf("the line %q, want the erasure and no text of the savepoint", line)
+					}
+				}
+			}},
+		{"a window a plain job broke beside an erasure's job", []string{"write window failed"}, true,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// Met at a job of no erasure's, the window's failure is that
+				// job's: the line gives its text and blames no erasure (#36).
+				runWindow(t, w, sharesAWindow(), quietStep{}, plainRollsBack{})
+				waitLine(t, log, "write window failed")
+				for line := range strings.Lines(log()) {
+					if strings.Contains(line, "write window failed") &&
+						(strings.Contains(line, "4f0c9d3e8a1b2c3d4e5f60718293a4b5") || !strings.Contains(line, "savepoint") ||
+							!strings.Contains(line, "jobs=2")) {
+						t.Errorf("the line %q, want the job's savepoint, no erasure, and the erasure's job in the window", line)
+					}
+				}
 			}},
 		{"a lone write whose commit fails", []string{"a write of an erasure did not commit"}, true,
 			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
@@ -754,7 +781,7 @@ func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
 		t.Errorf("the wrap of %v does not reach the refusal it carries", wrapped)
 	}
 	if text := wrapped.Error(); strings.Contains(text, "4711") ||
-		!strings.Contains(text, "a write of erasure "+erasure+" was refused (invalid)") {
+		!strings.Contains(text, "a write of erasure "+erasure+" was rejected (invalid)") {
 		t.Errorf("the text %q, want the erasure and the kind of the refusal without its words", text)
 	}
 	logFailure(wrapped, slog.LevelError, "a line")
@@ -779,6 +806,27 @@ func TestAJobFailureSaysItsFactsWhereverItGoes(t *testing.T) {
 
 	if err := failedAt(sharesAWindow(), inner); err != error(inner) {
 		t.Errorf("a job that does not redact answers %v, want its own error", err)
+	}
+
+	// A routine refusal is a refusal too, with no kind to give.
+	if text := failedAt(hostileJob{}, fmt.Errorf("a job: %w", ErrBadToken)).Error(); text != "a write of erasure "+erasure+" was rejected" {
+		t.Errorf("a routine refusal says %q", text)
+	}
+
+	// A window that failed with no job to blame names each erasure it held a
+	// job of once, joined so that a search for either id finds it.
+	window := failedByWindow([]*submission{{job: stepOf{"aaa"}}, {job: sharesAWindow()}, {job: stepOf{"bbb"}},
+		{job: stepOf{"aaa"}}}, errors.New("words of the commit"))
+	if text := window.Error(); text != "a write of erasures aaa,bbb failed: "+causeOther {
+		t.Errorf("a window's failure says %q", text)
+	}
+	buf.Reset()
+	logFailure(window, slog.LevelWarn, "a window")
+	if out := buf.String(); !strings.Contains(out, "err.erasures=aaa,bbb ") || strings.Contains(out, "words of the commit") {
+		t.Errorf("the line %q, want the erasures unquoted and no words of the commit", out)
+	}
+	if err := failedByWindow([]*submission{{job: sharesAWindow()}}, inner); err != error(inner) {
+		t.Errorf("a window of no erasure's job answers %v, want its own error", err)
 	}
 }
 
@@ -828,3 +876,21 @@ func (quietStep) failureRedacted() (string, bool) {
 type commitFailsPlainly struct{}
 
 func (commitFailsPlainly) apply(tx *sql.Tx) error { return failsAtCommit{}.apply(tx) }
+
+// plainRollsBack is a job of no erasure's that ends the writer's transaction
+// itself, as rollsBackItself does.
+type plainRollsBack struct{}
+
+func (plainRollsBack) apply(tx *sql.Tx) error {
+	_, _ = tx.Exec(`ROLLBACK`)
+	return errors.New("a job of no erasure's rolled the window back")
+}
+
+// Its owner logs its failure, so that the only line of it is the window's.
+func (plainRollsBack) failureReported() bool { return true }
+
+// stepOf is a job of the erasure id that commits.
+type stepOf struct{ id string }
+
+func (stepOf) apply(*sql.Tx) error               { return nil }
+func (j stepOf) failureRedacted() (string, bool) { return j.id, true }
