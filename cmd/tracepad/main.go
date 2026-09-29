@@ -164,6 +164,15 @@ func serve(args []string) error {
 		return err
 	}
 
+	// One server per data directory (spec 001 #20): two would be two writers,
+	// two sweepers and two migrators over one file. Taken before the database
+	// is opened, so a second server refuses before it touches anything.
+	lock, err := store.LockDatabase(cfg.DBPath())
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	st, err := store.Open(cfg.DBPath())
 	if err != nil {
 		return err

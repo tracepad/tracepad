@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -178,5 +179,24 @@ func TestCheckDeclaredSecrets(t *testing.T) {
 	}
 	if logged, err := check(store.ProvisionSpec{Name: "gone", PublicKey: "tp-pk-gone", SecretKey: "tp-sk-gone"}); err != nil || logged != "" {
 		t.Errorf("a short key of a deleted project: err=%v log=%q, want neither", err, logged)
+	}
+}
+
+// `serve` on a data directory another server holds refuses before it opens
+// the database, and says so (spec 001 #20).
+func TestServeRefusesADataDirectoryInUse(t *testing.T) {
+	dir := t.TempDir()
+	held, err := store.LockDatabase(filepath.Join(dir, "tracepad.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	err = serve([]string{"--data-dir", dir, "--listen", "127.0.0.1:0"})
+	if err == nil || !strings.Contains(err.Error(), "another tracepad is already running") {
+		t.Fatalf("serve on a held data directory = %v, want the refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "tracepad.db")); statErr == nil {
+		t.Error("the refused server had already created the database")
 	}
 }
