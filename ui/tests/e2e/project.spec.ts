@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { BCRYPT_WAIT, createProject, FAILING_TRACE, signIn, signInAsOwner, state } from './harness';
+import { BCRYPT_WAIT, createProject, FAILING_TRACE, openDialog, signIn, signInAsOwner, state } from './harness';
 
 // The project in the URL and the switcher (spec 029, Testing): every screen
 // lives under `/p/{id}`, a bare path redirects to the remembered project, a
@@ -106,8 +106,7 @@ test('New project from the switcher shows the keys once and lands on the new das
 	const name = `made-${Math.random().toString(36).slice(2, 8)}`;
 
 	await page.getByRole('button', { name: 'Switch project' }).click();
-	await page.getByRole('menuitem', { name: 'New project' }).click();
-	const dialog = page.getByRole('dialog', { name: 'New project' });
+	const dialog = await openDialog(page.getByRole('menuitem', { name: 'New project' }), 'New project');
 	await dialog.getByLabel('Name').fill(name);
 	await dialog.getByRole('button', { name: 'Create' }).click();
 

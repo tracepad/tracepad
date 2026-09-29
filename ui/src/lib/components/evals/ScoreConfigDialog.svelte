@@ -70,6 +70,22 @@
 
 	const problem = $derived(configProblem(form));
 
+	let content = $state<HTMLElement | null>(null);
+
+	/**
+	 * Opening puts the focus in the first field that takes text. bits-ui's own
+	 * choice is the first tabbable, which on an edit is the read-only name: a
+	 * keystroke there goes nowhere (spec 006 #26).
+	 */
+	function focusFirstEditable(event: Event) {
+		const field = content?.querySelector<HTMLElement>(
+			'input:not([readonly]):not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([readonly]):not([disabled])'
+		);
+		field?.focus();
+		// Only when the focus took: otherwise the primitive's own choice stands.
+		if (field && document.activeElement === field) event.preventDefault();
+	}
+
 	async function save() {
 		busy = true;
 		failure = null;
@@ -92,6 +108,8 @@
 	<Dialog.Portal>
 		<Dialog.Overlay class="fixed inset-0 z-50 bg-black/50" />
 		<Dialog.Content
+			bind:ref={content}
+			onOpenAutoFocus={focusFirstEditable}
 			class="border-border bg-canvas shadow-overlay fixed top-1/2 left-1/2 z-50 max-h-[90dvh]
 				w-[min(30rem,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto
 				rounded-lg border p-4"

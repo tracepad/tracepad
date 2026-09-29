@@ -6,6 +6,7 @@ import {
 	createProject,
 	fromOwnAddress,
 	inviteNobody,
+	openDialog,
 	section,
 	sideways,
 	signIn,
@@ -253,8 +254,7 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 
 	// The dialog the switcher shares (spec 029 #7): a name, then the keys.
 	const name = `disposable-${Math.random().toString(36).slice(2, 8)}`;
-	await page.getByRole('button', { name: 'New project' }).click();
-	const form = page.getByRole('dialog', { name: 'New project' });
+	const form = await openDialog(page.getByRole('button', { name: 'New project' }), 'New project');
 	await form.getByLabel('Name').fill(name);
 	await form.getByRole('button', { name: 'Create' }).click();
 
