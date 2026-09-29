@@ -1648,6 +1648,9 @@ func captureLog(t *testing.T) func() string {
 	t.Helper()
 	var logged bytes.Buffer
 	var mu sync.Mutex
+	panics.mu.Lock()
+	panics.lastLog, panics.silenced = nil, nil // a panic's stack is paced across tests too
+	panics.mu.Unlock()
 	previous := logger
 	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
 	t.Cleanup(func() { logger = previous })

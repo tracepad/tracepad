@@ -538,7 +538,7 @@ func (s *Store) scrubBatches(ctx context.Context, writer jobSubmitter, e *Erasur
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				errs[i] = guard("erasure scrub", func() error { return submitErasureJob(ctx, writer, planned.job) })
+				errs[i] = submitErasureJob(ctx, writer, planned.job)
 			}()
 		}
 		wg.Wait()

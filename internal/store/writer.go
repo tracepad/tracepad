@@ -285,7 +285,7 @@ func (w *Writer) QueueDepth() (waiting, capacity int) {
 // A job that reaches its transaction and is refused there comes back as a
 // *Rejection; the handler renders it rather than retrying it.
 func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
-	if job == nil {
+	if isNilJob(job) {
 		return errNilJob
 	}
 	sub := &submission{job: job, done: make(chan error, 1)}
@@ -322,7 +322,7 @@ func (w *Writer) Submit(ctx context.Context, job WriteJob) error {
 // with ErrWriterClosed; ctx ends the wait, and once queued, the wait for the
 // commit, as it does Submit's.
 func (w *Writer) SubmitWaiting(ctx context.Context, job WriteJob) error {
-	if job == nil {
+	if isNilJob(job) {
 		return errNilJob
 	}
 	sub := &submission{job: job, done: make(chan error, 1)}

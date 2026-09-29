@@ -153,16 +153,10 @@ func (a *Aggregator) Pass(ctx context.Context) error {
 	var failures []error
 	var rolled int
 	for _, project := range projects {
-		if a.panics.skip(project.ID) {
-			continue
-		}
-		hours, err := try("stats rollup of a project", func() (int, error) {
-			return a.rollProject(ctx, project, start)
-		})
-		if a.panics.settle(project.ID, err) {
-			logger().Error("statistics gave up on a project whose roll panicked in every pass; it is left out until the server restarts",
-				"project", project.Name, "passes", maxHeldPasses)
-		}
+		hours, err := tryLedger(&a.panics, project.ID, "stats rollup of a project",
+			"statistics roll of project "+project.Name, func() (int, error) {
+				return a.rollProject(ctx, project, start)
+			})
 		rolled += hours
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
@@ -439,6 +433,7 @@ func (a *Aggregator) forgetGone(projects []*Project) {
 	for _, project := range projects {
 		live[project.ID] = true
 	}
+	a.panics.forget(live)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, held := range []map[string]holding{a.held, a.stuck} {

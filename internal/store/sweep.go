@@ -61,6 +61,9 @@ type SweepStatus struct {
 	Since             int64
 	TracesDeleted     int64
 	RawBatchesDeleted int64
+	// GaveUp says the retention of this project is left out until the
+	// process restarts, its sweep having panicked in every pass (spec 043 #42).
+	GaveUp bool
 }
 
 // jobSubmitter is the writer as the sweeper needs it.
@@ -202,6 +205,7 @@ func (sw *Sweeper) Status(projectID string) SweepStatus {
 	if !sw.lastRun.IsZero() {
 		status.LastRun = sw.lastRun.UnixNano()
 	}
+	status.GaveUp = sw.panics.skip(projectID)
 	if counters := sw.deleted[projectID]; counters != nil {
 		status.TracesDeleted = counters.traces
 		status.RawBatchesDeleted = counters.raw
@@ -233,20 +237,19 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sweep: list projects: %w", err)
 	}
+	live := make(map[string]bool, len(projects))
+	for _, project := range projects {
+		live[project.ID] = true
+	}
+	sw.panics.forget(live)
 
 	var freed bool
 	var failures []error
 	for _, project := range projects {
-		if sw.panics.skip(project.ID) {
-			continue
-		}
-		removed, err := try("retention sweep of a project", func() (bool, error) {
-			return sw.sweepProject(ctx, project, start)
-		})
-		if sw.panics.settle(project.ID, err) {
-			logger().Error("retention gave up on a project whose sweep panicked in every pass; it is left out until the server restarts",
-				"project", project.Name, "passes", maxHeldPasses)
-		}
+		removed, err := tryLedger(&sw.panics, project.ID, "retention sweep of a project",
+			"retention sweep of project "+project.Name, func() (bool, error) {
+				return sw.sweepProject(ctx, project, start)
+			})
 		if removed {
 			freed = true
 		}
@@ -258,7 +261,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		}
 	}
 
-	orphans, err := try("orphaned payloads sweep", func() (int64, error) { return sw.sweepOrphanPayloads(ctx) })
+	orphans, err := tryLedger(&sw.panics, stepKey+"orphaned payloads", "orphaned payloads sweep", "orphaned payloads sweep",
+		func() (int64, error) { return sw.sweepOrphanPayloads(ctx) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -269,9 +273,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		freed = true
 	}
 
-	media, err := try("orphaned media sweep", func() (int64, error) {
-		return sw.sweepOrphanMedia(ctx, start.UnixNano())
-	})
+	media, err := tryLedger(&sw.panics, stepKey+"orphaned media", "orphaned media sweep", "orphaned media sweep",
+		func() (int64, error) { return sw.sweepOrphanMedia(ctx, start.UnixNano()) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -286,7 +289,7 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// Not counted as freed: a row per trace, gone within the hour.
 	// On the wall clock, as the rows are stamped and read (#29), not on the
 	// pass's own clock.
-	if err := guard("voided uploads sweep", func() error {
+	if err := sw.panics.run(stepKey+"voided uploads", "voided uploads sweep", "voided uploads sweep", func() error {
 		return sw.sweepVoidedUploads(ctx, time.Now().UnixNano())
 	}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
@@ -295,9 +298,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("voided uploads: %w", err))
 	}
 
-	entries, err := try("orphaned search entries sweep", func() (int64, error) {
-		return sw.sweepOrphanSearchEntries(ctx)
-	})
+	entries, err := tryLedger(&sw.panics, stepKey+"orphaned search entries", "orphaned search entries sweep", "orphaned search entries sweep",
+		func() (int64, error) { return sw.sweepOrphanSearchEntries(ctx) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -312,9 +314,8 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// #10). Once per pass rather than once per project: an account belongs
 	// to the deployment, not to a project. A lookup already ignores an
 	// expired row, so this is about the disk and not about access.
-	accounts, err := try("expired sessions sweep", func() (int64, error) {
-		return sw.sweepAccounts(ctx, start.UnixNano())
-	})
+	accounts, err := tryLedger(&sw.panics, stepKey+"expired sessions", "expired sessions sweep", "expired sessions sweep",
+		func() (int64, error) { return sw.sweepAccounts(ctx, start.UnixNano()) })
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWriterClosed) {
 			return err
@@ -329,7 +330,7 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 	// so that a purge finished above is compacted in the same pass
 	// (spec 044 #11). A compaction drains the whole freelist; a pass without
 	// one hands back one bounded job's worth of what its own deletions freed.
-	drained, err := try("compaction", func() (bool, error) {
+	drained, err := tryLedger(&sw.panics, stepKey+"compaction", "compaction", "compaction", func() (bool, error) {
 		_, drained, err := sw.compact(ctx)
 		return drained, err
 	})
@@ -340,14 +341,14 @@ func (sw *Sweeper) Pass(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("compaction: %w", err))
 	}
 	if freed && !drained {
-		if err := guard("incremental vacuum", func() error { return sw.drainFreelist(ctx, false) }); err != nil {
+		if err := sw.panics.run(stepKey+"vacuum", "incremental vacuum", "incremental vacuum", func() error { return sw.drainFreelist(ctx, false) }); err != nil {
 			failures = append(failures, fmt.Errorf("incremental vacuum: %w", err))
 		}
 	}
 
 	// The newest pre-migration backup, seven days after it was written
 	// (spec 044 #12). Files, not rows: nothing here goes through the writer.
-	if err := guard("backup expiry", func() error { sw.store.expireBackups(start); return nil }); err != nil {
+	if err := sw.panics.run(stepKey+"backups", "backup expiry", "backup expiry", func() error { sw.store.expireBackups(start); return nil }); err != nil {
 		failures = append(failures, fmt.Errorf("backup expiry: %w", err))
 	}
 

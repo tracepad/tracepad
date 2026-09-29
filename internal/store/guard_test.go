@@ -281,7 +281,7 @@ func TestAProjectThatPanicsInEveryPassIsGivenUp(t *testing.T) {
 	if swept != maxHeldPasses {
 		t.Errorf("the project was swept %d times, want %d and then left out", swept, maxHeldPasses)
 	}
-	if !strings.Contains(logged(), "retention gave up on a project") {
+	if !strings.Contains(logged(), "gave up on a part of a background pass") {
 		t.Errorf("giving up was not logged:\n%s", logged())
 	}
 
@@ -297,5 +297,96 @@ func TestAProjectThatPanicsInEveryPassIsGivenUp(t *testing.T) {
 	}
 	if ledger.skip("p") {
 		t.Error("a project that recovered in between was given up on")
+	}
+}
+
+// A typed nil — a nil *IngestBatch held in the interface — is nothing all the
+// same, and is refused with the untyped one.
+func TestATypedNilJobIsRefusedAtSubmit(t *testing.T) {
+	s, _ := openIngestStore(t)
+	w, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	var batch *IngestBatch
+	if err := w.Submit(t.Context(), batch); err == nil {
+		t.Error("a nil *IngestBatch was accepted")
+	}
+}
+
+// The ledger gives up on a key after maxHeldPasses panics in a row; an error
+// that is not a panic changes nothing, only a pass without one starts the count
+// again; the projects that are gone are forgotten and the steps are not.
+func TestThePanicLedger(t *testing.T) {
+	var l panicLedger
+	panicked := &PanicError{Where: "x"}
+	busy := ErrWriterBusy
+	l.settle("p", panicked)
+	l.settle("p", busy) // does not reset
+	l.settle("p", panicked)
+	if l.skip("p") {
+		t.Fatal("given up after two panics")
+	}
+	if !l.settle("p", panicked) || !l.skip("p") {
+		t.Fatal("not given up after three panics in a row, busy writer in between")
+	}
+	l.settle(stepKey+"compaction", panicked)
+	l.forget(map[string]bool{})
+	if l.skip("p") || l.runs[stepKey+"compaction"] != 1 {
+		t.Errorf("forget left %v: want the gone project dropped and the step kept", l.runs)
+	}
+	l.settle("q", panicked)
+	l.settle("q", nil)
+	if l.runs["q"] != 0 {
+		t.Error("a pass without a panic did not start the count again")
+	}
+}
+
+// A step given up on is not run again, and the line says so once; the same
+// place's stack is written once in panicLogEvery, the rest counted.
+func TestAStepThatPanicsInEveryPassIsLeftOutAndTheLogIsPaced(t *testing.T) {
+	logged := captureLog(t)
+	var l panicLedger
+	runs := 0
+	for range maxHeldPasses + 3 {
+		_ = l.run(stepKey+"x", "a place of its own", "the step x", func() error { runs++; panic("boom") })
+	}
+	if runs != maxHeldPasses {
+		t.Errorf("the step ran %d times, want %d and then not", runs, maxHeldPasses)
+	}
+	if n := strings.Count(logged(), "a panic was recovered"); n != 1 {
+		t.Errorf("%d stacks for one place inside the pacing interval, want 1:\n%s", n, logged())
+	}
+	if strings.Count(logged(), "gave up on a part of a background pass") != 1 {
+		t.Errorf("giving up was not said once:\n%s", logged())
+	}
+	if got := Panics(); got.Recovered < int64(maxHeldPasses) || got.LastWhere == "" || got.GivenUp < 1 {
+		t.Errorf("Panics() = %+v, want the recoveries, the place and the give-up counted", got)
+	}
+}
+
+// The aggregator gives up on a project whose roll panics in every pass and
+// forgets it when the project is gone.
+func TestTheAggregatorGivesUpOnAProjectThatPanicsInEveryPass(t *testing.T) {
+	captureLog(t)
+	s, p := openIngestStore(t)
+	w, err := s.NewWriter(WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	ag := s.NewAggregator(w, RollupOptions{})
+	rolled := 0
+	ag.beforeProject = func(*Project) { rolled++; panic("this project's data") }
+	for range maxHeldPasses + 2 {
+		_ = ag.Pass(t.Context())
+	}
+	if rolled != maxHeldPasses {
+		t.Errorf("the project was rolled %d times, want %d and then left out", rolled, maxHeldPasses)
+	}
+	ag.forgetGone(nil)
+	if ag.panics.skip(p.ID) {
+		t.Error("a project that is gone is still given up on")
 	}
 }
