@@ -1,6 +1,6 @@
 # Spec 049 — Tokens where people look: traces, sessions, users, and every class in the statistics
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ SHIPPED
 **Sprint:** September 2026
 
 > Tracepad has no price table (spec 002 #14): cost is known only when the
