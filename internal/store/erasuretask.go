@@ -630,10 +630,8 @@ func (er *Eraser) Start() {
 				// worker may find the database answering again (#29).
 				logFacts(slog.LevelError, "could not read the next erasure", err)
 			case id != "":
-				err := guard("erasure worker", func() error {
-					_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
-					return err
-				})
+				// runErasure recovers its own panics, keeping the phase.
+				_, err := er.store.runErasure(ctx, er.writer, id, er.opts)
 				if ctx.Err() != nil {
 					return
 				}
