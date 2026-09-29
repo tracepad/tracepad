@@ -382,3 +382,31 @@ func TestDeprecatedHostWarningUsesTheInitLogger(t *testing.T) {
 		t.Errorf("configured logger = %q, default logger = %q", logs, defaults)
 	}
 }
+
+// A call that resolves the environment before Init — a Prompt at start-up —
+// says it to the default logger and leaves Init its own chance to say it to
+// the application's; a configuration that fails to resolve says nothing.
+func TestDeprecatedHostWarningIsNotSpentBeforeInit(t *testing.T) {
+	fresh(t)
+	defaults := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(defaults, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Setenv("TRACEPAD_HOST", "http://from-host:4318")
+
+	if _, err := current(); !errors.Is(err, ErrConfig) || defaults.Len() != 0 {
+		t.Fatalf("no key: err = %v, default log = %q", err, defaults)
+	}
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+	if _, err := current(); err != nil || !strings.Contains(defaults.String(), "TRACEPAD_HOST is deprecated") {
+		t.Fatalf("before Init: err = %v, default log = %q", err, defaults)
+	}
+	logs := &bytes.Buffer{}
+	if _, err := Init(context.Background(), WithExport(false), WithTracerProvider(sdktrace.NewTracerProvider()),
+		WithLogger(slog.New(slog.NewTextHandler(logs, nil)))); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "TRACEPAD_HOST is deprecated") {
+		t.Errorf("Init's logger = %q", logs)
+	}
+}

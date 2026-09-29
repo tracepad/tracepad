@@ -152,7 +152,7 @@ func Init(ctx context.Context, opts ...Option) (shutdown func(context.Context) e
 	if o.logger != nil {
 		log = o.logger
 	}
-	c, err := resolveWith(log, o.host, o.key, o.environment, o.release)
+	c, err := resolveWith(log, &hostWarned, o.host, o.key, o.environment, o.release)
 	if err != nil {
 		return nil, err
 	}
@@ -477,4 +477,5 @@ func reset() {
 	clear(warnedKinds.seen)
 	warnedKinds.Unlock()
 	hostWarned.Store(false)
+	implicitHostWarned.Store(false)
 }

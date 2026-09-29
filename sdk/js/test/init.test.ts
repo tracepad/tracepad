@@ -217,6 +217,17 @@ describe('configuration', () => {
     expect(resolve({ host: null as unknown as string }).host).toBe('http://from-host:4318');
   });
 
+  test('spanProcessor applies the logger, so its deprecated-host warning goes there and is not spent', () => {
+    process.env.TRACEPAD_API_KEY = KEY;
+    process.env.TRACEPAD_HOST = 'http://from-host:4318';
+    const lines: string[] = [];
+    tracepad.spanProcessor({ logger: { warn: (m) => lines.push(m) } });
+    expect(lines).toEqual([
+      'tracepad: TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too',
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
   test('the logger override takes the warnings', () => {
     const lines: string[] = [];
     tracepad.init({ host: HOST, key: KEY, export: false, logger: { warn: (m) => lines.push(m) } });

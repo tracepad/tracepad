@@ -92,7 +92,6 @@ def _pick_host(argument: str | None) -> str:
     """The argument, then TRACEPAD_URL — the name the CLI and the server read
     too (spec 017 #21) — then TRACEPAD_HOST, this package's first name for it:
     it still works, and says once that it is going away."""
-    global _host_warned
     if argument is not None:
         return argument.strip()
     url = os.environ.get("TRACEPAD_URL", "").strip()
@@ -142,6 +141,9 @@ def current() -> Config:
 
 
 def forget() -> None:
-    """Drop the process-wide configuration. For tests."""
-    global _current
+    """Drop the process-wide configuration, and re-arm the deprecated-host warning.
+    For tests."""
+    global _current, _host_warned
     _current = None
+    with _host_warned_lock:
+        _host_warned = False

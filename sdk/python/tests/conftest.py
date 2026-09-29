@@ -43,8 +43,6 @@ def fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.delenv(variable.lower(), raising=False)
     monkeypatch.setenv("NO_PROXY", "*")
     monkeypatch.setenv("no_proxy", "*")
-    # The deprecated-host warning is once a process; every test starts unwarned.
-    monkeypatch.setattr("tracepad._config._host_warned", False)
     testing.reset()
     yield
     testing.reset()

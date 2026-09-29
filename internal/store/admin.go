@@ -64,7 +64,9 @@ type DeleteCounts struct {
 	RawBatchesRewritten int64 `json:"raw_batches_rewritten,omitempty"`
 	RawBatchesDeleted   int64 `json:"raw_batches_deleted,omitempty"`
 	// Oldest is the arrival time of the oldest affected row (Unix
-	// nanoseconds), or zero when nothing is affected.
+	// nanoseconds), or zero when nothing is affected. The API sends it as
+	// `oldest_ingested` (spec 005 #24); this tag stays `oldest` because an
+	// erasure task persists these counts under it.
 	Oldest int64 `json:"oldest,omitempty"`
 }
 

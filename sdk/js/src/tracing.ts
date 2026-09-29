@@ -231,6 +231,7 @@ function resourceFor(config: Config) {
  * without a warning.
  */
 export function spanProcessor(options: InitOptions = {}): SpanProcessor {
+  if (options.logger !== undefined) setLogger(options.logger);
   const config = resolve(options);
   if (config.environment !== undefined || config.release !== undefined) refuseResource('spanProcessor');
   adopt(config);
