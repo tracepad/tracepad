@@ -224,7 +224,7 @@ test('an item opens in the panel, whole', async ({ page }) => {
 
 test('the run page shows the summary the API returns and the item peek drills into the trace and back', async ({
 	page
-}) => {
+}, testInfo) => {
 	await signIn(page);
 	const summary = (await (await call('GET', `/api/v1/runs/${RUN_A}`)).json()) as {
 		summary: { items: { covered: number; total: number }; traces: { count: number } };
@@ -233,7 +233,11 @@ test('the run page shows the summary the API returns and the item peek drills in
 
 	await expect(page.getByRole('heading', { name: 'prompt v7' })).toBeVisible();
 	await expect(page.getByText(`${summary.summary.items.covered} of ${summary.summary.items.total} covered`)).toBeVisible();
-	await expect(page.getByRole('cell', { name: 'accuracy', exact: true })).toBeVisible();
+	// The score's own cell on a desktop; on a phone the cell that holds its
+	// name first, then its type, count and mean (spec 006 #24).
+	await expect(
+		page.getByRole('cell', testInfo.project.name === 'mobile' ? { name: /^accuracy numeric/ } : { name: 'accuracy', exact: true })
+	).toBeVisible();
 	expect(summary.summary.traces.count).toBe(3);
 
 	// The case, then its attempt's trace one level down, then back (#12).
@@ -254,8 +258,10 @@ test('the compare page renders header and verdicts, the toggle hides same, swap 
 	await signIn(page);
 	await page.goto(`/runs/${RUN_A}/compare/${RUN_B}`);
 
-	// The header block is the response's: one score name, and the counts.
-	await expect(page.getByText('1 improved · 0 regressed · 1 same')).toBeVisible();
+	// The header block is the response's: one score name, and the counts —
+	// a column on a desktop, folded under the name on a phone (spec 006 #24).
+	const scores = page.locator('main table').filter({ hasText: 'Delta' });
+	await expect(scores).toContainText('1 improved · 0 regressed · 1 same');
 	const rows = page.getByRole('table', { name: 'Cases' }).locator('tbody tr');
 	await expect(rows).toHaveCount(2);
 	await expect(page.getByText('improved', { exact: true })).toBeVisible();
@@ -265,7 +271,7 @@ test('the compare page renders header and verdicts, the toggle hides same, swap 
 	await page.getByRole('button', { name: 'Changed only' }).click();
 	await expect(page).toHaveURL(/changed=1/);
 	await expect(rows).toHaveCount(1);
-	await expect(page.getByText('1 improved · 0 regressed · 1 same')).toBeVisible();
+	await expect(scores).toContainText('1 improved · 0 regressed · 1 same');
 
 	// The panel walks what the table draws: with the toggle on, the hidden
 	// `same` case is not a row `j`/`k` can reach.
@@ -504,9 +510,9 @@ test('no screen scrolls the page sideways', async ({ page }) => {
 	}
 });
 
-// Spec 006 #22: on a phone every eval listing folds to the width it is given —
-// the columns that name a row stay, the rest go under it — and none of them
-// scrolls sideways in its own box either.
+// Spec 006 #22, #24: on a phone every eval table folds to the width it is
+// given — the columns that name a row stay, the rest go under it — and none
+// of them scrolls sideways in its own box either.
 test('on a phone the eval listings fold rather than scroll', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
 	await signIn(page);
@@ -515,6 +521,9 @@ test('on a phone the eval listings fold rather than scroll', async ({ page }, te
 		[`/datasets/${DATASET}`, page.locator('main table').first(), ['Id', 'Input']],
 		['/runs', page.locator('main table').first(), ['Compare', 'Name', 'Status']],
 		[`/runs/${RUN_A}`, page.getByRole('table', { name: 'Items' }), ['Item', 'Scores']],
+		[`/runs/${RUN_A}`, page.locator('main table').filter({ hasText: 'Range or distribution' }), ['Name', 'Range or distribution']],
+		[`/runs/${RUN_A}/compare/${RUN_B}`, page.locator('main table').filter({ hasText: 'Delta' }), ['Name', 'Delta']],
+		[`/runs/${RUN_A}/compare/${RUN_B}`, page.getByRole('table', { name: 'Cases' }), ['Item', 'Scores']],
 		['/score-configs', page.locator('main table').first(), ['Name', 'Actions']]
 	] as const) {
 		await page.goto(path);
@@ -525,22 +534,91 @@ test('on a phone the eval listings fold rather than scroll', async ({ page }, te
 	}
 });
 
+// Spec 006 #22, #24: what a program named is bounded at its column, so a
+// categorical label longer than the score's columns, a score name and a
+// metadata key that is a sentence leave the tables inside their boxes, on a
+// phone and on a desktop. The comparison's own numbers come from the demo data
+// otherwise, and its labels are short.
+test('long labels, score names and a long metadata key leave the comparison in its boxes', async ({
+	page
+}, testInfo) => {
+	await signIn(page);
+	const hex = () => Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+	const dataset = `labels-${hex().slice(0, 6)}`;
+	const item = hex();
+	await must('POST', `/api/v1/datasets/${dataset}/items`, [{ id: item, input: { question: 'q' } }]);
+	const key = 'a_metadata_key_that_is_a_whole_sentence_about_the_run_'.repeat(2);
+	const runs = [hex(), hex()];
+	const name = 'a_score_whose_name_is_longer_than_its_column';
+	const scores: unknown[] = [];
+	for (const [i, run] of runs.entries()) {
+		await must('POST', `/api/v1/datasets/${dataset}/runs`, {
+			id: run,
+			name: `run ${i}`,
+			metadata: { [key]: i ? 'a much longer value, '.repeat(12) : 'short', model: 'claude-sonnet-4-5-20250929' }
+		});
+		const traces = [
+			[hex(), item, 1],
+			[hex(), item, 1]
+		] as const;
+		const exported = await call('POST', '/v1/traces', exportOf(run, traces), 'application/x-protobuf');
+		if (!exported.ok) throw new Error(`export run: ${exported.status}`);
+		for (const [j, [trace]] of traces.entries()) {
+			scores.push({
+				id: hex(),
+				trace_id: trace,
+				name,
+				data_type: 'categorical',
+				string_value: j ? 'friendly_handoff_completed' : i ? 'needs_escalation_to_a_person' : 'friendly'
+			});
+		}
+	}
+	await must('POST', '/api/v1/scores', scores);
+
+	await page.goto(`/runs/${runs[0]}/compare/${runs[1]}`);
+	const table = page.locator('main table').filter({ hasText: 'Delta' });
+	await expect(table).toContainText(name);
+	const cases = page.getByRole('table', { name: 'Cases' });
+	const metadata = page.locator('main section').filter({ hasText: 'Metadata that differs' }).locator('table');
+	await expect(metadata).toContainText('short');
+	if (testInfo.project.name === 'mobile') {
+		expect(await sideways(table)).toBeLessThanOrEqual(0);
+		expect(await sideways(cases)).toBeLessThanOrEqual(0);
+		expect(await sideways(metadata)).toBeLessThanOrEqual(0);
+		expect(await clipped(table)).toEqual([]);
+		return;
+	}
+	await foldsAt(page, table, 608, 6, 34);
+	await foldsAt(page, cases, 312 + 112, 4);
+	for (const width of [820, 1440]) {
+		await page.setViewportSize({ width, height: 900 });
+		expect(await sideways(table), `${width}`).toBeLessThanOrEqual(0);
+		expect(await sideways(cases), `${width}`).toBeLessThanOrEqual(0);
+		expect(await sideways(metadata), `${width}`).toBeLessThanOrEqual(0);
+	}
+});
+
 // Spec 006 #22: on a desktop each table has all its columns from its own
 // width — the runs' 896 px, the runs of one dataset's 720, the datasets' 880
 // and so on — and folds under it, however the window got that size.
 test('the eval tables fold at their own widths on a desktop', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
 	await signIn(page);
-	for (const [path, table, box, columns] of [
-		['/datasets', page.locator('main table').first(), 880, 6],
-		[`/datasets/${DATASET}`, page.locator('main table').first(), 672, 5],
-		[`/datasets/${DATASET}?tab=runs`, page.locator('main table').first(), 720, 6],
-		['/runs', page.locator('main table').first(), 896, 7],
-		[`/runs/${RUN_A}`, page.getByRole('table', { name: 'Items' }), 672, 4],
-		['/score-configs', page.locator('main table').first(), 912, 6]
+	// The last number is what a card puts around its table: two 16 px gutters
+	// and a border on the run and comparison screens.
+	for (const [path, table, box, columns, around] of [
+		['/datasets', page.locator('main table').first(), 880, 6, 0],
+		[`/datasets/${DATASET}`, page.locator('main table').first(), 672, 5, 0],
+		[`/datasets/${DATASET}?tab=runs`, page.locator('main table').first(), 720, 6, 0],
+		['/runs', page.locator('main table').first(), 896, 7, 0],
+		[`/runs/${RUN_A}`, page.getByRole('table', { name: 'Items' }), 672, 4, 0],
+		[`/runs/${RUN_A}`, page.locator('main table').filter({ hasText: 'Range or distribution' }), 496, 5, 34],
+		[`/runs/${RUN_A}/compare/${RUN_B}`, page.locator('main table').filter({ hasText: 'Delta' }), 608, 6, 34],
+		[`/runs/${RUN_A}/compare/${RUN_B}`, page.getByRole('table', { name: 'Cases' }), 424, 4, 0],
+		['/score-configs', page.locator('main table').first(), 912, 6, 0]
 	] as const) {
 		await page.goto(path);
 		await expect(table.locator('tbody tr').first(), path).toBeVisible();
-		await foldsAt(page, table, box, columns);
+		await foldsAt(page, table, box, columns, around);
 	}
 });

@@ -40,10 +40,14 @@
 		<p class="text-subtle px-3 pt-6 pb-2 text-center text-sm">Nothing in this window</p>
 	{:else}
 		<div class="overflow-x-auto">
-			<table class="w-full min-w-md border-collapse text-left">
+			<!-- The table's own width (spec 006 #24): what its cells need not to
+			     tear a value, which fits a phone, and a third of the Quality
+			     screen on a desktop is about that much. A longer label scrolls the
+			     table in its box rather than break in the middle of a word. -->
+			<table class="w-full min-w-60 border-collapse text-left">
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
-						<th scope="col" class="px-3 py-1.5 font-medium">{label}</th>
+						<th scope="col" class="w-48 px-3 py-1.5 font-medium">{label}</th>
 						<th scope="col" class="w-32 px-3 py-1.5 font-medium">Scores</th>
 						<th scope="col" class="w-48 px-3 py-1.5 font-medium">{summaryLabel}</th>
 					</tr>
@@ -53,7 +57,7 @@
 						<tr class="border-border border-b last:border-b-0">
 							<th
 								scope="row"
-								class="max-w-64 truncate px-3 py-1.5 text-left font-mono text-xs font-normal"
+								class="max-w-0 min-w-24 truncate px-3 py-1.5 text-left font-mono text-xs font-normal"
 								title={row.key}
 							>
 								{row.key}

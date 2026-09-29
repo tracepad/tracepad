@@ -1,6 +1,8 @@
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { timestamp } from '$lib/format';
+import { boxWidth } from '../../../tests/box';
 import KeysCard from './KeysCard.svelte';
 
 // The Keys card (spec 045 #14): each row says which program holds the key, who
@@ -149,5 +151,33 @@ describe('the keys card', () => {
 
 		expect(listKeys).not.toHaveBeenCalled();
 		expect(screen.queryByLabelText('Which program will hold the new key')).toBeNull();
+	});
+
+	// In a box narrower than the table (spec 006 #24) the row is the key and
+	// Revoke, and the rest folds under the public key.
+	describe('in a narrow box', () => {
+		it('folds the scopes, the minting and the last use under the key, and names Revoke by it', async () => {
+			boxWidth(322);
+			render(KeysCard, { current: PROJECT } as never);
+
+			const editor = (await screen.findByText('tp-pk-editor')).closest('tr')!;
+			expect(screen.getAllByRole('columnheader').map((one) => one.textContent?.trim())).toEqual(['Name', 'Actions']);
+			expect(editor).toHaveTextContent(
+				`ingest, read, write · created ${timestamp('2026-09-02T00:00:00Z')} · by ed@example.com (editor) · last used never`
+			);
+			expect(within(editor).getByRole('button', { name: 'Revoke tp-pk-editor' })).toBeTruthy();
+
+			const gone = screen.getByText('tp-pk-gone').closest('tr')!;
+			expect(within(gone).getByText(/can no longer manage keys here/)).toBeTruthy();
+		});
+
+		it('is the whole table in a box as wide as it', async () => {
+			boxWidth(640);
+			render(KeysCard, { current: PROJECT } as never);
+
+			await screen.findByText('tp-pk-editor');
+			expect(screen.getAllByRole('columnheader')).toHaveLength(5);
+			expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(3);
+		});
 	});
 });

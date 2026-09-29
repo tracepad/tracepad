@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { inviteEditor, signIn as enter, state } from './harness';
+import { clipped, inviteEditor, sideways, signIn as enter, state } from './harness';
 
 // The dashboard over the fixed corpus (spec 007 Testing, spec 034). The
 // window is named explicitly rather than left to the default: the fixtures
@@ -35,7 +35,7 @@ test('all five charts render over the corpus', async ({ page }) => {
 
 test('the Tokens chart has three lines and the model table a column, from the corpus', async ({
 	page
-}) => {
+}, testInfo) => {
 	await signIn(page);
 	await page.goto(`/dashboard?${WINDOW}&group_by=day`);
 
@@ -58,10 +58,12 @@ test('the Tokens chart has three lines and the model table a column, from the co
 	};
 	const model = models.buckets.find((bucket) => bucket.tokens?.input !== undefined)!;
 	const table = page.getByRole('table').filter({ has: page.getByText('Model') });
-	const row = table
-		.getByRole('row')
-		.filter({ has: page.getByRole('rowheader', { name: model.key, exact: true }) });
-	await expect(table.getByRole('columnheader', { name: 'Tokens' })).toBeVisible();
+	const row = table.getByRole('row').filter({ has: page.getByText(model.key, { exact: true }) });
+	// A column on a desktop; on a phone the tokens fold under the model's
+	// name (spec 006 #24), and the number is the same.
+	if (testInfo.project.name !== 'mobile') {
+		await expect(table.getByRole('columnheader', { name: 'Tokens' })).toBeVisible();
+	}
 	await expect(row).toContainText(
 		((model.tokens!.input ?? 0) + (model.tokens!.output ?? 0)).toLocaleString('en-US')
 	);
@@ -89,10 +91,9 @@ test('the breakdown tables match what the endpoint reports', async ({ page }) =>
 		// The row whose *key* is this model, not every row whose text
 		// contains it: `claude-haiku-4-5` is a prefix of
 		// `claude-haiku-4-5-20251001`, and the corpus carries both. The key
-		// column is the row's header, which is what makes it addressable.
-		const row = table
-			.getByRole('row')
-			.filter({ has: page.getByRole('rowheader', { name: bucket.key, exact: true }) });
+		// is an element of its own — the row's header on a desktop, the
+		// first line of a folded cell on a phone (spec 006 #24).
+		const row = table.getByRole('row').filter({ has: page.getByText(bucket.key, { exact: true }) });
 		await expect(row).toContainText(String(bucket.count));
 	}
 });
@@ -155,6 +156,32 @@ test('both themes render the charts, and neither scrolls the page sideways', asy
 	await page.emulateMedia({ colorScheme: 'dark' });
 	await expect(page.locator('.uplot canvas').first()).toBeVisible();
 	expect(await overflow()).toBeLessThanOrEqual(0);
+});
+
+// Spec 006 #24: a breakdown folds in a box narrower than its table — on a
+// phone the key, how many and how many failed stay, the cost and the tokens
+// go under the key — and on a tablet, whose box fits it, it is the table.
+test('a breakdown folds on a phone and is the whole table on a tablet', async ({ page }, testInfo) => {
+	await signIn(page);
+	const phone = testInfo.project.name === 'mobile';
+	if (!phone) await page.setViewportSize({ width: 820, height: 1180 });
+	await page.goto(`/dashboard?${WINDOW}&group_by=day`);
+
+	for (const [title, label, unit] of [
+		['By model', 'Model', 'Observations'],
+		['By environment', 'Environment', 'Traces']
+	]) {
+		const table = page
+			.locator('section', { has: page.getByRole('heading', { name: title, exact: true }) })
+			.getByRole('table');
+		await expect(table.locator('tbody tr').first()).toBeVisible();
+		await expect(table.locator('thead th'), title).toHaveText(
+			phone ? [label, unit, 'Errors'] : [label, unit, 'Errors', 'Cost', 'Tokens']
+		);
+		if (phone && label === 'Model') await expect(table.locator('tbody tr').first()).toContainText(/ tokens/);
+		expect(await sideways(table), title).toBeLessThanOrEqual(0);
+		expect(await clipped(table), title).toEqual([]);
+	}
 });
 
 // What spec 007 #3's invariant became (spec 028 #4, #6): there is no bearer

@@ -3,10 +3,12 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { said } from '$lib/accounts';
 	import { api, type DryRun, type Key, type NewKey, type Project } from '$lib/api/client.svelte';
+	import { Fold } from '$lib/fold.svelte';
 	import { timeOrNever, timestamp } from '$lib/format';
 	import { MAX_KEY_NAME, minter, outlived, SCOPES, type Scope, tooLong } from '$lib/keys';
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
+	import Folded from '../Folded.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
 	import Card from './Card.svelte';
 	import ViewerNote from './ViewerNote.svelte';
@@ -102,6 +104,14 @@
 		notice = `Key ${publicKey} revoked.`;
 		return notice;
 	}
+
+	// In a box narrower than the table the row is the key and *Revoke*; its
+	// scopes, who minted it when and its last use fold under the public key
+	// (spec 006 #24), in a plain cell for the reason the Accounts card gives
+	// (#18), so the button carries the public key. The number is the unfolded
+	// table's width and its `min-width`.
+	const fold = new Fold(640);
+	const narrow = $derived(fold.narrow);
 </script>
 
 <Card
@@ -125,39 +135,57 @@
 				Reading the keys
 			</p>
 		{:else}
-			<div class="border-border overflow-x-auto rounded-md border">
-				<table class="w-full border-collapse text-left text-sm">
+			<div bind:contentRect={fold.rect} class="border-border overflow-x-auto rounded-md border">
+				<table class="w-full border-collapse text-left text-sm" style:min-width={fold.min}>
 					<thead class="text-subtle text-xs whitespace-nowrap">
 						<tr class="border-border border-b">
-							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Scopes</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Created</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Last used</th>
+							<th scope="col" class={['px-3 py-1.5 font-medium', narrow && 'w-full']}>Name</th>
+							{#if !narrow}
+								<th scope="col" class="px-3 py-1.5 font-medium">Scopes</th>
+								<th scope="col" class="px-3 py-1.5 font-medium">Created</th>
+								<th scope="col" class="px-3 py-1.5 font-medium">Last used</th>
+							{/if}
 							<th scope="col" class="w-24 px-3 py-1.5"><span class="sr-only">Actions</span></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each keys as key (key.public_key)}
+							{@const warning = outlived(key.created_by)}
 							<tr class="border-border border-b align-top last:border-b-0">
-								<th scope="row" class="px-3 py-1.5 text-left font-normal">
-									{key.name || '—'}
-									<span class="text-subtle block font-mono text-xs break-all">{key.public_key}</span>
-								</th>
-								<td class="text-muted px-3 py-1.5">{key.scopes.join(', ')}</td>
-								<td class="text-muted px-3 py-1.5">
-									<span class="tabular-nums">{timestamp(key.created_at)}</span>
-									<span class="block text-xs">by {minter(key.created_by)}</span>
-									{#if outlived(key.created_by)}
-										<span class="text-warn block text-xs">
-											The person who minted it can no longer manage keys here.
+								{#if narrow}
+									<td class="max-w-0 px-3 py-1.5 wrap-anywhere">
+										{@render identity(key, true)}
+										<div class="text-muted text-xs">
+											<Folded
+												values={[
+													key.scopes.join(', '),
+													`created ${timestamp(key.created_at)}`,
+													`by ${minter(key.created_by)}`,
+													`last used ${timeOrNever(key.last_used_at)}`
+												]}
+											/>
+										</div>
+										{#if warning}{@render outlivedNote()}{/if}
+									</td>
+								{:else}
+									<th scope="row" class="min-w-40 px-3 py-1.5 text-left font-normal wrap-anywhere">
+										{@render identity(key)}
+									</th>
+									<td class="text-muted px-3 py-1.5">{key.scopes.join(', ')}</td>
+									<td class="text-muted max-w-0 min-w-44 px-3 py-1.5">
+										<span class="tabular-nums whitespace-nowrap">{timestamp(key.created_at)}</span>
+										<span class="block truncate text-xs" title={minter(key.created_by)}>
+											by {minter(key.created_by)}
 										</span>
-									{/if}
-								</td>
-								<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
-									{timeOrNever(key.last_used_at)}
-								</td>
+										{#if warning}{@render outlivedNote()}{/if}
+									</td>
+									<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
+										{timeOrNever(key.last_used_at)}
+									</td>
+								{/if}
 								<td class="px-3 py-1.5">
 									<Button
+										aria-label={narrow ? `Revoke ${key.public_key}` : undefined}
 										onclick={() => (
 											(notice = null),
 											(revoking = revoking === key.public_key ? null : key.public_key)
@@ -229,5 +257,21 @@
 		{/if}
 	{/if}
 </Card>
+
+<!-- The public key is what a person copies into a program, so unfolded it is
+     never torn across lines, and the column is as wide as it needs (spec 006
+     #24). Folded, the cell is the box's width, and it breaks last. -->
+{#snippet identity(key: Key, stacked = false)}
+	{key.name || '—'}
+	<span class={['text-subtle block font-mono text-xs', stacked ? 'break-all' : 'whitespace-nowrap']}>
+		{key.public_key}
+	</span>
+{/snippet}
+
+{#snippet outlivedNote()}
+	<span class="text-warn block text-xs">
+		The person who minted it can no longer manage keys here.
+	</span>
+{/snippet}
 
 <SecretDialog pair={minted} onclose={() => (minted = null)} />

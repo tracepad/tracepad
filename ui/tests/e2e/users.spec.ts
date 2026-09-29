@@ -17,6 +17,8 @@ const BOB = 'bob@e2e';
 const CAROL = '7d444840-9dc0-11d1-b245-5ffdce74fad2';
 const CAROL_SESSION = '0d8f2c9a-5b1e-4f6a-9c3d-7e2b8a1f4c60';
 const LONG_NAME = 'checkout-assistant-conversation-turn-with-a-long-name';
+const LONG_MODEL = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0-with-a-very-long-suffix';
+const LONG_ENVIRONMENT = 'production-eu-west-1-blue-canary-deployment-a';
 /**
  * Two hours in the past, so both are closed from the aggregator's first pass —
  * and relative to now, on the hour, as `filters.spec.ts` does: the page opens
@@ -92,6 +94,7 @@ type Span = {
 	cost: number;
 	environment: string;
 	name?: string;
+	model?: string;
 };
 
 function exportOf(spans: Span[]): Uint8Array {
@@ -104,7 +107,7 @@ function exportOf(spans: Span[]): Uint8Array {
 			...fixed64(8, span.at + 700_000_000n),
 			...bytes(9, attribute('user.id', span.user)),
 			...bytes(9, attribute('session.id', span.session)),
-			...bytes(9, attribute('gen_ai.request.model', 'claude-sonnet-5')),
+			...bytes(9, attribute('gen_ai.request.model', span.model ?? 'claude-sonnet-5')),
 			...bytes(9, attribute('deployment.environment.name', span.environment)),
 			...bytes(9, money('gen_ai.usage.cost', span.cost))
 		])
@@ -159,7 +162,7 @@ function seed(): Promise<void> {
 			// Bob: one trace, later, cheap — so last seen and cost disagree.
 			{ trace: 'b0'.padEnd(32, '3'), user: BOB, session: 'sess-b', at: HOUR_B + 10_000_000_000n, cost: 0.001, environment: 'production' },
 			// Carol: the earliest and the cheapest, so she is last under both sorts.
-			{ trace: 'c0'.padEnd(32, '4'), user: CAROL, session: CAROL_SESSION, at: HOUR_A - 2n * HOUR, cost: 0.0005, environment: 'production', name: LONG_NAME }
+			{ trace: 'c0'.padEnd(32, '4'), user: CAROL, session: CAROL_SESSION, at: HOUR_A - 2n * HOUR, cost: 0.0005, environment: LONG_ENVIRONMENT, name: LONG_NAME, model: LONG_MODEL }
 		]);
 		await rolled(3);
 	})();
@@ -420,4 +423,17 @@ test.describe('in a Russian locale', () => {
 		test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
 		await listingsAtTheirWidths(page);
 	});
+});
+
+// Spec 006 #24: nor does a model name or an environment longer than its column
+// widen a breakdown past the box it scrolls in, on a phone or a desktop.
+test('a long model and a long environment leave the breakdowns inside their boxes', async ({
+	page
+}) => {
+	await signIn(page);
+	await page.goto(`/users/${encodeURIComponent(CAROL)}?${WINDOW}`);
+
+	await expect(page.getByText(LONG_MODEL.slice(0, 24)).first()).toBeVisible();
+	const tables = page.locator('main table').filter({ has: page.locator('thead') });
+	for (const table of await tables.all()) expect(await sideways(table)).toBeLessThanOrEqual(0);
 });

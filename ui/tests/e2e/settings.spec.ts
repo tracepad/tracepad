@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
 	BCRYPT_WAIT,
+	clipped,
+	foldsAt,
 	createProject,
 	fromOwnAddress,
 	inviteNobody,
 	section,
+	sideways,
 	signIn,
 	signInAsOwner,
 	state,
@@ -269,7 +272,7 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	const row = page.getByRole('row').filter({ hasText: name });
 	await expect(row).toContainText('Live');
 
-	await row.getByRole('button', { name: 'Delete', exact: true }).click();
+	await row.getByRole('button', { name: /^Delete\b/ }).click();
 	await page.getByRole('button', { name: 'Show what it holds' }).click();
 	await expect(page.getByText('the keys stop working immediately')).toBeVisible();
 
@@ -286,6 +289,71 @@ test('the Server tab creates, deletes with the echo, and restores', async ({ pag
 	await expect(row).toContainText('Live');
 });
 
+// Spec 006 #24: a settings table folds in a box narrower than itself. On a
+// phone the keys are the key and Revoke, named for it, and the projects the
+// name and the verbs, named for it; on a tablet the boxes are 544 px, narrower
+// than either table, so both fold there too.
+test('the keys and the projects fold where their box is narrower than the table', async ({
+	page
+}, testInfo) => {
+	// With names longer than any column: a project's and a key's, in one word.
+	const own = await createProject(`fold${'x'.repeat(40)}`);
+	const phone = testInfo.project.name === 'mobile';
+	if (!phone) await page.setViewportSize({ width: 820, height: 1180 });
+	await signInAsOwner(page, own.id);
+
+	await page.goto('/settings/project');
+	await page.getByLabel('Which program will hold the new key').fill('k'.repeat(60));
+	await page.getByRole('button', { name: 'Mint a key pair' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'I have copied it' }).click();
+	const keys = page.getByRole('table').filter({ hasText: 'tp-pk-' });
+	await expect(keys.locator('tbody tr')).toHaveCount(2);
+	await expect(keys.locator('thead th')).toHaveText(['Name', 'Actions']);
+	await expect(keys.locator('tbody tr').first()).toContainText(
+		/ingest.* · created .* · by the admin token · last used /
+	);
+	await expect(keys.getByRole('button', { name: /^Revoke tp-pk-/ })).toHaveCount(2);
+	expect(await sideways(keys)).toBeLessThanOrEqual(0);
+	expect(await clipped(keys)).toEqual([]);
+
+	await page.goto('/settings/server');
+	const projects = page.getByRole('table').filter({ hasText: own.id });
+	const row = projects.locator('tbody tr').filter({ hasText: own.id });
+	await expect(projects.locator('thead th')).toHaveText(['Name', 'Actions']);
+	await expect(row).toContainText('Keep forever · Live');
+	await expect(row.getByRole('button', { name: `Settings of ${own.name}` })).toBeVisible();
+	await expect(row.getByRole('button', { name: `Delete ${own.name}` })).toBeVisible();
+	expect(await sideways(projects)).toBeLessThanOrEqual(0);
+	expect(await clipped(projects)).toEqual([]);
+});
+
+// Spec 006 #24: on a desktop the keys have their five columns from 640 px and
+// the projects theirs from 704, and fold under them as the window narrows. A
+// settings card puts 68 px of padding, border and gutter between the window
+// and its table.
+test('the keys and the projects fold at their own widths on a desktop', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
+	const own = await createProject('foldwidths');
+	await signInAsOwner(page, own.id);
+
+	await page.goto('/settings/project');
+	const keys = page.getByRole('table').filter({ hasText: 'tp-pk-' });
+	await expect(keys.locator('tbody tr')).toHaveCount(1);
+	await foldsAt(page, keys, 640, 5, 68, 64);
+
+	await page.goto('/settings/server');
+	const projects = page.getByRole('table').filter({ hasText: own.id });
+	await expect(projects.locator('tbody tr').first()).toBeVisible();
+	await foldsAt(page, projects, 704, 5, 68);
+	// The id is what an operator copies into the CLI: on one line, whole.
+	const lines = await projects.getByText(own.id).first().evaluate((node) => {
+		const range = document.createRange();
+		range.selectNodeContents(node);
+		return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+	});
+	expect(lines).toBe(1);
+});
+
 // The project on screen is the one being deleted: `me` drops it at once, but
 // the tab — and the Restore on it — stays until the next navigation
 // (spec 029 #4, edge cases). Pulling the screen away mid-action would leave
@@ -299,7 +367,7 @@ test('deleting the project on screen leaves the tab, and Restore, in place', asy
 	// By id: the accounts table on the same tab has a row for the project's
 	// editor, whose email carries the name.
 	const row = page.getByRole('row').filter({ hasText: own.id });
-	await row.getByRole('button', { name: 'Delete', exact: true }).click();
+	await row.getByRole('button', { name: /^Delete\b/ }).click();
 	await page.getByRole('button', { name: 'Show what it holds' }).click();
 	await page.getByRole('textbox', { name: /Type the project name/ }).fill(own.name);
 	await page.getByRole('button', { name: 'Delete the project' }).click();

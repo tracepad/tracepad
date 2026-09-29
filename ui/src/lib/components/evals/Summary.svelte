@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { RunWithSummary } from '$lib/api/client.svelte';
-	import { trim } from '$lib/evals';
-	import { ABSENT, cost, count, duration } from '$lib/format';
+	import { scoreType, trim } from '$lib/evals';
+	import { Fold } from '$lib/fold.svelte';
+	import { ABSENT, cost, count, counted, duration } from '$lib/format';
 	import { href } from '$lib/project.svelte';
+	import Folded from '../Folded.svelte';
 
 	// A run's summary as the server computed it (spec 014 API contract →
 	// Runs): coverage, traffic, the scores table, what actually ran, and what
@@ -23,6 +25,12 @@
 		const most = counts[0]?.[1] ?? 1;
 		return counts.map(([value, n]) => ({ value, n, share: (100 * n) / most }));
 	}
+
+	// In a box narrower than the scores table a score is its name and what it
+	// came to; its type, how many and the mean fold under the name (spec 006
+	// #24). The number is the unfolded table's width and its `min-width`.
+	const fold = new Fold(496);
+	const narrow = $derived(fold.narrow);
 
 	const card = 'border-border bg-surface min-w-0 rounded-lg border';
 	const head = 'text-subtle border-border border-b px-3 py-2 text-xs font-medium';
@@ -93,29 +101,45 @@
 		{#if names.length === 0}
 			<p class="text-subtle px-3 py-4 text-center text-sm">No score has been posted against this run's traces</p>
 		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full min-w-lg border-collapse text-left text-sm">
+			<div bind:contentRect={fold.rect} class="overflow-x-auto">
+				<table class="w-full border-collapse text-left text-sm" style:min-width={fold.min}>
 					<thead class="text-subtle text-xs whitespace-nowrap">
 						<tr class="border-border border-b">
-							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-							<th scope="col" class="w-28 px-3 py-1.5 font-medium">Type</th>
-							<th scope="col" class="w-20 px-3 py-1.5 text-right font-medium">Count</th>
-							<th scope="col" class="w-20 px-3 py-1.5 text-right font-medium">Mean</th>
-							<th scope="col" class="w-64 px-3 py-1.5 font-medium">Range or distribution</th>
+							<th scope="col" class={['px-3 py-1.5 font-medium', narrow && 'w-1/2']}>Name</th>
+							{#if !narrow}
+								<th scope="col" class="w-28 px-3 py-1.5 font-medium">Type</th>
+								<th scope="col" class="w-20 px-3 py-1.5 text-right font-medium">Count</th>
+								<th scope="col" class="w-20 px-3 py-1.5 text-right font-medium">Mean</th>
+							{/if}
+							<th scope="col" class={['px-3 py-1.5 font-medium', !narrow && 'w-64']}>Range or distribution</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each names as name (name)}
 							{@const stat = summary.scores[name]}
+							{@const type = scoreType(stat)}
 							<tr class="border-border border-b last:border-b-0">
-								<td class="px-3 py-1.5 font-medium">{name}</td>
-								<td class="text-muted px-3 py-1.5">
-									{stat.data_type}{stat.direction ? ` · ${stat.direction}` : ''}
-								</td>
-								<td class="text-muted px-3 py-1.5 text-right tabular-nums">{count(stat.count)}</td>
-								<td class="px-3 py-1.5 text-right tabular-nums">
-									{stat.mean == null ? ABSENT : trim(stat.mean)}
-								</td>
+								{#if narrow}
+									<td class="max-w-0 px-3 py-1.5">
+										<div class="truncate font-medium" title={name}>{name}</div>
+										<div class="text-muted text-xs tabular-nums">
+											<Folded
+												values={[
+													type,
+													counted(stat.count, 'score'),
+													stat.mean == null ? null : `mean ${trim(stat.mean)}`
+												]}
+											/>
+										</div>
+									</td>
+								{:else}
+									<td class="max-w-0 min-w-32 truncate px-3 py-1.5 font-medium" title={name}>{name}</td>
+									<td class="text-muted px-3 py-1.5">{type}</td>
+									<td class="text-muted px-3 py-1.5 text-right tabular-nums">{count(stat.count)}</td>
+									<td class="px-3 py-1.5 text-right tabular-nums">
+										{stat.mean == null ? ABSENT : trim(stat.mean)}
+									</td>
+								{/if}
 								<td class="text-muted px-3 py-1.5 tabular-nums">
 									{#if stat.distribution}
 										<ul class="space-y-0.5">
