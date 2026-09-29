@@ -570,7 +570,10 @@
                 "exports_over_span_cap": {"type": "integer", "description": "This project's exports refused with 413 for carrying more spans than TRACEPAD_MAX_SPANS_PER_REQUEST"},
                 "bodies_refused_for_budget": {"type": "integer", "description": "This project's request bodies — exports, JSON API writes, media uploads — refused with 429 because TRACEPAD_BODY_BUDGET_BYTES was spent"},
                 "reads_timed_out": {"type": "integer", "description": "This project's reads the read deadline stopped (TRACEPAD_READ_TIMEOUT)"},
-                "reads_refused_busy": {"type": "integer", "description": "This project's reads refused because no read slot came free before the deadline"}
+                "reads_refused_busy": {"type": "integer", "description": "This project's reads refused because no read slot came free before the deadline"},
+                "scores_over_row_cap": {"type": "integer", "description": "This project's POST /api/v1/scores arrays refused with 413 for carrying more than 10,000 scores"},
+                "dataset_items_over_row_cap": {"type": "integer", "description": "This project's dataset item arrays refused with 413 for carrying more than 10,000 items"},
+                "queue_adds_over_target_cap": {"type": "integer", "description": "This project's queue adds refused with 400 for carrying more than 1,000 targets"}
               }}
             },
             "required": ["version", "started_at", "uptime_seconds", "database", "counters"]

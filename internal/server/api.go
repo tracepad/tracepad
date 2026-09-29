@@ -329,12 +329,15 @@ func (e *overItemCap) Error() string {
 		e.count, e.kind, e.limit)
 }
 
-// writeBatchError answers a body decodeBatch refused.
-func writeBatchError(w http.ResponseWriter, err error) {
+// writeBatchError answers a body decodeBatch refused, and counts it in the
+// project's counters when it was refused for its number of values (spec 043
+// #40).
+func (s *Server) writeBatchError(w http.ResponseWriter, projectID string, kind batchKind, err error) {
 	status := http.StatusBadRequest
 	var over *overItemCap
 	if errors.As(err, &over) {
 		status = http.StatusRequestEntityTooLarge
+		s.counters.observeOverBatchCap(projectID, kind)
 	}
 	writeError(w, status, err.Error())
 }

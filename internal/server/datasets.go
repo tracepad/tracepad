@@ -308,7 +308,7 @@ func (s *Server) handleCreateItems(w http.ResponseWriter, r *http.Request) {
 	}
 	requests, err := decodeBatch[itemRequest](body, "item", maxItemsPerWrite)
 	if err != nil {
-		writeBatchError(w, err)
+		s.writeBatchError(w, project.ID, batchDatasetItems, err)
 		return
 	}
 	if len(requests) == 0 {

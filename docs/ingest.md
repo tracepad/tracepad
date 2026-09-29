@@ -285,7 +285,10 @@ the database and the server its memory:
 `held_bytes` and `capacity_bytes` — and counts, per project, the exports
 refused for their spans (`counters.exports_over_span_cap`, also counted in
 `rejected_batches`) and the bodies refused for the budget
-(`counters.bodies_refused_for_budget`).
+(`counters.bodies_refused_for_budget`). The array writes of the JSON API have
+counters of their own for the arrays they refuse for their length
+(`counters.scores_over_row_cap`, `counters.dataset_items_over_row_cap` and
+`counters.queue_adds_over_target_cap`; see [api.md](api.md#system)).
 
 ## What is kept, and for how long
 

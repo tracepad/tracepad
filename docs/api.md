@@ -1172,6 +1172,10 @@ carrying more than `TRACEPAD_MAX_SPANS_PER_REQUEST` spans (each is a
 `rejected_batches` too), and `bodies_refused_for_budget` its request bodies —
 exports, JSON API writes, media uploads — refused with `429` because the budget
 was spent ([ingest.md](ingest.md#how-much-one-export-may-carry)).
+`scores_over_row_cap` and `dataset_items_over_row_cap` count this project's
+arrays refused with `413` for carrying more than 10,000 scores or dataset
+items, and `queue_adds_over_target_cap` its queue adds refused with `400` for
+more than 1,000 targets — each its own counter, since the limits differ.
 
 `read_slots` is how many reads are being served now against
 `TRACEPAD_READ_CONCURRENCY`, deployment-wide like the writer queue:

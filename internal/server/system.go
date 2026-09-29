@@ -58,6 +58,13 @@ type projectCounters struct {
 	// #21).
 	exportsOverSpanCap     int64
 	bodiesRefusedForBudget int64
+	// scoresOverRowCap, datasetItemsOverRowCap and queueAddsOverTargetCap
+	// count the array writes refused for carrying more values than their
+	// limit: 10,000 scores or dataset items, 1,000 queue targets (spec 043
+	// #40).
+	scoresOverRowCap       int64
+	datasetItemsOverRowCap int64
+	queueAddsOverTargetCap int64
 }
 
 // counters holds every since-start number the system endpoint reports, kept
@@ -124,6 +131,34 @@ func (c *counters) observeOverSpanCap(projectID string) {
 	project := c.forProject(projectID)
 	project.rejectedBatches++
 	project.exportsOverSpanCap++
+}
+
+// batchKind is which array write a refusal for its number of values was
+// about.
+type batchKind int
+
+const (
+	batchScores batchKind = iota
+	batchDatasetItems
+	batchQueueTargets
+)
+
+// observeOverBatchCap records an array write refused for carrying more values
+// than its limit (spec 043 #40). Each route has a counter of its own, because
+// their limits are different ones and a client sending a thousand and one
+// targets is not one sending ten thousand and one scores.
+func (c *counters) observeOverBatchCap(projectID string, kind batchKind) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	project := c.forProject(projectID)
+	switch kind {
+	case batchScores:
+		project.scoresOverRowCap++
+	case batchDatasetItems:
+		project.datasetItemsOverRowCap++
+	case batchQueueTargets:
+		project.queueAddsOverTargetCap++
+	}
 }
 
 // observeBodyRefused records a body the budget could not hold, in the project
@@ -230,7 +265,10 @@ func (c *counters) snapshot(projectID string) object {
 		put("exports_over_span_cap", project.exportsOverSpanCap).
 		put("bodies_refused_for_budget", project.bodiesRefusedForBudget).
 		put("reads_timed_out", project.readsTimedOut).
-		put("reads_refused_busy", project.readsRefusedBusy)
+		put("reads_refused_busy", project.readsRefusedBusy).
+		put("scores_over_row_cap", project.scoresOverRowCap).
+		put("dataset_items_over_row_cap", project.datasetItemsOverRowCap).
+		put("queue_adds_over_target_cap", project.queueAddsOverTargetCap)
 }
 
 // orphanTraces reports one project's count of trace deliveries that named a
