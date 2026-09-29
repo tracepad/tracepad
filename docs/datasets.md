@@ -509,7 +509,7 @@ harness never touches a span it does not hold.
 ```python
 import tracepad
 
-tracepad.init()  # TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+tracepad.init()  # TRACEPAD_URL / TRACEPAD_API_KEY from the environment
 
 tracepad.score_configs([
     {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
@@ -549,7 +549,7 @@ async iterable over the items, a callback for the block, `wrap` or
 ```ts
 import * as tracepad from 'tracepad';
 
-tracepad.init(); // TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+tracepad.init(); // TRACEPAD_URL / TRACEPAD_API_KEY from the environment
 
 await tracepad.scoreConfigs([
   { name: 'accuracy', data_type: 'numeric', direction: 'higher', min: 0, max: 1 },
@@ -586,7 +586,7 @@ the item, and a span processor writes them on every span started under it —
 the application's own, a framework's, another SDK's.
 
 ```go
-shutdown, err := tracepad.Init(ctx) // TRACEPAD_HOST / TRACEPAD_API_KEY from the environment
+shutdown, err := tracepad.Init(ctx) // TRACEPAD_URL / TRACEPAD_API_KEY from the environment
 defer shutdown(ctx)
 
 tracepad.ScoreConfigs(ctx, []tracepad.ScoreConfig{

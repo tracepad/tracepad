@@ -690,7 +690,12 @@ func defaultDataDir() string {
 func warnUnknownEnv() {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(name, "TRACEPAD_") && !knownEnv[name] {
+		if name == "TRACEPAD_HOST" {
+			// The packages' first name for the store's address (spec 017 #21),
+			// still read by them: a shared .env carries it to the server too.
+			slog.Warn("TRACEPAD_HOST is the packages' deprecated name for TRACEPAD_URL; the server does not read it",
+				"name", name)
+		} else if strings.HasPrefix(name, "TRACEPAD_") && !knownEnv[name] {
 			slog.Warn("unknown TRACEPAD_* environment variable", "name", name)
 		}
 	}

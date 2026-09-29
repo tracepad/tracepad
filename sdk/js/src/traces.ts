@@ -54,7 +54,7 @@ export function deleteTrace(id: string, { confirm = false }: { confirm?: boolean
  * Delete every trace the filter matches that started before `to`.
  *
  * With no `confirm` this is one dry run, and the answer is the API's preview
- * (`matched`, `would_delete`, `affected_runs`, `oldest`, `confirm`, `note`).
+ * (`matched`, `would_delete`, `affected_runs`, `oldest_ingested`, `confirm`, `note`).
  * With the project's name it deletes in rounds of at most `limit` traces,
  * repeating while the API says `more`, and resolves with the total:
  * `{ deleted: { traces, observations, scores, payloads, annotation_items }, rounds }`.

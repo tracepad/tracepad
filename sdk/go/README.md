@@ -30,7 +30,7 @@ if err != nil {
 defer shutdown(ctx)
 ```
 
-`TRACEPAD_HOST` and `TRACEPAD_API_KEY` are the two variables it reads;
+`TRACEPAD_URL` and `TRACEPAD_API_KEY` are the two variables it reads;
 `TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` are the two it can also use. If
 the application already has a `TracerProvider` — `otelhttp`, another SDK —
 `Init` registers an exporter on it rather than replacing it.

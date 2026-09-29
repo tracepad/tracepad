@@ -10,7 +10,7 @@ then add the detail that makes traces useful.
 Search the service for what already traces it:
 
 ```sh
-grep -rniE "opentelemetry|TracerProvider|langfuse|OTEL_EXPORTER_OTLP|TRACEPAD_HOST" --include="*.py" --include="*.ts" --include="*.js" --include="*.go" --include="*.env*" .
+grep -rniE "opentelemetry|TracerProvider|langfuse|OTEL_EXPORTER_OTLP|TRACEPAD_URL" --include="*.py" --include="*.ts" --include="*.js" --include="*.go" --include="*.env*" .
 ```
 
 A service that already exports through one SDK needs configuration, not a
@@ -41,8 +41,9 @@ Two settings people lose an afternoon to:
 | Node | `npm install tracepad @opentelemetry/api` | `tracepad.init()` |
 | Go | `go get github.com/tracepad/tracepad/sdk/go` | `shutdown, err := tracepad.Init(ctx)`, then `defer shutdown(ctx)` |
 
-- The packages read **`TRACEPAD_HOST`** and `TRACEPAD_API_KEY` — `HOST`, not
-  the CLI's `TRACEPAD_URL`. `TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` name
+- The packages read **`TRACEPAD_URL`** and `TRACEPAD_API_KEY`, the same two
+  variables as the CLI (`TRACEPAD_HOST`, an older name for the address, still
+  works and warns). `TRACEPAD_ENVIRONMENT` and `TRACEPAD_RELEASE` name
   the deployment and its version; a variant inside one release — an
   experiment arm, a prompt bundle — is the trace's own version, set where the
   trace is updated. Without a host or a key `init`

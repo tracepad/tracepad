@@ -96,7 +96,7 @@ with a preview:
   "would_delete": {"traces": 41203, "observations": 180114, "scores": 96,
                    "prompts": 4, "raw_batches": 812, "api_keys": 2,
                    "annotation_queues": 3, "annotation_items": 1408},
-  "oldest": "2026-03-14T08:21:00Z",
+  "oldest_ingested": "2026-03-14T08:21:00Z",
   "confirm": "checkout-service",
   "note": "the keys stop working immediately; the data is restorable for seven days"
 }
@@ -332,7 +332,7 @@ dry run counts each before anything happens:
     "traces": 12, "observations": 240, "scores": 30, "session_scores": 2,
     "annotation_items": 1, "dataset_items": 3, "media": 4, "media_bytes": 812003
   },
-  "oldest": "2026-06-01T09:14:02Z",
+  "oldest_ingested": "2026-06-01T09:14:02Z",
   "affected_runs": [{"id": "…", "dataset": "support-golden", "traces": 2}],
   "affected_datasets": [{"dataset": "support-golden", "items": 3}],
   "raw": {"batches_to_scan": 41, "unattributable_batches": 0},
@@ -534,7 +534,7 @@ then shows the item as missing, and the preview names the run under
 
 **One trace.** The echo is the trace id, because the id is the trace's only
 identity. Without `confirm` the endpoint answers the preview — `would_delete`
-with `traces`, `observations`, `scores` and `annotation_items`, `oldest`,
+with `traces`, `observations`, `scores` and `annotation_items`, `oldest_ingested`,
 `affected_runs`, `confirm`, `note` — and an unknown id is `404`, dry run and
 confirmed alike. With `?confirm=<id>` it deletes and answers
 `{"dry_run": false, "deleted": {…}, "id", "compaction"}`; `deleted` counts the

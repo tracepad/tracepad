@@ -211,7 +211,7 @@ func TestWithoutInitTheApplicationsOwnProviderStillScores(t *testing.T) {
 	provider := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 	otel.SetTracerProvider(provider)
-	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_URL", testHost)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	s := &sender{}
 	q := queue(t, s, nil)
@@ -254,7 +254,7 @@ func TestWithoutInitASampledOutSpanKeepsItsIDs(t *testing.T) {
 // naming no target: dropped, as in the other two packages.
 func TestWithTracingOffAnEmptyTraceIDIsNoTarget(t *testing.T) {
 	withoutInit(t)
-	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_URL", testHost)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	s := &sender{}
 	q := queue(t, s, nil)
@@ -274,7 +274,7 @@ func TestWithTracingOffAnEmptyTraceIDIsNoTarget(t *testing.T) {
 // that trace — tracing is on here, whatever the global says (spec 039 #8).
 func TestWithoutInitAnUnregisteredProvidersSpanStillScores(t *testing.T) {
 	withoutInit(t)
-	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_URL", testHost)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	provider := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
@@ -319,7 +319,7 @@ func TestWithTracingOffAScoreByIDIsSent(t *testing.T) {
 	withoutInit(t)
 	// By id it is REST, not tracing (spec 039 #2): posted with the store the
 	// environment names, as a judge script that traces nothing does.
-	t.Setenv("TRACEPAD_HOST", testHost)
+	t.Setenv("TRACEPAD_URL", testHost)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	s := &sender{}
 	q := queue(t, s, nil)

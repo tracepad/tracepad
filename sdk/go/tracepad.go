@@ -48,8 +48,8 @@ func (o options) String() string {
 
 func (o options) GoString() string { return o.String() }
 
-// WithHost names the store, e.g. "http://localhost:4318". TRACEPAD_HOST
-// otherwise.
+// WithHost names the store, e.g. "http://localhost:4318". TRACEPAD_URL
+// otherwise (TRACEPAD_HOST, deprecated, after that).
 func WithHost(host string) Option { return func(o *options) { o.host = host } }
 
 // WithKey is a secret key ("tp-sk-…"), sent as Bearer. TRACEPAD_API_KEY
@@ -472,4 +472,5 @@ func reset() {
 	warnedKinds.Lock()
 	clear(warnedKinds.seen)
 	warnedKinds.Unlock()
+	hostWarned = sync.Once{}
 }

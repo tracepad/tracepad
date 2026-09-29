@@ -209,7 +209,7 @@ func TestRetentionPreviewCountsWhatWouldGo(t *testing.T) {
 	expectStatus(t, rec, 200)
 	preview := decodeJSON[struct {
 		WouldDelete map[string]int `json:"would_delete"`
-		Oldest      string         `json:"oldest"`
+		Oldest      string         `json:"oldest_ingested"`
 	}](t, rec)
 	if preview.WouldDelete["traces"] != 2 {
 		t.Errorf("would_delete = %v, want the two that are already past a seven-day window", preview.WouldDelete)

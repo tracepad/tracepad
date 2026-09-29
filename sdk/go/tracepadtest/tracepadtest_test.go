@@ -232,7 +232,7 @@ func TestTheResetDropsWhatTheQueueHeld(t *testing.T) {
 	var posts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posts.Add(1) }))
 	t.Cleanup(server.Close)
-	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_URL", server.URL)
 	t.Setenv("TRACEPAD_API_KEY", "tp-sk-test")
 	tracepadtest.Reset(t)
 	if err := tracepad.Score(context.Background(), "pending", tracepad.WithTraceID(strings.Repeat("a", 32))); err != nil {
@@ -255,7 +255,7 @@ func TestTheResetNeitherWaitsForASendInFlightNorWarns(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	t.Cleanup(func() { close(release) })
-	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_URL", server.URL)
 	t.Setenv("TRACEPAD_API_KEY", "tp-sk-test")
 	logs := &bytes.Buffer{}
 	previous := slog.Default()

@@ -2045,9 +2045,9 @@ export interface components {
             matched?: number;
             /**
              * Format: date-time
-             * @description Arrival of the oldest affected row; absent when nothing is affected
+             * @description When the oldest affected row arrived (its ingest time, not the time its trace started); absent when nothing is affected
              */
-            oldest?: string;
+            oldest_ingested?: string;
             /** @description User-data erasure and trace deletion only: the dataset runs that would lose traces to it, because both override the pin a run puts on them */
             affected_runs?: {
                 id: string;

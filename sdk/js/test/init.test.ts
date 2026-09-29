@@ -8,6 +8,7 @@ import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { BasicTracerProvider as BasicTracerProviderV1, InMemorySpanExporter, SimpleSpanProcessor, type SpanProcessor as SpanProcessorV1 } from 'sdk-trace-base-v1';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
+import { resolve } from '../src/config.js';
 import * as tracepad from '../src/index.js';
 import { HOST, KEY, fresh, registered, warnings } from './helpers.js';
 
@@ -190,12 +191,28 @@ describe('configuration', () => {
   });
 
   test('reads the environment, and the arguments win over it', () => {
-    process.env.TRACEPAD_HOST = 'http://from-env:4318/';
+    process.env.TRACEPAD_URL = 'http://from-env:4318/';
     process.env.TRACEPAD_API_KEY = 'tp-sk-env';
     process.env.TRACEPAD_ENVIRONMENT = 'staging';
     tracepad.init({ key: KEY, export: false });
     const resource = (registered() as unknown as { _resource: { attributes: Record<string, unknown> } })._resource;
     expect(resource.attributes['deployment.environment.name']).toBe('staging');
+  });
+
+  test('TRACEPAD_HOST is a deprecated synonym for TRACEPAD_URL: it works, warns once, and loses to it', () => {
+    process.env.TRACEPAD_API_KEY = KEY;
+    process.env.TRACEPAD_URL = 'http://from-url:4318/';
+    process.env.TRACEPAD_HOST = 'http://from-host:4318';
+    expect(resolve().host).toBe('http://from-url:4318');
+    expect(warnings).toEqual([]);
+
+    delete process.env.TRACEPAD_URL;
+    expect(resolve().host).toBe('http://from-host:4318');
+    expect(resolve().host).toBe('http://from-host:4318');
+    expect(warnings).toEqual([
+      'tracepad: TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too',
+    ]);
+    expect(resolve({ host: 'http://argument:4318' }).host).toBe('http://argument:4318');
   });
 
   test('the logger override takes the warnings', () => {

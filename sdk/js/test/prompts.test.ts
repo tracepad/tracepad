@@ -119,12 +119,12 @@ describe('the cache', () => {
   });
 
   test('with no init, the environment is read on the first call', async () => {
-    process.env.TRACEPAD_HOST = HOST;
+    process.env.TRACEPAD_URL = HOST;
     process.env.TRACEPAD_API_KEY = KEY;
     const calls = fakeFetch(() => ({ body: STORED }));
     await tracepad.prompt('support-answer');
     expect(calls[0]?.headers.Authorization).toBe(`Bearer ${KEY}`);
-    delete process.env.TRACEPAD_HOST;
+    delete process.env.TRACEPAD_URL;
   });
 
   test('with no configuration at all it rejects with TracepadConfigError', async () => {

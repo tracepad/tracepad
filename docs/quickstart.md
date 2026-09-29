@@ -94,7 +94,7 @@ store, and the shapes a person writes every time:
 
 ```sh
 pip install tracepad
-export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_URL=http://localhost:4318
 export TRACEPAD_API_KEY=tp-sk-…
 ```
 
@@ -123,7 +123,7 @@ same rules about what throws — for Node 22 and newer:
 
 ```sh
 npm install tracepad @opentelemetry/api
-export TRACEPAD_HOST=http://localhost:4318
+export TRACEPAD_URL=http://localhost:4318
 export TRACEPAD_API_KEY=tp-sk-…
 ```
 
@@ -157,7 +157,7 @@ go get github.com/tracepad/tracepad/sdk/go
 import tracepad "github.com/tracepad/tracepad/sdk/go"
 
 func main() {
-	shutdown, err := tracepad.Init(ctx)      // TRACEPAD_HOST, TRACEPAD_API_KEY
+	shutdown, err := tracepad.Init(ctx)      // TRACEPAD_URL, TRACEPAD_API_KEY
 	if err != nil {
 		log.Fatal(err)
 	}

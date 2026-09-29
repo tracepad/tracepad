@@ -44,7 +44,7 @@ def delete_traces(*, to: datetime | str, confirm: str = "", limit: int = ROUND,
     the API's 400, raised.
 
     With no `confirm` this is one dry run, and the answer is the API's preview
-    (`matched`, `would_delete`, `affected_runs`, `oldest`, `confirm`, `note`).
+    (`matched`, `would_delete`, `affected_runs`, `oldest_ingested`, `confirm`, `note`).
     With the project's name as `confirm` it deletes in rounds of at most
     `limit` traces (1 to 1000), repeating while the API says `more`, and returns
     the total: `{"deleted": {"traces", "observations", "scores", "payloads",

@@ -23,6 +23,7 @@ pytest_plugins = ["pytester"]
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for variable in (
+        "TRACEPAD_URL",
         "TRACEPAD_HOST",
         "TRACEPAD_API_KEY",
         "TRACEPAD_ENVIRONMENT",
@@ -42,6 +43,8 @@ def fresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.delenv(variable.lower(), raising=False)
     monkeypatch.setenv("NO_PROXY", "*")
     monkeypatch.setenv("no_proxy", "*")
+    # The deprecated-host warning is once a process; every test starts unwarned.
+    monkeypatch.setattr("tracepad._config._host_warned", False)
     testing.reset()
     yield
     testing.reset()

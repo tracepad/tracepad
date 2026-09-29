@@ -98,7 +98,7 @@ func TestNoHostAndNoKeyIsErrConfig(t *testing.T) {
 	if !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), "no host and no key") {
 		t.Errorf("err = %v", err)
 	}
-	t.Setenv("TRACEPAD_HOST", testHost+"/")
+	t.Setenv("TRACEPAD_URL", testHost+"/")
 	if _, err := Init(context.Background()); !errors.Is(err, ErrConfig) || !strings.Contains(err.Error(), "no key") {
 		t.Errorf("err = %v", err)
 	}
@@ -131,7 +131,7 @@ func TestInitBuildsAProviderWhenThereIsNone(t *testing.T) {
 	if os.Getenv("TRACEPAD_TEST_BUILD") == "" {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestInitBuildsAProviderWhenThereIsNone$", "-test.v")
 		cmd.Env = append(os.Environ(), "TRACEPAD_TEST_BUILD=1", "OTEL_SERVICE_NAME=support-bot",
-			"TRACEPAD_HOST=", "TRACEPAD_API_KEY=", "TRACEPAD_ENVIRONMENT=", "TRACEPAD_RELEASE=")
+			"TRACEPAD_URL=", "TRACEPAD_HOST=", "TRACEPAD_API_KEY=", "TRACEPAD_ENVIRONMENT=", "TRACEPAD_RELEASE=")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("child: %v\n%s", err, out)
 		}
@@ -192,7 +192,7 @@ func TestAScoreBeforeInitIsSentAtShutdown(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("TRACEPAD_HOST", server.URL)
+	t.Setenv("TRACEPAD_URL", server.URL)
 	t.Setenv("TRACEPAD_API_KEY", testKey)
 	if err := Score(context.Background(), "early", WithValue(1), WithTraceID(strings.Repeat("a", 32))); err != nil {
 		t.Fatal(err)
@@ -321,5 +321,42 @@ func TestTheExportTimeoutResolves(t *testing.T) {
 	}
 	if got := exportTimeout(1500 * time.Millisecond); got != 1500*time.Millisecond {
 		t.Errorf("the option = %v, want it to win", got)
+	}
+}
+
+// TestURLIsTheHostVariableAndHostIsTheDeprecatedSynonym pins spec 033 #20: the
+// address of the store is TRACEPAD_URL, as the CLI and the server have it;
+// TRACEPAD_HOST still works, says so once, and loses to TRACEPAD_URL.
+func TestURLIsTheHostVariableAndHostIsTheDeprecatedSynonym(t *testing.T) {
+	fresh(t)
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Setenv("TRACEPAD_API_KEY", testKey)
+
+	t.Setenv("TRACEPAD_URL", "http://from-url:4318/")
+	c, err := resolve("", "", "", "")
+	if err != nil || c.host != "http://from-url:4318" || logs.Len() != 0 {
+		t.Fatalf("URL alone: host = %q, err = %v, logs = %q", c.host, err, logs)
+	}
+
+	t.Setenv("TRACEPAD_HOST", "http://from-host:4318")
+	if c, _ = resolve("", "", "", ""); c.host != "http://from-url:4318" || logs.Len() != 0 {
+		t.Errorf("URL and HOST: host = %q, logs = %q", c.host, logs)
+	}
+
+	t.Setenv("TRACEPAD_URL", "")
+	for range 2 {
+		if c, _ = resolve("", "", "", ""); c.host != "http://from-host:4318" {
+			t.Errorf("HOST alone: host = %q", c.host)
+		}
+	}
+	if n := strings.Count(logs.String(), "TRACEPAD_HOST is deprecated"); n != 1 {
+		t.Errorf("the warning appeared %d times, want once: %q", n, logs)
+	}
+
+	if c, _ = resolve("http://argument:4318", "", "", ""); c.host != "http://argument:4318" {
+		t.Errorf("an argument beats both: host = %q", c.host)
 	}
 }

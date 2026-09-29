@@ -3,7 +3,7 @@
  *
  *     import * as tracepad from 'tracepad';
  *
- *     tracepad.init(); // TRACEPAD_HOST / TRACEPAD_API_KEY
+ *     tracepad.init(); // TRACEPAD_URL / TRACEPAD_API_KEY
  *
  *     const answer = tracepad.observe(async (question: string) => {
  *       return tracepad.generation('chat', { model: 'gpt-4o-mini' }, async (call) => {

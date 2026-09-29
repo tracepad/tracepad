@@ -27,7 +27,7 @@ type recorder struct {
 // fresh forgets the default between tests: Init is process-wide by design.
 func fresh(t *testing.T) {
 	t.Helper()
-	for _, variable := range []string{"TRACEPAD_HOST", "TRACEPAD_API_KEY", "TRACEPAD_ENVIRONMENT", "TRACEPAD_RELEASE"} {
+	for _, variable := range []string{"TRACEPAD_URL", "TRACEPAD_HOST", "TRACEPAD_API_KEY", "TRACEPAD_ENVIRONMENT", "TRACEPAD_RELEASE"} {
 		t.Setenv(variable, "")
 	}
 	reset()

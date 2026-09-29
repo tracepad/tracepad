@@ -111,9 +111,9 @@ export TRACEPAD_API_KEY=tp-sk-…
 ```
 
 Piped, every command prints the API's JSON; exit `1` is a request that failed
-and `2` a command typed wrong. The rest is [cli.md](cli.md). The SDKs read
-`TRACEPAD_HOST` rather than `TRACEPAD_URL` — the skill's instrumenting
-reference says so, because it is the variable an agent mixes up.
+and `2` a command typed wrong. The rest is [cli.md](cli.md). The packages
+read the same two variables (`TRACEPAD_HOST`, their first name for the
+address, still works and says it is deprecated).
 
 ## What the skill holds the agent to
 

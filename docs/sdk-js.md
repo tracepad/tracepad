@@ -35,7 +35,7 @@ tracepad.init();
 
 | Option | Environment | Meaning |
 |---|---|---|
-| `host` | `TRACEPAD_HOST` | Where the store is, e.g. `http://localhost:4318` |
+| `host` | `TRACEPAD_URL` | Where the store is, e.g. `http://localhost:4318` |
 | `key` | `TRACEPAD_API_KEY` | A secret key (`tp-sk-…`), sent as `Bearer` |
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`updateTrace({ version })`](#the-trace-around-a-step) |
@@ -46,6 +46,8 @@ tracepad.init();
 The options win over the environment, and with neither a host nor a key the
 call throws `TracepadConfigError` — misconfiguration discovered as a `401` in
 a log file an hour later is the bug report that rule prevents.
+
+`TRACEPAD_URL` is the same variable the CLI and the MCP server read; the package's first name for it, `TRACEPAD_HOST`, still works, warns once, and loses to `TRACEPAD_URL`.
 
 **`exportTimeoutMillis`** is handed to the OTLP exporter as its timeout, and
 `spanProcessor()` takes it too. OpenTelemetry's default is ten seconds,
@@ -643,7 +645,7 @@ A REST call follows a redirect of a `GET` with the key only within the store's
 origin — the same scheme, host and port; anywhere else it goes without
 `Authorization`, as `fetch` has it. A write is never re-sent: its redirect is an
 error that names where it pointed. The store itself never redirects, so
-`TRACEPAD_HOST` should be the address it answers on.
+`TRACEPAD_URL` should be the address it answers on.
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package warns about goes through `console.warn` with a

@@ -153,7 +153,7 @@ func (s *Server) handleDeleteTraces(w http.ResponseWriter, r *http.Request) {
 			put("dry_run", true).
 			put("matched", counts.Traces).
 			put("would_delete", wouldDelete(counts)).
-			putSome("oldest", oldestTime(counts)).
+			putSome("oldest_ingested", oldestTime(counts)).
 			put("affected_runs", affectedRuns(runs)).
 			put("confirm", project.Name).
 			put("note", deleteNote))
@@ -255,7 +255,7 @@ func deletionPreview(counts store.DeleteCounts, runs []store.AffectedRun, confir
 	return object{}.
 		put("dry_run", true).
 		put("would_delete", wouldDelete(counts)).
-		putSome("oldest", oldestTime(counts)).
+		putSome("oldest_ingested", oldestTime(counts)).
 		put("affected_runs", affectedRuns(runs)).
 		put("confirm", confirm).
 		put("note", note)

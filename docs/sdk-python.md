@@ -27,7 +27,7 @@ tracepad.init()
 
 | Argument | Environment | Meaning |
 |---|---|---|
-| `host` | `TRACEPAD_HOST` | Where the store is, e.g. `http://localhost:4318` |
+| `host` | `TRACEPAD_URL` | Where the store is, e.g. `http://localhost:4318` |
 | `key` | `TRACEPAD_API_KEY` | A secret key (`tp-sk-…`), sent as `Bearer` |
 | `environment` | `TRACEPAD_ENVIRONMENT` | The deployment this process is |
 | `release` | `TRACEPAD_RELEASE` | The version of this deployment — per trace, [`update_trace(version=…)`](#the-trace-around-a-step) |
@@ -37,6 +37,8 @@ tracepad.init()
 The arguments win over the environment, and with neither a host nor a key the
 call raises `TracepadConfigError` — misconfiguration discovered as a `401` in a
 log file an hour later is the bug report that rule prevents.
+
+`TRACEPAD_URL` is the same variable the CLI and the MCP server read; the package's first name for it, `TRACEPAD_HOST`, still works, warns once, and loses to `TRACEPAD_URL`.
 
 **Not calling `init` is how tracing is turned off** — in tests, on a machine
 with no key — as long as the process has no OpenTelemetry provider of its own:
@@ -580,7 +582,7 @@ processes, so they do not share one.
 
 A REST call that meets a redirect sends the next hop without the key, wherever
 it points, so a write redirected to a `GET` is answered `401`. The store itself
-never redirects, so `TRACEPAD_HOST` should be the address it answers on.
+never redirects, so `TRACEPAD_URL` should be the address it answers on.
 
 Instrumentation that can break the function it observes is worse than none.
 Everything the package logs goes to the `tracepad` logger, which has no handler

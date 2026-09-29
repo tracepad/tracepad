@@ -12,7 +12,7 @@
 import { type ProxyTracerProvider, type TracerProvider, trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, vi } from 'vitest';
 
-import { adopt } from '../src/config.js';
+import { adopt, rearmHostWarning } from '../src/config.js';
 import { setLogger } from '../src/log.js';
 import { type Capture, capture, reset } from '../src/testing.js';
 import { FOLLOWER } from '../src/tracing.js';
@@ -28,6 +28,7 @@ const intoWarnings = { warn: (message: string) => warnings.push(message) };
 export function fresh(): void {
   beforeEach(() => {
     for (const variable of [
+      'TRACEPAD_URL',
       'TRACEPAD_HOST',
       'TRACEPAD_API_KEY',
       'TRACEPAD_ENVIRONMENT',
@@ -38,6 +39,7 @@ export function fresh(): void {
       delete process.env[variable];
     }
     warnings.length = 0;
+    rearmHostWarning();
     reset();
     setLogger(intoWarnings);
   });

@@ -153,7 +153,7 @@ Dry run (no `confirm`):
     "traces": 12, "observations": 240, "scores": 30, "session_scores": 2,
     "annotation_items": 1, "dataset_items": 3, "media": 4, "media_bytes": 812003
   },
-  "oldest": "2026-06-01T09:14:02Z",
+  "oldest_ingested": "2026-06-01T09:14:02Z",
   "affected_runs": [{"id": "…", "dataset": "support-golden", "traces": 2}],
   "affected_datasets": [{"dataset": "support-golden", "items": 3}],
   "raw": {"batches_to_scan": 41, "unattributable_batches": 0},

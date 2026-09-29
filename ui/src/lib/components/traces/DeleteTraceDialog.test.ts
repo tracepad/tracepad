@@ -15,7 +15,7 @@ const { deleteTrace } = vi.hoisted(() => ({
 			? {
 					dry_run: true as const,
 					would_delete: { traces: 1, observations: 4, scores: 2, annotation_items: 1 },
-					oldest: '2026-09-01T09:00:00Z',
+					oldest_ingested: '2026-09-01T09:00:00Z',
 					affected_runs: [{ id: 'a'.repeat(32), dataset: 'golden', traces: 1 }],
 					confirm: TRACE,
 					note: 'raw OTLP bodies are not deleted; they expire on the raw retention window'

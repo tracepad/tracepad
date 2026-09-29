@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"flag"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -475,6 +477,28 @@ func TestInContainer(t *testing.T) {
 	}
 	if !knownEnv["TRACEPAD_IN_CONTAINER"] {
 		t.Error("TRACEPAD_IN_CONTAINER would be warned about as unknown")
+	}
+}
+
+// TRACEPAD_HOST is the packages' deprecated name for TRACEPAD_URL (spec 017
+// #21): a shared .env carries it to the server, which says what it is
+// instead of calling it a typo, and still calls a real typo one.
+func TestWarnUnknownEnvNamesTheDeprecatedHost(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Setenv("TRACEPAD_HOST", "http://localhost:4318")
+	t.Setenv("TRACEPAD_LISTNE", ":4318")
+
+	warnUnknownEnv()
+
+	out := logs.String()
+	if !strings.Contains(out, "deprecated name for TRACEPAD_URL") || strings.Contains(out, "unknown TRACEPAD_* environment variable\" name=TRACEPAD_HOST") {
+		t.Errorf("TRACEPAD_HOST: %s", out)
+	}
+	if !strings.Contains(out, "unknown TRACEPAD_* environment variable\" name=TRACEPAD_LISTNE") {
+		t.Errorf("a typo is still reported as unknown: %s", out)
 	}
 }
 

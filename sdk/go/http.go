@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -71,7 +72,7 @@ const redacted = "[redacted]"
 // values are nowhere.
 func resolve(host, key, environment, release string) (config, error) {
 	c := config{
-		host:        strings.TrimRight(pick(host, "TRACEPAD_HOST"), "/"),
+		host:        strings.TrimRight(pickHost(host), "/"),
 		key:         pick(key, "TRACEPAD_API_KEY"),
 		environment: pick(environment, "TRACEPAD_ENVIRONMENT"),
 		release:     pick(release, "TRACEPAD_RELEASE"),
@@ -85,10 +86,32 @@ func resolve(host, key, environment, release string) (config, error) {
 	}
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("%w: no %s; pass tracepad.WithHost and tracepad.WithKey to Init "+
-			"or set TRACEPAD_HOST and TRACEPAD_API_KEY", ErrConfig, strings.Join(missing, " and no "))
+			"or set TRACEPAD_URL and TRACEPAD_API_KEY", ErrConfig, strings.Join(missing, " and no "))
 	}
 	return c, nil
 }
+
+// pickHost is the option, then TRACEPAD_URL — the name the CLI and the server
+// read too (spec 033 #20) — then TRACEPAD_HOST, this package's first name for
+// it, which still works and says once that it is going away.
+func pickHost(given string) string {
+	if given != "" {
+		return strings.TrimSpace(given)
+	}
+	if url := strings.TrimSpace(os.Getenv("TRACEPAD_URL")); url != "" {
+		return url
+	}
+	legacy := strings.TrimSpace(os.Getenv("TRACEPAD_HOST"))
+	if legacy != "" {
+		hostWarned.Do(func() {
+			def.log().Warn("TRACEPAD_HOST is deprecated; set TRACEPAD_URL, which the CLI and the server read too")
+		})
+	}
+	return legacy
+}
+
+// hostWarned makes the TRACEPAD_HOST warning once a process; reset re-arms it.
+var hostWarned sync.Once
 
 func pick(given, variable string) string {
 	if given != "" {
