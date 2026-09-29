@@ -645,8 +645,8 @@ type traceSweep struct {
 	Purge bool
 	Limit int
 
-	// Filled by apply. Assigned rather than accumulated: a window that
-	// fails is retried job by job, so apply can run more than once.
+	// Filled by apply. Assigned rather than accumulated: apply is idempotent
+	// and may run again, as any job's may (spec 043 #38).
 	Traces       int64
 	Observations int64
 	Scores       int64

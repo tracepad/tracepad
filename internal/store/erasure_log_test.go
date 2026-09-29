@@ -300,6 +300,24 @@ func erasureLogPaths() []erasureLogPath {
 				// the job that failed is refused there: its line, and no
 				// line of a window that came apart, which did not.
 				waitLine(t, log, "a write of an erasure did not commit")
+				if out := log(); strings.Contains(out, "write window failed") {
+					t.Errorf("a window a job of an erasure's failed by itself is said to have come apart:\n%s", out)
+				}
+			}},
+		{"a job replayed after its window's first pass", []string{"a job failed its window's first pass and passed the second"}, false,
+			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
+				w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				// A job of an erasure's that fails the window's first pass and
+				// passes the second is committed and refused nothing: the
+				// replay line is the only one it leaves.
+				if errs := runWindow(t, w, sharesAWindow(), &failsOnce{err: fail}, sharesAWindow()); errors.Join(errs...) != nil {
+					t.Fatalf("answers %v, want every job committed by the second pass", errs)
+				}
+				waitLine(t, log, "a job failed its window's first pass and passed the second")
 			}},
 		{"a window a job broke", []string{"write window failed", "a write of an erasure did not commit"}, false,
 			func(t *testing.T, f *sweepFixture, id string, fail error, log func() string) {
@@ -326,6 +344,23 @@ func (j rollsBackItself) apply(tx *sql.Tx) error {
 	return j.err
 }
 func (rollsBackItself) failureRedacted() (string, bool) {
+	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
+}
+
+// failsOnce is a job of an erasure's that fails its first application with an
+// error of its own words and passes every one after.
+type failsOnce struct {
+	err   error
+	calls int
+}
+
+func (j *failsOnce) apply(*sql.Tx) error {
+	if j.calls++; j.calls == 1 {
+		return j.err
+	}
+	return nil
+}
+func (*failsOnce) failureRedacted() (string, bool) {
 	return "4f0c9d3e8a1b2c3d4e5f60718293a4b5", true
 }
 
@@ -524,27 +559,50 @@ func TestTheLevelsOfAnErasuresLines(t *testing.T) {
 }
 
 // A window that a job of an erasure's takes down by ending the transaction
-// itself is a Warn, without the job's words, as a window that came apart is
-// (#33), and the erasure it was a step of is named.
+// itself is a Warn, without the job's words and naming the erasure it was a
+// step of (spec 047 #33, #35): its cause is the savepoint the job left no way
+// back to, not the job's own failure. The job's own failure is a line of its
+// own, an Info when it is a refusal and an Error when it is not, as alone.
 func TestAWindowAnErasureJobTookDownIsAWarn(t *testing.T) {
-	f := newErasureFixture(t)
-	var logged bytes.Buffer
-	var mu sync.Mutex
-	old := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-	t.Cleanup(func() { logger = old })
-	w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-	runWindow(t, w, sharesAWindow(), rollsBackItself{err: errors.New("words of the user")}, sharesAWindow())
-	mu.Lock()
-	defer mu.Unlock()
-	out := logged.String()
-	if !strings.Contains(out, "level=WARN msg=\"write window failed") ||
-		!strings.Contains(out, "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5") || strings.Contains(out, "words of the user") {
-		t.Errorf("the log %q, want a Warn of the window, naming the erasure, without the job's words", out)
+	for _, tc := range []struct {
+		name string
+		fail error
+		job  string
+	}{
+		{"a broken job", errors.New("words of the user"), "level=ERROR"},
+		{"a refusing job", &Rejection{Kind: RejectInvalid, Message: "words of the user"}, "level=INFO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newErasureFixture(t)
+			log := captureLog(t)
+			w, err := f.store.NewWriter(WriterOptions{CommitWindow: 50 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			runWindow(t, w, sharesAWindow(), rollsBackItself{err: tc.fail}, sharesAWindow())
+			waitLine(t, log, "a write of an erasure did not commit")
+			out := log()
+			const erasure = "erasure=4f0c9d3e8a1b2c3d4e5f60718293a4b5"
+			var window, job string
+			for _, line := range strings.Split(out, "\n") {
+				switch {
+				case strings.Contains(line, "write window failed"):
+					window = line
+				case strings.Contains(line, "a write of an erasure did not commit"):
+					job = line
+				}
+			}
+			if !strings.Contains(window, "level=WARN") || !strings.Contains(window, erasure) {
+				t.Errorf("the line of the window %q, want a Warn naming the erasure", window)
+			}
+			if !strings.Contains(job, tc.job) || !strings.Contains(job, erasure) {
+				t.Errorf("the line of the job %q, want %s naming the erasure", job, tc.job)
+			}
+			if strings.Contains(out, "words of the user") {
+				t.Errorf("the log carries the job's words:\n%s", out)
+			}
+		})
 	}
 }
 

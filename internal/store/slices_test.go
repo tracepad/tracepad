@@ -765,16 +765,12 @@ func TestAReplayNothingRefusedIsExplained(t *testing.T) {
 	}{
 		{"a job", &weighedJob{rows: 1, do: flaky("transient fluke")}, "transient fluke", true},
 		{"a job that reports its own failure",
-			&reportedJob{weighedJob{rows: 1, do: flaky("the hour is broken")}}, "the hour is broken", true},
+			&reportedJob{weighedJob{rows: 1, do: flaky("the hour is broken")}}, "the hour is broken", false},
 		{"a job that redacts its failure",
 			&redactedJob{weighedJob{rows: 1, do: flaky("user-7f3a9c was not found")}}, "user-7f3a9c", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var logged bytes.Buffer
-			var mu sync.Mutex
-			previous := logger
-			logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-			t.Cleanup(func() { logger = previous })
+			log := captureLog(t)
 
 			s, p := openIngestStore(t)
 			probe := newProbeWindow(t, s)
@@ -786,9 +782,7 @@ func TestAReplayNothingRefusedIsExplained(t *testing.T) {
 			if want := []int{3}; !slices.Equal(windows, want) {
 				t.Errorf("committed windows %v, want %v", windows, want)
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			text := logged.String()
+			text := log()
 			if n := strings.Count(text, "first pass and passed the second"); n != 1 {
 				t.Errorf("%d lines about the replay, want one:\n%s", n, text)
 			}
@@ -848,8 +842,8 @@ func TestAReplayedScoreIsStampedByTheApplicationThatCommits(t *testing.T) {
 	if at := stored("dated"); at != own {
 		t.Errorf("the caller's own stamp became %d, want %d", at, own)
 	}
-	if stamped.CreatedAt != stored("stamped") {
-		t.Errorf("the score the caller reads carries %d, the row %d", stamped.CreatedAt, stored("stamped"))
+	if stamped.CreatedAt != 0 {
+		t.Errorf("the caller's score was stamped with %d, want it left as it was", stamped.CreatedAt)
 	}
 }
 
@@ -871,11 +865,7 @@ func TestARoutineRefusalIsLoggedAtInfo(t *testing.T) {
 		{"an error nobody expected", errors.New("boom"), "ERROR"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var logged bytes.Buffer
-			var mu sync.Mutex
-			previous := logger
-			logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-			t.Cleanup(func() { logger = previous })
+			log := captureLog(t)
 
 			s, p := openIngestStore(t)
 			h := newHeldWriter(t, s, p)
@@ -884,12 +874,10 @@ func TestARoutineRefusalIsLoggedAtInfo(t *testing.T) {
 			if !errors.Is(errs[0], c.err) {
 				t.Fatalf("answer %v, want the job's error", errs[0])
 			}
-			mu.Lock()
-			defer mu.Unlock()
 			// The line about the refusal, and no other: opening the store logs
 			// its migrations at info into the same buffer.
 			var line string
-			for _, l := range strings.Split(logged.String(), "\n") {
+			for _, l := range strings.Split(log(), "\n") {
 				if strings.Contains(l, "write refused") {
 					line = l
 				}
@@ -1009,11 +997,7 @@ func TestAnIngestSliceThatFailsInAWindowIsRolledBackAlone(t *testing.T) {
 // committed with it, and the line says the write was refused, not that a
 // commit failed.
 func TestALoneJobThatFailsIsRefused(t *testing.T) {
-	var logged bytes.Buffer
-	var mu sync.Mutex
-	previous := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-	t.Cleanup(func() { logger = previous })
+	log := captureLog(t)
 
 	s, p := openIngestStore(t)
 	probe := newProbeWindow(t, s)
@@ -1029,9 +1013,7 @@ func TestALoneJobThatFailsIsRefused(t *testing.T) {
 	if len(windows) != 0 {
 		t.Errorf("committed windows %v, want none", windows)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if text := logged.String(); !strings.Contains(text, "write refused") || strings.Contains(text, "write commit failed") {
+	if text := log(); !strings.Contains(text, "write refused") || strings.Contains(text, "write commit failed") {
 		t.Errorf("the line for a refused lone job:\n%s", text)
 	}
 }
@@ -1106,11 +1088,7 @@ func TestAWindowOfRefusedJobsCommitsNothing(t *testing.T) {
 // goes on and commits the others, and nothing of the slice is left in the
 // transaction — not its trace, not its observation, not its media.
 func TestAnIngestSliceRefusedForItsMediaIsRefusedAlone(t *testing.T) {
-	var logged bytes.Buffer
-	var mu sync.Mutex
-	previous := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-	t.Cleanup(func() { logger = previous })
+	log := captureLog(t)
 
 	s, p := openIngestStore(t)
 	probe := newProbeWindow(t, s)
@@ -1142,9 +1120,7 @@ func TestAnIngestSliceRefusedForItsMediaIsRefusedAlone(t *testing.T) {
 			t.Errorf("%d rows of the refused slice in %s", n, table)
 		}
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if text := logged.String(); strings.Contains(text, "write window failed") {
+	if text := log(); strings.Contains(text, "write window failed") {
 		t.Errorf("a slice refused for its media failed its window:\n%s", text)
 	}
 }
@@ -1173,11 +1149,7 @@ func sharesAWindow() WriteJob {
 // refused inside a window either (spec 043 #38, spec 044 #15): its error may
 // name a user, and the one line about it is its caller's.
 func TestAJobRefusedInAWindowThatReportsItsFailureIsNotLogged(t *testing.T) {
-	var logged bytes.Buffer
-	var mu sync.Mutex
-	previous := logger
-	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
-	t.Cleanup(func() { logger = previous })
+	log := captureLog(t)
 
 	s, p := openIngestStore(t)
 	probe := newProbeWindow(t, s)
@@ -1189,9 +1161,7 @@ func TestAJobRefusedInAWindowThatReportsItsFailureIsNotLogged(t *testing.T) {
 	if errs[0] != nil || errs[1] == nil || errs[2] != nil {
 		t.Fatalf("answers %v, want the middle job refused and the others committed", errs)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if text := logged.String(); strings.Contains(text, "write refused") ||
+	if text := log(); strings.Contains(text, "write refused") ||
 		strings.Contains(text, "write commit failed") || strings.Contains(text, "user-7f3a9c") {
 		t.Errorf("the writer logged a job whose caller reports it:\n%s", text)
 	}
@@ -1669,5 +1639,21 @@ func TestAResolvedIdOnlyTheRawBodyNamesIsCheckedByTheLastSlice(t *testing.T) {
 	collectBetweenSlices(t, s, p.ID, "ij")
 	if err := applySlice(t, s, cut[1]); !errors.Is(err, ErrMediaGone) {
 		t.Errorf("the last slice answered %v, want ErrMediaGone", err)
+	}
+}
+
+// captureLog swaps the package logger for one that writes to a buffer until the
+// test ends, and answers what has been written.
+func captureLog(t *testing.T) func() string {
+	t.Helper()
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	previous := logger
+	logger = func() *slog.Logger { return slog.New(slog.NewTextHandler(&lockedWriter{w: &logged, mu: &mu}, nil)) }
+	t.Cleanup(func() { logger = previous })
+	return func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.String()
 	}
 }

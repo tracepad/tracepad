@@ -662,13 +662,19 @@ var errJobFailed = errors.New("a job of the window failed by itself")
 // explainReplay says why a window was applied twice when it did not show:
 // a job failed the first pass and was committed by the second, which leaves no
 // refusal to log. It names the job's type and gives its error, unless the job
-// redacts its failure, whose words the writer does not log (spec 047 #33): its
-// line has the facts of the error and what the job was a step of.
+// reports its failure itself or redacts it: a line that reports its own has the
+// type alone, since its error may name a user (spec 044 #15), and one that
+// redacts has the facts of the error and what the job was a step of, not its
+// words (spec 047 #33).
 func explainReplay(sub *submission, failed error) {
 	const message = "a job failed its window's first pass and passed the second"
 	job := fmt.Sprintf("%T", sub.job)
 	if id, redacted := redacts(sub.job); redacted {
 		logRedacted(slog.LevelWarn, message, id, failed, "job", job)
+		return
+	}
+	if reports(sub.job) {
+		logger().Warn(message, "job", job)
 		return
 	}
 	logger().Warn(message, "job", job, "err", failed)
