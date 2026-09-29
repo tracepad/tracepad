@@ -53,6 +53,13 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 | `TRACEPAD_RELEASE` | unset | The version of this deployment. |
 | `TRACEPAD_EXPORT_TIMEOUT` | `5` | Seconds one export may take, retries included. |
 
+**`TRACEPAD_URL` is one variable with two readers.** The server takes it as the
+public, browser-facing address (for the links it prints), the CLI and the
+packages as the address to talk to. In a `.env` shared between the server and an
+application, the application therefore sends its spans to the public address; if
+it should use an internal one (`http://tracepad:4318`), give `init` the host
+explicitly or keep a separate `.env` for it.
+
 Options passed to `init` win over these. The OpenTelemetry variables
 (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, the exporter's and the batch
 processor's own) are the OpenTelemetry SDK's business, and it honours them as
