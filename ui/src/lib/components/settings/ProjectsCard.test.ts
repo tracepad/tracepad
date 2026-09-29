@@ -49,13 +49,11 @@ describe('the projects card', () => {
 
 		const legacy = screen.getByText('legacy').closest('tr')!;
 		expect(legacy).toHaveTextContent('Keep forever · Deleted, purged');
-		// The purge time is one piece, cut and titled rather than torn.
-		expect(within(legacy).getByTitle(/^Deleted, purged /)).toBeTruthy();
 		expect(within(legacy).getByRole('button', { name: 'Restore legacy' })).toBeTruthy();
 	});
 
 	it('is the whole table in a box as wide as it', async () => {
-		boxWidth(704);
+		boxWidth(728);
 		render(ProjectsCard);
 
 		await screen.findByText('checkout');
@@ -64,7 +62,7 @@ describe('the projects card', () => {
 	});
 
 	it('folds one rem under it', async () => {
-		boxWidth(688);
+		boxWidth(712);
 		render(ProjectsCard);
 
 		await screen.findByText('checkout');

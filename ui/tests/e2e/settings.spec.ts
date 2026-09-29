@@ -4,6 +4,7 @@ import {
 	clipped,
 	foldsAt,
 	createProject,
+	deleteProject,
 	fromOwnAddress,
 	inviteNobody,
 	openDialog,
@@ -12,6 +13,7 @@ import {
 	signIn,
 	signInAsOwner,
 	state,
+	torn,
 	type Account
 } from './harness';
 
@@ -298,6 +300,9 @@ test('the keys and the projects fold where their box is narrower than the table'
 }, testInfo) => {
 	// With names longer than any column: a project's and a key's, in one word.
 	const own = await createProject(`fold${'x'.repeat(40)}`);
+	// The table lists a deleted project too, with its purge time on the row: the
+	// tests before this one leave such rows, and a run alone must have one.
+	await deleteProject(await createProject('folddeleted'));
 	const phone = testInfo.project.name === 'mobile';
 	if (!phone) await page.setViewportSize({ width: 820, height: 1180 });
 	await signInAsOwner(page, own.id);
@@ -328,12 +333,13 @@ test('the keys and the projects fold where their box is narrower than the table'
 });
 
 // Spec 006 #24: on a desktop the keys have their five columns from 640 px and
-// the projects theirs from 704, and fold under them as the window narrows. A
+// the projects theirs from 728 (with a deleted project in the table, whose *Restore* is the widest verb), and fold under them as the window narrows. A
 // settings card puts 68 px of padding, border and gutter between the window
 // and its table.
 test('the keys and the projects fold at their own widths on a desktop', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name === 'mobile', 'a desktop window is the test');
 	const own = await createProject('foldwidths');
+	await deleteProject(await createProject('folddeleted'));
 	await signInAsOwner(page, own.id);
 
 	await page.goto('/settings/project');
@@ -344,7 +350,13 @@ test('the keys and the projects fold at their own widths on a desktop', async ({
 	await page.goto('/settings/server');
 	const projects = page.getByRole('table').filter({ hasText: own.id });
 	await expect(projects.locator('tbody tr').first()).toBeVisible();
-	await foldsAt(page, projects, 704, 5, 68);
+	// A deleted project's time may break at the space between its date and its
+	// hour, and nowhere else.
+	await foldsAt(page, projects, 728, 5, 68, Infinity, async () => {
+		const deleted = projects.locator('tbody tr').filter({ hasText: 'Deleted, purged' });
+		await expect(deleted.first()).toBeVisible();
+		for (const row of await deleted.all()) expect(await torn(row)).toEqual([]);
+	});
 	// The id is what an operator copies into the CLI: on one line, whole.
 	const lines = await projects.getByText(own.id).first().evaluate((node) => {
 		const range = document.createRange();

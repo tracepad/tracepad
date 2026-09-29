@@ -557,9 +557,12 @@ test('the run header does not lay its controls over its title and breadcrumbs', 
 		});
 	}
 
-	// The run comes back late, so the header is seen before and after it.
+	// The run is held back until the test lets it go, so the header is seen
+	// before and after it however long the checks between take.
+	let release!: () => void;
+	const held = new Promise<void>((done) => (release = done));
 	await page.route(`**/api/v1/runs/${run}*`, async (route) => {
-		await new Promise((done) => setTimeout(done, 800));
+		await held;
 		await route.continue();
 	});
 	await page.goto(`/runs/${run}`);
@@ -574,6 +577,7 @@ test('the run header does not lay its controls over its title and breadcrumbs', 
 		const own = (await select.boundingBox())!;
 		expect(own.y + own.height, `${width} while it loads`).toBeLessThanOrEqual(bar.y + bar.height);
 	}
+	release();
 	await expect(select).toBeEnabled();
 	await expect(select.locator('option')).toHaveCount(3);
 

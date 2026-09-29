@@ -65,6 +65,20 @@ export async function createProject(
 }
 
 /**
+ * Soft-deletes a project the way an owner does, the name typed as the echo: it
+ * stays in the Server tab's table with its purge date (spec 007 #4), which is
+ * a row a test reading that table has to fit.
+ */
+export async function deleteProject(project: { id: string; name: string }): Promise<void> {
+	const { baseURL } = state();
+	const response = await fetch(
+		`${baseURL}/api/v1/projects/${project.id}?confirm=${encodeURIComponent(project.name)}`,
+		{ method: 'DELETE', headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } }
+	);
+	if (!response.ok) throw new Error(`delete project: ${response.status} ${await response.text()}`);
+}
+
+/**
  * Invites an editor of one project and accepts the invitation, which is the
  * only way an account gets a password (spec 028 #10). Two requests, both of
  * them the ones an owner and an invited person make.
@@ -282,6 +296,39 @@ export async function section(page: Page, name: string): Promise<Locator> {
 }
 
 /**
+ * The words under a node that sit on two lines: a timestamp, a key or an id
+ * that broke in the middle rather than at a space (spec 006 #24). A word is a
+ * run of characters with no space in it.
+ */
+export async function torn(locator: Locator): Promise<string[]> {
+	return locator.evaluate((node) => {
+		const chars: { c: string; top: number }[] = [];
+		const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+		for (let text = walker.nextNode() as Text | null; text; text = walker.nextNode() as Text | null) {
+			for (let i = 0; i < text.length; i++) {
+				const range = document.createRange();
+				range.setStart(text, i);
+				range.setEnd(text, i + 1);
+				const rects = range.getClientRects();
+				chars.push({ c: text.data[i], top: rects.length ? Math.round(rects[0].top) : NaN });
+			}
+		}
+		const found = new Set<string>();
+		let word: typeof chars = [];
+		const end = () => {
+			if (new Set(word.map((one) => one.top)).size > 1) found.add(word.map((one) => one.c).join(''));
+			word = [];
+		};
+		for (const one of chars) {
+			if (/\s/.test(one.c)) end();
+			else if (!Number.isNaN(one.top)) word.push(one);
+		}
+		end();
+		return [...found];
+	});
+}
+
+/**
  * How far a table's own box would scroll sideways: 0 once a listing folds to
  * fit it (spec 006 #22). The box is the nearest ancestor that scrolls.
  */
@@ -349,7 +396,8 @@ const MD = 768;
  * and border, a page's gutter. `tall` is the tallest a row may be in the whole
  * table: the layout at its own width is the honest one, and a value torn
  * across lines there (a timestamp, a key, an id) makes its row taller than the
- * table's ordinary rows are (spec 006 #22).
+ * table's ordinary rows are (spec 006 #22). `atWhole` runs at the narrowest
+ * width the table is whole in, which is where a value is most likely to tear.
  */
 export async function foldsAt(
 	page: Page,
@@ -357,8 +405,15 @@ export async function foldsAt(
 	box: number,
 	columns: number,
 	around = 0,
-	tall = Infinity
+	tall = Infinity,
+	atWhole?: () => Promise<void>
 ) {
+	// A page taller than the window has a scrollbar, and a classic one takes its
+	// width from the box. How tall the page is depends on how many rows the server
+	// holds, which is not this test's to know, and a table folding at the edge makes
+	// the page taller: so the scrollbars take no room here, and the box is the width
+	// the window says.
+	await page.addStyleTag({ content: '* { scrollbar-width: none !important; }' });
 	const window = (px: number) =>
 		page.setViewportSize({
 			width: px + around + (px + around + SIDEBAR >= MD ? SIDEBAR : 0),
@@ -371,6 +426,7 @@ export async function foldsAt(
 		.locator('tbody tr')
 		.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
 	expect(Math.max(...heights), 'the tallest row').toBeLessThanOrEqual(tall);
+	await atWhole?.();
 
 	await window(box - 16);
 	await expect(table.locator('thead th')).not.toHaveCount(columns);
