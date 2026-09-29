@@ -402,18 +402,24 @@ func detailCost(details map[string]any) string {
 
 // totalTokens is the tree's `N tokens` beside an observation: input plus
 // output under the classes every listing reads (spec 049 #11), so the tree
-// agrees with the Tokens column. A usage that names no class — a bare
-// `total` or `total_tokens` — still shows the total it sent.
+// agrees with the Tokens column. A `total` or `total_tokens` the client sent
+// wins when the classes are absent or add up to less: one observation's own
+// count is what the tree is about, and a total above input plus output means
+// classes the listing does not add in, which is no reason to hide them here.
 func totalTokens(usage map[string]any) string {
-	if billed := store.UsageTokens(usage).Billed(); billed != nil {
-		return fmt.Sprintf("%d tokens", *billed)
-	}
+	shown := store.UsageTokens(usage).Billed()
 	for _, key := range []string{"total", "total_tokens"} {
 		if total, ok := usage[key].(float64); ok {
-			return fmt.Sprintf("%d tokens", int64(total))
+			if n := int64(total); shown == nil || n > *shown {
+				shown = &n
+			}
+			break
 		}
 	}
-	return ""
+	if shown == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d tokens", *shown)
 }
 
 // tokenCounts is a `tokens` object as the API renders it: five classes, each

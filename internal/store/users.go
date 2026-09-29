@@ -326,8 +326,8 @@ func scanUserRow(row scanner) (*UserRow, error) {
 		cost   sql.NullFloat64
 		tokens tokenScan
 	)
-	if err := row.Scan(append([]any{&out.UserID, &out.Traces, &out.ErrorCount, &cost,
-		&out.Sessions, &out.FirstSeen, &out.LastSeen}, tokens.targets()...)...); err != nil {
+	if err := row.Scan(tokens.into([]any{&out.UserID, &out.Traces, &out.ErrorCount, &cost,
+		&out.Sessions, &out.FirstSeen, &out.LastSeen})...); err != nil {
 		return nil, fmt.Errorf("scan a user: %w", err)
 	}
 	if cost.Valid {
@@ -371,15 +371,15 @@ func (s *Store) UserRollup(ctx context.Context, projectID, userID string, before
 		held      bool
 		totalCost CostSum
 	)
+	var (
+		hour, count, errored, sessions int64
+		cost                           sql.NullFloat64
+		latency                        string
+		tokens                         tokenScan
+	)
+	dest := tokens.into([]any{&hour, &count, &errored, &cost, &latency, &sessions})
 	for rows.Next() {
-		var (
-			hour, count, errored, sessions int64
-			cost                           sql.NullFloat64
-			latency                        string
-			tokens                         tokenScan
-		)
-		if err := rows.Scan(append([]any{&hour, &count, &errored, &cost, &latency, &sessions},
-			tokens.targets()...)...); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan a user's rolled hour: %w", err)
 		}
 		summary.Tokens.Add(tokens.tokens())
@@ -442,16 +442,16 @@ func (s *Store) UserTail(ctx context.Context, projectID, userID string, fromNano
 	}
 	defer rows.Close()
 	var totalCost CostSum
+	var (
+		errored   int
+		cost      sql.NullFloat64
+		latency   sql.NullInt64
+		timestamp int64
+		tokens    tokenScan
+	)
+	dest := tokens.into([]any{&errored, &cost, &latency, &timestamp})
 	for rows.Next() {
-		var (
-			errored   int
-			cost      sql.NullFloat64
-			latency   sql.NullInt64
-			timestamp int64
-			tokens    tokenScan
-		)
-		if err := rows.Scan(append([]any{&errored, &cost, &latency, &timestamp},
-			tokens.targets()...)...); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan a tail trace: %w", err)
 		}
 		summary.Traces++
@@ -583,20 +583,23 @@ func (s *Store) UsersRollupRows(ctx context.Context, projectID, userID string, f
 		return fmt.Errorf("read the user rollup: %w", err)
 	}
 	defer rows.Close()
+	var (
+		row     UserStatsRow
+		cost    sql.NullFloat64
+		latency string
+		tokens  tokenScan
+	)
+	dest := tokens.into([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
+		&row.Count, &row.ErrorCount, &cost, &latency, &row.SessionsStarted})
 	for rows.Next() {
-		var (
-			row     = UserStatsRow{UserID: userID}
-			cost    sql.NullFloat64
-			latency string
-			tokens  tokenScan
-		)
-		if err := rows.Scan(append([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
-			&row.Count, &row.ErrorCount, &cost, &latency, &row.SessionsStarted},
-			tokens.targets()...)...); err != nil {
+		row = UserStatsRow{UserID: userID}
+		if err := rows.Scan(dest...); err != nil {
 			return fmt.Errorf("scan a user rollup row: %w", err)
 		}
 		if cost.Valid {
-			row.TotalCost = &cost.Float64
+			// A copy: `cost` is the next row's destination too.
+			total := cost.Float64
+			row.TotalCost = &total
 		}
 		row.Tokens = tokens.tokens()
 		if row.Latency, err = decodeHistogram(latency); err != nil {
@@ -671,7 +674,7 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		             THEN (o.end_time - o.start_time) / 1000000 END,
-		        `+tokenColumns("o.usage")+`
+		        o.usage
 		 FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE o.project_id = ? AND t.timestamp >= ? AND t.timestamp < ?
@@ -682,20 +685,20 @@ func rollUserHour(tx *sql.Tx, projectID string, hour int64) ([]UserStatsRow, err
 		return nil, fmt.Errorf("read the hour's observations by user: %w", err)
 	}
 	defer observations.Close()
+	var (
+		user, environment, release, model string
+		errored                           int
+		cost                              sql.NullFloat64
+		latency                           sql.NullInt64
+		usage                             sql.RawBytes
+	)
 	for observations.Next() {
-		var (
-			user, environment, release, model string
-			errored                           int
-			cost                              sql.NullFloat64
-			latency                           sql.NullInt64
-			counts                            tokenScan
-		)
-		if err := observations.Scan(append([]any{&user, &environment, &release, &model,
-			&errored, &cost, &latency}, counts.targets()...)...); err != nil {
+		if err := observations.Scan(&user, &environment, &release, &model,
+			&errored, &cost, &latency, &usage); err != nil {
 			return nil, fmt.Errorf("scan an observation of the hour by user: %w", err)
 		}
 		add(&cell(user, environment, release, model).StatsRow, errored != 0, cost, latency)
-		tokens := counts.tokens()
+		tokens := usageTokens(usage)
 		cell(user, environment, release, model).Tokens.Add(tokens)
 		cell(user, environment, release, "").Tokens.Add(tokens)
 	}

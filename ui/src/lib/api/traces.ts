@@ -63,6 +63,16 @@ export type TraceFilters = {
  * Reads the filters out of a URL. Every screen's state lives there so that
  * what somebody is looking at is a link they can send (Application contract).
  */
+/**
+ * Whether a filter's value can be sent as typed. `min_tokens` is a count, and
+ * the server refuses anything but a whole number (spec 049 #13): a fraction or
+ * a sign from a hand-edited link or a number field is dropped here rather than
+ * turned into a `400` for the whole listing.
+ */
+export function sendable(name: FilterName, value: string): boolean {
+	return name !== 'min_tokens' || /^\d+$/.test(value);
+}
+
 export function readFilters(params: URLSearchParams): TraceFilters {
 	const filters: TraceFilters = {};
 	for (const name of TRACE_FILTERS) {
@@ -72,7 +82,7 @@ export function readFilters(params: URLSearchParams): TraceFilters {
 			continue;
 		}
 		const value = params.get(name)?.trim();
-		if (!value) continue;
+		if (!value || !sendable(name, value)) continue;
 		if (name === 'status') {
 			if (value === 'error' || value === 'ok') filters.status = value;
 			continue;

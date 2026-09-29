@@ -145,9 +145,9 @@ func scanTrace(rows scanner, extra ...any) (*TraceRow, error) {
 		ttft      sql.NullInt64
 		tokens    tokenScan
 	)
-	targets := append([]any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
+	targets := tokens.into([]any{&row.ProjectID, &row.ID, &name, &userID, &sessionID, &row.Environment,
 		&release, &version, &runID, &itemID, &tags, &timestamp, &totalCost, &latency, &ttft,
-		&row.ErrorCount, &row.ObservationCount}, tokens.targets()...)
+		&row.ErrorCount, &row.ObservationCount})
 	if err := rows.Scan(append(targets, extra...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err

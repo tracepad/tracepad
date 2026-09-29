@@ -577,21 +577,23 @@ func upsertObservation(tx *sql.Tx, projectID string, o *model.Observation, index
 // The five token columns are the statistics' counting rule applied to one
 // trace (spec 049 #2): only observations that name a model (spec 031 #12),
 // only counts within the domain (spec 043 #4), each class its own sum and
-// NULL when nothing carried it. One subquery assigns all five, so the trace's
-// observations are read once for them rather than once per class; migration
-// 0033 fills the columns of the traces stored before it with the same
-// expressions (`traceTokenSums`).
+// NULL when nothing carried it. The trace's `usage` texts are read once and
+// each decoded once for all five (`traceTokens`); migration 0033 fills the
+// columns of the traces stored before it by the same rule (`UsageTokens`,
+// which it calls as `tracepad_token`).
 //
 // Like every aggregate it is recomputed on each delivery, so a trace whose
 // generations arrive in several batches converges on the earliest completion
 // start seen so far (spec 002 #22).
 func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
-	_, err := tx.Exec(
+	tokens, err := traceTokens(tx, projectID, traceID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(
 		`UPDATE traces SET
-		   (`+tokenColumnList("")+`) = (SELECT `+traceTokenSums()+`
-		                        FROM observations o
-		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id
-		                          AND o.model IS NOT NULL AND o.model != ''),
+		   input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
+		   reasoning_tokens = ?, cache_write_tokens = ?,
 		   observation_count = (SELECT COUNT(*) FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id),
 		   error_count       = (SELECT COUNT(*) FROM observations o
@@ -616,12 +618,36 @@ func refreshAggregates(tx *sql.Tx, projectID, traceID string) error {
 		                        FROM observations o
 		                        WHERE o.project_id = traces.project_id AND o.trace_id = traces.id)
 		 WHERE project_id = ? AND id = ?`,
-		projectID, traceID,
+		append(tokens.values(), projectID, traceID)...,
 	)
 	if err != nil {
 		return fmt.Errorf("refresh trace aggregates %s: %w", traceID, err)
 	}
 	return nil
+}
+
+// traceTokens sums the five classes over a trace's observations that name a
+// model, each `usage` decoded once (spec 049 #2).
+func traceTokens(tx *sql.Tx, projectID, traceID string) (Tokens, error) {
+	rows, err := tx.Query(
+		`SELECT usage FROM observations
+		  WHERE project_id = ? AND trace_id = ? AND usage IS NOT NULL
+		    AND model IS NOT NULL AND model != ''`, projectID, traceID)
+	if err != nil {
+		return Tokens{}, fmt.Errorf("read the usage of trace %s: %w", traceID, err)
+	}
+	defer rows.Close()
+	var (
+		sum   Tokens
+		usage sql.RawBytes
+	)
+	for rows.Next() {
+		if err := rows.Scan(&usage); err != nil {
+			return Tokens{}, fmt.Errorf("read the usage of trace %s: %w", traceID, err)
+		}
+		sum.Add(usageTokens(usage))
+	}
+	return sum, rows.Err()
 }
 
 // writePayload stores a value in `payloads` and returns its id, or NULL for

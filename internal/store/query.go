@@ -372,8 +372,7 @@ func (s *Store) Session(ctx context.Context, projectID, id string) (*SessionRow,
 		`SELECT COUNT(*), SUM(total_cost), SUM(error_count > 0), MIN(timestamp), MAX(timestamp),
 		        `+columnTokenSums()+`
 		 FROM traces WHERE project_id = ? AND session_id = ?`, projectID, id).
-		Scan(append([]any{&row.TraceCount, &totalCost, &errorCount, &firstSeen, &lastSeen},
-			tokens.targets()...)...)
+		Scan(tokens.into([]any{&row.TraceCount, &totalCost, &errorCount, &firstSeen, &lastSeen})...)
 	if err != nil {
 		return nil, fmt.Errorf("read session %s: %w", id, err)
 	}
@@ -508,8 +507,8 @@ func (s *Store) Sessions(ctx context.Context, projectID string, filter SessionFi
 			lastSeen   sql.NullInt64
 			tokens     tokenScan
 		)
-		if err := rows.Scan(append([]any{&row.ID, &row.TraceCount, &totalCost, &errorCount,
-			&firstSeen, &lastSeen}, tokens.targets()...)...); err != nil {
+		if err := rows.Scan(tokens.into([]any{&row.ID, &row.TraceCount, &totalCost, &errorCount,
+			&firstSeen, &lastSeen})...); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		// A cost nobody reported is absent, not zero (spec 002 #14).
@@ -676,9 +675,9 @@ func (s *Store) StatsSamples(ctx context.Context, projectID string, filter Stats
 			errored int
 			cost    sql.NullFloat64
 			latency sql.NullInt64
-			tokens  tokenScan
+			usage   sql.RawBytes
 		)
-		if err := rows.Scan(append([]any{&key, &errored, &cost, &latency}, tokens.targets()...)...); err != nil {
+		if err := rows.Scan(&key, &errored, &cost, &latency, &usage); err != nil {
 			return fmt.Errorf("scan stats row: %w", err)
 		}
 		sample := StatsSample{Key: key.String, Errored: errored != 0}
@@ -688,7 +687,7 @@ func (s *Store) StatsSamples(ctx context.Context, projectID string, filter Stats
 		if latency.Valid {
 			sample.LatencyMs = &latency.Int64
 		}
-		sample.Tokens = tokens.tokens()
+		sample.Tokens = usageTokens(usage)
 		yield(sample)
 	}
 	return rows.Err()
@@ -713,17 +712,34 @@ func (s *Store) StatsTokens(ctx context.Context, projectID string, filter StatsF
 	}
 	defer rows.Close()
 
+	sums := map[string]*Tokens{}
+	var (
+		key   sql.NullString
+		usage sql.RawBytes
+	)
 	for rows.Next() {
-		var (
-			key    sql.NullString
-			tokens tokenScan
-		)
-		if err := rows.Scan(append([]any{&key}, tokens.targets()...)...); err != nil {
+		if err := rows.Scan(&key, &usage); err != nil {
 			return fmt.Errorf("scan stats tokens row: %w", err)
 		}
-		yield(StatsTokenSum{Key: key.String, Tokens: tokens.tokens()})
+		tokens := usageTokens(usage)
+		if tokens == (Tokens{}) {
+			// A bucket is not made here that the scan did not make.
+			continue
+		}
+		sum := sums[key.String]
+		if sum == nil {
+			sum = &Tokens{}
+			sums[key.String] = sum
+		}
+		sum.Add(tokens)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for key, sum := range sums {
+		yield(StatsTokenSum{Key: key, Tokens: *sum})
+	}
+	return nil
 }
 
 // statsQuery builds the scan. `timestamp` is Unix nanoseconds, so the bucket
@@ -739,30 +755,28 @@ func statsQuery(projectID string, filter StatsFilter) (string, []any) {
 		                    THEN ` + costExpr("o.cost_details") + ` END,
 		               CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		                    THEN (o.end_time - o.start_time) / 1000000 END,
-		               ` + tokenColumns("o.usage") + `
+		               o.usage
 		        FROM observations o
 		        JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		        WHERE ` + strings.Join(where, " AND "), args
 	}
 
-	// A trace-unit row carries no tokens here: NULLs keep the scan's shape,
-	// and StatsTokens sums them per bucket.
-	return `SELECT ` + statsKey(filter.GroupBy) + `, t.error_count > 0, t.total_cost, t.latency_ms,
-	               ` + strings.TrimSuffix(strings.Repeat("NULL, ", len(tokenClasses)), ", ") + `
+	// A trace-unit row carries no tokens here: a NULL usage keeps the
+	// scan's shape, and StatsTokens sums them per bucket.
+	return `SELECT ` + statsKey(filter.GroupBy) + `, t.error_count > 0, t.total_cost, t.latency_ms, NULL
 	        FROM traces t WHERE ` + strings.Join(where, " AND "), args
 }
 
-// statsTokensQuery is the trace unit's aggregate: the model grouping's join
-// and rows, summed per trace-unit bucket key. `SUM` over rows that carried no
-// count is NULL, which is what a bucket with none should say.
+// statsTokensQuery is the trace unit's rows: the model grouping's join, each
+// observation's `usage` with the trace-unit bucket key it falls in. The sum is
+// StatsTokens', per class, one decode a row; a bucket none of whose rows
+// carried a count gets no sum, which is what it should say.
 func statsTokensQuery(projectID string, filter StatsFilter) (string, []any) {
 	where, args := statsWhere(projectID, filter, true)
-	key := statsKey(filter.GroupBy)
-	return `SELECT ` + key + `, ` + tokenSums("o.usage") + `
+	return `SELECT ` + statsKey(filter.GroupBy) + `, o.usage
 	        FROM observations o
 	        JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
-	        WHERE ` + strings.Join(where, " AND ") + `
-	        GROUP BY ` + key, args
+	        WHERE ` + strings.Join(where, " AND ") + ` AND o.usage IS NOT NULL`, args
 }
 
 // statsWhere is the trace-level filter every statistics scan applies, on the

@@ -194,8 +194,8 @@ Each observation's line names its kind, and — where the client sent them —
 ```
 
 `N tokens` is that observation's input plus output, read under the spellings
-every listing reads ([api.md](api.md#tokens)); a usage that names neither
-shows the `total` it sent, if any.
+every listing reads ([api.md](api.md#tokens)), or the `total` it sent when
+that is larger or there is nothing else to add up.
 
 The header above the tree carries the trace's release and version when it
 named them, beside its latency, TTFT and cost. `ttft` is the wait before the

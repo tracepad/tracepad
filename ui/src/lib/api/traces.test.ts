@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TRACE_FILTERS, filterCount, filterSearch, readFilters } from './traces';
+import { TRACE_FILTERS, filterCount, filterSearch, readFilters, sendable } from './traces';
 
 /**
  * The filter bar is a mirror of `GET /api/v1/traces`, and this is what keeps
@@ -114,3 +114,19 @@ describe('filters in the URL', () => {
 // The live-poll merge that used to be tested here went with `mergeRows`
 // (spec 009 #9): a window anchored at "newest" is replaced by the page it
 // re-fetches, so there is nothing left to fold.
+
+describe('min_tokens', () => {
+	it('is sent only as a whole number (spec 049 #13)', () => {
+		expect(sendable('min_tokens', '1000')).toBe(true);
+		expect(sendable('min_tokens', '0')).toBe(true);
+		for (const bad of ['1.5', '-1', '1e3', ' 12', 'lots']) {
+			expect(sendable('min_tokens', bad)).toBe(false);
+		}
+		// The rule is the count's own: a cost may be a fraction.
+		expect(sendable('min_cost', '0.01')).toBe(true);
+	});
+	it('drops a fraction from a link rather than asking for a 400', () => {
+		expect(readFilters(new URLSearchParams('min_tokens=1.5&min_cost=0.5'))).toEqual({ min_cost: '0.5' });
+		expect(readFilters(new URLSearchParams('min_tokens=2000'))).toEqual({ min_tokens: '2000' });
+	});
+});

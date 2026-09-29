@@ -27,7 +27,7 @@ func generation(trace string, n int, modelName string, usage map[string]any) *mo
 	}
 }
 
-func traceTokens(t *testing.T, s *Store, projectID, id string) Tokens {
+func storedTokens(t *testing.T, s *Store, projectID, id string) Tokens {
 	t.Helper()
 	row, err := s.Trace(t.Context(), projectID, id)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestEveryKeyLandsInItsClass(t *testing.T) {
 				id := hexTrace(n)
 				seedTrace(t, s, project.ID, &model.Trace{ID: id, Environment: "production"},
 					generation(id, n, "m", map[string]any{key: 42}))
-				got := traceTokens(t, s, project.ID, id)
+				got := storedTokens(t, s, project.ID, id)
 				for i, field := range got.fields() {
 					switch {
 					case i == class && (*field == nil || **field != 42):
@@ -95,7 +95,7 @@ func TestEveryKeyLandsInItsClass(t *testing.T) {
 			id := hexTrace(n)
 			seedTrace(t, s, project.ID, &model.Trace{ID: id, Environment: "production"},
 				generation(id, n, "m", tc.usage))
-			expectTokens(t, tc.name, traceTokens(t, s, project.ID, id), tc.want)
+			expectTokens(t, tc.name, storedTokens(t, s, project.ID, id), tc.want)
 		})
 	}
 }
@@ -110,7 +110,7 @@ func TestReasoningIsNeverAddedToOutput(t *testing.T) {
 			"input_tokens": 10, "output_tokens": 100, "reasoning_tokens": 40,
 			"cache_read_input_tokens": 5, "cache_creation_input_tokens": 6,
 		}))
-	got := traceTokens(t, s, project.ID, hexTrace(1))
+	got := storedTokens(t, s, project.ID, hexTrace(1))
 	expectTokens(t, "the trace", got, Tokens{count(10), count(100), count(5), count(40), count(6)})
 	if billed := got.Billed(); billed == nil || *billed != 110 {
 		t.Errorf("billed = %v, want input + output = 110", billed)
@@ -150,17 +150,17 @@ func TestTheTraceSumsItsTokensOnEveryBatch(t *testing.T) {
 	trace := &model.Trace{ID: id, Environment: "production"}
 
 	seedTrace(t, s, project.ID, trace)
-	expectTokens(t, "no observations yet", traceTokens(t, s, project.ID, id), Tokens{})
+	expectTokens(t, "no observations yet", storedTokens(t, s, project.ID, id), Tokens{})
 
 	seedTrace(t, s, project.ID, trace,
 		generation(id, 1, "m", map[string]any{"input_tokens": 100, "output_tokens": 10}),
 		generation(id, 2, "", map[string]any{"input_tokens": 1000, "output_tokens": 1000}))
-	expectTokens(t, "after the first batch", traceTokens(t, s, project.ID, id),
+	expectTokens(t, "after the first batch", storedTokens(t, s, project.ID, id),
 		Tokens{Input: count(100), Output: count(10)})
 
 	seedTrace(t, s, project.ID, trace,
 		generation(id, 3, "m", map[string]any{"prompt_tokens": 50, "reasoning_tokens": 7}))
-	expectTokens(t, "after the second batch", traceTokens(t, s, project.ID, id),
+	expectTokens(t, "after the second batch", storedTokens(t, s, project.ID, id),
 		Tokens{Input: count(150), Output: count(10), Reasoning: count(7)})
 
 	// A re-delivered span is the same span (spec 002 #5): it replaces its
@@ -168,13 +168,13 @@ func TestTheTraceSumsItsTokensOnEveryBatch(t *testing.T) {
 	seedTrace(t, s, project.ID, trace,
 		generation(id, 1, "m", map[string]any{"input_tokens": 200, "output_tokens": 20}),
 		generation(id, 4, "m", map[string]any{"cache_write_tokens": 3}))
-	expectTokens(t, "after the third batch", traceTokens(t, s, project.ID, id),
+	expectTokens(t, "after the third batch", storedTokens(t, s, project.ID, id),
 		Tokens{Input: count(250), Output: count(20), Reasoning: count(7), CacheWrite: count(3)})
 
 	other := hexTrace(2)
 	seedTrace(t, s, project.ID, &model.Trace{ID: other, Environment: "production"},
 		generation(other, 5, "m", nil), generation(other, 6, "", map[string]any{"input_tokens": 5}))
-	expectTokens(t, "a trace with no counted usage", traceTokens(t, s, project.ID, other), Tokens{})
+	expectTokens(t, "a trace with no counted usage", storedTokens(t, s, project.ID, other), Tokens{})
 }
 
 // tokenMonth seeds a synthetic month for the agreement test: three users and
@@ -247,7 +247,7 @@ func TestTraceColumnsAgreeWithEveryRollup(t *testing.T) {
 		t.Helper()
 		var sums tokenScan
 		if err := s.db.QueryRow(`SELECT `+columnTokenSums()+` FROM traces WHERE project_id = ? AND `+where,
-			append([]any{project.ID}, args...)...).Scan(sums.targets()...); err != nil {
+			append([]any{project.ID}, args...)...).Scan(sums.into(nil)...); err != nil {
 			t.Fatal(err)
 		}
 		return sums.tokens()
@@ -524,9 +524,10 @@ func TestErasureAndDeletionReRollTheTokens(t *testing.T) {
 	}
 }
 
-// Migration 0033 carries the sums `refreshAggregates` assigns, as the store
-// builds them: a backfill that summed anything else would count what ingest
-// does not.
+// Migration 0033 sums every class through the store's own rule — the
+// `tracepad_token` function, which is `UsageTokens` — over the observations
+// ingest sums: a backfill that counted anything else would disagree with
+// ingest. That the numbers agree is TestMigration0033BackfillsTracesAndRollups.
 func TestMigration0033SpellsTheTraceSums(t *testing.T) {
 	body, err := migrationFS.ReadFile("migrations/0033_tokens_everywhere.sql")
 	if err != nil {
@@ -537,8 +538,14 @@ func TestMigration0033SpellsTheTraceSums(t *testing.T) {
 		s = space.ReplaceAllString(s, " ")
 		return strings.ReplaceAll(strings.ReplaceAll(s, "( ", "("), " )", ")")
 	}
-	if !strings.Contains(normal(string(body)), normal(traceTokenSums())) {
-		t.Errorf("the migration does not carry traceTokenSums as the store builds it:\n%s", normal(traceTokenSums()))
+	for class := range tokenClasses {
+		call := fmt.Sprintf("SUM(%s(o.usage, %d))", tokenFunction, class)
+		if !strings.Contains(normal(string(body)), call) {
+			t.Errorf("the migration does not sum class %d through the store's rule: %s", class, call)
+		}
+	}
+	if !strings.Contains(normal(string(body)), "WHERE o.model IS NOT NULL AND o.model != ''") {
+		t.Error("the migration does not count only the observations that name a model")
 	}
 	if !strings.Contains(normal(string(body)), normal(userTokensKey)) {
 		t.Errorf("idx_users_tokens is not built on userTokensKey %s", userTokensKey)
@@ -707,6 +714,6 @@ func TestUsageTokensAgreesWithTheSQL(t *testing.T) {
 			t.Fatal(err)
 		}
 		stored := observations[0].Usage
-		expectTokens(t, fmt.Sprintf("usage %v", usage), UsageTokens(stored), traceTokens(t, s, project.ID, id))
+		expectTokens(t, fmt.Sprintf("usage %v", usage), UsageTokens(stored), storedTokens(t, s, project.ID, id))
 	}
 }

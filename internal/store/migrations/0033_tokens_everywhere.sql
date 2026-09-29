@@ -38,9 +38,9 @@ ALTER TABLE stats_hourly ADD COLUMN cache_write_tokens INTEGER;
 CREATE INDEX idx_users_tokens ON users(project_id,
     (coalesce(input_tokens, 0) + coalesce(output_tokens, 0)) DESC, user_id);
 
--- The backfill of the trace columns (#4), with the sums `refreshAggregates`
--- assigns (`traceTokenSums` in the store; a test holds the two together).
--- `tracepad_token` is the counting rule registered by the binary (tokens.go):
+-- The backfill of the trace columns (#4), by the rule `refreshAggregates`
+-- sums with. `tracepad_token` is that rule, registered by the binary
+-- (`UsageTokens` in tokens.go):
 -- per class, over the observations that name a model (spec 031 #12), each
 -- count read under the first key of its class that is present and counted
 -- only within 0..10^9 (spec 043 #4). One grouped pass over the observations

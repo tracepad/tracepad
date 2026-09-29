@@ -152,8 +152,8 @@ func TestUsersRejectsAnUnknownSubcommand(t *testing.T) {
 }
 
 // The tree's `N tokens` reads the classes every listing reads (spec 049 #11):
-// an OpenAI-style usage with no `total` shows input plus output, and a usage
-// that names no class still shows the total it sent.
+// an OpenAI-style usage with no `total` shows input plus output, and a total
+// the client sent wins when there are no classes or they add up to less.
 func TestTreeTokensReadTheClasses(t *testing.T) {
 	for _, tc := range []struct {
 		usage map[string]any
@@ -161,7 +161,12 @@ func TestTreeTokensReadTheClasses(t *testing.T) {
 	}{
 		{map[string]any{"prompt_tokens": 120.0, "completion_tokens": 30.0, "total_tokens": 150.0}, "150 tokens"},
 		{map[string]any{"input_tokens": 10.0, "output_tokens": 5.0, "reasoning_tokens": 400.0}, "15 tokens"},
-		{map[string]any{"input": 128.0, "output": 41.0, "total": 999.0}, "169 tokens"},
+		{map[string]any{"input": 128.0, "output": 41.0, "total": 169.0}, "169 tokens"},
+		// A sent total above input plus output is shown: the classes the
+		// listing does not add in are this observation's tokens too.
+		{map[string]any{"input": 40.0, "total": 100.0}, "100 tokens"},
+		{map[string]any{"input": 128.0, "output": 41.0, "total": 999.0}, "999 tokens"},
+		{map[string]any{"input": 128.0, "output": 41.0, "total": 100.0}, "169 tokens"},
 		{map[string]any{"total_tokens": 77.0}, "77 tokens"},
 		{map[string]any{"cache_read_input_tokens": 9.0}, ""},
 		{nil, ""},

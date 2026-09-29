@@ -1,6 +1,6 @@
 <script lang="ts" module>
 	import { facetChip, readList } from '$lib/api/facets';
-	import { TRACE_FILTERS, type FilterName, type TraceFilters } from '$lib/api/traces';
+	import { sendable, TRACE_FILTERS, type FilterName, type TraceFilters } from '$lib/api/traces';
 	import { OBSERVATION_TYPES } from '$lib/observations';
 
 	type Field = {
@@ -219,7 +219,7 @@
 			if (Array.isArray(value)) {
 				const tags = value.map((tag) => tag.trim()).filter(Boolean);
 				if (tags.length) next.tag = tags;
-			} else if (typeof value === 'string' && value.trim()) {
+			} else if (typeof value === 'string' && value.trim() && sendable(name, value.trim())) {
 				if (name === 'status') next.status = value as 'error' | 'ok';
 				else (next as Record<string, string>)[name] = value.trim();
 			}

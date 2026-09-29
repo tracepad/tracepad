@@ -987,9 +987,14 @@ absent when nothing did: a trace whose calls reported no usage says nothing
 rather than zero. A trace's classes are kept on the trace as its spans arrive,
 a session's are summed over its traces, and a user's are rolled with the rest
 of the per-user rollup. Data stored before this store learned the classes is
-filled in on upgrade — the traces by the migration, the statistics and users
-on the next pass — except an hour past the project's `retention_days`, whose
-observations are gone: it keeps the classes it had for ever.
+filled in on upgrade: the traces by the migration, before the server
+listens, and the statistics and users by the first pass after it, which
+re-rolls every retained hour. **Until that pass is through**, a user's
+tokens — on the listing, under `sort=tokens` and in the rolled half of the
+user page — and the statistics' tokens for the older hours cover only the
+hours re-rolled so far, and grow as it goes; the pass logs when it ends. An
+hour past the project's `retention_days` is frozen: its observations are
+gone, and it keeps the classes it had — none of the new ones — for ever.
 
 ### Where the numbers come from
 

@@ -86,8 +86,8 @@ func (t Tokens) Billed() *int64 {
 //
 // The dotted keys are the OpenTelemetry conventions' `gen_ai.usage.*` names,
 // kept as the suffix the mapper stores (`cache_read.input_tokens`): one key
-// with a dot in it, not a nested object. The list is read by `UsageTokens`,
-// which SQL reaches as `tracepad_token` (tokens.go).
+// with a dot in it, not a nested object. The list is read by `UsageTokens`
+// (tokens.go), and by nothing else.
 var tokenClasses = [...][]string{
 	{"input_tokens", "prompt_tokens", "input"},
 	{"output_tokens", "completion_tokens", "output"},
@@ -155,33 +155,18 @@ func costExpr(details string) string {
 	             THEN CAST((` + number + `) AS REAL) END`
 }
 
-// tokenColumns is `tokenExprs` as a SELECT list: one observation's five
-// counts, in the order a `tokenScan` reads them.
-func tokenColumns(usage string) string {
-	exprs := tokenExprs(usage)
-	return strings.Join(exprs[:], ", ")
-}
-
-// tokenSums is the same five as aggregates: `SUM` over rows that carried no
-// count is NULL, which is what a cell with none should say.
-func tokenSums(usage string) string {
-	exprs := tokenExprs(usage)
-	for i, expr := range exprs {
-		exprs[i] = "SUM(" + expr + ")"
-	}
-	return strings.Join(exprs[:], ", ")
-}
-
 // tokenScan is the five scanned columns of one row, in the order of
-// `tokenClasses`: `targets` goes into a Scan, `tokens` comes out of it.
+// `tokenColumnNames`: `into` adds them to a Scan's destinations, `tokens`
+// reads them back out.
 type tokenScan [len(tokenClasses)]sql.NullInt64
 
-func (s *tokenScan) targets() []any {
-	out := make([]any, len(s))
+// into appends the five destinations to a Scan's list. A loop builds its list
+// once, before its first row, and scans every row into it.
+func (s *tokenScan) into(dest []any) []any {
 	for i := range s {
-		out[i] = &s[i]
+		dest = append(dest, &s[i])
 	}
-	return out
+	return dest
 }
 
 func (s *tokenScan) tokens() Tokens {
@@ -217,11 +202,15 @@ func (t Tokens) values() []any {
 // Add folds another cell's sums in, class by class: a nil contributes nothing
 // and does not make the sum zero, which is how the bucket adds cost (spec 031
 // #5), and no class is added to another (spec 049 #1).
+//
+// Spelled out class by class: it runs twice for every observation a roll
+// reads, and a loop over `fields` took the addresses of both values.
 func (t *Tokens) Add(other Tokens) {
-	mine, theirs := t.fields(), other.fields()
-	for i := range mine {
-		addCount(mine[i], *theirs[i])
-	}
+	addCount(&t.Input, other.Input)
+	addCount(&t.Output, other.Output)
+	addCount(&t.CacheRead, other.CacheRead)
+	addCount(&t.Reasoning, other.Reasoning)
+	addCount(&t.CacheWrite, other.CacheWrite)
 }
 
 // addCount folds one count into a sum that holds at the int64 limits rather
@@ -376,19 +365,23 @@ func (s *Store) StatsRollupRows(ctx context.Context, projectID string, fromHour,
 	}
 	defer rows.Close()
 
+	var (
+		row     StatsRow
+		cost    sql.NullFloat64
+		latency string
+		tokens  tokenScan
+	)
+	dest := tokens.into([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
+		&row.Count, &row.ErrorCount, &cost, &latency})
 	for rows.Next() {
-		var (
-			row     StatsRow
-			cost    sql.NullFloat64
-			latency string
-			tokens  tokenScan
-		)
-		if err := rows.Scan(append([]any{&row.Hour, &row.Environment, &row.Release, &row.Model,
-			&row.Count, &row.ErrorCount, &cost, &latency}, tokens.targets()...)...); err != nil {
+		row = StatsRow{}
+		if err := rows.Scan(dest...); err != nil {
 			return fmt.Errorf("scan a rollup row: %w", err)
 		}
 		if cost.Valid {
-			row.TotalCost = &cost.Float64
+			// A copy: `cost` is the next row's destination too.
+			total := cost.Float64
+			row.TotalCost = &total
 		}
 		row.Tokens = tokens.tokens()
 		if row.Latency, err = decodeHistogram(latency); err != nil {
@@ -744,7 +737,7 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 		             THEN `+costExpr("o.cost_details")+` END,
 		        CASE WHEN o.start_time > 0 AND o.end_time >= o.start_time
 		             THEN (o.end_time - o.start_time) / 1000000 END,
-		        `+tokenColumns("o.usage")+`
+		        o.usage
 		 FROM observations o
 		 JOIN traces t ON t.project_id = o.project_id AND t.id = o.trace_id
 		 WHERE o.project_id = ? AND t.timestamp >= ? AND t.timestamp < ?
@@ -754,20 +747,20 @@ func rollHour(tx *sql.Tx, projectID string, hour int64) ([]StatsRow, error) {
 		return nil, fmt.Errorf("read the hour's observations: %w", err)
 	}
 	defer observations.Close()
+	var (
+		environment, release, model string
+		errored                     int
+		cost                        sql.NullFloat64
+		latency                     sql.NullInt64
+		usage                       sql.RawBytes
+	)
 	for observations.Next() {
-		var (
-			environment, release, model string
-			errored                     int
-			cost                        sql.NullFloat64
-			latency                     sql.NullInt64
-			counts                      tokenScan
-		)
-		if err := observations.Scan(append([]any{&environment, &release, &model,
-			&errored, &cost, &latency}, counts.targets()...)...); err != nil {
+		if err := observations.Scan(&environment, &release, &model,
+			&errored, &cost, &latency, &usage); err != nil {
 			return nil, fmt.Errorf("scan an observation of the hour: %w", err)
 		}
 		add(cell(environment, release, model), errored != 0, cost, latency)
-		tokens := counts.tokens()
+		tokens := usageTokens(usage)
 		cell(environment, release, model).Tokens.Add(tokens)
 		cell(environment, release, "").Tokens.Add(tokens)
 	}
@@ -850,12 +843,4 @@ func (a *statsRollupAdvance) apply(tx *sql.Tx) error {
 		return fmt.Errorf("advance the rollup watermark: %w", err)
 	}
 	return nil
-}
-
-// traceTokenSums is the five sums a trace's columns hold, over its
-// observations' `usage` (spec 049 #2). `refreshAggregates` assigns them on
-// every write, and migration 0033 carries the same expressions to fill the
-// traces it finds; a test holds the migration to this text.
-func traceTokenSums() string {
-	return tokenSums("o.usage")
 }

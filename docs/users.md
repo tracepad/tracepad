@@ -70,8 +70,9 @@ Traces screen, which is live.
 
 An existing install already has its statistics rolled up to now, so nothing
 about the history would look "changed" and these two tables would stay empty —
-or, on the upgrade that taught them the token classes, without tokens. The
-migration therefore asks the aggregator to walk the rolled history once:
+or, on the upgrade that taught them the token classes, without tokens (until
+that walk is through, a user's tokens grow hour by hour as it re-rolls them).
+The migration therefore asks the aggregator to walk the rolled history once:
 the first pass after the upgrade re-rolls every hour it holds, which fills the
 per-user tables and rewrites the identical statistics rows. It is background
 work, it happens once, and the statistics keep answering from the rollup
