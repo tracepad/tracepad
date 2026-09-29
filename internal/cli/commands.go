@@ -598,6 +598,7 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 		session     string
 		name        string
 		dataType    string
+		author      string
 		since       string
 		cursor      string
 		limit       int
@@ -608,6 +609,7 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 	fs.StringVar(&session, "session", "", "")
 	fs.StringVar(&name, "name", "", "")
 	fs.StringVar(&dataType, "type", "", "")
+	fs.StringVar(&author, "author", "", "")
 	fs.StringVar(&since, "since", "", "")
 	fs.StringVar(&cursor, "cursor", "", "")
 	fs.IntVar(&limit, "limit", 0, "")
@@ -621,6 +623,7 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 	addSome(query, "session_id", session)
 	addSome(query, "name", name)
 	addSome(query, "data_type", dataType)
+	addSome(query, "author", author)
 	if err := addCursor(query, fs, cursor); err != nil {
 		return err
 	}
@@ -642,14 +645,15 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 	}
 	listing, err := decode[struct {
 		Scores []struct {
-			ID          string   `json:"id"`
-			TraceID     string   `json:"trace_id"`
-			Name        string   `json:"name"`
-			DataType    string   `json:"data_type"`
-			Value       *float64 `json:"value"`
-			StringValue *string  `json:"string_value"`
-			Comment     string   `json:"comment"`
-			Timestamp   string   `json:"timestamp"`
+			ID          string       `json:"id"`
+			TraceID     string       `json:"trace_id"`
+			Name        string       `json:"name"`
+			DataType    string       `json:"data_type"`
+			Value       *float64     `json:"value"`
+			StringValue *string      `json:"string_value"`
+			Comment     string       `json:"comment"`
+			Timestamp   string       `json:"timestamp"`
+			Author      *scoreAuthor `json:"author"`
 		} `json:"scores"`
 		NextCursor *string `json:"next_cursor"`
 	}](body)
@@ -660,7 +664,7 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 		fmt.Fprintln(r.opt.Stdout, "no scores")
 		return nil
 	}
-	t := newTable(r.opt.Stdout, "TIME", "NAME", "VALUE", "TYPE", "TRACE", "COMMENT")
+	t := newTable(r.opt.Stdout, "TIME", "NAME", "VALUE", "TYPE", "TRACE", "AUTHOR", "COMMENT")
 	for _, score := range listing.Scores {
 		value := "-"
 		switch {
@@ -670,7 +674,7 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 			value = *score.StringValue
 		}
 		t.row(shortTime(score.Timestamp), score.Name, value, score.DataType,
-			orDash(score.TraceID), orDash(score.Comment))
+			orDash(score.TraceID), scoreAuthorLabel(score.Author), orDash(score.Comment))
 	}
 	t.flush()
 	// `older`, because this listing is newest first and its cursor is a
@@ -678,6 +682,21 @@ func (r *run) scoresList(ctx context.Context, args []string) error {
 	// there is no far end to jump to and no page above to come back to.
 	walkOn(r, "older", listing.NextCursor, nil)
 	return nil
+}
+
+// scoreAuthor is the part of a score's author the listing prints.
+type scoreAuthor struct {
+	Name string `json:"name"`
+}
+
+// scoreAuthorLabel is who wrote a score, in one cell (spec 048 #9): the
+// account's or the key's name, or a dash — for an author with none, and for a
+// score from before authors were recorded. `--json` has the id and the kind.
+func scoreAuthorLabel(author *scoreAuthor) string {
+	if author == nil {
+		return "-"
+	}
+	return orDash(author.Name)
 }
 
 func (r *run) prompts(ctx context.Context, args []string) error {

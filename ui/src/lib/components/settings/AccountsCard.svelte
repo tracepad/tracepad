@@ -186,8 +186,8 @@
 			<ConfirmCard
 				title="Delete {target.email}"
 				description="Their memberships, sessions and any live invitation go with them. Nothing they
-					wrote does: a score does not name its author. Disabling is the reversible way to take
-					access away."
+					wrote does: their scores keep their name and email. Disabling is the reversible way to
+					take access away."
 				echoLabel="email"
 				previewLabel="Show what would go"
 				executeLabel="Delete the account"

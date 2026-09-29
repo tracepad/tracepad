@@ -113,7 +113,7 @@ tracepad is a later question.
 | `list_users` | `GET /api/v1/users` | "Who are my heaviest users" |
 | `get_user` | `GET /api/v1/users/{id}` | "What does this account cost me" |
 | `get_prompt` | `GET /api/v1/prompts/{name}` | "What prompt is in production" |
-| `list_scores` | `GET /api/v1/scores` | Reading eval results |
+| `list_scores` | `GET /api/v1/scores` | Reading eval results; "what did I score" with `author: "me"` |
 | `get_stats` | `GET /api/v1/stats` | Counts, cost, latency, trends |
 | `get_score_trends` | `GET /api/v1/stats/scores` | "Did hallucination drop after 2.5.0", "which model scores best" |
 | `get_facets` | `GET /api/v1/facets` | "Which environments exist", "what are the traces called" — before guessing at a filter value |

@@ -311,6 +311,11 @@ which names the offending item — and dropped: a scoring failure must not fail
 the request that produced the trace. Pass `WithID` for the
 [idempotency](scores.md#idempotency-and-corrections) the API offers.
 
+The server records the key the package sends with as the score's
+[author](scores.md#who-wrote-a-score): give the key a name that says which
+program it is, and put anything finer — the judge's model, the run — in the
+score's `metadata`.
+
 `tracepad.Flush(ctx)` drains the queue and then the span processors; the
 `shutdown` returned by `Init` does the same before it closes anything. Both
 keep to the context's deadline: against a store that never answers, `Flush`

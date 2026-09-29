@@ -193,8 +193,8 @@ const Usage = `Client commands (they talk to a running server over HTTP):
                          [--limit N] [--cursor C] [--oldest] [--newer] [--total]
   tracepad users show    <user-id>
   tracepad scores ls    [--trace ID] [--observation ID] [--session S] [--name N]
-                        [--type numeric|boolean|categorical|text] [--since 1h]
-                        [--limit N] [--cursor C]
+                        [--type numeric|boolean|categorical|text] [--author ID|me]
+                        [--since 1h] [--limit N] [--cursor C]
   tracepad scores add   (--trace ID [--observation ID] | --session S) --name N
                         (--value V | --string S)
                         [--type numeric|boolean|categorical|text] [--comment C]

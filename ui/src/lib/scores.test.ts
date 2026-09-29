@@ -27,6 +27,7 @@ import {
 
 const score = (extra: Partial<Score> = {}): Score => ({
 	id: 'a'.repeat(32),
+	author: null,
 	name: 'helpfulness',
 	data_type: 'numeric',
 	value: 0.9,

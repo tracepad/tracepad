@@ -146,6 +146,7 @@ describe('what Save posts', () => {
 	it('resends the id when it is editing, so the row is replaced', async () => {
 		const editing: Score = {
 			id: 'b'.repeat(32),
+			author: null,
 			name: 'accuracy',
 			data_type: 'numeric',
 			value: 0.4,

@@ -74,7 +74,8 @@ carries `value` or `string_value` — never both.
 
 Unknown fields are rejected with a `400` naming the field. That is deliberate:
 an unattended agent that writes `commet` should be told, not silently lose the
-comment.
+comment. `author` is one of them: who wrote a score is not yours to say, it is
+the credential you wrote with ([below](#who-wrote-a-score)).
 
 A score whose `name` has a [config](#score-configs) is checked against it —
 type, range, categories — and a violation is a `400` naming the item and the
@@ -84,7 +85,8 @@ rule. A name without a config is as free as the table above.
 
 A score id is the idempotency key. Re-posting the same id replaces the row
 whole, so retrying a failed batch is safe and a correction is just another
-POST — there is nothing to delete first.
+POST — there is nothing to delete first. The row's author goes with it: whoever
+wrote the correction is now the score's author.
 
 If your eval loop already has a natural key, hash it into the id:
 
@@ -231,18 +233,21 @@ curl -H "Authorization: Bearer tp-sk-…" \
       "comment": "answered the question and cited the source",
       "metadata": {"judge_model": "claude"},
       "timestamp": "2026-08-27T10:00:00Z",
-      "created_at": "2026-08-27T10:00:02.114Z"
+      "created_at": "2026-08-27T10:00:02.114Z",
+      "author": {"kind": "key", "id": "tp-pk-…", "name": "nightly-judge", "standing": "active"}
     }
   ],
   "next_cursor": null
 }
 ```
 
-Scores come back newest first. Fields that were never set are omitted.
+Scores come back newest first. Fields that were never set are omitted, except
+`author`, which is always there ([below](#who-wrote-a-score)).
 
 | Parameter | Notes |
 |---|---|
 | `trace_id`, `observation_id`, `session_id`, `name`, `data_type` | Exact-match filters |
+| `author` | The scores one author wrote: an account id or a public key, as a score's `author.id` gives it, or `me` for the account or key asking |
 | `from`, `to` | RFC 3339, on `timestamp`. `from` is inclusive, `to` is exclusive, so walking day by day never counts a score twice. |
 | `limit` | 1–500, default 50 |
 | `cursor` | The `next_cursor` of the previous page |
@@ -255,6 +260,46 @@ An unknown query parameter is a `400` — the same reasoning as unknown JSON
 fields. So is a known one sent without a value (`?name=`): that is a template
 with an unset variable, and reading it as "no filter" would quietly answer a
 different question than the one asked.
+
+## Who wrote a score
+
+Every score records the credential it was written with: the account signed
+in to the web interface, or the project key a program sent. The server stamps
+it; the body has no say, so a key cannot write a score in somebody else's
+name. What a program is — the judge's model, the eval run — belongs in
+`metadata`, as before; the key is who stands behind it.
+
+```json
+"author": {"kind": "account", "id": "3f0c…", "name": "Ada", "email": "ada@example.com", "standing": "editor"}
+"author": {"kind": "key", "id": "tp-pk-…", "name": "nightly-judge", "standing": "revoked"}
+"author": null
+```
+
+- **`kind`** is `account` or `key`, and **`id`** the account's id or the
+  key's public key.
+- **`name`** is the account's display name, or the key's name when it wrote.
+  An account that is gone, or has no display name now, shows the name it had
+  when it wrote. It can be empty: an account never has to set one.
+- **`email`** is the account's email when it wrote, and only a signed-in
+  **editor or owner** of the project sees it — the people who already see who
+  minted each key. A viewer and every key get the name alone; a viewer cannot
+  list the team anywhere else, and a program has no use for a person's
+  address.
+- **`standing`** is the author's relation to the project **now**: an account's
+  `owner`, `editor` or `viewer`, or `removed` (no longer a member),
+  `disabled` or `deleted`; a key's `active` or `revoked`. The name and the
+  email are copies, so they survive the account's deletion and the key's
+  revocation, and `standing` says that the author is gone.
+- **The last writer is the author.** A correction re-posts the score whole
+  (above), and its author with it: when a person corrects a judge, the value
+  and the author are the person's, and `metadata.source` still says `judge`.
+- **`null`** is a score written before the server recorded authors. Nothing
+  on disk says who wrote those, so nothing is guessed.
+
+Deleting an account leaves its scores where they are, with its name and email
+on them ([accounts.md](accounts.md)). Erasing an end user's data takes the
+scores on their traces whoever wrote them, and says nothing about the authors
+([retention.md](retention.md#deleting-a-users-data)).
 
 ## From the web interface
 

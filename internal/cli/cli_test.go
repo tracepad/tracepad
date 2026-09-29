@@ -1191,3 +1191,36 @@ func TestPromptsRemoveNeedsConfirmation(t *testing.T) {
 		t.Errorf("removing it twice = %+v, want the server's 404", got)
 	}
 }
+
+// TestScoresListShowsTheAuthor is spec 048 #9 on the command line: the
+// listing names who wrote each score — the name, or a dash — and --author
+// narrows to one of them, `me` being the key the command runs with.
+func TestScoresListShowsTheAuthor(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	added := h.run(ctx, true, "scores", "add", "--trace", traceHex(1), "--name", "helpfulness", "--value", "0.9")
+	if added.code != ExitOK {
+		t.Fatalf("scores add exited %d: %s", added.code, added.stderr)
+	}
+	one := 1.0
+	if err := h.writer.Submit(ctx, &store.ScoreWrite{ProjectID: h.projectID(t), Scores: []*store.Score{{
+		ID: traceHex(77), TraceID: traceHex(1), Name: "judged", DataType: store.ScoreNumeric, Value: &one,
+		Timestamp: seedBase, Author: store.KeyAuthor(&store.KeyInfo{PublicKey: "tp-pk-judge", Name: "nightly-judge"}),
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := h.run(ctx, true, "scores", "ls")
+	if listed.code != ExitOK || !strings.Contains(listed.stdout, "AUTHOR") ||
+		!strings.Contains(listed.stdout, "nightly-judge") || strings.Contains(listed.stdout, "key ") {
+		t.Fatalf("scores ls = %+v, want an AUTHOR column with the key's name alone", listed)
+	}
+	mine := h.run(ctx, true, "scores", "ls", "--author", "me")
+	if mine.code != ExitOK || !strings.Contains(mine.stdout, "helpfulness") {
+		t.Errorf("scores ls --author me = %+v, want the key's own score", mine)
+	}
+	nobody := h.run(ctx, true, "scores", "ls", "--author", "nobody")
+	if nobody.code != ExitOK || !strings.Contains(nobody.stdout, "no scores") {
+		t.Errorf("scores ls --author nobody = %+v, want none", nobody)
+	}
+}

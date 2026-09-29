@@ -343,7 +343,14 @@ tracepad scores ls --name helpfulness --since 24h
 ```
 
 Filters: `--trace`, `--observation`, `--session`, `--name`, `--type`,
-`--since`.
+`--author`, `--since`.
+
+The `AUTHOR` column says who wrote each score: the account's or the key's
+name, or `-` for an author with none and for a score from before the server
+recorded authors ([scores.md](scores.md#who-wrote-a-score)); `--json` has the
+kind and the id. `--author me` is
+the scores the key you run with wrote; `--author` also takes an account id or
+a public key, as `--json` prints them.
 
 Newest first, and it pages: `--limit` (1–500, default 50) and `--cursor`, with
 the last line printing the command that continues the walk.

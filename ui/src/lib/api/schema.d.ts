@@ -1254,7 +1254,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an account; a dry run until `?confirm=` echoes its email
-         * @description For people who are gone. It takes their memberships, sessions and invitations and nothing else: a score does not name its author, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.
+         * @description For people who are gone. It takes their memberships, sessions and invitations and nothing else: the scores it wrote keep its name and email, counted in the dry run as `scores_authored`, and the keys it minted keep working, listed in the dry run. Disabling is the reversible way to take access away today.
          */
         delete: operations["deleteAccount"];
         options?: never;
@@ -1607,6 +1607,8 @@ export interface components {
                 /** Format: date-time */
                 last_used_at: string | null;
             }[];
+            /** @description The scores the account wrote, in every project. Not in `would_delete`: they stay, with its name and email on them */
+            scores_authored: number;
             /** @description The exact string `?confirm=` must carry: the account's email */
             confirm: string;
             note?: string;
@@ -1856,6 +1858,24 @@ export interface components {
             timestamp: string;
             /** Format: date-time */
             created_at: string;
+            /** @description Who wrote the score: the credential the write came with, stamped by the server. The last writer is the author. null on a score written before the server recorded authors */
+            author: components["schemas"]["ScoreAuthor"] | null;
+        };
+        /** @description An account or a project key, as it was named when it wrote, with its standing in the score's project now */
+        ScoreAuthor: {
+            /** @enum {string} */
+            kind: "account" | "key";
+            /** @description The account's id, or the key's public key */
+            id: string;
+            /** @description The account's display name now, or the one it had when it wrote once it is gone or has none; the key's name when it wrote. May be empty */
+            name: string;
+            /** @description The account's email when it wrote. Present only for a signed-in editor or owner, and never for a key */
+            email?: string;
+            /**
+             * @description An account: its role in the project, or removed, disabled, deleted. A key: active or revoked
+             * @enum {string}
+             */
+            standing: "owner" | "editor" | "viewer" | "removed" | "disabled" | "deleted" | "active" | "revoked";
         };
         Prompt: {
             name: string;
@@ -4198,6 +4218,8 @@ export interface operations {
                 session_id?: string;
                 name?: string;
                 data_type?: "numeric" | "boolean" | "categorical" | "text";
+                /** @description The scores one author wrote: an account id, a public key, or `me` for the caller itself */
+                author?: string;
                 /** @description RFC 3339, inclusive. The range is half-open, so walking a timeline never reports a row twice. */
                 from?: components["parameters"]["From"];
                 /** @description RFC 3339, exclusive */

@@ -316,10 +316,12 @@ Three rules worth knowing before you press something:
 - **Disabling** ends the account's sessions at once and keeps its roles, so
   enabling puts everything back. It is how you take access away today.
 - **Deleting** is for people who are gone. It takes the memberships, sessions
-  and invitations and nothing else — a score does not name its author, and the
-  keys the account minted keep working, with its email still on them. The dry
-  run lists those keys, in every project, so you can decide whether to rotate
-  them ([admin.md](admin.md#keys)). The echo is the email, the one thing about
+  and invitations and nothing else. The scores the account wrote keep its name
+  and email as they were when it wrote them, and read as `deleted`
+  ([scores.md](scores.md#who-wrote-a-score)). The keys it minted keep working,
+  with its email still on them. The dry run counts those scores
+  (`scores_authored`) and lists those keys, in every project, so you can
+  decide whether to rotate them ([admin.md](admin.md#keys)). The echo is the email, the one thing about
   an account a person means.
 - **Making somebody an owner** deletes their memberships, because an owner has
   every project. Demoting them leaves none, so they see nothing until they are

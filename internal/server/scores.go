@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -58,6 +59,19 @@ type scoreResponse struct {
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 	Timestamp     string          `json:"timestamp"`
 	CreatedAt     string          `json:"created_at"`
+	// Author is always present: null on a score from before authors were
+	// recorded (spec 048 #6).
+	Author *scoreAuthorResponse `json:"author"`
+}
+
+// scoreAuthorResponse is who wrote a score (spec 048 #4). Email is present
+// only for an editor or an owner (#5), and never for a key's score.
+type scoreAuthorResponse struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Email    string `json:"email,omitempty"`
+	Standing string `json:"standing"`
 }
 
 // handleCreateScores accepts one score object or an array of them. An array is
@@ -66,6 +80,15 @@ type scoreResponse struct {
 func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	project, ok := s.apiProject(w, r)
 	if !ok {
+		return
+	}
+	// Resolved before the body is read, since it depends on nothing in it.
+	// The route admits a session or a key and nothing else (spec 028 #3), so
+	// a caller that is neither is the server's own mistake.
+	author := scoreAuthor(callerFrom(r.Context()))
+	if author == nil {
+		slog.Error("a score write reached its handler without a session or a key", "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "internal error: the score has no author to record")
 		return
 	}
 	// The write routes take no query parameters at all, and one that was
@@ -109,6 +132,7 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		seen[score.ID] = i
+		score.Author = author
 		write.Scores = append(write.Scores, score)
 		ids = append(ids, score.ID)
 	}
@@ -122,6 +146,19 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 	//
 	// 201 only now: the transaction is committed and fsynced (#9).
 	writeJSON(w, http.StatusCreated, scoreIDsResponse{IDs: ids})
+}
+
+// scoreAuthor is the credential a score write came with (spec 048 #1): the
+// signed-in account, or the key. The body has no say: `author` is not a field
+// of scoreRequest, so strict decoding refuses it.
+func scoreAuthor(c *caller) *store.ScoreAuthor {
+	switch {
+	case c.isSession():
+		return store.AccountAuthor(c.account)
+	case c.isKey():
+		return store.KeyAuthor(c.key)
+	}
+	return nil
 }
 
 // itemError names which item of an array POST was refused; a single object
@@ -273,7 +310,7 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values, err := queryParams(r, "trace_id", "observation_id", "session_id",
-		"name", "data_type", "from", "to", "limit", "cursor")
+		"name", "data_type", "author", "from", "to", "limit", "cursor")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -290,6 +327,7 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 		SessionID:     lookupLabel(values.Get("session_id")),
 		Name:          values.Get("name"),
 		DataType:      values.Get("data_type"),
+		AuthorID:      authorFilter(callerFrom(r.Context()), values.Get("author")),
 		// One row beyond the page tells us whether there is a next one.
 		Limit: limit + 1,
 	}
@@ -345,9 +383,10 @@ func (s *Server) handleListScores(w http.ResponseWriter, r *http.Request) {
 		cursor := encodeCursor(strconv.FormatInt(last.Timestamp, 10), last.ID)
 		next = &cursor
 	}
+	c := callerFrom(r.Context())
 	out := make([]scoreResponse, 0, len(scores))
 	for _, score := range scores {
-		out = append(out, renderScore(score))
+		out = append(out, renderScore(score, c))
 	}
 	writeJSON(w, http.StatusOK, scoreListResponse{Scores: out, NextCursor: next})
 }
@@ -372,7 +411,7 @@ func (s *Server) handleGetScore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("score %q not found", id))
 		return
 	}
-	writeJSON(w, http.StatusOK, renderScore(score))
+	writeJSON(w, http.StatusOK, renderScore(score, callerFrom(r.Context())))
 }
 
 // handleDeleteScore retracts one score (spec 022 #6). No dry run and no echo:
@@ -408,7 +447,39 @@ type scoreDeletedResponse struct {
 	ID string `json:"id"`
 }
 
-func renderScore(score *store.Score) scoreResponse {
+// authorFilter reads `author=` (spec 048 #9): an account id or a public key as
+// sent, or `me` for the caller itself. An id nobody has is an empty page, not
+// an error, as an unknown trace id is.
+func authorFilter(c *caller, value string) string {
+	if value != "me" {
+		return value
+	}
+	if author := scoreAuthor(c); author != nil {
+		return author.ID
+	}
+	return value
+}
+
+// seesAuthorEmail is whether a caller may read an author's email (spec 048
+// #5): a signed-in editor or owner, the tier that already sees who minted a
+// key. A viewer cannot list the team anywhere else, and a key reads for a
+// program.
+func seesAuthorEmail(c *caller) bool {
+	return c.isSession() && (c.role == store.RoleEditor || c.role == store.RoleOwner)
+}
+
+func renderAuthor(author *store.ScoreAuthor, c *caller) *scoreAuthorResponse {
+	if author == nil {
+		return nil
+	}
+	out := &scoreAuthorResponse{Kind: author.Kind, ID: author.ID, Name: author.Name, Standing: author.Standing}
+	if seesAuthorEmail(c) {
+		out.Email = author.Email
+	}
+	return out
+}
+
+func renderScore(score *store.Score, c *caller) scoreResponse {
 	return scoreResponse{
 		ID:            score.ID,
 		TraceID:       score.TraceID,
@@ -422,6 +493,7 @@ func renderScore(score *store.Score) scoreResponse {
 		Metadata:      json.RawMessage(score.Metadata),
 		Timestamp:     formatTime(score.Timestamp),
 		CreatedAt:     formatTime(score.CreatedAt),
+		Author:        renderAuthor(score.Author, c),
 	}
 }
 

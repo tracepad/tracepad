@@ -534,9 +534,10 @@ func (a *AccountUpdate) apply(tx *sql.Tx) error {
 }
 
 // AccountDelete removes an account with its memberships, sessions and tokens.
-// It takes nothing else with it (Decision 12): a score does not name its
-// author, and the keys the account minted keep working with the reference to
-// it gone null and its email still on them (spec 045 #8, #10).
+// It takes nothing else with it (Decision 12): the scores it wrote keep its
+// id, name and email as they were copied onto them (spec 048 #7), and the keys
+// it minted keep working with the reference to it gone null and its email
+// still on them (spec 045 #8, #10).
 type AccountDelete struct {
 	AccountID string
 	Confirm   string
