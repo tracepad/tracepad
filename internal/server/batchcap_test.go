@@ -127,7 +127,7 @@ func TestBatchWritesOverTheCapAreAnsweredWithoutMemoryPerValue(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			err, allocs, held := heldBy(func() error {
-				_, err := decodeBatch[scoreRequest](c.body, "score")
+				_, err := decodeBatch[scoreRequest](c.body, "score", maxItemsPerWrite)
 				return err
 			})
 			if !c.want(err) {
@@ -148,14 +148,14 @@ func TestBatchWritesOverTheCapAreAnsweredWithoutMemoryPerValue(t *testing.T) {
 // the cap and is written.
 func TestBatchWritesAtTheLengthBoundAreCounted(t *testing.T) {
 	zeros := func(n int) []byte { return []byte("[" + strings.Repeat("0,", n-1) + "0]") }
-	if len(zeros(maxItemsPerWrite+1)) != minBodyOverCap {
-		t.Fatalf("len = %d, want %d", len(zeros(maxItemsPerWrite+1)), minBodyOverCap)
+	if len(zeros(maxItemsPerWrite+1)) != minBodyOver(maxItemsPerWrite) {
+		t.Fatalf("len = %d, want %d", len(zeros(maxItemsPerWrite+1)), minBodyOver(maxItemsPerWrite))
 	}
-	if rows, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite), "row"); err != nil || len(rows) != maxItemsPerWrite {
+	if rows, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite), "row", maxItemsPerWrite); err != nil || len(rows) != maxItemsPerWrite {
 		t.Errorf("at the cap: %d rows, err %v", len(rows), err)
 	}
 	var over *overItemCap
-	if _, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite+1), "row"); !errors.As(err, &over) || over.count != maxItemsPerWrite+1 {
+	if _, err := decodeBatch[json.RawMessage](zeros(maxItemsPerWrite+1), "row", maxItemsPerWrite); !errors.As(err, &over) || over.count != maxItemsPerWrite+1 {
 		t.Errorf("the shortest body over the cap: err = %v", err)
 	}
 }
@@ -195,7 +195,7 @@ func TestOnlyABodyThatCanBeOverTheCapIsScanned(t *testing.T) {
 		"more values than the cap":                   {zeros(3 * maxItemsPerWrite), 1},
 	} {
 		scans = 0
-		_, _ = decodeBatch[json.RawMessage](c.body, "row")
+		_, _ = decodeBatch[json.RawMessage](c.body, "row", maxItemsPerWrite)
 		if scans != c.scans {
 			t.Errorf("%s: scanned %d times, want %d", name, scans, c.scans)
 		}
@@ -235,10 +235,10 @@ func TestScanArrayFollowsStringsAndNesting(t *testing.T) {
 			}
 			// Through the reader: the count, or the value after the array.
 			var over *overItemCap
-			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)), "row"); !errors.As(err, &over) || over.count != n {
+			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)), "row", maxItemsPerWrite); !errors.As(err, &over) || over.count != n {
 				t.Errorf("counted: err = %v", err)
 			}
-			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)+" 0"), "row"); !errors.Is(err, errTrailingValue) {
+			if _, err := decodeBatch[json.RawMessage]([]byte(repeat(value, n)+" 0"), "row", maxItemsPerWrite); !errors.Is(err, errTrailingValue) {
 				t.Errorf("with a value after it: err = %v", err)
 			}
 		})
@@ -276,7 +276,7 @@ func BenchmarkItemCapCount20MiBZeros(b *testing.B) {
 	b.SetBytes(int64(len(body)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+		if _, err := decodeBatch[scoreRequest](body, "score", maxItemsPerWrite); err == nil {
 			b.Fatal("not refused")
 		}
 	}
@@ -290,7 +290,7 @@ func BenchmarkBatchDecodeOverCapWithTail20MiB(b *testing.B) {
 	b.SetBytes(int64(len(body)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+		if _, err := decodeBatch[scoreRequest](body, "score", maxItemsPerWrite); err == nil {
 			b.Fatal("not refused")
 		}
 	}
@@ -302,7 +302,7 @@ func BenchmarkBatchDecodeOverCapTruncated20MiB(b *testing.B) {
 	b.SetBytes(int64(len(body)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := decodeBatch[scoreRequest](body, "score"); err == nil {
+		if _, err := decodeBatch[scoreRequest](body, "score", maxItemsPerWrite); err == nil {
 			b.Fatal("not refused")
 		}
 	}
@@ -323,7 +323,7 @@ func BenchmarkBatchDecode100Scores33KB(b *testing.B) {
 	b.SetBytes(int64(len(body)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if scores, err := decodeBatch[scoreRequest](body, "score"); err != nil || len(scores) != 100 {
+		if scores, err := decodeBatch[scoreRequest](body, "score", maxItemsPerWrite); err != nil || len(scores) != 100 {
 			b.Fatal(err)
 		}
 	}
@@ -336,8 +336,9 @@ func zeros20MiB() []byte {
 }
 
 // The cap the API describes is the cap it applies (spec 043 #36): both array
-// writes say `maxItems` in the OpenAPI document, which the clients are written
-// against, and it is maxItemsPerWrite.
+// writes and the queue add say `maxItems` in the OpenAPI document, which the
+// clients are written against, and it is the limit the server applies:
+// maxItemsPerWrite, or maxItemsPerAdd for the queue (spec 024 #25).
 func TestOpenAPIDescribesTheItemCap(t *testing.T) {
 	var document struct {
 		Paths map[string]map[string]struct {
@@ -355,15 +356,19 @@ func TestOpenAPIDescribesTheItemCap(t *testing.T) {
 	if err := json.Unmarshal(openAPIDocument, &document); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v1/scores", "/api/v1/datasets/{name}/items"} {
+	for path, limit := range map[string]int{
+		"/api/v1/scores":                maxItemsPerWrite,
+		"/api/v1/datasets/{name}/items": maxItemsPerWrite,
+		"/api/v1/queues/{name}/items":   maxItemsPerAdd,
+	} {
 		described := 0
 		for _, alternative := range document.Paths[path]["post"].RequestBody.Content["application/json"].Schema.OneOf {
 			if alternative.MaxItems != nil {
 				described = *alternative.MaxItems
 			}
 		}
-		if described != maxItemsPerWrite {
-			t.Errorf("openapi.json says POST %s takes at most %d, the server takes %d", path, described, maxItemsPerWrite)
+		if described != limit {
+			t.Errorf("openapi.json says POST %s takes at most %d, the server takes %d", path, described, limit)
 		}
 	}
 }

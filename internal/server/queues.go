@@ -1,8 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -300,16 +300,11 @@ func (s *Server) handleAddItems(w http.ResponseWriter, r *http.Request) {
 	}
 	requests, err := decodeTargets(body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, queueAddRefusal(err))
 		return
 	}
 	if len(requests) == 0 {
 		writeError(w, http.StatusBadRequest, "no targets in the request")
-		return
-	}
-	if len(requests) > maxItemsPerAdd {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf(
-			"an add takes at most %d targets; use items/from-traces for a filter", maxItemsPerAdd))
 		return
 	}
 
@@ -340,25 +335,24 @@ func (s *Server) handleAddItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // decodeTargets reads the body as one target or an array of them, as strictly
-// in both shapes (spec 003 #17).
+// in both shapes (spec 003 #17), and counts an array before it decodes any of
+// it (spec 024 #25): an add of more than maxItemsPerAdd targets is an
+// *overItemCap at the cost of a scan, not of a decoded target for each of
+// the millions a body of the size of the body cap can hold.
 func decodeTargets(body []byte) ([]*itemTargetRequest, error) {
-	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
-		var requests []*itemTargetRequest
-		if err := decodeStrict(body, &requests); err != nil {
-			return nil, err
-		}
-		for i, request := range requests {
-			if request == nil {
-				return nil, fmt.Errorf("target at index %d is null", i)
-			}
-		}
-		return requests, nil
+	return decodeBatch[itemTargetRequest](body, "target", maxItemsPerAdd)
+}
+
+// queueAddRefusal is what a queue add says of a body decodeTargets refused.
+// An add over its limit is the 400 it always was, in the words it always
+// used, which say what to use instead; the 413 and its text are the ones of
+// scores and items, whose limit is a different one (spec 043 #36).
+func queueAddRefusal(err error) string {
+	var over *overItemCap
+	if errors.As(err, &over) {
+		return fmt.Sprintf("an add takes at most %d targets; use items/from-traces for a filter", over.limit)
 	}
-	var request itemTargetRequest
-	if err := decodeStrict(body, &request); err != nil {
-		return nil, err
-	}
-	return []*itemTargetRequest{&request}, nil
+	return err.Error()
 }
 
 // validate checks the shape of the two ids. Neither is looked up: an item may

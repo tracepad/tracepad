@@ -79,7 +79,7 @@ func (s *Server) handleCreateScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requests, err := decodeBatch[scoreRequest](body, "score")
+	requests, err := decodeBatch[scoreRequest](body, "score", maxItemsPerWrite)
 	if err != nil {
 		writeBatchError(w, err)
 		return

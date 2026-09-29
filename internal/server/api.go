@@ -204,15 +204,16 @@ const maxItemsPerWrite = store.MaxItemsPerWrite
 // both (spec 003 #17). What an array is judged on before any value is
 // decoded into a T is one scan of its bytes (scanArray): an array that never
 // closes is malformed, a value after it is more than one JSON value, and one
-// of more than maxItemsPerWrite values is an *overItemCap. So the answer to
-// such a body is by its shape and its count, whatever the values hold, and
-// costs no memory per value. Only a body that can be over the cap is
-// scanned: one of at least minBodyOverCap bytes with at least
-// maxItemsPerWrite commas, since more than that many values are separated by
-// at least that many. Any other body — the batches an SDK sends, and every
-// body of another shape — goes to the strict decode, whose cost is bounded by
-// the cap. noun names one value in the messages: "score", "item".
-func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
+// of more than limit values is an *overItemCap. So the answer to such a body
+// is by its shape and its count, whatever the values hold, and costs no
+// memory per value. Only a body that can be over the limit is scanned: one of
+// at least minBodyOver(limit) bytes with at least limit commas, since more
+// than that many values are separated by at least that many. Any other body —
+// the batches an SDK sends, and every body of another shape — goes to the
+// strict decode, whose cost is bounded by the limit. noun names one value in
+// the messages: "score", "item", "target". The limit's answer is the
+// caller's: 413 for scores and items (writeBatchError), 400 for a queue add.
+func decodeBatch[T any](body []byte, noun string, limit int) ([]*T, error) {
 	trimmed := bytes.TrimLeft(body, " \t\r\n")
 	if len(trimmed) == 0 || trimmed[0] != '[' {
 		var one T
@@ -221,14 +222,14 @@ func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
 		}
 		return []*T{&one}, nil
 	}
-	if len(trimmed) >= minBodyOverCap && bytes.Count(trimmed, []byte{','}) >= maxItemsPerWrite {
+	if len(trimmed) >= minBodyOver(limit) && bytes.Count(trimmed, []byte{','}) >= limit {
 		switch scan := scanBody(trimmed); {
 		case !scan.closed:
 			return nil, errMalformedBody
 		case scan.trailing:
 			return nil, errTrailingValue
-		case scan.count > maxItemsPerWrite:
-			return nil, &overItemCap{count: scan.count, kind: noun + "s"}
+		case scan.count > limit:
+			return nil, &overItemCap{count: scan.count, limit: limit, kind: noun + "s"}
 		}
 	}
 	var batch []*T
@@ -248,11 +249,11 @@ func decodeBatch[T any](body []byte, noun string) ([]*T, error) {
 // answers are the same whether it was or not.
 var scanBody = scanArray
 
-// minBodyOverCap is the length below which an array cannot hold more than
-// maxItemsPerWrite values: n values take at least 2n+1 bytes — n one-byte
-// values, n−1 commas and two brackets — so a shorter body is not scanned.
-// An SDK's batch of 100 scores is most often under it, and pays nothing.
-const minBodyOverCap = 2*(maxItemsPerWrite+1) + 1
+// minBodyOver is the length below which an array cannot hold more than limit
+// values: n values take at least 2n+1 bytes — n one-byte values, n−1 commas
+// and two brackets — so a shorter body is not scanned. An SDK's batch of 100
+// scores is most often under it, and pays nothing.
+func minBodyOver(limit int) int { return 2*(limit+1) + 1 }
 
 // arrayScan is what scanArray says of the first array of a body.
 type arrayScan struct {
@@ -315,15 +316,17 @@ func scanArray(body []byte) arrayScan {
 	return scan
 }
 
-// overItemCap is an array write over maxItemsPerWrite: a 413, not a 400.
+// overItemCap is an array write over the limit it was read with: a 413 for
+// scores and items, and for a queue add the 400 that says what to use instead.
 type overItemCap struct {
 	count int
+	limit int
 	kind  string
 }
 
 func (e *overItemCap) Error() string {
 	return fmt.Sprintf("this request carries %d %s; the server takes at most %d per request — send them in batches",
-		e.count, e.kind, maxItemsPerWrite)
+		e.count, e.kind, e.limit)
 }
 
 // writeBatchError answers a body decodeBatch refused.
