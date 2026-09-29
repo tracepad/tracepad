@@ -123,7 +123,7 @@
 	// 006 #24), in a plain cell for the reason the Accounts card gives (#18),
 	// so the buttons carry the name. The number is the unfolded table's width
 	// and its `min-width`.
-	const fold = new Fold(704);
+	const fold = new Fold(728);
 	const narrow = $derived(fold.narrow);
 </script>
 
@@ -148,7 +148,7 @@
 			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
-						<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
+						<th scope="col" class={['px-3 py-1.5 font-medium', narrow && 'w-full']}>Name</th>
 						{#if !narrow}
 							<th scope="col" class="px-3 py-1.5 font-medium">Id</th>
 							<th scope="col" class="px-3 py-1.5 font-medium">Retention</th>
@@ -161,13 +161,12 @@
 					{#each projects as row (row.id)}
 						<tr class={['border-border border-b last:border-b-0', narrow && 'align-top']}>
 							{#if narrow}
-								<td class="px-3 py-1.5 wrap-anywhere">
+								<td class="max-w-0 px-3 py-1.5 wrap-anywhere">
 									{@render name(row)}
 									<div class="text-muted font-mono text-xs break-all">{row.id}</div>
-									<!-- Each piece is one line or is cut, never torn: the purge time
-									     stays whole (spec 006 #24). -->
+									<!-- Wraps at its spaces; the dot and the time stay whole (#24, #29). -->
 									<div class="text-muted text-xs">
-										<span class="inline-block max-w-full truncate align-bottom">{retention(row)} ·</span>
+										<span class="whitespace-nowrap">{retention(row)} ·</span>
 										{@render status(row, true)}
 									</div>
 								</td>
@@ -255,15 +254,18 @@
 	{/if}
 {/snippet}
 
-{#snippet status(row: Project, stacked = false)}
-	{@const text = row.deleted_at ? `Deleted, purged ${timestamp(row.purge_at)}` : 'Live'}
+<!-- Whole, the time may break between its date and its hour, or the table would
+     need more than a card is wide; folded, it is one piece (spec 006 #29). -->
+{#snippet status(row: Project, folded = false)}
 	<!-- Colour is never the message on its own. -->
-	<span
-		class={[row.deleted_at ? 'text-danger' : 'text-muted', stacked && 'inline-block max-w-full truncate align-bottom']}
-		title={stacked ? text : undefined}
-	>
-		{text}
-	</span>
+	{#if row.deleted_at}
+		<span class="text-danger">
+			Deleted, purged
+			<span class={folded ? 'whitespace-nowrap' : undefined}>{timestamp(row.purge_at)}</span>
+		</span>
+	{:else}
+		<span class="text-muted">Live</span>
+	{/if}
 {/snippet}
 
 <NewProjectDialog open={creating} onclose={closed} oncreated={(created) => (made = created)} />
