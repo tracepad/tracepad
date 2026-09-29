@@ -28,19 +28,28 @@
 		/** What the first column holds, e.g. "Model". */
 		label: string;
 		/**
-		 * Whether to draw the Tokens column. On for the Stats screen and off
-		 * for a user's page, whose answer never carries tokens (spec 031
-		 * #11): a column of dashes would be noise, not information.
+		 * Whether to draw the Tokens column. On wherever the answer carries
+		 * tokens — the Stats screen, and a user's page since the per-user
+		 * rollup rolls them (spec 049 #5); off where it cannot, because a
+		 * column of dashes is noise, not information (spec 031 #11).
 		 */
 		tokens?: boolean;
 	} = $props();
 
-	const cells = $derived([
-		{ share: (row: BreakdownRow) => row.countShare, text: (row: BreakdownRow) => count(row.count), tint: 'bg-accent' },
-		{ share: (row: BreakdownRow) => row.errorShare, text: (row: BreakdownRow) => count(row.errorCount), tint: 'bg-danger' },
-		{ share: (row: BreakdownRow) => row.costShare, text: (row: BreakdownRow) => cost(row.cost), tint: 'bg-accent' },
+	type Cell = {
+		share: (row: BreakdownRow) => number;
+		text: (row: BreakdownRow) => string;
+		tint: string;
+		title?: (row: BreakdownRow) => string | undefined;
+	};
+	const cells: Cell[] = $derived([
+		{ share: (row) => row.countShare, text: (row) => count(row.count), tint: 'bg-accent' },
+		{ share: (row) => row.errorShare, text: (row) => count(row.errorCount), tint: 'bg-danger' },
+		{ share: (row) => row.costShare, text: (row) => cost(row.cost), tint: 'bg-accent' },
+		// Input plus output, with every class the row reported in its
+		// tooltip — reasoning and cache write among them (spec 049 #9).
 		...(tokens
-			? [{ share: (row: BreakdownRow) => row.tokensShare, text: (row: BreakdownRow) => count(row.tokens), tint: 'bg-accent' }]
+			? [{ share: (row: BreakdownRow) => row.tokensShare, text: (row: BreakdownRow) => count(row.tokens), tint: 'bg-accent', title: (row: BreakdownRow) => row.tokenClasses }]
 			: [])
 	]);
 
@@ -88,7 +97,9 @@
 								<td class="max-w-0 px-3 py-1.5 text-xs">
 									<div class="truncate font-mono" title={row.key}>{row.key}</div>
 									<div class="text-muted tabular-nums">
-										<Folded values={[cost(row.cost), tokens ? counted(row.tokens, 'token') : null]} />
+										<span title={tokens ? row.tokenClasses : undefined}>
+											<Folded values={[cost(row.cost), tokens ? counted(row.tokens, 'token') : null]} />
+										</span>
 									</div>
 								</td>
 							{:else}
@@ -101,7 +112,7 @@
 								</th>
 							{/if}
 							{#each shown as cell, index (index)}
-								<td class="px-3 py-1.5">
+								<td class="px-3 py-1.5" title={cell.title?.(row)}>
 									<!-- The bar sits behind the number rather than beside
 									     it, so a long column does not push the figures out
 									     of alignment. -->

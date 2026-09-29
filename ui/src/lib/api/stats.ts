@@ -1,4 +1,5 @@
 import { ABSENT, cost, count, duration } from '$lib/format';
+import { billedTokens, tokenClasses, type Tokens } from '$lib/tokens';
 import type { Bucket } from './range';
 
 // Turning `GET /api/v1/stats` into what the Stats screen draws. Pure, because
@@ -19,11 +20,12 @@ export type StatsBucket = {
 	 */
 	sessions?: number;
 	/**
-	 * Token sums over the bucket's generations (spec 031 #4). Each key is
-	 * present only when something carried that count, and the object is
-	 * absent when none did — absent, never zero, like `total_cost`.
+	 * Token sums over the bucket's generations, per class (spec 031 #4, spec
+	 * 049 #7). Each key is present only when something carried that count,
+	 * and the object is absent when none did — absent, never zero, like
+	 * `total_cost`.
 	 */
-	tokens?: { input?: number; output?: number; cache_read?: number };
+	tokens?: Tokens;
 	latency_ms: { p50?: number | null; p95?: number | null };
 };
 
@@ -36,10 +38,12 @@ export type Series = {
 	errors: (number | null)[];
 	/** Null everywhere the answer carried no `sessions` at all (spec 023 #6). */
 	sessions: (number | null)[];
-	/** The three token classes, each null wherever the bucket carried none. */
+	/** The five token classes, each null wherever the bucket carried none. */
 	input: (number | null)[];
 	output: (number | null)[];
 	cacheRead: (number | null)[];
+	reasoning: (number | null)[];
+	cacheWrite: (number | null)[];
 	p50: (number | null)[];
 	p95: (number | null)[];
 };
@@ -95,6 +99,8 @@ export function buildSeries(
 		input: [],
 		output: [],
 		cacheRead: [],
+		reasoning: [],
+		cacheWrite: [],
 		p50: [],
 		p95: []
 	};
@@ -114,6 +120,8 @@ export function buildSeries(
 		series.input.push(bucket?.tokens?.input ?? null);
 		series.output.push(bucket?.tokens?.output ?? null);
 		series.cacheRead.push(bucket?.tokens?.cache_read ?? null);
+		series.reasoning.push(bucket?.tokens?.reasoning ?? null);
+		series.cacheWrite.push(bucket?.tokens?.cache_write ?? null);
 		series.p50.push(bucket?.latency_ms?.p50 ?? null);
 		series.p95.push(bucket?.latency_ms?.p95 ?? null);
 	}
@@ -154,6 +162,8 @@ export type BreakdownRow = {
 	 * cached tokens inside the input (spec 031 #6).
 	 */
 	tokens: number | null;
+	/** Every class the group reported, for the cell's tooltip (spec 049 #9). */
+	tokenClasses: string | undefined;
 	/** Bar widths as fractions of the largest row in each column. */
 	countShare: number;
 	errorShare: number;
@@ -161,11 +171,7 @@ export type BreakdownRow = {
 	tokensShare: number;
 };
 
-/** The headline number of a bucket's tokens: input plus output, or null. */
-export function billedTokens(tokens: StatsBucket['tokens']): number | null {
-	if (!tokens || (tokens.input === undefined && tokens.output === undefined)) return null;
-	return (tokens.input ?? 0) + (tokens.output ?? 0);
-}
+export { billedTokens };
 
 /**
  * Turns categorical buckets into table rows with proportion bars, biggest
@@ -188,6 +194,7 @@ export function breakdown(buckets: StatsBucket[], unnamed = ''): BreakdownRow[] 
 		errorCount: bucket.error_count,
 		cost: bucket.total_cost ?? null,
 		tokens: billedTokens(bucket.tokens),
+		tokenClasses: tokenClasses(bucket.tokens),
 		countShare: 0,
 		errorShare: 0,
 		costShare: 0,
