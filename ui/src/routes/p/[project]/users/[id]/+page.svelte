@@ -381,12 +381,14 @@
 
 		<div class="grid grid-cols-1 gap-3 px-4 pb-4 lg:grid-cols-2">
 			<BreakdownTable
+				tokens
 				title="By environment"
 				label="Environment"
 				unit={environments?.unit ?? 'trace'}
 				rows={breakdown((environments?.buckets ?? []) as StatsBucket[])}
 			/>
 			<BreakdownTable
+				tokens
 				title="By model"
 				label="Model"
 				unit={models?.unit ?? 'observation'}

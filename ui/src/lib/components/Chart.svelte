@@ -1,6 +1,7 @@
 <script lang="ts">
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
+	import { hasData, drawn, type Line } from '$lib/chart';
 	import { theme } from '$lib/theme.svelte';
 
 	// The one chart component (spec 007 #6). uPlot draws the four time series —
@@ -14,7 +15,6 @@
 	// unresolved pair — so the colours are read off a probe element, which is
 	// the only thing that resolves them the way the rest of the page does.
 
-	type Line = { label: string; values: (number | null)[]; token: string };
 
 	let {
 		title,
@@ -101,9 +101,15 @@
 	 * passed — but a chart of nothing but gaps is an empty frame, and an empty
 	 * frame is worse than a sentence saying the window is empty.
 	 */
-	const populated = $derived(
-		x.length > 0 && lines.some((line) => line.values.some((value) => value !== null))
-	);
+	const populated = $derived(x.length > 0 && lines.some(hasData));
+
+	/**
+	 * What the reader clicked in the legend, by label. The chart is rebuilt
+	 * whenever the theme, the range or the data moves, and a rebuilt chart
+	 * that forgot its toggles would put back what they had just hidden. Not
+	 * reactive on purpose: a click must not itself rebuild the chart.
+	 */
+	const chosen = new Map<string, boolean>();
 
 	function draw(node: HTMLDivElement) {
 		// Reading these here is what redraws the chart when the theme moves.
@@ -126,6 +132,15 @@
 				},
 				...(range ? { scales: { y: { range } } } : {}),
 				legend: { live: true },
+				hooks: {
+					setSeries: [
+						// Only a toggle: the same hook fires for a focus change.
+						(chart, index, opts) => {
+							const line = index === null ? undefined : lines[index - 1];
+							if (line && opts && 'show' in opts) chosen.set(line.label, !!chart.series[index!].show);
+						}
+					]
+				},
 				axes: [
 					{ ...axis(colours), space: 64 },
 					{
@@ -141,6 +156,7 @@
 					{ label: 'Time' },
 					...lines.map((line) => ({
 						label: line.label,
+						show: drawn(lines, chosen, line),
 						stroke: colours[line.token],
 						width: 1.5,
 						points: { show: x.length < 40 },

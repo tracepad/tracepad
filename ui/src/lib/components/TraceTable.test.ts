@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TraceRow } from '$lib/api/client.svelte';
 import TraceTable from './TraceTable.svelte';
 import { boxWidth } from '../../tests/box';
+import { tooltipOver } from '../../tests/tooltip';
 
 // The trace listing at the two widths it has (spec 006 #18): every column on a
 // screen with room for them, and on a phone the three that say when, what and
@@ -28,6 +29,7 @@ const ROW = {
 	user_id: 'user-1137',
 	session_id: 'session-9',
 	total_cost: 0.0054,
+	tokens: { input: 12_000, output: 400, reasoning: 90, cache_write: 5 },
 	latency_ms: 2080,
 	ttft_ms: 410,
 	error_count: 2
@@ -46,12 +48,33 @@ describe('the trace table', () => {
 			'User',
 			'Session',
 			'Cost',
+			'Tokens',
 			'Latency',
 			'TTFT',
 			'Errors'
 		]);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '62rem' });
 		expect(screen.getByRole('link', { name: 'user-1137' })).toBeInTheDocument();
+	});
+
+	it('shows input plus output compactly, with every class reported in the tooltip', () => {
+		render(TraceTable, { rows: [ROW, { ...ROW, id: 'bb', tokens: undefined }] });
+
+		const cell = screen.getByRole('cell', { name: '12.4k' });
+		expect(cell).toHaveAttribute('title', 'Input 12,000\nOutput 400\nReasoning 90\nCache write 5');
+		// No tokens is a dash and no tooltip, not a zero.
+		expect(screen.getAllByRole('cell', { name: '—' })[0]).not.toHaveAttribute('title');
+	});
+
+	it('gives the folded tokens the class breakdown as their tooltip', () => {
+		narrow = true;
+		render(TraceTable, { rows: [ROW] });
+
+		expect(tooltipOver(screen.getByText(/12\.4k tokens/))).toBe(
+			'Input 12,000\nOutput 400\nReasoning 90\nCache write 5'
+		);
+		// The rest of the line keeps repeating itself for the sake of a cut value.
+		expect(tooltipOver(screen.getByText(/^\$0\.0054/))).toBe('$0.0054');
 	});
 
 	it('keeps three columns on a phone and folds the rest under the name', () => {
@@ -63,12 +86,13 @@ describe('the trace table', () => {
 		const name = screen.getByText('answer-question').closest('td')!;
 		// One value to a box, so a line breaks between values and never inside one.
 		const line = within(name).getByText(/^production/).parentElement!;
-		expect(line).toHaveTextContent('production · 2.08 s · TTFT 410 ms · $0.0054');
+		expect(line).toHaveTextContent('production · 2.08 s · TTFT 410 ms · $0.0054 · 12.4k tokens');
 		expect([...line.querySelectorAll('span')].map((one) => one.textContent)).toEqual([
 			'production ·',
 			'2.08 s ·',
 			'TTFT 410 ms ·',
-			'$0.0054'
+			'$0.0054 ·',
+			'12.4k tokens'
 		]);
 		// The failure is still in words, not a colour on its own.
 		expect(screen.getByText('2 errors')).toBeInTheDocument();
@@ -109,7 +133,7 @@ describe('the trace table by its box', () => {
 	});
 
 	it('folds in a box narrower than the table, on a wide screen', () => {
-		boxWidth(895);
+		boxWidth(991);
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
@@ -118,11 +142,11 @@ describe('the trace table by its box', () => {
 
 	it('keeps every column in a box as wide as the table, whatever the screen', () => {
 		narrow = true;
-		boxWidth(896);
+		boxWidth(992);
 		render(TraceTable, { rows: [ROW] });
 
-		expect(heads()).toHaveLength(9);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '56rem' });
+		expect(heads()).toHaveLength(10);
+		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '62rem' });
 	});
 
 	// The table's columns are rem, so its width is: a reader whose default is
@@ -138,7 +162,7 @@ describe('the trace table by its box', () => {
 	it('folds and unfolds as its box is resized after it is on the screen', async () => {
 		boxWidth(1200);
 		render(TraceTable, { rows: [ROW] });
-		expect(heads()).toHaveLength(9);
+		expect(heads()).toHaveLength(10);
 
 		boxWidth(600);
 		await tick();
@@ -146,6 +170,6 @@ describe('the trace table by its box', () => {
 
 		boxWidth(1200);
 		await tick();
-		expect(heads()).toHaveLength(9);
+		expect(heads()).toHaveLength(10);
 	});
 });

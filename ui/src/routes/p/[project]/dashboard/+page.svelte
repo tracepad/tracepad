@@ -428,10 +428,14 @@
 								lines={[
 									{ label: 'Input', values: series.input, token: 'accent' },
 									{ label: 'Output', values: series.output, token: 'ok' },
-									{ label: 'Cache read', values: series.cacheRead, token: 'muted' }
+									{ label: 'Cache read', values: series.cacheRead, token: 'muted' },
+									// Read off the legend, not drawn: reasoning may sit inside
+									// output and would double-count beside it (spec 049 #9).
+									{ label: 'Reasoning', values: series.reasoning, token: 'warn', hidden: true },
+									{ label: 'Cache write', values: series.cacheWrite, token: 'subtle', hidden: true }
 								]}
 								format={(value) => count(value)}
-								summary="Input, output and cache-read tokens per {bucket}; a bucket where nothing reported usage is a gap, not a zero."
+								summary="Input, output and cache-read tokens per {bucket}, with reasoning and cache-write counts in the legend; a bucket where nothing reported usage is a gap, not a zero."
 							/>
 						{:else if id === 'latency'}
 							<Chart

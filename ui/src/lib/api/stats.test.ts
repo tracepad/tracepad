@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { billedTokens, breakdown, buildSeries, key, NEW, summarize, type StatsBucket } from './stats';
+import { breakdown, buildSeries, key, NEW, summarize, type StatsBucket } from './stats';
+import { billedTokens } from '$lib/tokens';
 
 /**
  * What the Stats screen draws (spec 007 #6). Two things are worth pinning
@@ -46,10 +47,10 @@ describe('the time series', () => {
 		expect(series.cost).toEqual([0.5, null]);
 	});
 
-	it('keeps the three token classes apart, and absent ones absent', () => {
+	it('keeps the five token classes apart, and absent ones absent', () => {
 		const series = buildSeries(
 			[
-				bucket('2026-09-01T02:00:00Z', { tokens: { input: 300, output: 30, cache_read: 12 } }),
+				bucket('2026-09-01T02:00:00Z', { tokens: { input: 300, output: 30, cache_read: 12, reasoning: 8, cache_write: 4 } }),
 				// Traffic whose calls reported no usage: a gap on every class,
 				// not three zeroes (spec 031 #6).
 				bucket('2026-09-01T03:00:00Z'),
@@ -63,6 +64,8 @@ describe('the time series', () => {
 		expect(series.input).toEqual([300, null, 200]);
 		expect(series.output).toEqual([30, null, 20]);
 		expect(series.cacheRead).toEqual([12, null, null]);
+		expect(series.reasoning).toEqual([8, null, null]);
+		expect(series.cacheWrite).toEqual([4, null, null]);
 	});
 
 	it('carries the latency percentiles as two series', () => {

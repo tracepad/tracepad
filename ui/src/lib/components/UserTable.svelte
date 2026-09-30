@@ -4,6 +4,7 @@
 	import { Fold } from '$lib/fold.svelte';
 	import { ABSENT, cost, count, counted, middleEllipsis, timestamp } from '$lib/format';
 	import { href } from '$lib/project.svelte';
+	import { billedTokens, compact, tokenClasses, tokensText } from '$lib/tokens';
 	import CopyButton from './CopyButton.svelte';
 	import Folded from './Folded.svelte';
 
@@ -24,7 +25,7 @@
 	// failed; what they sent, what it cost and when they were last seen fold
 	// under the id (spec 006 #22). The number is the unfolded table's width
 	// and its `min-width`.
-	const fold = new Fold(848);
+	const fold = new Fold(944);
 	const narrow = $derived(fold.narrow);
 </script>
 
@@ -42,6 +43,7 @@
 				<th scope="col" class={['px-3 py-2 font-medium', !narrow && 'w-28']}>Errors</th>
 				{#if !narrow}
 					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Cost</th>
+					<th scope="col" class="w-24 px-3 py-2 text-right font-medium">Tokens</th>
 					<th scope="col" class="w-44 px-3 py-2 font-medium">First seen</th>
 					<th scope="col" class="w-44 px-3 py-2 font-medium">Last seen</th>
 				{/if}
@@ -71,7 +73,8 @@
 									values={[
 										counted(row.traces, 'trace'),
 										counted(row.sessions, 'session'),
-										cost(row.total_cost)
+										cost(row.total_cost),
+										{ text: tokensText(row.tokens), title: tokenClasses(row.tokens) }
 									]}
 								/>
 							</div>
@@ -106,6 +109,9 @@
 					</td>
 					{#if !narrow}
 						<td class="text-muted {numeric}">{cost(row.total_cost)}</td>
+						<td class="text-muted {numeric}" title={tokenClasses(row.tokens)}>
+							{compact(billedTokens(row.tokens))}
+						</td>
 						<td class="text-muted px-3 py-1.5 font-mono text-xs whitespace-nowrap tabular-nums">
 							{timestamp(row.first_seen)}
 						</td>
