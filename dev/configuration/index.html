@@ -1543,7 +1543,7 @@ does not know is logged as a warning at start, which catches a typo.</p>
 <tr>
 <td><code>TRACEPAD_MAX_SPANS_PER_REQUEST</code></td>
 <td><code>20000</code></td>
-<td>Spans one export may carry.</td>
+<td>Spans one export may carry; at least <code>1</code>.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_BODY_BUDGET_BYTES</code></td>
@@ -1553,17 +1553,17 @@ does not know is logged as a warning at start, which catches a typo.</p>
 <tr>
 <td><code>TRACEPAD_RESPONSE_BUDGET_BYTES</code></td>
 <td><code>51200</code></td>
-<td>The default byte budget of a read response (<a href="../api/">api.md</a>); a request may ask for another.</td>
+<td>The default byte budget of a read response (<a href="../api/">api.md</a>); a request may ask for another. From 4 KiB to 5 MiB.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_READ_TIMEOUT</code></td>
 <td><code>20s</code></td>
-<td>Deadline of one read request.</td>
+<td>Deadline of one read request, its wait for a slot included; from <code>1s</code> to <code>4m</code>.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_READ_CONCURRENCY</code></td>
 <td>two per CPU, at least 4</td>
-<td>Reads served at once.</td>
+<td>Reads served at once; at least <code>1</code>.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_MCP</code></td>
