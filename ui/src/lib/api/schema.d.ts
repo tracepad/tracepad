@@ -299,8 +299,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Version, uptime, database size and ingest counters since start
-         * @description Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts and counters are the asking project's own — `payloads` is absent because it cannot be attributed to one, `projects` is how many tenants share this process (naming none of them), and `size_bytes` is the whole deployment's file on disk.
+         * Version and uptime, the deployment's gauges for the admin token or an owner, and the project's figures for its callers
+         * @description Self-diagnosis without a metrics stack, in two halves, each to the caller it belongs to. The deployment view — `database.size_bytes`, `database.rows.projects`, `writer_queue`, `worker_panics`, `body_budget`, `read_slots` and `compaction` — moves with every tenant's traffic, so only the admin token and an owner session get it; the admin token is the one caller outside a project this route admits. The project view — the asking project's `database.rows`, `sweeper`, `runs`, `raw`, `media` and `counters` — goes to a key and to a session for its `X-Tracepad-Project`. `view` says which halves the body holds, and a withheld field is absent, never zero. The counters are in-memory and cover this process only, which is what `counters.since` says; `payloads` is not counted because it cannot be attributed to a project.
          */
         get: operations["system"];
         put?: never;
@@ -3400,19 +3400,27 @@ export interface operations {
                         /** Format: date-time */
                         started_at: string;
                         uptime_seconds: number;
+                        /** @description Which halves this body holds. A field of a half that is withheld is absent rather than zero */
+                        view: {
+                            /** @description The project the project view is about; null for the admin token, which has none and gets no project view */
+                            project: string | null;
+                            /** @description Whether the deployment view is here: true for the admin token and an owner session */
+                            deployment: boolean;
+                        };
                         database: {
-                            /** @description The database file plus its write-ahead log, for the whole deployment */
+                            /** @description The database file plus its write-ahead log, for the whole deployment. Deployment view only */
                             size_bytes?: number;
-                            /** @description Row counts within the asking project, plus `projects` as a bare tenant count */
-                            rows?: {
+                            /** @description Row counts within the asking project (project view), and `projects`, how many tenants share this process (deployment view) */
+                            rows: {
                                 [key: string]: number;
                             };
                         };
+                        /** @description The group-commit writer's queue, for the whole deployment. Deployment view only */
                         writer_queue?: {
                             waiting?: number;
                             capacity?: number;
                         };
-                        /** @description Panics in a write job or a background pass that the process recovered and went on from since it started, for the whole deployment; each has an `ERROR` line with its stack. `given_up` counts the projects and the shared steps of the sweeper and the rollup that panicked in every one of three passes and are left out until the process restarts (the asking project's own retention is `sweeper.given_up`). It names no project */
+                        /** @description Panics in a write job or a background pass that the process recovered and went on from since it started, for the whole deployment (deployment view only); each has an `ERROR` line with its stack. `given_up` counts the projects and the shared steps of the sweeper and the rollup that panicked in every one of three passes and are left out until the process restarts (the asking project's own retention is `sweeper.given_up`). It names no project */
                         worker_panics?: {
                             recovered: number;
                             given_up: number;
@@ -3421,12 +3429,12 @@ export interface operations {
                             /** Format: date-time */
                             last_at: string | null;
                         };
-                        /** @description Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429` */
+                        /** @description Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES; deployment view only. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429` */
                         body_budget?: {
                             held_bytes: number;
                             capacity_bytes: number;
                         };
-                        /** @description Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline */
+                        /** @description Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY (deployment view only); a read that finds none free waits within its deadline */
                         read_slots?: {
                             busy: number;
                             capacity: number;
@@ -3464,7 +3472,7 @@ export interface operations {
                             /** @description Their decoded size */
                             bytes: number;
                         };
-                        /** @description The deployment's compaction: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file */
+                        /** @description The deployment's compaction, in the deployment view only: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file */
                         compaction?: {
                             /**
                              * Format: date-time
@@ -3478,7 +3486,7 @@ export interface operations {
                             completed_at: string | null;
                         };
                         /** @description This project's ingest traffic, the requests the ingest and read bounds refused, since the process started */
-                        counters: {
+                        counters?: {
                             /** Format: date-time */
                             since?: string;
                             dialects?: {

@@ -254,7 +254,9 @@ claims queue items, which for a key are `ingest` and `write`.
 agent can see what a route would need before it calls it.
 
 The admin token keeps exactly the reach [administration](admin.md) gave it,
-plus the account routes. It still reaches no data-plane route: the reason it
+plus the account routes and `GET /api/v1/system`, which answers it the
+deployment's gauges and nothing of any project ([api.md](api.md#system)). It
+still reaches no data-plane route: the reason it
 was kept off the data plane — a browser holding the key to everything — is
 what accounts replace.
 

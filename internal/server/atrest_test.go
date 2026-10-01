@@ -91,11 +91,12 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 		t.Errorf("the answer's backup = %+v, want the one written %v", answer.Backup, written)
 	}
 
-	// Once the pass has run, `/system` says so, and nothing is pending.
+	// Once the pass has run, `/system` says so to the deployment's
+	// credential, and nothing is pending (spec 044 #22).
 	if err := h.sweeper.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	rec = h.get(t, "/api/v1/system")
+	rec = h.call(t, "GET", "/api/v1/system", nil, asAdmin)
 	expectStatus(t, rec, http.StatusOK)
 	system := decodeJSON[struct {
 		Compaction struct {

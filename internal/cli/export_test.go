@@ -921,9 +921,11 @@ func TestSystemPrintsTheRawArchive(t *testing.T) {
 
 // A compaction waiting for the next sweep is named with the moment it was
 // asked for (spec 044 #11) — and a new store, which has deleted nothing, has
-// none to name (#18).
+// none to name (#18). It is the deployment's, so the admin token reads it and
+// a project key does not (spec 044 #22).
 func TestSystemPrintsThePendingCompaction(t *testing.T) {
-	h := newHarness(t)
+	h := newAdminCLI(t)
+	h.asAdmin()
 	got := h.run(t.Context(), true, "system")
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
@@ -932,13 +934,57 @@ func TestSystemPrintsThePendingCompaction(t *testing.T) {
 		t.Errorf("a new store reports a compaction:\n%s", got.stdout)
 	}
 
+	h.env["TRACEPAD_API_KEY"] = testKey
 	h.seedTraces(t, 1, 1, "")
 	if out := h.run(t.Context(), true, "traces", "rm", traceHex(1), "--yes"); out.code != ExitOK {
 		t.Fatalf("traces rm exited %d: %s", out.code, out.stderr)
 	}
+	if got = h.run(t.Context(), true, "system"); strings.Contains(got.stdout, "compaction pending") {
+		t.Errorf("a project key was shown the deployment's compaction:\n%s", got.stdout)
+	}
+	h.asAdmin()
 	got = h.run(t.Context(), true, "system")
 	if !strings.Contains(got.stdout, "compaction pending since") {
 		t.Errorf("the system output does not name the pending compaction:\n%s", got.stdout)
+	}
+}
+
+// `tracepad system` prints the lines its view holds and says which ones it
+// was not given, rather than printing a zero for them (spec 004 #37).
+func TestSystemPrintsItsView(t *testing.T) {
+	h := newAdminCLI(t)
+	seedArchive(t, h, 1)
+
+	key := h.run(t.Context(), true, "system")
+	if key.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", key.code, key.stderr)
+	}
+	for _, want := range []string{"rows in this project", "raw archive", "ingest in this project",
+		"shown to the admin token or an owner"} {
+		if !strings.Contains(key.stdout, want) {
+			t.Errorf("a key's system output does not mention %q:\n%s", want, key.stdout)
+		}
+	}
+	for _, absent := range []string{"  database ", "  writes ", "  projects "} {
+		if strings.Contains(key.stdout, absent) {
+			t.Errorf("a key's system output has the deployment's %q:\n%s", absent, key.stdout)
+		}
+	}
+
+	h.asAdmin()
+	admin := h.run(t.Context(), true, "system")
+	if admin.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", admin.code, admin.stderr)
+	}
+	for _, want := range []string{"  database ", "  writes ", "  projects   1", "no project"} {
+		if !strings.Contains(admin.stdout, want) {
+			t.Errorf("the admin token's system output does not mention %q:\n%s", want, admin.stdout)
+		}
+	}
+	for _, absent := range []string{"rows in this project", "raw archive", "ingest in this project"} {
+		if strings.Contains(admin.stdout, absent) {
+			t.Errorf("the admin token's system output has a project's %q:\n%s", absent, admin.stdout)
+		}
 	}
 }
 

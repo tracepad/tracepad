@@ -180,9 +180,11 @@ func policyDecision(p policy, w who, path string) verdict {
 		return verdict{status: http.StatusForbidden, fragment: "owner account"}
 
 	case member:
-		if w == deploymentToken && !projectRoute(path) {
+		if w == deploymentToken && !projectRoute(path) && path != "/api/v1/system" {
 			// The admin token keeps exactly the powers spec 005 #11
-			// gave it and still reaches no data-plane route.
+			// gave it and still reaches no data-plane route. The system
+			// read is the one more: it answers the token the
+			// deployment's gauges and no project's (spec 004 #37).
 			return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 		}
 		return admitted

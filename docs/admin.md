@@ -438,7 +438,8 @@ first and then the newest
 - `compaction` — the freed space is zeroed as the rows go; the search index
   and the write-ahead log are rewritten by a sweeper pass, and `expected_by`
   is when that pass is due: the next one, or the one after a pass already
-  running. `GET /api/v1/system` says when it finished. Both fields are `null`
+  running. `GET /api/v1/system` says when it finished, to the admin token or an
+owner (the compaction is the deployment's). Both fields are `null`
   when the erasure found nothing to delete and so asked for nothing.
 - `pre_migration_backup` — present while the server keeps a copy of the
   database from before its last upgrade: the one copy an erasure does not

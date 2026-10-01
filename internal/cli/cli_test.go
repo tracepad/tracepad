@@ -686,8 +686,9 @@ func TestStatsAndSystem(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %s", system.code, system.stderr)
 	}
 	// The endpoint map does not advertise /mcp, so `system` is where a
-	// human finds out whether it is being served (Decision 27).
-	for _, fragment := range []string{"tracepad test", "database", "rows", "traces", "mcp"} {
+	// human finds out whether it is being served (Decision 27). The
+	// database's size is the deployment's, and a key is not shown it (#37).
+	for _, fragment := range []string{"tracepad test", "rows", "traces", "mcp"} {
 		if !strings.Contains(system.stdout, fragment) {
 			t.Errorf("system output is missing %q:\n%s", fragment, system.stdout)
 		}

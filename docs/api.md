@@ -116,7 +116,7 @@ document served without authentication.
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions | `read` |
 | `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed | `write` |
 | `DELETE` | `/api/v1/scores/{id}` | Retract one score; no dry run, a re-POST puts it back | `write` |
-| `GET` | `/api/v1/system` | Version, uptime, database size, ingest counters | `read` |
+| `GET` | `/api/v1/system` | Version, uptime, the deployment's gauges or the project's figures | `read` |
 | `GET` | `/api/v1` | This endpoint map | `any` |
 | `GET` | `/api/v1/openapi.json` | The OpenAPI document | `any` |
 
@@ -1208,14 +1208,38 @@ the router disagree in either direction; each operation carries its scope as
 curl … "http://localhost:4318/api/v1/system"
 ```
 
-Version, uptime, the database's size on disk, row counts, the writer queue's
-depth, and — since this process started — how many batches and spans arrived
-per attribute dialect, how many were skipped, and every distinct
-`x-langfuse-ingestion-version` seen. The counters are in memory and say so:
-`counters.since` is when they started.
+Version, uptime, and two halves, each for the caller it belongs to:
 
-`body_budget` is how many bytes of request bodies the server holds now
-against `TRACEPAD_BODY_BUDGET_BYTES`, deployment-wide like the writer queue:
+- **The deployment view** — the database's size on disk, how many projects
+  share the server, the writer queue, the body budget, the read slots, the
+  recovered panics and the compaction. These move with every tenant's
+  traffic, so only the **admin token** and an **owner's session** get them.
+  The admin token is the one caller outside a project this route admits; it
+  gets this half and nothing of any project.
+- **The project view** — the asking project's row counts, its retention
+  sweeper, runs, raw archive, media and counters. A project key gets it, and
+  so does a session for the project its `X-Tracepad-Project` names.
+
+So a key gets the project view, the admin token the deployment view, and an
+owner's session both. `view` says which halves the body holds:
+
+```json
+"view": {"project": "a1b2c3d4e5f6", "deployment": false}
+```
+
+A field of a half you were not given is **absent** — not `0`, not `null`. A
+`"waiting": 0` in the writer queue says writes are keeping up, and from a key
+it would be a claim about other tenants' traffic, not about yours. `project`
+is `null` for the admin token, which has no project.
+
+The counters are since this process started and in memory, and say so:
+`counters.since` is when they started. They count how many batches and spans
+arrived per attribute dialect, how many were skipped, and every distinct
+`x-langfuse-ingestion-version` seen.
+
+`body_budget` (deployment view) is how many bytes of request bodies the server
+holds now against `TRACEPAD_BODY_BUDGET_BYTES`, deployment-wide like the writer
+queue:
 `{"held_bytes": 1310720, "capacity_bytes": 83886080}`. Among the counters,
 `exports_over_span_cap` counts this project's exports refused with `413` for
 carrying more than `TRACEPAD_MAX_SPANS_PER_REQUEST` spans (each is a
@@ -1227,15 +1251,15 @@ arrays refused with `413` for carrying more than 10,000 scores or dataset
 items, and `queue_adds_over_target_cap` its queue adds refused with `400` for
 more than 1,000 targets — each its own counter, since the limits differ.
 
-`worker_panics` counts the panics the process recovered from since it started,
-for the whole deployment: `recovered`, `given_up` (projects and shared steps of
+`worker_panics` (deployment view) counts the panics the process recovered from
+since it started, for the whole deployment: `recovered`, `given_up` (projects and shared steps of
 the retention sweeper and the statistics rollup that panicked in each of three
 passes in a row and are left out until a restart), `last_where` (a kind of
 work, never a project's name) and `last_at`. The asking project's own retention
 is `sweeper.given_up`. Each recovered panic has an `ERROR` line with its stack
 in the server's log.
 
-`read_slots` is how many reads are being served now against
+`read_slots` (deployment view) is how many reads are being served now against
 `TRACEPAD_READ_CONCURRENCY`, deployment-wide like the writer queue:
 `{"busy": 3, "capacity": 16}`. Among the counters, `reads_timed_out` and
 `reads_refused_busy` count this project's reads the read deadline stopped and
@@ -1287,14 +1311,16 @@ The row counts and the ingest counters are **your project's**: a project key is
 a tenant credential, so this does not report how much data anybody else holds,
 how much traffic they send, which SDK versions they run, or how many keys they
 have. `payloads` is absent because that table has no project to attribute a row
-to, and `projects` is a bare count of how many tenants share this process — it
-names none of them.
+to.
 
-`size_bytes` is the one deployment-wide number: it is the file on disk, which
-is the operator question this endpoint exists to answer, and payloads and
-compression are shared so it cannot be split per project.
+`database.size_bytes` and `database.rows.projects` are the deployment view's:
+the file on disk — the operator question this endpoint exists to answer, which
+payloads and compression share so it cannot be split per project — and a bare
+count of how many tenants share this process. Both grow when somebody else
+ingests or makes a project, which is why a key does not see them.
 
-`compaction` is deployment-wide too, and names nobody:
+`compaction` (deployment view) names nobody, but its `requested_at` is the
+moment the latest deletion asked for one, whoever made it:
 
 ```json
 "compaction": {"requested_at": "2026-09-26T10:02:11Z", "completed_at": "2026-09-26T09:00:00Z"}
@@ -1304,7 +1330,9 @@ An erasure, a trace deletion or a project's purge asks the next sweeper pass to
 overwrite what it unlinked — merge the search index, drain the free pages,
 truncate the write-ahead log ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
 `requested_at` is the latest request still waiting, `null` when none is;
-`completed_at` is when one last finished, `null` before the first.
+`completed_at` is when one last finished, `null` before the first. A project
+that erased a person or deleted traces learns when its own compaction is due
+from the deletion's answer, `compaction.expected_by`.
 
 This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.

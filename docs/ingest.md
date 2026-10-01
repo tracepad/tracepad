@@ -287,8 +287,9 @@ the database and the server its memory:
   more of heap at the peak; size the budget against a container's memory limit
   with that in mind. A budget smaller than the body cap refuses to start.
 
-`GET /api/v1/system` shows the budget binding — `body_budget` with
-`held_bytes` and `capacity_bytes` — and counts, per project, the exports
+`GET /api/v1/system` shows the budget binding to the admin token or an owner —
+`body_budget` with `held_bytes` and `capacity_bytes`, deployment-wide — and
+counts, per project and to the project's own callers, the exports
 refused for their spans (`counters.exports_over_span_cap`, also counted in
 `rejected_batches`) and the bodies refused for the budget
 (`counters.bodies_refused_for_budget`). The array writes of the JSON API have

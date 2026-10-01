@@ -214,7 +214,7 @@ const Usage = `Client commands (they talk to a running server over HTTP):
   tracepad stats        [--group-by hour|day|model|environment|release|total]
                         [--since 1h] [--until T] [--env E] [--user U]
   tracepad facets       [--since 1h] [--until T]
-  tracepad system
+  tracepad system       (a key: the project; admin token: the deployment)
 
 --env, --release and --name take a comma-separated list — --env production,staging
 keeps traces from either — and facets is what lists the values with their counts.

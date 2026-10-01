@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"sort"
@@ -293,68 +294,27 @@ func (c *counters) orphanTraces(projectID string) int64 {
 	return 0
 }
 
-// handleSystem reports what this process knows about itself.
+// handleSystem reports what this process knows about itself, giving each
+// caller the half that is theirs (spec 004 #37). The deployment's gauges move
+// with every tenant's traffic, so they go to the deployment's credentials — the
+// admin token and an owner session — and the project's figures go to whoever
+// the project was resolved for. A withheld half is absent rather than zero, and
+// `view` says which halves the body holds.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	project, ok := s.apiProject(w, r)
-	if !ok {
+	c := callerFrom(r.Context())
+	if c == nil || (c.project == nil && !c.admin) {
+		slog.Error("the system handler ran without a project or the admin token", "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "the request was not authorized")
 		return
 	}
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// Row counts are the asking project's own. A project key is a tenant
-	// credential, and whole-table counts told one tenant how much data the
-	// others held and how many keys they had; cross-project access is what
-	// the admin token of design §6.3 is for, and it does not exist yet
-	// (Decision 33).
-	tables, err := s.store.TableCounts(r.Context(), project.ID)
-	if err != nil {
-		readFailed(w, r, "failed to read the database counts", err)
-		return
-	}
-	rows := object{}
-	for _, table := range tables {
-		rows = rows.put(table.Table, table.Rows)
-	}
-
-	queue := object{}
-	if writer, ok := s.writer.(queueReporter); ok {
-		waiting, capacity := writer.QueueDepth()
-		queue = queue.put("waiting", waiting).put("capacity", capacity)
-	}
-	// How many traces the project's runs keep out of the sweep (spec 014
-	// #13) — the size of retention's one exception, so the operator sees
-	// why the file did not shrink — beside how many traces named a run
-	// that does not exist (spec 014 #3).
-	pinned, err := s.store.PinnedTraces(r.Context(), project.ID)
-	if err != nil {
-		readFailed(w, r, "failed to count the pinned traces", err)
-		return
-	}
-
-	// What the archive holds and how far back it reaches (spec 019 #4):
-	// the numbers the export's report ends with, and the ones an operator
-	// deciding whether to shorten `raw_retention_days` needs before.
-	raw, err := s.rawBlock(r.Context(), project.ID)
-	if err != nil {
-		readFailed(w, r, "failed to summarise the raw archive", err)
-		return
-	}
-
-	// What media costs this project, beside the setting that decides it
-	// (spec 041 #11).
-	media, err := s.mediaBlock(r.Context(), project)
-	if err != nil {
-		readFailed(w, r, "failed to summarise the media", err)
-		return
-	}
-
-	compaction, err := s.store.Compaction(r.Context())
-	if err != nil {
-		readFailed(w, r, "failed to read the compaction state", err)
-		return
+	deployment := c.admin || (c.isSession() && c.account.Owner)
+	var projectID any
+	if c.project != nil {
+		projectID = c.project.ID
 	}
 
 	body := object{}.
@@ -362,24 +322,21 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("go_version", runtime.Version()).
 		put("started_at", formatTime(s.startedAt.UnixNano())).
 		put("uptime_seconds", int64(time.Since(s.startedAt).Seconds())).
-		put("database", object{}.
-			put("size_bytes", s.store.FileSize()).
-			put("rows", rows)).
-		put("writer_queue", queue).
-		// Panics the process recovered and went on from (spec 043 #42): the
-		// deployment's, and naming no project.
-		put("worker_panics", workerPanics(store.Panics())).
-		// Request bodies held in memory now against
-		// TRACEPAD_BODY_BUDGET_BYTES — the deployment's, like the queue
-		// (spec 043 #21).
-		put("body_budget", object{}.
-			put("held_bytes", s.bodies.heldBytes()).
-			put("capacity_bytes", s.bodies.capacityBytes())).
-		// Reads being served now against TRACEPAD_READ_CONCURRENCY — the
-		// deployment's, like the queue (spec 043 #21).
-		put("read_slots", object{}.
-			put("busy", s.reads.busy()).
-			put("capacity", s.reads.capacity())).
+		put("view", object{}.put("project", projectID).put("deployment", deployment))
+
+	database, ok := s.databaseBlock(w, r, c.project, deployment)
+	if !ok {
+		return
+	}
+	body = body.put("database", database)
+	if deployment {
+		gauges, ok := s.deploymentGauges(w, r)
+		if !ok {
+			return
+		}
+		body = append(body, gauges...)
+	}
+	body = body.
 		// The endpoint map deliberately does not advertise /mcp — it is
 		// a transport, not an endpoint of this API — so this is where a
 		// caller finds out whether it is being served (Decision 27).
@@ -393,7 +350,115 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// the limit's counts are every tenant's sign-ins, and the list of
 		// trusted proxies is the deployment's topology (spec 046 #13, #16).
 		put("source", sourceText(sourceOf(s.clientAddress(r)))).
-		put("response_budget_bytes", s.responseBudget).
+		put("response_budget_bytes", s.responseBudget)
+	if c.project != nil {
+		blocks, ok := s.projectBlocks(w, r, c.project)
+		if !ok {
+			return
+		}
+		body = append(body, blocks...)
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// databaseBlock is `database`: the file's size and the tenant count for the
+// deployment view, the asking project's row counts for the project view
+// (Decision 33, #37).
+func (s *Server) databaseBlock(w http.ResponseWriter, r *http.Request, project *store.Project,
+	deployment bool) (object, bool) {
+	block, rows := object{}, object{}
+	if deployment {
+		// The file on disk: the operator question this endpoint exists to
+		// answer, and one every tenant's ingest moves.
+		block = block.put("size_bytes", s.store.FileSize())
+	}
+	if project != nil {
+		tables, err := s.store.TableCounts(r.Context(), project.ID)
+		if err != nil {
+			readFailed(w, r, "failed to read the database counts", err)
+			return nil, false
+		}
+		for _, table := range tables {
+			rows = rows.put(table.Table, table.Rows)
+		}
+	}
+	if deployment {
+		// How many tenants share the process names none of them, and still
+		// moves when another one is made.
+		projects, err := s.store.LiveProjects(r.Context())
+		if err != nil {
+			readFailed(w, r, "failed to read the database counts", err)
+			return nil, false
+		}
+		rows = rows.put("projects", projects)
+	}
+	return block.put("rows", rows), true
+}
+
+// deploymentGauges is the deployment view's gauges (#37): numbers that move
+// with every tenant's traffic and name no project, for the admin token and an
+// owner session alone.
+func (s *Server) deploymentGauges(w http.ResponseWriter, r *http.Request) (object, bool) {
+	compaction, err := s.store.Compaction(r.Context())
+	if err != nil {
+		readFailed(w, r, "failed to read the compaction state", err)
+		return nil, false
+	}
+	queue := object{}
+	if writer, ok := s.writer.(queueReporter); ok {
+		waiting, capacity := writer.QueueDepth()
+		queue = queue.put("waiting", waiting).put("capacity", capacity)
+	}
+	return object{}.
+		put("writer_queue", queue).
+		// Panics the process recovered and went on from (spec 043 #42),
+		// naming no project.
+		put("worker_panics", workerPanics(store.Panics())).
+		// Request bodies held in memory now against
+		// TRACEPAD_BODY_BUDGET_BYTES (spec 043 #21, #43).
+		put("body_budget", object{}.
+			put("held_bytes", s.bodies.heldBytes()).
+			put("capacity_bytes", s.bodies.capacityBytes())).
+		// Reads being served now against TRACEPAD_READ_CONCURRENCY
+		// (spec 043 #21, #43).
+		put("read_slots", object{}.
+			put("busy", s.reads.busy()).
+			put("capacity", s.reads.capacity())).
+		// Whether an explicit deletion is still waiting for the pass that
+		// overwrites what it unlinked, and when one last finished (spec 044
+		// #11). One file, one compaction — and a stamp of whichever project
+		// deleted something last (spec 044 #22).
+		put("compaction", compactionBlock(compaction)), true
+}
+
+// projectBlocks is the project view's blocks (#37): the asking project's
+// retention, runs, archive, media and counters.
+func (s *Server) projectBlocks(w http.ResponseWriter, r *http.Request, project *store.Project) (object, bool) {
+	// How many traces the project's runs keep out of the sweep (spec 014
+	// #13) — the size of retention's one exception, so the operator sees
+	// why the file did not shrink — beside how many traces named a run
+	// that does not exist (spec 014 #3).
+	pinned, err := s.store.PinnedTraces(r.Context(), project.ID)
+	if err != nil {
+		readFailed(w, r, "failed to count the pinned traces", err)
+		return nil, false
+	}
+	// What the archive holds and how far back it reaches (spec 019 #4):
+	// the numbers the export's report ends with, and the ones an operator
+	// deciding whether to shorten `raw_retention_days` needs before.
+	raw, err := s.rawBlock(r.Context(), project.ID)
+	if err != nil {
+		readFailed(w, r, "failed to summarise the raw archive", err)
+		return nil, false
+	}
+	// What media costs this project, beside the setting that decides it
+	// (spec 041 #11).
+	media, err := s.mediaBlock(r.Context(), project)
+	if err != nil {
+		readFailed(w, r, "failed to summarise the media", err)
+		return nil, false
+	}
+	return object{}.
 		// What retention has done and when it runs next (spec 005 #14).
 		// There is no endpoint to run it now: an immediate sweep would be
 		// a destructive trigger without the dry run the rest of the admin
@@ -405,18 +470,12 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			put("orphan_traces", s.counters.orphanTraces(project.ID))).
 		put("raw", raw).
 		put("media", media).
-		// Whether an explicit deletion is still waiting for the pass that
-		// overwrites what it unlinked, and when one last finished
-		// (spec 044 #11). The deployment's, not the project's: one file,
-		// one compaction, and neither stamp names anybody.
-		put("compaction", compactionBlock(compaction)).
 		// The counters are since this process started and say so: an
 		// honest process-lifetime number now beats a metrics subsystem
 		// later (#10). They are this project's, for the same reason the
 		// row counts are (Decision 33).
 		put("counters", s.counters.snapshot(project.ID).
-			put("since", formatTime(s.startedAt.UnixNano())))
-	writeJSON(w, http.StatusOK, body)
+			put("since", formatTime(s.startedAt.UnixNano()))), true
 }
 
 // sweeperStatus renders the retention sweeper's state. The deletion counts are

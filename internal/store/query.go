@@ -835,8 +835,8 @@ func statsKey(groupBy string) string {
 //
 // `payloads` is absent because it cannot be: the table has no project_id, and
 // reporting it whole would tell one project how much data the others hold
-// (spec 004 Decision 33). `projects` is reported as a plain count — how many
-// tenants share this process is an operator fact, and it names none of them.
+// (spec 004 Decision 33). `projects` is not here either: how many tenants
+// share this process is LiveProjects, and the deployment's (spec 004 #37).
 // `search_entries` is reported for the same reason the others are and the
 // reason `payloads` is not: it carries a project id, so it can be counted
 // within the asking project, and it is the one store whose size an operator
@@ -882,7 +882,7 @@ type TableCount struct {
 // TableCounts counts one project's rows, in a fixed order so the answer is a
 // stable diff between two calls.
 func (s *Store) TableCounts(ctx context.Context, projectID string) ([]TableCount, error) {
-	out := make([]TableCount, 0, len(countedTables)+1)
+	out := make([]TableCount, 0, len(countedTables))
 	for _, table := range countedTables {
 		var rows int64
 		// The table names are the package's own constants, never
@@ -893,15 +893,21 @@ func (s *Store) TableCounts(ctx context.Context, projectID string) ([]TableCount
 		}
 		out = append(out, TableCount{Table: table, Rows: rows})
 	}
-	// Live projects only: a soft-deleted one has vanished from every
-	// listing, and a count that still included it would be the one place
-	// the deletion did not take (spec 005 #9).
+	return out, nil
+}
+
+// LiveProjects counts the tenants sharing the process: the one figure of
+// `GET /api/v1/system`'s row counts that is not a project's own, and in its
+// deployment view alone (spec 004 #37). Live projects only: a soft-deleted one
+// has vanished from every listing, and a count that still included it would be
+// the one place the deletion did not take (spec 005 #9).
+func (s *Store) LiveProjects(ctx context.Context) (int64, error) {
 	var projects int64
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).
 		Scan(&projects); err != nil {
-		return nil, fmt.Errorf("count projects: %w", err)
+		return 0, fmt.Errorf("count projects: %w", err)
 	}
-	return append(out, TableCount{Table: "projects", Rows: projects}), nil
+	return projects, nil
 }
 
 // explainQueryPlan returns SQLite's plan for a statement, one line per step.

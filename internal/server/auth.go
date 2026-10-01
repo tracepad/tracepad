@@ -659,8 +659,10 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 		if c.admin {
 			// The admin token keeps exactly the powers spec 005 #11
 			// gave it — the project's own administration — and still
-			// reaches no data-plane route (Decision 3).
-			if projectRoute(rt.Path) {
+			// reaches no data-plane route (Decision 3). The one more is
+			// the system read, whose deployment view is its to read
+			// (spec 004 #37).
+			if adminReaches(rt.Path) {
 				return true
 			}
 			writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -762,6 +764,13 @@ const projectHeader = "X-Tracepad-Project"
 // projectRoutePrefix is the administration surface a project key and the admin
 // token reach (spec 005 #11).
 const projectRoutePrefix = "/api/v1/projects"
+
+// adminReaches reports a `member` or `editor` route the admin token is
+// admitted to: the project routes (spec 005 #11), and the system read, which
+// answers it the deployment's gauges and nothing of any project (spec 004 #37).
+func adminReaches(path string) bool {
+	return projectRoute(path) || path == systemPath
+}
 
 // projectRoute reports a route under `/api/v1/projects`: the listing, the
 // create, and everything about one project.
