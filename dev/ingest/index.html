@@ -2056,8 +2056,9 @@ which for traces are spans); its default of 0 means no maximum.
   with that in mind. A budget smaller than the body cap refuses to start.</p>
 </li>
 </ul>
-<p><code>GET /api/v1/system</code> shows the budget binding — <code>body_budget</code> with
-<code>held_bytes</code> and <code>capacity_bytes</code> — and counts, per project, the exports
+<p><code>GET /api/v1/system</code> shows the budget binding to the admin token or an owner —
+<code>body_budget</code> with <code>held_bytes</code> and <code>capacity_bytes</code>, deployment-wide — and
+counts, per project and to the project's own callers, the exports
 refused for their spans (<code>counters.exports_over_span_cap</code>, also counted in
 <code>rejected_batches</code>) and the bodies refused for the budget
 (<code>counters.bodies_refused_for_budget</code>). The array writes of the JSON API have

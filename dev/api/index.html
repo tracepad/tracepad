@@ -2382,7 +2382,7 @@ document served without authentication.</p>
 <tr>
 <td><code>GET</code></td>
 <td><code>/api/v1/system</code></td>
-<td>Version, uptime, database size, ingest counters</td>
+<td>Version, uptime, the deployment's gauges or the project's figures</td>
 <td><code>read</code></td>
 </tr>
 <tr>
@@ -3403,7 +3403,7 @@ did, so both are diffed. Empty when the two versions are identical.</p>
 <h2 id="self-description">Self-description</h2>
 <p><code>GET /api/v1</code> returns the endpoint map: every route, a one-line description,
 the one word that says what calling it takes — its <code>policy</code>: <code>public</code>,
-<code>ingest</code>, <code>member</code>, <code>editor</code>, <code>owner</code> or <code>session</code>
+<code>ingest</code>, <code>member</code>, <code>editor</code>, <code>owner</code>, <code>session</code> or <code>diagnostic</code>
 (<a href="../accounts/#who-may-do-what">accounts.md</a>) — and the <code>scope</code> it asks of a
 project key: <code>any</code>, <code>ingest</code>, <code>read</code>, <code>write</code> or <code>none</code> (<a href="#scopes">Scopes</a>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="p">{</span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GET"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/queues/{name}/next"</span><span class="p">,</span><span class="w"> </span><span class="nt">"policy"</span><span class="p">:</span><span class="w"> </span><span class="s2">"member"</span><span class="p">,</span>
@@ -3417,13 +3417,41 @@ the router disagree in either direction; each operation carries its scope as
 <h2 id="system">System</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/system"</span>
 </code></pre></div>
-<p>Version, uptime, the database's size on disk, row counts, the writer queue's
-depth, and — since this process started — how many batches and spans arrived
-per attribute dialect, how many were skipped, and every distinct
-<code>x-langfuse-ingestion-version</code> seen. The counters are in memory and say so:
-<code>counters.since</code> is when they started.</p>
-<p><code>body_budget</code> is how many bytes of request bodies the server holds now
-against <code>TRACEPAD_BODY_BUDGET_BYTES</code>, deployment-wide like the writer queue:
+<p>Version, uptime, and two halves, each for the caller it belongs to:</p>
+<ul>
+<li><strong>The deployment view</strong> — the database's size on disk, how many projects
+  share the server, the writer queue, the body budget, the read slots, the
+  recovered panics and the compaction. These move with every tenant's
+  traffic, so only the <strong>admin token</strong> and an <strong>owner's session</strong> get them.
+  The admin token is the one caller outside a project this route admits; it
+  gets this half and nothing of any project.</li>
+<li><strong>The project view</strong> — the asking project's row counts, its retention
+  sweeper, runs, raw archive, media and counters. A project key gets it, and
+  so does a session for the project its <code>X-Tracepad-Project</code> names.</li>
+</ul>
+<p>So a key gets the project view, the admin token the deployment view, and an
+owner's session both — or the deployment view alone when it sends no
+<code>X-Tracepad-Project</code>, as on a fresh install with no project to name. A member's
+session must name its project. The route's policy word is <code>diagnostic</code>, which
+is this endpoint's alone. <code>view</code> says which halves the body holds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nt">"view"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"project"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4e5f6"</span><span class="p">,</span><span class="w"> </span><span class="nt">"deployment"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<p>A field of a half you were not given is <strong>absent</strong> — not <code>0</code>, not <code>null</code>. A
+<code>"waiting": 0</code> in the writer queue says writes are keeping up, and from a key
+it would be a claim about other tenants' traffic, not about yours. <code>project</code>
+is <code>null</code> when the body has no project's half. That happens for the admin
+token, which has no project, and for an owner's session that named none. It
+also happens when an owner's session named a project that is not there, absent
+or deleted. The owner still gets the deployment half, and
+<code>"project_error": "no such project"</code> says why the other half is missing. A
+member's session naming such a project is refused, as on every read.</p>
+<p>The counters are since this process started and in memory, and say so:
+<code>counters.since</code> is when they started. They count how many batches and spans
+arrived per attribute dialect, how many were skipped, and every distinct
+<code>x-langfuse-ingestion-version</code> seen.</p>
+<p><code>body_budget</code> (deployment view) is how many bytes of request bodies the server
+holds now against <code>TRACEPAD_BODY_BUDGET_BYTES</code>, deployment-wide like the writer
+queue:
 <code>{"held_bytes": 1310720, "capacity_bytes": 83886080}</code>. Among the counters,
 <code>exports_over_span_cap</code> counts this project's exports refused with <code>413</code> for
 carrying more than <code>TRACEPAD_MAX_SPANS_PER_REQUEST</code> spans (each is a
@@ -3434,14 +3462,14 @@ was spent (<a href="../ingest/#how-much-one-export-may-carry">ingest.md</a>).
 arrays refused with <code>413</code> for carrying more than 10,000 scores or dataset
 items, and <code>queue_adds_over_target_cap</code> its queue adds refused with <code>400</code> for
 more than 1,000 targets — each its own counter, since the limits differ.</p>
-<p><code>worker_panics</code> counts the panics the process recovered from since it started,
-for the whole deployment: <code>recovered</code>, <code>given_up</code> (projects and shared steps of
+<p><code>worker_panics</code> (deployment view) counts the panics the process recovered from
+since it started, for the whole deployment: <code>recovered</code>, <code>given_up</code> (projects and shared steps of
 the retention sweeper and the statistics rollup that panicked in each of three
 passes in a row and are left out until a restart), <code>last_where</code> (a kind of
 work, never a project's name) and <code>last_at</code>. The asking project's own retention
 is <code>sweeper.given_up</code>. Each recovered panic has an <code>ERROR</code> line with its stack
 in the server's log.</p>
-<p><code>read_slots</code> is how many reads are being served now against
+<p><code>read_slots</code> (deployment view) is how many reads are being served now against
 <code>TRACEPAD_READ_CONCURRENCY</code>, deployment-wide like the writer queue:
 <code>{"busy": 3, "capacity": 16}</code>. Among the counters, <code>reads_timed_out</code> and
 <code>reads_refused_busy</code> count this project's reads the read deadline stopped and
@@ -3465,14 +3493,14 @@ payloads cost, beside the setting that decides whether they are kept:
 project's traces and raw batches point at, and their decoded size.</p>
 <p><code>raw</code> is the archive of export bodies — what an export can carry out, and what
 it cannot:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-46-3" name="__codelineno-46-3" href="#__codelineno-46-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
-<a id="__codelineno-46-4" name="__codelineno-46-4" href="#__codelineno-46-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
-<a id="__codelineno-46-5" name="__codelineno-46-5" href="#__codelineno-46-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
-<a id="__codelineno-46-6" name="__codelineno-46-6" href="#__codelineno-46-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
-<a id="__codelineno-46-7" name="__codelineno-46-7" href="#__codelineno-46-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
-<a id="__codelineno-46-8" name="__codelineno-46-8" href="#__codelineno-46-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
+<a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
+<a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
+<a id="__codelineno-47-7" name="__codelineno-47-7" href="#__codelineno-47-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
+<a id="__codelineno-47-8" name="__codelineno-47-8" href="#__codelineno-47-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>Unlike the counters below it, these are on disk rather than since start.
 <code>enabled</code> is <code>TRACEPAD_STORE_RAW</code>; <code>bytes</code> is what the archive occupies
@@ -3485,19 +3513,25 @@ the batch line — and <a href="../export/">export.md</a> says what to do about 
 a tenant credential, so this does not report how much data anybody else holds,
 how much traffic they send, which SDK versions they run, or how many keys they
 have. <code>payloads</code> is absent because that table has no project to attribute a row
-to, and <code>projects</code> is a bare count of how many tenants share this process — it
-names none of them.</p>
-<p><code>size_bytes</code> is the one deployment-wide number: it is the file on disk, which
-is the operator question this endpoint exists to answer, and payloads and
-compression are shared so it cannot be split per project.</p>
-<p><code>compaction</code> is deployment-wide too, and names nobody:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T09:00:00Z"</span><span class="p">}</span>
+to.</p>
+<p><code>database.size_bytes</code> and <code>database.rows.projects</code> are the deployment view's:
+the file on disk — the operator question this endpoint exists to answer, which
+payloads and compression share so it cannot be split per project — and a bare
+count of how many tenants share this process. Both grow when somebody else
+ingests or makes a project, which is why a key does not see them.</p>
+<p><code>compaction</code> (deployment view) names nobody, but its <code>requested_at</code> is the
+moment the latest deletion asked for one, whoever made it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T09:00:00Z"</span><span class="p">}</span>
 </code></pre></div>
 <p>An erasure, a trace deletion or a project's purge asks the next sweeper pass to
 overwrite what it unlinked — merge the search index, drain the free pages,
 truncate the write-ahead log (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).
 <code>requested_at</code> is the latest request still waiting, <code>null</code> when none is;
-<code>completed_at</code> is when one last finished, <code>null</code> before the first.</p>
+<code>completed_at</code> is when one last finished, <code>null</code> before the first. A project
+that deleted traces learns when its compaction is due from the deletion's
+answer, <code>compaction.expected_by</code>. An erasure goes further: its status carries
+<code>compaction.completed_at</code>, when the pass that covered it finished. That stamp
+is the erasure's own, and a later pass does not move it.</p>
 <p>This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.</p>
 <h2 id="response-headers">Response headers</h2>
@@ -3600,12 +3634,12 @@ works through take a slot and run under the deadline, and answer the same two
 slot.</p>
 <h2 id="errors">Errors</h2>
 <p>One shape everywhere:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unknown query parameter \"trace\" (accepted: from, to, environment, …)"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unknown query parameter \"trace\" (accepted: from, to, environment, …)"</span><span class="p">}</span>
 </code></pre></div>
 <p>A refusal a client has to <em>act</em> on carries what it needs beside the sentence —
 a prompt append refused by <code>expect_version</code> says which version the name is
 actually at (<a href="../prompts/#appending-to-the-version-you-meant">prompts.md</a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt \"summarize\" is at version 9, not 7: it changed while this one was being written"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt \"summarize\" is at version 9, not 7: it changed while this one was being written"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>

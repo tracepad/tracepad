@@ -1939,6 +1939,10 @@ than a description of it.</p>
 <td><code>session</code></td>
 <td>Only a cookie. A key or the admin token is told <code>not a session</code>, which is what it is.</td>
 </tr>
+<tr>
+<td><code>diagnostic</code></td>
+<td><code>GET /api/v1/system</code> alone. Every credential gets through, and each is answered with its own half (<a href="../api/#system">api.md</a>): a key with <code>read</code>, or a member's session for its project, gets the project's figures; the admin token gets the deployment's; an owner's session gets both, or the deployment's alone when it names no project.</td>
+</tr>
 </tbody>
 </table>
 <p>A key passes the policy and then its <strong>scope</strong>: every route also names the one
@@ -1951,7 +1955,10 @@ claims queue items, which for a key are <code>ingest</code> and <code>write</cod
 <p><code>GET /api/v1</code> lists every endpoint with its policy word and its scope, so an
 agent can see what a route would need before it calls it.</p>
 <p>The admin token keeps exactly the reach <a href="../admin/">administration</a> gave it,
-plus the account routes. It still reaches no data-plane route: the reason it
+plus the account routes and <code>GET /api/v1/system</code> (policy <code>diagnostic</code>), which
+answers it the deployment's gauges and nothing of any project
+(<a href="../api/#system">api.md</a>). It
+still reaches no data-plane route: the reason it
 was kept off the data plane — a browser holding the key to everything — is
 what accounts replace.</p>
 <h2 id="inviting-somebody">Inviting somebody</h2>
