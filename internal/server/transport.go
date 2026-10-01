@@ -35,7 +35,7 @@ import (
 //
 // A full `script-src` policy is the interface's two documents' own, and is
 // sent by the handler that serves them in place of the first line (csp.go,
-// spec 050).
+// spec 051).
 var securityHeaders = [...][2]string{
 	{"Content-Security-Policy", "frame-ancestors 'none'"},
 	{"X-Frame-Options", "DENY"},

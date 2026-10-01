@@ -1024,7 +1024,7 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 
 A refusal is a line in the browser's console. If a change to the interface
 trips one, the fix is in the change; the policy is not widened without a
-decision in [spec 050](../specs/050-content-security-policy.md). `npm run dev`
+decision in [spec 051](../specs/051-content-security-policy.md). `npm run dev`
 is Vite's server and sends no policy, so the production build is where to look.
 A reverse proxy that adds a `Content-Security-Policy` of its own adds a second
 policy, and the browser enforces both: it can narrow this one, never loosen it.

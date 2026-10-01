@@ -5,7 +5,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
 import { createProject, signInAsOwner, state } from './harness';
 
-// The page's Content-Security-Policy (spec 050, Testing), against the real
+// The page's Content-Security-Policy (spec 051, Testing), against the real
 // binary. Three things are claimed and each has a test of its own:
 //
 //   - the policy is sent, once, with the hash of the script the document

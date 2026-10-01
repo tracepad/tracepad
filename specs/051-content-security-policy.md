@@ -1,4 +1,4 @@
-# Spec 050 — A policy for the page: what script, style and requests the interface may run
+# Spec 051 — A policy for the page: what script, style and requests the interface may run
 
 **Status:** ✅ SHIPPED
 **Sprint:** October 2026

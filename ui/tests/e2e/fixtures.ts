@@ -1,7 +1,7 @@
 import { expect, test as base, type BrowserContext } from '@playwright/test';
 
 // Every end-to-end test runs under a watch on the page's Content-Security-
-// Policy (spec 050 #7). The interface is served under a policy with no
+// Policy (spec 051 #7). The interface is served under a policy with no
 // `'unsafe-inline'`, so a screen that reaches for an inline script, an inline
 // style or an origin the policy does not name does not break loudly: the
 // browser refuses it, logs one line to a console nobody reads mid-test, and

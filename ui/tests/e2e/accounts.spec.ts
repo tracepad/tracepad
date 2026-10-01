@@ -152,7 +152,7 @@ async function signIn(page: Page, at: Stand, who: { email: string; password: str
  * care — the server it was talking to is stopped first.
  */
 const extra: BrowserContext[] = [];
-/** What each of them was refused, which the suite's own watch cannot see (spec 050 #7). */
+/** What each of them was refused, which the suite's own watch cannot see (spec 051 #7). */
 const watched: Watch[] = [];
 
 async function otherBrowser(browser: Browser) {

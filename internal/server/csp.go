@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// The policy of an HTML document the server hands out (spec 050). Every
+// The policy of an HTML document the server hands out (spec 051). Every
 // response carries spec 001 #14's `frame-ancestors 'none'`; the two documents
 // the interface is made of — the SPA's entry and the stub a build without the
 // `ui` tag serves — replace it with the policy below, which is the one that
@@ -21,7 +21,7 @@ import (
 // here, when the server starts, from the bytes it is about to send — never
 // from a copy in a config file or a build step, which a rebuild could leave
 // stale and the interface would then be a blank page that only a console
-// explains (spec 050 #3).
+// explains (spec 051 #3).
 
 // inlineScript matches a `<script>` element and captures its content. One with
 // a `src` has no content, so it matches with an empty body, which is skipped.
@@ -39,8 +39,8 @@ var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 //   - `script-src 'self'` plus the hash of each inline script: the bundle's
 //     own files and the one inline line that starts them, and nothing a
 //     payload, a URL or an attribute could smuggle in. No `'unsafe-inline'`,
-//     no `'unsafe-eval'`, no `'strict-dynamic'` (spec 050 #1, #2).
-//   - `style-src 'self' 'unsafe-inline'`, and only for style (spec 050 #5):
+//     no `'unsafe-eval'`, no `'strict-dynamic'` (spec 051 #1, #2).
+//   - `style-src 'self' 'unsafe-inline'`, and only for style (spec 051 #5):
 //     the editor writes its stylesheet into a `<style>` element and the
 //     dialogs write the page's `style` attribute, neither of which can carry
 //     a hash or a nonce a static bundle could know.

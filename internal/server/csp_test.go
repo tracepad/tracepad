@@ -11,7 +11,7 @@ import (
 	"github.com/tracepad/tracepad/internal/ui"
 )
 
-// The policy the interface's documents are served under (spec 050): built from
+// The policy the interface's documents are served under (spec 051): built from
 // the document, so that what it names is what is sent.
 
 func hashOf(code string) string {

@@ -155,7 +155,7 @@ type Server struct {
 	assets   fs.FS
 	reserved map[string]bool
 	paths    pathMatcher
-	// The policies the two documents are served under (spec 050), taken from
+	// The policies the two documents are served under (spec 051), taken from
 	// the bytes at start-up: the SPA's entry, and the stub of a build without
 	// the interface.
 	indexPolicy, stubPolicy string
