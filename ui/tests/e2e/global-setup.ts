@@ -2,7 +2,16 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ADMIN_TOKEN, inviteEditor, ownAddress, PASSWORD, PORT, STATE, type State } from './harness';
+import {
+	ADMIN_TOKEN,
+	inviteEditor,
+	mintFullKey,
+	ownAddress,
+	PASSWORD,
+	PORT,
+	STATE,
+	type State
+} from './harness';
 
 // Boots the real binary on a temp database and fills it from the synthetic
 // OTLP corpus in `testdata/` (spec 006, Testing). Nothing here is mocked: the
@@ -46,16 +55,21 @@ export default async function boot() {
 	};
 
 	try {
-		const { key, setup } = await firstRunOutput(server);
+		const { key: printed, setup } = await firstRunOutput(server);
 
 		const baseURL = `http://127.0.0.1:${PORT}`;
 		await waitForHealth(baseURL, server);
-		await ingest(baseURL, key);
+		// The printed key is the application's: it sends the corpus and
+		// cannot read it back (spec 045 #28). The suites read and write with
+		// a key of every scope, minted the way the banner says.
+		await ingest(baseURL, printed);
+		await cannotRead(baseURL, printed);
 
 		// The server names itself `localhost`; the tests drive `127.0.0.1`, and
 		// a cross-origin hop would drop the cookie a session lives in.
 		const owner = await createOwner(baseURL, setup.replace(/^http:\/\/[^/]+/, baseURL));
-		const project = await seededProject(baseURL, key);
+		const project = await seededProject(baseURL, printed);
+		const key = await mintFullKey(baseURL, project, ADMIN_TOKEN);
 		const member = await inviteEditor(baseURL, project, 'member');
 
 		const carried: State = { baseURL, key, project, owner, member };
@@ -100,6 +114,19 @@ function firstRunOutput(server: ChildProcess): Promise<{ key: string; setup: str
 			reject(new Error(`the server exited with ${code}:\n${output}`));
 		});
 	});
+}
+
+/** The printed key holds `ingest` alone: a read is refused for its scope (spec 045 #28). */
+async function cannotRead(baseURL: string, key: string) {
+	const response = await fetch(`${baseURL}/api/v1/traces`, {
+		headers: { Authorization: `Bearer ${key}` }
+	});
+	const challenge = response.headers.get('WWW-Authenticate') ?? '';
+	if (response.status !== 403 || !challenge.includes('insufficient_scope')) {
+		throw new Error(
+			`the printed key read traces: ${response.status} ${challenge}; it should hold ingest alone`
+		);
+	}
 }
 
 /** The first owner, from the link the server printed (spec 028 #9). */

@@ -23,17 +23,17 @@ your applications' keys would cross the network readable by anything on the
 path. Keep `127.0.0.1:` for applications on the same machine; to serve anyone
 else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). Inside
 the container the server cannot see where its port was published, so it says
-this once at every start, as an `INFO` line, until `TRACEPAD_URL` is an
-`https://` address. (The same binary on a host, reachable beyond loopback over
-plain HTTP, makes it a `WARN`.) The note reads the same whatever the publish
-is, so it does not tell you when the port *is* exposed: with
+this once at every start, as an `INFO` line, whatever `TRACEPAD_URL` says. (The
+same binary on a host listens on loopback unless told otherwise, and bound
+beyond it makes this a `WARN`.) The note reads the same whatever the
+publish is, so it does not tell you when the port *is* exposed: with
 `--network host`, in a Kubernetes pod, or with `-p 4318:4318`, other machines
 reach the server over plain HTTP and nothing louder is printed.
 
 ## The keys are printed once, to the log
 
-The first run creates the database, a project called `default` and its key
-pair, and prints them exactly as it does on a host
+The first run creates the database, a project called `default` and a key for
+your application, and prints it exactly as it does on a host
 ([quickstart](quickstart.md)) — which for a container means its stdout:
 
 ```sh
@@ -60,8 +60,13 @@ to learn a key that a host install does not have.
 the container exists, and with the default `json-file` driver it never rotates
 it: whoever can run `docker logs tracepad` — or read the log file under the
 daemon's directory, or receive whatever ships your logs elsewhere — can read
-that key next month. Treat the first key as exposed once it has been copied
-out, and rotate onto one that was never printed: in the web interface, under
+that key next month. That is why it holds the `ingest` scope alone: whoever
+finds it can send spans into the project, not read what is in it. A key that
+reads — for the CLI, an agent, the eval harness — is minted in the interface
+and shown in your browser, never in this log
+([quickstart](quickstart.md#3-look-at-them)). Treat the printed key as exposed
+once it has been copied out all the same, and rotate onto one that was never
+printed: in the web interface, under
 **Settings → Project → API keys**, mint a pair — with the `ingest` scope alone
 for an application ([api.md](api.md#scopes)) — move your applications onto it,
 and revoke the printed one. A project key cannot do this for you — no key
@@ -149,7 +154,7 @@ keys as they are. See [admin.md](admin.md) and [cli.md](cli.md).
 | Entrypoint | `/tracepad` — arguments are the server's flags |
 | Port | `4318` |
 | Volume | `/data` |
-| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note) |
+| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note, printed at every start whatever `TRACEPAD_URL` is) |
 | Health | `HEALTHCHECK` running `tracepad health` |
 | Licences | `/usr/share/doc/tracepad/` — `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES` (every Go module and npm package the binary carries) and `third_party/` |
 
@@ -277,7 +282,8 @@ them — so a short declared secret that is still its key is a warning at every
 start, saying how to replace it.
 
 `TRACEPAD_LISTEN` is already right, and the way to break it is to set it to
-`127.0.0.1:4318`. Inside a container, loopback is the container's own: the
+`127.0.0.1:4318` — or to `localhost:4318`, the binary's default, which the image
+overrides for this reason. Inside a container, loopback is the container's own: the
 server would answer its own health check and nothing else, and `-p` would
 publish a port nothing accepts on. Bind to `:4318` — the container **is** the
 isolation boundary — and control who can reach it with `-p 127.0.0.1:4318:4318`
@@ -401,9 +407,9 @@ location / {
   large batch is then lost at the proxy with a `413` the server never sees.
 
 Then tell the server where people reach it, and it prints its setup and
-invitation links there — and stops noting plain HTTP at start. An `https://`
-`TRACEPAD_URL` is taken as your word that a TLS proxy fronts this process; the
-direct listener stays reachable, which is why the port stays on loopback:
+invitation links there. The note about plain HTTP stays: the direct listener
+is still reachable without the proxy, which is why the port stays on loopback,
+and the server cannot tell from inside the container that it is:
 
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \

@@ -43,7 +43,7 @@ In Docker, which needs nothing else installed:
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
   ghcr.io/tracepad/tracepad
-docker logs tracepad          # the first run prints the keys, once
+docker logs tracepad          # the first run prints your app's key, once
 ```
 
 The port is published on this machine only: Tracepad speaks plain HTTP, and
@@ -160,7 +160,10 @@ See [docs/scores.md](docs/scores.md) and [docs/prompts.md](docs/prompts.md).
 Everything Tracepad knows is readable over HTTP, and the read API is written
 for agents first: flat JSON, cursor pagination, a byte budget so a response
 never quietly eats a context window, and task shortcuts instead of only REST
-listings.
+listings. Reading takes a key that holds the `read` scope, which the key the
+first run prints does not: it is for your application, and it sits in a log.
+Mint one in the interface, under Settings → Project → API keys
+([docs/quickstart.md](docs/quickstart.md#3-look-at-them)).
 
 ```sh
 curl -H "Authorization: Bearer tp-sk-…" \

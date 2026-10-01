@@ -132,7 +132,7 @@ Usage:
                              print the skill, or one of its references
 
 Flags of serve:
-  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default :4318)
+  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default localhost:4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
 Server environment:
@@ -233,7 +233,7 @@ func serve(args []string) error {
 	// After the server, because the server is what knows whether this
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
-	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
+	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL(), cfg.AdminToken != "")
 	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 	// Once, so that "whose X-Forwarded-For does this server believe" is
@@ -373,7 +373,9 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9) — and says where the browser interface is.
 //
-// A secret is printed only when this run generated it. One declared in
+// A secret is printed only when this run generated it, and that key holds
+// ingest alone (spec 045 #28): the lines say where a key that reads comes
+// from, since the printed one is for the application. One declared in
 // TRACEPAD_PROJECTS is the operator's already, and printing it would copy it
 // into every log this output is kept in — `docker logs` among them, which
 // keeps it for the life of the container (spec 001 #12). The lines are
@@ -387,7 +389,7 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 // moment the server prints a line, so the line is the credential — and so is
 // the fragment, which never reaches the server and which the app strips from
 // the URL as soon as it has read it.
-func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL string) {
+func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL string, adminToken bool) {
 	host := config.DisplayHost(listen)
 	for _, c := range boot.Created {
 		intro, secret := ". Connect your app with either:", c.Keys.Secret
@@ -409,6 +411,9 @@ Project %q created%s
   LANGFUSE_SECRET_KEY=%s
 
 `, c.Project.Name, intro, host, secret, host, c.Keys.PublicKey, secret)
+		if c.Scopes == store.GeneratedKeyScopes {
+			fmt.Fprint(w, readKeyHint(ui.Enabled && setupURL != "", adminToken))
+		}
 	}
 	if !ui.Enabled {
 		return
@@ -427,6 +432,39 @@ new one printed.
 		return
 	}
 	fmt.Fprintf(w, "\nWeb interface: http://%s/\n\n", host)
+}
+
+// readKeyHint is the note under a printed key that holds ingest alone (spec
+// 045 #28): what it cannot do, and the way to a key that reads that this
+// server actually offers. The interface is one when it is built in and the
+// setup link was printed — on a first start nobody has signed in yet, so with
+// setup off there is no one to sign in — and the admin token is the other;
+// with neither, the way is to configure the token.
+func readKeyHint(signIn, adminToken bool) string {
+	const intro = `This key holds the ingest scope alone: it sends spans and scores and fetches
+prompts, and cannot read what was sent. For the CLI, an agent or the eval
+harness, mint a key that reads`
+	const command = "  TRACEPAD_API_KEY=<the admin token> tracepad keys create --scope read,write\n\n"
+	switch {
+	case signIn && adminToken:
+		return intro + ` in Settings → Project → API keys once you are
+signed in, or with the admin token:
+
+` + command
+	case signIn:
+		return intro + ` in Settings → Project → API keys once you are
+signed in.
+
+`
+	case adminToken:
+		return intro + ` with the admin token:
+
+` + command
+	}
+	return intro + `. This server has no admin token and no way to sign
+in: set TRACEPAD_ADMIN_TOKEN (openssl rand -hex 32), restart, and run
+
+` + command
 }
 
 // noteSetupOff says, on a server with no owner yet and TRACEPAD_SETUP=off,
@@ -451,22 +489,32 @@ func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server
-// over plain HTTP and nothing says a TLS proxy stands in front (spec 001 #12).
+// over plain HTTP (spec 001 #12, #22).
 // A warning, not a refusal. In the image it is one INFO line instead: a
 // container binds every interface by design and is fenced by where its port
 // is published, which the server cannot see, and a warning that fires in the
 // recommended setup teaches people to skip warnings.
 func warnPlainHTTP(log *slog.Logger, listen, publicURL string, inContainer bool) {
-	if !config.PlainHTTPBeyondLoopback(listen, publicURL) {
+	if !config.PlainHTTPBeyondLoopback(listen) {
 		return
 	}
 	if inContainer {
-		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1 "+
-			"or put TLS in front — docs/docker.md", "listen", listen)
+		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1, "+
+			"and put a TLS proxy in front before anyone else connects — docs/docker.md", "listen", listen)
+		return
+	}
+	// An https TRACEPAD_URL says where people are meant to connect, not that
+	// nobody connects here directly, so it changes the advice and not whether
+	// there is any (spec 001 #22).
+	if config.HTTPSURL(publicURL) {
+		log.Warn("TRACEPAD_URL is https, but this listener takes plain HTTP from other machines: a client that "+
+			"connects to it directly skips the TLS proxy. If the proxy runs on this machine, listen on localhost, "+
+			"the default; if it does not, the hop from the proxy to here crosses the network unencrypted",
+			"listen", listen)
 		return
 	}
 	log.Warn("serving plain HTTP beyond loopback: passwords, session cookies and keys cross the network unencrypted. "+
-		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on 127.0.0.1 "+
+		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on localhost, the default "+
 		"(in a container, publish the port with -p 127.0.0.1:4318:4318)",
 		"listen", listen)
 }

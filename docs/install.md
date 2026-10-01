@@ -98,17 +98,23 @@ before they run a downloaded program:
 ## First run
 
 ```sh
-tracepad --listen 127.0.0.1:4318
+tracepad
 ```
 
-Without `--listen` the server binds `:4318` — every interface — and serves
-plain HTTP, which is why it warns at start while other machines can reach it.
-`127.0.0.1:4318` keeps it on this machine. To serve anyone else, put a TLS proxy
-in front and leave the port private: [docker.md](docker.md#serving-over-tls)
-has the two proxies, and the same advice holds off Docker.
+The server listens on `localhost:4318`: this machine only, on both loopback
+addresses, `127.0.0.1` and `::1`, so a client reaches it whichever one it tries
+first (on a host without IPv6 it says so and serves `127.0.0.1`). It serves plain
+HTTP, so reaching it from anywhere else — `--listen :4318` for every interface,
+or one address of this host — is a choice to make with a TLS proxy in front,
+and until there is one it warns at start while other machines can reach it.
+Better still, leave it on loopback and run the proxy on the same machine:
+[docker.md](docker.md#serving-over-tls) has the two proxies, and the same
+advice holds off Docker. An `https://` `TRACEPAD_URL` does not quiet the
+warning, since a client that connects to the port directly skips the proxy.
 
-The first run prints the project's keys and the setup link, once; the
-[quickstart](quickstart.md#1-run-the-server) explains both.
+The first run prints a key for your application — it can send and not read —
+and the setup link, once; the [quickstart](quickstart.md#1-run-the-server)
+explains both.
 
 ### Where the data lives
 
@@ -138,7 +144,10 @@ Description=Tracepad
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/tracepad serve --listen 127.0.0.1:4318
+# Listens on localhost:4318, the default: this machine only. To move it, set
+# TRACEPAD_LISTEN below rather than passing --listen, so that `tracepad
+# health` finds it too.
+ExecStart=/usr/local/bin/tracepad serve
 Restart=on-failure
 
 # The data directory: /var/lib/tracepad, owned by a user that exists only

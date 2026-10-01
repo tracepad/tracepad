@@ -12,7 +12,7 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TRACEPAD_LISTEN` | `:4318` | Address to serve on. `127.0.0.1:4318` keeps it on this machine; the default is every interface, over plain HTTP. See [install.md](install.md#first-run). |
+| `TRACEPAD_LISTEN` | `localhost:4318` | Address to serve on. The default is this machine only: a `localhost` host is both loopback addresses, `127.0.0.1` and `::1`. `:4318` is every interface, over plain HTTP, and warns at start. The Docker image sets `:4318`. See [install.md](install.md#first-run). |
 | `TRACEPAD_DATA_DIR` | `$XDG_DATA_HOME/tracepad`, else `~/.local/share/tracepad` (`/data` in the image) | The one directory everything is kept in. |
 | `TRACEPAD_URL` | unset | The address people reach the server at, for the links it prints — the setup and invitation links. Set it behind a proxy. The CLI reads the same variable as its target. See [accounts.md](accounts.md). |
 | `TRACEPAD_PROJECTS` | unset | `name:public_key:secret_key,…` — projects and keys declared at start, so a deployment never has one printed. See [docker.md](docker.md). |

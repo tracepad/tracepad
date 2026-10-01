@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -324,21 +327,76 @@ func listenAddr(configured string) string {
 	return configured
 }
 
-// ListenAndServe blocks until the server stops. It binds the listener itself
-// so that the log names the address actually bound — the port `:0` chose, the
-// address a host name resolved to — rather than the one configured.
+// ListenAndServe blocks until the server stops. It binds the listeners itself
+// so that the log names the addresses actually bound — the port `:0` chose,
+// the address a host name resolved to — rather than the one configured.
 func (s *Server) ListenAndServe() error {
-	listener, err := net.Listen("tcp", listenAddr(s.http.Addr))
+	listeners, err := listen(listenAddr(s.http.Addr), net.Listen)
 	if err != nil {
 		return err
 	}
-	slog.Info("listening", "addr", listener.Addr().String())
+	for _, listener := range listeners {
+		slog.Info("listening", "addr", listener.Addr().String())
+	}
 	s.startKeyUseFlusher()
-	err = s.http.Serve(listener)
+	errc := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		go func() { errc <- s.http.Serve(listener) }()
+	}
+	// The first to end decides: a Shutdown ends them all with
+	// ErrServerClosed, and a listener that fails on its own is a server
+	// that is no longer serving what it was asked to, so the caller stops
+	// the rest.
+	err = <-errc
 	if err == http.ErrServerClosed {
 		return nil
 	}
 	return err
+}
+
+// listen binds an address. `localhost` is both loopback addresses, 127.0.0.1
+// and ::1, on one port (spec 001 #23): a client that resolves the name tries
+// either first, and some try only the first. Any other host is bound as
+// net.Listen binds it, one address.
+//
+// A family this host does not have — IPv6 switched off — is a WARN, and the
+// server runs on the other; any other failure of either, a port somebody else
+// holds above all, refuses the start, since a server reachable on one of the
+// two would answer the clients that try that one and leave the rest talking
+// to whoever holds the port on the other.
+func listen(addr string, bind func(network, address string) (net.Listener, error)) ([]net.Listener, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !strings.EqualFold(host, "localhost") {
+		listener, err := bind("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return []net.Listener{listener}, nil
+	}
+	v4, err4 := bind("tcp4", net.JoinHostPort("127.0.0.1", port))
+	if err4 == nil && port == "0" {
+		// One port for both: the one the system chose for the first.
+		port = strconv.Itoa(v4.Addr().(*net.TCPAddr).Port)
+	}
+	v6, err6 := bind("tcp6", net.JoinHostPort("::1", port))
+	switch {
+	case err4 == nil && err6 == nil:
+		return []net.Listener{v4, v6}, nil
+	case err4 != nil && err6 != nil:
+		return nil, fmt.Errorf("listen on localhost: %w", errors.Join(err4, err6))
+	case err6 != nil && familyUnavailable(err6):
+		slog.Warn("listening on 127.0.0.1 alone: this host has no IPv6 loopback", "addr", addr, "error", err6)
+		return []net.Listener{v4}, nil
+	case err4 != nil && familyUnavailable(err4):
+		slog.Warn("listening on ::1 alone: this host has no IPv4 loopback", "addr", addr, "error", err4)
+		return []net.Listener{v6}, nil
+	case err6 != nil:
+		v4.Close()
+		return nil, fmt.Errorf("listen on localhost: %w", err6)
+	default:
+		v6.Close()
+		return nil, fmt.Errorf("listen on localhost: %w", err4)
+	}
 }
 
 // Shutdown drains in-flight requests, then writes the key uses they made

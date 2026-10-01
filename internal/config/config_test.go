@@ -55,6 +55,24 @@ func TestParseProjects(t *testing.T) {
 	}
 }
 
+// With neither the variable nor the flag the server listens on loopback only
+// — both addresses of it, which the server binds for the name (spec 001 #22,
+// #23): a bare binary is not reachable from the network until the operator
+// says it should be.
+func TestListenDefaultsToLoopback(t *testing.T) {
+	t.Setenv("TRACEPAD_LISTEN", "")
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Listen != "localhost:4318" {
+		t.Fatalf("Listen = %q, want localhost:4318", cfg.Listen)
+	}
+	if PlainHTTPBeyondLoopback(cfg.Listen) {
+		t.Fatal("the default bind counts as reachable beyond loopback")
+	}
+}
+
 func TestFlagsOverrideEnv(t *testing.T) {
 	t.Setenv("TRACEPAD_LISTEN", ":9999")
 	cfg, err := Load([]string{"--listen", ":4318"})
@@ -507,7 +525,10 @@ func TestDisplayHost(t *testing.T) {
 		":4318":          "localhost:4318",
 		"0.0.0.0:4318":   "localhost:4318",
 		"[::]:4318":      "localhost:4318",
+		"localhost:4318": "localhost:4318",
 		"127.0.0.1:4318": "127.0.0.1:4318",
+		"[::1]:4318":     "[::1]:4318",
+		"10.0.0.5:4318":  "10.0.0.5:4318",
 		"myhost:4318":    "myhost:4318",
 	}
 	for in, want := range cases {
@@ -518,29 +539,42 @@ func TestDisplayHost(t *testing.T) {
 }
 
 // Tracepad serves no TLS of its own, so a listener other machines can reach is
-// one they send passwords and keys to in clear — unless TRACEPAD_URL says the
-// people come in through https (spec 001 #12).
+// one they send passwords and keys to in clear (spec 001 #12) — whatever
+// TRACEPAD_URL says, since a proxy in front does not stop anybody from
+// connecting here directly (#22).
 func TestPlainHTTPBeyondLoopback(t *testing.T) {
-	cases := []struct {
-		listen, url string
-		want        bool
-	}{
-		{":4318", "", true},
-		{"0.0.0.0:4318", "", true},
-		{"[::]:4318", "", true},
-		{"192.168.1.20:4318", "", true},
-		{"traces.internal:4318", "", true},
-		{":4318", "http://traces.example.com", true},
-		{"127.0.0.1:4318", "", false},
-		{"[::1]:4318", "", false},
-		{"localhost:4318", "", false},
-		{":4318", "https://traces.example.com", false},
-		{":4318", "HTTPS://traces.example.com", false},
-		{"not-an-address", "", false},
+	cases := map[string]bool{
+		":4318":                true,
+		"0.0.0.0:4318":         true,
+		"[::]:4318":            true,
+		"192.168.1.20:4318":    true,
+		"traces.internal:4318": true,
+		"127.0.0.1:4318":       false,
+		"127.0.0.2:4318":       false,
+		"[::1]:4318":           false,
+		"localhost:4318":       false,
+		"LOCALHOST:4318":       false,
+		"not-an-address":       false,
 	}
-	for _, c := range cases {
-		if got := PlainHTTPBeyondLoopback(c.listen, c.url); got != c.want {
-			t.Errorf("PlainHTTPBeyondLoopback(%q, %q) = %v, want %v", c.listen, c.url, got, c.want)
+	for listen, want := range cases {
+		if got := PlainHTTPBeyondLoopback(listen); got != want {
+			t.Errorf("PlainHTTPBeyondLoopback(%q) = %v, want %v", listen, got, want)
+		}
+	}
+}
+
+// An https TRACEPAD_URL is the operator's word that people come in through a
+// TLS proxy (spec 001 #12); the warning reads it for its wording (#22).
+func TestHTTPSURL(t *testing.T) {
+	for publicURL, want := range map[string]bool{
+		"https://traces.example.com":   true,
+		" HTTPS://traces.example.com ": true,
+		"http://traces.example.com":    false,
+		"":                             false,
+		"traces.example.com":           false,
+	} {
+		if got := HTTPSURL(publicURL); got != want {
+			t.Errorf("HTTPSURL(%q) = %v, want %v", publicURL, got, want)
 		}
 	}
 }

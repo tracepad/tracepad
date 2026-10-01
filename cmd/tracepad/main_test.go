@@ -37,9 +37,11 @@ func TestSplitCommand(t *testing.T) {
 func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 	var out bytes.Buffer
 	printStartup(&out, &store.BootstrapResult{Created: []store.BootstrapCreated{
-		{Project: store.Project{Name: "default"}, Keys: store.KeyPair{PublicKey: "tp-pk-gen", Secret: "tp-sk-generated"}},
-		{Project: store.Project{Name: "app"}, Keys: store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-declared"}, Declared: true},
-	}}, ":4318", "")
+		{Project: store.Project{Name: "default"}, Keys: store.KeyPair{PublicKey: "tp-pk-gen", Secret: "tp-sk-generated"},
+			Scopes: store.GeneratedKeyScopes},
+		{Project: store.Project{Name: "app"}, Keys: store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-declared"},
+			Declared: true, Scopes: store.AllScopes},
+	}}, "localhost:4318", "", true)
 
 	got := out.String()
 	if strings.Contains(got, "tp-sk-declared") {
@@ -49,6 +51,10 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 		`Project "default" created. Connect your app with either:`,
 		// No gRPC receiver: an exporter left to its default reports nothing.
 		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+		// The default bind is both loopback addresses, printed as the name
+		// that reaches both (spec 001 #22, #23).
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces",
+		"LANGFUSE_HOST=http://localhost:4318",
 		"Bearer tp-sk-generated",
 		"LANGFUSE_SECRET_KEY=tp-sk-generated",
 		`Project "app" created from TRACEPAD_PROJECTS.`,
@@ -59,12 +65,60 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 			t.Errorf("banner lacks %q:\n%s", want, got)
 		}
 	}
+
+	// The printed key is for the application and says so, with where a key
+	// that reads comes from; the declared one holds all three and needs no
+	// such line (spec 045 #28).
+	ingestOnly := "This key holds the ingest scope alone"
+	if strings.Count(got, ingestOnly) != 1 {
+		t.Errorf("want the ingest-only note once, under the generated key:\n%s", got)
+	}
+	generated, declared, _ := strings.Cut(got, `Project "app"`)
+	if !strings.Contains(generated, ingestOnly) || strings.Contains(declared, ingestOnly) {
+		t.Errorf("the ingest-only note is under the wrong project:\n%s", got)
+	}
+	if !strings.Contains(generated, "tracepad keys create --scope read,write") {
+		t.Errorf("the note does not say where a reading key comes from:\n%s", got)
+	}
 }
 
-// Other machines reaching a plain-HTTP listener with nothing saying a TLS proxy
-// is in front is a warning at start, naming the address — and, in the image,
-// where the wildcard bind is the design and the publish decides the reach, one
-// INFO line instead (spec 001 #12).
+// The way to a key that reads is one this server offers: the interface when
+// somebody can sign in to it, the admin token when there is one, and with
+// neither, how to configure the token — never a screen nobody can reach or a
+// token that does not exist (spec 045 #28).
+func TestReadKeyHint(t *testing.T) {
+	cases := []struct {
+		signIn, token bool
+		want, not     []string
+	}{
+		{true, true, []string{"Settings → Project → API keys", "with the admin token", "--scope read,write"}, []string{"set TRACEPAD_ADMIN_TOKEN"}},
+		{true, false, []string{"Settings → Project → API keys"}, []string{"admin token", "keys create"}},
+		{false, true, []string{"with the admin token", "--scope read,write"}, []string{"Settings", "set TRACEPAD_ADMIN_TOKEN"}},
+		{false, false, []string{"set TRACEPAD_ADMIN_TOKEN", "restart", "--scope read,write"}, []string{"Settings"}},
+	}
+	for _, c := range cases {
+		hint := readKeyHint(c.signIn, c.token)
+		if !strings.HasPrefix(hint, "This key holds the ingest scope alone") {
+			t.Errorf("sign-in %v, token %v: the hint does not say what the key is:\n%s", c.signIn, c.token, hint)
+		}
+		for _, want := range c.want {
+			if !strings.Contains(hint, want) {
+				t.Errorf("sign-in %v, token %v: want %q in\n%s", c.signIn, c.token, want, hint)
+			}
+		}
+		for _, not := range c.not {
+			if strings.Contains(hint, not) {
+				t.Errorf("sign-in %v, token %v: %q offers a way this server does not have:\n%s", c.signIn, c.token, not, hint)
+			}
+		}
+	}
+}
+
+// Other machines reaching a plain-HTTP listener is a warning at start, naming
+// the address — and, in the image, where the wildcard bind is the design and
+// the publish decides the reach, one INFO line instead (spec 001 #12). An
+// https TRACEPAD_URL silences neither: a proxy in front does not stop anybody
+// from connecting here directly (#22).
 func TestWarnPlainHTTP(t *testing.T) {
 	cases := []struct {
 		listen, url string
@@ -72,10 +126,12 @@ func TestWarnPlainHTTP(t *testing.T) {
 		level       string // "" when nothing is logged
 	}{
 		{":4318", "", false, "WARN"},
-		{":4318", "https://traces.example.com", false, ""},
+		{":4318", "https://traces.example.com", false, "WARN"},
+		{"192.168.1.20:4318", "HTTPS://traces.example.com", false, "WARN"},
 		{"127.0.0.1:4318", "", false, ""},
+		{"127.0.0.1:4318", "https://traces.example.com", false, ""},
 		{":4318", "", true, "INFO"},
-		{":4318", "https://traces.example.com", true, ""},
+		{":4318", "https://traces.example.com", true, "INFO"},
 	}
 	for _, c := range cases {
 		var out bytes.Buffer
@@ -99,6 +155,12 @@ func TestWarnPlainHTTP(t *testing.T) {
 		}
 		if !strings.Contains(logged, fix) {
 			t.Errorf("the line should point at %s:\n%s", fix, logged)
+		}
+		// With an https URL the host's line says what the proxy does not
+		// cover, rather than asking for the URL it already has.
+		if !c.container && c.url != "" && !strings.Contains(logged, "skips the TLS proxy") {
+			t.Errorf("listen %q, url %q: the line should say a direct client skips the proxy:\n%s",
+				c.listen, c.url, logged)
 		}
 	}
 }
