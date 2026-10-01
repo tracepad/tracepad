@@ -321,6 +321,48 @@ test('a user id carrying a per-cent sign is read as it stands', async ({ page })
 	);
 });
 
+// A user id is very often an email, and a session id is whatever the
+// application keyed it by — both carry dots. The server once took a dot in the
+// last segment for a file name and answered a direct visit or a reload with
+// `{"error":"no such file…"}`, while in-app navigation, which never asks the
+// server, worked (spec 006 #32).
+test('a reload on a route whose id carries dots opens the screen', async ({ page }) => {
+	const email = 'jane.doe@example.com';
+	const session = 'checkout.v1.2';
+	await deliver([
+		{
+			trace: 'dd'.padEnd(32, '8'),
+			user: email,
+			session,
+			at: nowNanos(),
+			cost: 0.002,
+			environment: 'production'
+		}
+	]);
+
+	await signIn(page);
+	// A direct visit is what a pasted link does, and the reload is F5.
+	await page.goto(`/users/${encodeURIComponent(email)}`);
+	await expect(page.getByText('no such file')).toHaveCount(0);
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	await expect(page.getByTitle(email).first()).toBeVisible();
+	await page.reload();
+	await expect(page.getByText('no such file')).toHaveCount(0);
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	await expect(page.getByTitle(email).first()).toBeVisible();
+
+	// The session half: its id is on the page, not merely the absence of an
+	// error, after the visit and again after the reload.
+	await page.goto(`/sessions/${encodeURIComponent(session)}`);
+	await expect(page.getByText('no such file')).toHaveCount(0);
+	await expect(page.getByText(session, { exact: true }).first()).toBeVisible();
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+	await page.reload();
+	await expect(page.getByText('no such file')).toHaveCount(0);
+	await expect(page.getByText(session, { exact: true }).first()).toBeVisible();
+	await expect(page.locator('dt').filter({ hasText: /^Traces$/ })).toBeVisible();
+});
+
 test('erasing a user shows the dry run, refuses a wrong echo, and lands on /users', async ({
 	page
 }) => {

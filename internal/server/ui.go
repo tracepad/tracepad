@@ -59,13 +59,16 @@ func (s *Server) useBundle(assets fs.FS) {
 
 // handleUI answers everything the API did not claim.
 //
-// Three outcomes, in order:
+// Four outcomes, in order:
 //  1. the path belongs to the API — a real route reached under the wrong
 //     method, or a misspelling under an API prefix — and gets a JSON answer,
 //     never HTML. An agent that mistypes an endpoint must not get a 200 and a
 //     web page;
 //  2. the path names a file in the bundle — serve it;
-//  3. anything else is a client-side route — serve the SPA entry.
+//  3. a subresource or a script asked for a file the bundle does not carry —
+//     a JSON 404, never the page (see refusesDocument);
+//  4. anything else is a client-side route — serve the SPA entry. A dot in it
+//     does not make it a file: ids are the application's own.
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	if s.reserved[firstSegment(r.URL.Path)] {
 		s.writeAPIMiss(w, r)
@@ -85,12 +88,16 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusMovedPermanently)
 		return
 	}
-	// A path that names a file is never a client-side route, so it must not
-	// resolve to the document. Serving HTML for a missing `…/chunk.js` — a tab
-	// left open across an upgrade asking this binary for a bundle it no longer
-	// carries — turns a plain 404 into a syntax error inside the browser,
-	// which is a much worse thing to debug.
-	if path.Ext(r.URL.Path) != "" && !s.hasAsset(r.URL.Path) {
+	// A request that is not a page load must not be answered with the page.
+	// Serving HTML for a missing `…/chunk.js` — a tab left open across an
+	// upgrade asking this binary for a bundle it no longer carries — turns a
+	// plain 404 into a syntax error inside the browser, which is a much worse
+	// thing to debug. What tells a script from a reload is how it was asked
+	// for, not a dot in the path: a route segment is whatever the application
+	// named its thing (`alice@example.com`, `v1.2`), and a reload on it has to
+	// open. The cheap tests come first; the bundle is opened only for a path
+	// that would otherwise be refused.
+	if refusesDocument(r) && !s.hasAsset(r.URL.Path) {
 		writeError(w, http.StatusNotFound, s.noSuchFile())
 		return
 	}
@@ -108,6 +115,39 @@ func (s *Server) noSuchFile() string {
 		return "this build has no web interface"
 	}
 	return "no such file in the web interface"
+}
+
+// staticDir is where the SPA build puts everything it generates.
+const staticDir = "_app"
+
+// refusesDocument reports whether the SPA entry is the wrong answer for this
+// request if the bundle carries no such file: anything under the bundle's own
+// `_app/` directory, where every name is generated, and a path that ends in an
+// extension asked for by anything but a page load. A page load is a request
+// with `Sec-Fetch-Dest: document`, or — from a client that sends no such header
+// — one that accepts `text/html`; a script, a stylesheet, an image or a bare
+// fetch is not, and gets the 404 whatever it is called. A path with no
+// extension is a route however it is asked for, so `curl /traces` still
+// returns the page.
+func refusesDocument(r *http.Request) bool {
+	name := assetName(r.URL.Path)
+	if name == uiIndex {
+		// `/` itself, which a build without a bundle answers with its stub.
+		return false
+	}
+	if name == staticDir || strings.HasPrefix(name, staticDir+"/") {
+		return true
+	}
+	return path.Ext(name) != "" && !isPageLoad(r)
+}
+
+// isPageLoad reports whether a browser is navigating to this URL, as opposed to
+// loading a subresource or calling it from a script.
+func isPageLoad(r *http.Request) bool {
+	if dest := r.Header.Get("Sec-Fetch-Dest"); dest != "" {
+		return dest == "document"
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
 // hasAsset reports whether the bundle carries this path as a file.

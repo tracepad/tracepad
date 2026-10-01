@@ -42,6 +42,42 @@ func TestSPARoutesServeTheDocument(t *testing.T) {
 	}
 }
 
+// TestDottedRoutesServeTheDocumentToANavigation: an identifier is whatever the
+// application named its thing, and a dot in it is not a file extension. A
+// pasted link or F5 on these is a page load, however the client says so —
+// `Sec-Fetch-Dest: document` from a browser, `Accept: text/html` from one that
+// sends no fetch metadata — and a dot in the path is not what decides.
+func TestDottedRoutesServeTheDocumentToANavigation(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	navigations := map[string]func(*http.Request){
+		"Sec-Fetch-Dest": func(r *http.Request) { r.Header.Set("Sec-Fetch-Dest", "document") },
+		"Accept": func(r *http.Request) {
+			r.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+		},
+	}
+	for _, path := range []string{
+		"/users/alice@example.com",
+		"/p/0123456789abcdef0123456789abcdef/users/alice@example.com",
+		"/p/0123456789abcdef0123456789abcdef/sessions/a.b",
+		"/p/0123456789abcdef0123456789abcdef/prompts/v1.2",
+		"/p/0123456789abcdef0123456789abcdef/datasets/support.v2.final",
+		"/users/trailing.dot.",
+		// Names a file by its looks, and is a route all the same when a
+		// page is what asked.
+		"/p/x/chunk.js",
+		"/assets/a.css",
+	} {
+		for how, navigate := range navigations {
+			rec := h.call(t, "GET", path, nil, navigate)
+			expectStatus(t, rec, 200)
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+				t.Errorf("%s (%s): Content-Type = %q, want HTML", path, how, got)
+			}
+		}
+	}
+}
+
 // TestSPARoutesNeedNoKey: the document is a static bundle; it carries no data,
 // and requiring a credential for it would make the login screen unreachable.
 func TestSPARoutesNeedNoKey(t *testing.T) {
@@ -190,25 +226,57 @@ func TestStubExplainsWhyThereIsNoInterface(t *testing.T) {
 
 }
 
-// TestMissingFileIsNotTheDocument: a path that names a file is never a
-// client-side route. Answering `…/chunk.js` with HTML — which is what a tab
-// left open across an upgrade asks for — turns a plain 404 into a syntax
-// error inside the browser, and the same holds whether the bundle is absent
-// or merely no longer carries that name.
+// TestMissingFileIsNotTheDocument: a script, a stylesheet or an image that asks
+// for a file the bundle does not carry is never answered with the page.
+// Answering `…/chunk.js` with HTML — which is what a tab left open across an
+// upgrade asks for — turns a plain 404 into a syntax error inside the browser.
+// What separates that from a reload on `/users/alice@example.com` is how the
+// request was made, not the dot, so both sides are pinned here and a "fix"
+// that decides by extension alone breaks one of the two tests.
 func TestMissingFileIsNotTheDocument(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
-	for _, path := range []string{
+	asking := func(header, value string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set(header, value) }
+	}
+	for _, probe := range []struct {
+		path   string
+		mutate func(*http.Request)
+	}{
 		// Not `/favicon.ico`, which this used to be: the bundle carries the
 		// logo since spec 006 #30, and a name it carries is no miss.
-		"/no-such-icon.png",
-		"/_app/immutable/chunks/from-a-previous-build.js",
-		"/_app/immutable/assets/gone.css",
+		{"/no-such-icon.png", nil},
+		{"/robots.txt", nil},
+		{"/_app/immutable/chunks/from-a-previous-build.js", nil},
+		{"/_app/immutable/assets/gone.css", nil},
+		// No extension, and still not a route: the directory is the
+		// bundle's own, so nothing under it is the document — not even
+		// for a navigation.
+		{"/_app/immutable/chunks/no-extension", nil},
+		{"/_app/version", asking("Sec-Fetch-Dest", "document")},
+		{"/_app", nil},
+		// Outside `_app/`, where only the way it was asked for says what
+		// the path is.
+		{"/p/x/chunk.js", asking("Sec-Fetch-Dest", "script")},
+		{"/p/x/chunk.js", asking("Accept", "*/*")},
+		{"/assets/a.css", asking("Accept", "text/css,*/*;q=0.1")},
+		{"/p/abc/assets/logo.svg", asking("Sec-Fetch-Dest", "image")},
+		{"/static/app.js", nil},
+		// Fetch metadata wins over Accept: a script that accepts HTML is
+		// still a script.
+		{"/static/app.js", func(r *http.Request) {
+			r.Header.Set("Sec-Fetch-Dest", "script")
+			r.Header.Set("Accept", "text/html")
+		}},
 	} {
-		rec := h.get(t, path)
+		var mutate []func(*http.Request)
+		if probe.mutate != nil {
+			mutate = append(mutate, probe.mutate)
+		}
+		rec := h.call(t, "GET", probe.path, nil, mutate...)
 		expectStatus(t, rec, 404)
 		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-			t.Errorf("%s: Content-Type = %q, want JSON", path, got)
+			t.Errorf("%s: Content-Type = %q, want JSON", probe.path, got)
 		}
 	}
 }
