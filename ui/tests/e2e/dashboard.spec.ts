@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { clipped, inviteEditor, sideways, signIn as enter, state } from './harness';
+import { clipped, inviteEditor, sideways, signIn as enter, signInAsMember, state } from './harness';
 
 // The dashboard over the fixed corpus (spec 007 Testing, spec 034). The
 // window is named explicitly rather than left to the default: the fixtures
@@ -10,7 +10,7 @@ import { clipped, inviteEditor, sideways, signIn as enter, state } from './harne
 const WINDOW = 'from=2026-08-01T00:00:00Z&to=2026-09-30T00:00:00Z';
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 test('all five charts render over the corpus', async ({ page }) => {

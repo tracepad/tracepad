@@ -9,6 +9,7 @@ import {
 	ownAddress,
 	PASSWORD,
 	PORT,
+	SESSION_COOKIE,
 	STATE,
 	type State
 } from './harness';
@@ -72,7 +73,9 @@ export default async function boot() {
 		const key = await mintFullKey(baseURL, project, ADMIN_TOKEN);
 		const member = await inviteEditor(baseURL, project, 'member');
 
-		const carried: State = { baseURL, key, project, owner, member };
+		const memberSession = await openSession(baseURL, member);
+
+		const carried: State = { baseURL, key, project, owner, member, memberSession };
 		writeFileSync(STATE, JSON.stringify(carried, null, 2));
 	} catch (cause) {
 		stop();
@@ -142,6 +145,26 @@ async function createOwner(baseURL: string, link: string): Promise<State['owner'
 	if (!response.ok) throw new Error(`setup: ${response.status} ${await response.text()}`);
 	const { account } = (await response.json()) as { account: { id: string } };
 	return { id: account.id, email, password: PASSWORD };
+}
+
+/**
+ * Signs in the way the form does and returns the session cookie's value, for
+ * the suites that need somebody signed in and are not about signing in
+ * (`signInAsMember`).
+ */
+async function openSession(baseURL: string, account: { email: string; password: string }) {
+	const response = await fetch(`${baseURL}/api/v1/auth/login`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ownAddress() },
+		body: JSON.stringify(account)
+	});
+	if (!response.ok) throw new Error(`sign in as ${account.email}: ${response.status}`);
+	const cookie = response.headers
+		.getSetCookie()
+		.map((line) => new RegExp(`^${SESSION_COOKIE}=([^;]+)`).exec(line)?.[1])
+		.find(Boolean);
+	if (!cookie) throw new Error(`sign in as ${account.email}: no ${SESSION_COOKIE} cookie`);
+	return cookie;
 }
 
 /** The project first run created, which is the one the corpus was ingested into. */
