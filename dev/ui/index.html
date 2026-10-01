@@ -2816,7 +2816,7 @@ bits-ui (headless primitives), Lucide (icons), uPlot (the four charts) and
 CodeMirror 6 (the payload surface, imported statically and pinned by exact
 version; there is no <code>basicSetup</code> — the extensions are listed by hand in
 <code>ui/src/lib/components/json/setup.ts</code>).</p>
-<p>It builds with Node 24, the one Node <code>ui/package.json</code> names in <code>engines</code>:
+<p>It builds with Node 24.15 or a newer 24.x, the one Node <code>ui/package.json</code> names in <code>engines</code>:
 the targets below stop at once, naming the version they found, under any
 other. The type check is <code>svelte-check</code> on TypeScript 6.0: it imports the
 compiler as a library, which TypeScript 7 has no stable API for yet, so the
