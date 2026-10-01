@@ -1207,7 +1207,7 @@ func TestIsolationMatrix(t *testing.T) {
 				path, _ := pathWith(rt.Path, nil)
 				rec := send(c, rt, path, "", nil)
 				answers[c.who.String()+" "+rt.Method+" "+path] = fmt.Sprint(rec.Code, " ",
-					clock.ReplaceAllString(rec.Body.String(), `"$1":0`))
+					withoutClock(t, rt.Method+" "+rt.Path, rec.Body.Bytes()))
 			}
 		}
 		return answers
@@ -1224,9 +1224,36 @@ func TestIsolationMatrix(t *testing.T) {
 	}
 }
 
-// clock is what moves in a quiet listing on its own: how long the process has
-// been up, and the end of a window that defaults to the moment of asking.
-var clock = regexp.MustCompile(`"(uptime_seconds|to)":("[^"]*"|\d+)`)
+// clockFields are the fields of a quiet listing that move with the clock and
+// nobody's traffic, by route, each with the reason. Everything else is
+// compared exactly. The sweeper's `next_run` and `last_run` are not here: they
+// move when a pass runs, and none runs between the two readings.
+var clockFields = map[string][]struct {
+	field, why string
+}{
+	"GET /api/v1/system": {{"uptime_seconds", "how long the process has been up"}},
+	"GET /api/v1/facets": {{"to", "the window's end, which defaults to the moment of asking"}},
+}
+
+// withoutClock is a listing's answer with its route's clockFields taken out.
+func withoutClock(t *testing.T, route string, body []byte) string {
+	t.Helper()
+	fields := clockFields[route]
+	if len(fields) == 0 {
+		return string(body)
+	}
+	var answer map[string]any
+	if err := json.Unmarshal(body, &answer); err != nil {
+		t.Fatalf("%s: %v", route, err)
+	}
+	for _, f := range fields {
+		if _, ok := answer[f.field]; !ok {
+			t.Errorf("%s has no %s to take out (%s)", route, f.field, f.why)
+		}
+		delete(answer, f.field)
+	}
+	return string(mustJSONBytes(answer))
+}
 
 // uploadFor is a live upload token of A's, for a body A has not stored: the
 // presigned PUT is tried with it against B's media id and the ghost's.

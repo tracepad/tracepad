@@ -302,8 +302,12 @@ func (c *counters) orphanTraces(projectID string) int64 {
 // `view` says which halves the body holds.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	c := callerFrom(r.Context())
-	if c == nil || (c.project == nil && !c.admin) {
-		slog.Error("the system handler ran without a project or the admin token", "path", r.URL.Path)
+	deployment := c != nil && (c.admin || (c.isSession() && c.account.Owner))
+	if c == nil || (c.project == nil && !deployment) {
+		// The guard admits no such caller: a key always has its project,
+		// and a member's session must name one. A body with neither half
+		// would be an answer that says nothing, so it is a refusal.
+		slog.Error("the system handler ran for a caller with neither view", "path", r.URL.Path)
 		writeError(w, http.StatusInternalServerError, "the request was not authorized")
 		return
 	}
@@ -311,7 +315,6 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	deployment := c.admin || (c.isSession() && c.account.Owner)
 	var projectID any
 	if c.project != nil {
 		projectID = c.project.ID
@@ -324,11 +327,25 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("uptime_seconds", int64(time.Since(s.startedAt).Seconds())).
 		put("view", object{}.put("project", projectID).put("deployment", deployment))
 
-	database, ok := s.databaseBlock(w, r, c.project, deployment)
-	if !ok {
-		return
+	// `database` is the one block both halves write into: the project's
+	// row counts, and the file's size and the tenant count beside them.
+	database, rows := object{}, object{}
+	if c.project != nil {
+		own, ok := s.projectRows(w, r, c.project)
+		if !ok {
+			return
+		}
+		rows = own
 	}
-	body = body.put("database", database)
+	if deployment {
+		size, projects, ok := s.deploymentDatabase(w, r)
+		if !ok {
+			return
+		}
+		database = database.put("size_bytes", size)
+		rows = rows.put("projects", projects)
+	}
+	body = body.put("database", database.put("rows", rows))
 	if deployment {
 		gauges, ok := s.deploymentGauges(w, r)
 		if !ok {
@@ -361,38 +378,32 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// databaseBlock is `database`: the file's size and the tenant count for the
-// deployment view, the asking project's row counts for the project view
-// (Decision 33, #37).
-func (s *Server) databaseBlock(w http.ResponseWriter, r *http.Request, project *store.Project,
-	deployment bool) (object, bool) {
-	block, rows := object{}, object{}
-	if deployment {
-		// The file on disk: the operator question this endpoint exists to
-		// answer, and one every tenant's ingest moves.
-		block = block.put("size_bytes", s.store.FileSize())
+// projectRows is the project view's row counts: the asking project's own
+// (Decision 33).
+func (s *Server) projectRows(w http.ResponseWriter, r *http.Request, project *store.Project) (object, bool) {
+	tables, err := s.store.TableCounts(r.Context(), project.ID)
+	if err != nil {
+		readFailed(w, r, "failed to read the database counts", err)
+		return nil, false
 	}
-	if project != nil {
-		tables, err := s.store.TableCounts(r.Context(), project.ID)
-		if err != nil {
-			readFailed(w, r, "failed to read the database counts", err)
-			return nil, false
-		}
-		for _, table := range tables {
-			rows = rows.put(table.Table, table.Rows)
-		}
+	rows := object{}
+	for _, table := range tables {
+		rows = rows.put(table.Table, table.Rows)
 	}
-	if deployment {
-		// How many tenants share the process names none of them, and still
-		// moves when another one is made.
-		projects, err := s.store.LiveProjects(r.Context())
-		if err != nil {
-			readFailed(w, r, "failed to read the database counts", err)
-			return nil, false
-		}
-		rows = rows.put("projects", projects)
+	return rows, true
+}
+
+// deploymentDatabase is the deployment view's half of `database` (#37): the
+// file on disk — the operator question this endpoint exists to answer, and one
+// every tenant's ingest moves — and how many tenants share the process, which
+// names none of them and still moves when another is made.
+func (s *Server) deploymentDatabase(w http.ResponseWriter, r *http.Request) (size, projects int64, ok bool) {
+	projects, err := s.store.LiveProjects(r.Context())
+	if err != nil {
+		readFailed(w, r, "failed to read the database counts", err)
+		return 0, 0, false
 	}
-	return block.put("rows", rows), true
+	return s.store.FileSize(), projects, true
 }
 
 // deploymentGauges is the deployment view's gauges (#37): numbers that move
@@ -526,6 +537,23 @@ func (s *Server) compactionAnswer(requested int64) object {
 		}
 	}
 	return object{}.put("requested_at", requestedAt).put("expected_by", expectedBy)
+}
+
+// erasureCompaction is what an erasure says about the compaction it asked for:
+// #11's two fields, and `completed_at`, when a pass covering its latest request
+// finished — the erasure's own, where `/system`'s stamps are the deployment's
+// and an owner's to read (spec 044 #22). Until then `completed_at` is null and
+// `expected_by` names the pass that will; after, `expected_by` is null, since
+// no pass is due on its account.
+func (s *Server) erasureCompaction(e *store.Erasure) object {
+	answer := s.compactionAnswer(e.Compaction)
+	if e.CompactedAt == 0 {
+		return answer.put("completed_at", nil)
+	}
+	return object{}.
+		put("requested_at", formatTime(e.Compaction)).
+		put("expected_by", nil).
+		put("completed_at", formatTime(e.CompactedAt))
 }
 
 // backupAnswer names the newest pre-migration backup — the one copy of the

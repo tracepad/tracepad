@@ -2142,7 +2142,7 @@ export interface components {
             deleted: {
                 [key: string]: number;
             };
-            compaction: components["schemas"]["Compaction"];
+            compaction: components["schemas"]["ErasureCompaction"];
             /** @description Only while a backup exists */
             pre_migration_backup?: components["schemas"]["PreMigrationBackup"];
             /** @description Why a failed erasure failed: the phase and a cause from a fixed list ("the parsed phase failed: the disk is full"), or, when it ran out of starts, "3 starts ended before the erasure did" with the tail's last cause; never the error's own text, which neither the record nor the server's log carries */
@@ -2157,6 +2157,21 @@ export interface components {
              * @description When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer
              */
             expected_by: string | null;
+        };
+        /** @description The compaction this erasure asked for, and when a pass that covered it finished. `completed_at` is the erasure's own, so a project learns that its erasure reached the search index and the write-ahead log without the deployment's compaction stamps, which `/system` gives the admin token and owners alone. All null when it deleted nothing and so asked for nothing. */
+        ErasureCompaction: {
+            /** Format: date-time */
+            requested_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the pass that runs it is due, while none has; null once `completed_at` is set
+             */
+            expected_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the pass covering this erasure's latest request finished; null until then
+             */
+            completed_at: string | null;
         };
         /** @description The newest copy of the database the server wrote before an upgrade, which an erasure does not rewrite, and when the sweeper removes it */
         PreMigrationBackup: {

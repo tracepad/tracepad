@@ -81,7 +81,7 @@ func (s *Server) erasureResource(e *store.Erasure, requested string, backup any)
 			put("traces_at_start", traces).
 			put("traces_deleted", e.Counts.Traces)).
 		put("deleted", erasureCounts(e.Counts, true)).
-		put("compaction", s.compactionAnswer(e.Compaction))
+		put("compaction", s.erasureCompaction(e))
 	// The one copy of the database the erasure does not rewrite, and the
 	// day it goes (spec 044 #12).
 	if backup != nil {

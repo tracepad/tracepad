@@ -71,14 +71,20 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 	rec = h.call(t, "DELETE", path+"?wait=30&confirm=erase-me", nil)
 	expectStatus(t, rec, http.StatusOK)
 	expectUniqueKeys(t, rec)
+	type compaction struct {
+		RequestedAt *time.Time `json:"requested_at"`
+		ExpectedBy  *time.Time `json:"expected_by"`
+		CompletedAt *time.Time `json:"completed_at"`
+	}
 	answer := decodeJSON[struct {
+		ID         string         `json:"id"`
 		Deleted    map[string]int `json:"deleted"`
-		Compaction struct {
-			RequestedAt *time.Time `json:"requested_at"`
-			ExpectedBy  *time.Time `json:"expected_by"`
-		} `json:"compaction"`
-		Backup *backupBlock `json:"pre_migration_backup"`
+		Compaction compaction     `json:"compaction"`
+		Backup     *backupBlock   `json:"pre_migration_backup"`
 	}](t, rec)
+	if answer.Compaction.CompletedAt != nil {
+		t.Errorf("compaction = %+v, want no completion before a pass has run", answer.Compaction)
+	}
 	if answer.Deleted["traces"] != 1 {
 		t.Fatalf("deleted = %v, want the one trace", answer.Deleted)
 	}
@@ -106,6 +112,47 @@ func TestAnErasureAnswersWithItsCompactionAndTheBackup(t *testing.T) {
 	}](t, rec)
 	if system.Compaction.RequestedAt != nil || system.Compaction.CompletedAt == nil {
 		t.Errorf("/system compaction = %+v, want nothing pending and a completion", system.Compaction)
+	}
+
+	// The erasure itself says it was compacted, to the project's own key,
+	// which `/system` does not tell (spec 044 #22).
+	status := func() compaction {
+		t.Helper()
+		rec := h.get(t, "/api/v1/projects/"+h.project.ID+"/erasures/"+answer.ID)
+		expectStatus(t, rec, http.StatusOK)
+		return decodeJSON[struct {
+			Compaction compaction `json:"compaction"`
+		}](t, rec).Compaction
+	}
+	done := status()
+	if done.CompletedAt == nil || done.ExpectedBy != nil || !done.CompletedAt.Equal(*system.Compaction.CompletedAt) {
+		t.Errorf("the erasure's compaction = %+v, want completed with the pass at %v and nothing due",
+			done, system.Compaction.CompletedAt)
+	}
+	// Another project's deletion and the pass it asks for leave the stamp
+	// where it was: a later pass is not news this erasure may carry.
+	other := h.second(t, "other", "tp-sk-other")
+	if err := h.writer.Submit(t.Context(), &store.IngestBatch{ProjectID: other.ID,
+		Traces: []*model.Trace{{ID: traceHex(9)}}}); err != nil {
+		t.Fatal(err)
+	}
+	expectStatus(t, h.call(t, "DELETE", "/api/v1/traces/"+traceHex(9)+"?confirm="+traceHex(9), nil,
+		asKey("tp-sk-other")), http.StatusOK)
+	time.Sleep(2 * time.Millisecond)
+	if err := h.sweeper.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// The positive control: that pass did complete a compaction, later.
+	later := decodeJSON[struct {
+		Compaction struct {
+			CompletedAt *time.Time `json:"completed_at"`
+		} `json:"compaction"`
+	}](t, h.call(t, "GET", "/api/v1/system", nil, asAdmin)).Compaction.CompletedAt
+	if later == nil || !later.After(*done.CompletedAt) {
+		t.Fatalf("/system completed_at = %v after the second pass, want later than %v", later, done.CompletedAt)
+	}
+	if again := status(); again.CompletedAt == nil || !again.CompletedAt.Equal(*done.CompletedAt) {
+		t.Errorf("after another project's compaction the erasure's = %+v, want it unmoved from %v", again, done.CompletedAt)
 	}
 }
 

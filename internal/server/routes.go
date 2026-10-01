@@ -108,10 +108,8 @@ func (s *Server) routes() []route {
 		// starts (design §3.2).
 		{"GET", "/api/v1", public, scopeAny, "This endpoint map", s.handleAPIIndex},
 		{"GET", "/api/v1/openapi.json", public, scopeAny, "The OpenAPI 3.1 document for this API", s.handleOpenAPI},
-		// The one route outside the project routes that also admits the
-		// admin token, which gets the deployment view and no project's
-		// (spec 004 #37).
-		{"GET", systemPath, member, scopeRead, "Version and uptime, the deployment's gauges for the admin token or an owner, and the project's figures for its callers", s.handleSystem},
+		// Every caller gets the half of it that is theirs (spec 004 #37).
+		{"GET", systemPath, diagnostic, scopeRead, "Version and uptime, the deployment's gauges for the admin token or an owner, and the project's figures for its callers", s.handleSystem},
 
 		// Signing in (spec 028 Decisions 8–10). The three public ones are
 		// the three ways in — the first owner, a password, an invitation

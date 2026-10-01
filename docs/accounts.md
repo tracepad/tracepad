@@ -241,6 +241,7 @@ than a description of it.
 | `editor` | A project key with the route's scope, or an owner or `editor` session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure, and reading the raw archive (`/api/v1/raw`) — the bulk way out of a project, which a viewer does not take — but no project key lists, mints or revokes keys: those three routes answer a key `403`, and an owner or editor session or the admin token manages them. |
 | `owner` | `TRACEPAD_ADMIN_TOKEN`, or an owner session. Creating, deleting, restoring and renaming a project; listing every project; everything under `/api/v1/accounts`. |
 | `session` | Only a cookie. A key or the admin token is told `not a session`, which is what it is. |
+| `diagnostic` | `GET /api/v1/system` alone. Every credential gets through, and each is answered with its own half ([api.md](api.md#system)): a key with `read`, or a member's session for its project, gets the project's figures; the admin token gets the deployment's; an owner's session gets both, or the deployment's alone when it names no project. |
 
 A key passes the policy and then its **scope**: every route also names the one
 a key must hold — `ingest`, `read` or `write`, or `any`, or `none` — and a key
@@ -254,8 +255,9 @@ claims queue items, which for a key are `ingest` and `write`.
 agent can see what a route would need before it calls it.
 
 The admin token keeps exactly the reach [administration](admin.md) gave it,
-plus the account routes and `GET /api/v1/system`, which answers it the
-deployment's gauges and nothing of any project ([api.md](api.md#system)). It
+plus the account routes and `GET /api/v1/system` (policy `diagnostic`), which
+answers it the deployment's gauges and nothing of any project
+([api.md](api.md#system)). It
 still reaches no data-plane route: the reason it
 was kept off the data plane — a browser holding the key to everything — is
 what accounts replace.

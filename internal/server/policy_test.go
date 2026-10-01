@@ -64,7 +64,7 @@ func TestEndpointMapPublishesThePolicy(t *testing.T) {
 	}
 	for _, endpoint := range listed.Endpoints {
 		switch endpoint.Policy {
-		case "public", "ingest", "member", "editor", "owner", "session":
+		case "public", "ingest", "member", "editor", "owner", "session", "diagnostic":
 		default:
 			t.Errorf("%s %s has policy %q", endpoint.Method, endpoint.Path, endpoint.Policy)
 		}
@@ -180,13 +180,16 @@ func policyDecision(p policy, w who, path string) verdict {
 		return verdict{status: http.StatusForbidden, fragment: "owner account"}
 
 	case member:
-		if w == deploymentToken && !projectRoute(path) && path != "/api/v1/system" {
+		if w == deploymentToken && !projectRoute(path) {
 			// The admin token keeps exactly the powers spec 005 #11
-			// gave it and still reaches no data-plane route. The system
-			// read is the one more: it answers the token the
-			// deployment's gauges and no project's (spec 004 #37).
+			// gave it and still reaches no data-plane route.
 			return verdict{status: http.StatusUnauthorized, fragment: "unauthorized"}
 		}
+		return admitted
+
+	case diagnostic:
+		// Every credential, each answered the half that is its own
+		// (spec 004 #37).
 		return admitted
 
 	case editor:

@@ -3605,7 +3605,7 @@
             },
             "required": ["traces_at_start", "traces_deleted"]},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "compaction": {"$ref": "#/components/schemas/Compaction"},
+          "compaction": {"$ref": "#/components/schemas/ErasureCompaction"},
           "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "Only while a backup exists"},
           "error": {"type": ["string", "null"], "description": "Why a failed erasure failed: the phase and a cause from a fixed list (\"the parsed phase failed: the disk is full\"), or, when it ran out of starts, \"3 starts ended before the erasure did\" with the tail's last cause; never the error's own text, which neither the record nor the server's log carries"}
         },
@@ -3619,6 +3619,16 @@
           "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer"}
         },
         "required": ["requested_at", "expected_by"]
+      },
+      "ErasureCompaction": {
+        "type": "object",
+        "description": "The compaction this erasure asked for, and when a pass that covered it finished. `completed_at` is the erasure's own, so a project learns that its erasure reached the search index and the write-ahead log without the deployment's compaction stamps, which `/system` gives the admin token and owners alone. All null when it deleted nothing and so asked for nothing.",
+        "properties": {
+          "requested_at": {"type": ["string", "null"], "format": "date-time"},
+          "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "When the pass that runs it is due, while none has; null once `completed_at` is set"},
+          "completed_at": {"type": ["string", "null"], "format": "date-time", "description": "When the pass covering this erasure's latest request finished; null until then"}
+        },
+        "required": ["requested_at", "expected_by", "completed_at"]
       },
       "PreMigrationBackup": {
         "type": "object",

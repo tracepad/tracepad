@@ -470,9 +470,9 @@ are merged, and the write-ahead log, which keeps the pages as they were until
 it is checkpointed. So an erasure asks for a **compaction**, and the next
 sweeper pass — within `TRACEPAD_SWEEP_INTERVAL`, an hour by default — merges
 the index, drains the free pages and truncates the log. The erasure's answer
-says when that pass is due (`compaction.expected_by`); `GET /api/v1/system`
-says when it last completed, to the admin token or an owner. Deleting traces and a project's purge ask for one
-too; the retention sweep zeroes what it frees but does not, since rewriting the
+says when that pass is due (`compaction.expected_by`), and its status says when
+the pass that covered it finished (`compaction.completed_at`). Deleting traces
+and a project's purge ask for one too; the retention sweep zeroes what it frees but does not, since rewriting the
 index every hour would cost more than it protects, and the words of swept
 traces leave the index with its ordinary merges. The cost is per pass, not per
 deletion: an explicit deletion, however small — one trace — has the next pass

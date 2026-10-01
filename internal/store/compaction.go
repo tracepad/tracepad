@@ -166,11 +166,18 @@ type compactionDone struct {
 }
 
 func (d *compactionDone) apply(tx *sql.Tx) error {
-	_, err := tx.Exec(`UPDATE compaction
+	if _, err := tx.Exec(`UPDATE compaction
 	    SET completed_at = ?,
 	        requested_at = CASE WHEN requested_at = ? THEN NULL ELSE requested_at END,
 	        prepared_for = NULL
-	  WHERE id = 1`, d.At, d.Started)
+	  WHERE id = 1`, d.At, d.Started); err != nil {
+		return err
+	}
+	// The erasures this compaction covered learn it on their own row
+	// (spec 044 #22): every one whose latest request is at or before the
+	// one it started from, since requests coalesce into the latest stamp.
+	_, err := tx.Exec(`UPDATE erasures SET compacted_at = ?
+	  WHERE compacted_at IS NULL AND compaction > 0 AND compaction <= ?`, d.At, d.Started)
 	return err
 }
 

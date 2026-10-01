@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
@@ -360,6 +361,9 @@ func TestSystemGivesEachCallerItsView(t *testing.T) {
 		{"a project key", nil, true, false},
 		{"a viewer session", []func(*http.Request){asSession(viewer), inProject(h.project.ID)}, true, false},
 		{"an owner session", []func(*http.Request){asSession(owner), inProject(h.project.ID)}, true, true},
+		// An owner on a fresh install, or one whose projects are all gone,
+		// has no project to name, and still sees the deployment.
+		{"an owner session naming no project", []func(*http.Request){asSession(owner)}, false, true},
 		// The header is a session's, and the token has no project to name.
 		{"the admin token", []func(*http.Request){asAdmin, inProject(h.project.ID)}, false, true},
 	} {
@@ -408,6 +412,35 @@ func TestSystemGivesEachCallerItsView(t *testing.T) {
 				t.Errorf("rows = %v, want the project's tables only in the project view", database.Rows)
 			}
 		})
+	}
+}
+
+// TestSystemAsksASessionForAProject: a member's session names the project it
+// asks about, as on every other read; an owner may leave it out and gets the
+// deployment alone, and a project that is gone is gone here too (#37).
+func TestSystemAsksASessionForAProject(t *testing.T) {
+	h := newAccountHarness(t)
+	owner, viewer := h.owner(t), h.viewer(t)
+	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(viewer)),
+		http.StatusBadRequest, "a session must name the project")
+
+	if err := h.writer.Submit(t.Context(), &store.ProjectDelete{
+		ProjectID: h.project.ID, Confirm: "test", Now: time.Now().UnixNano(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(owner), inProject(h.project.ID)),
+		http.StatusNotFound, "no such project")
+	rec := h.call(t, "GET", "/api/v1/system", nil, asSession(owner))
+	expectStatus(t, rec, http.StatusOK)
+	view := decodeJSON[struct {
+		View struct {
+			Project    *string `json:"project"`
+			Deployment bool    `json:"deployment"`
+		} `json:"view"`
+	}](t, rec).View
+	if view.Project != nil || !view.Deployment {
+		t.Errorf("view = %+v, want the deployment alone once the only project is gone", view)
 	}
 }
 

@@ -1187,7 +1187,7 @@ did, so both are diffed. Empty when the two versions are identical.
 
 `GET /api/v1` returns the endpoint map: every route, a one-line description,
 the one word that says what calling it takes — its `policy`: `public`,
-`ingest`, `member`, `editor`, `owner` or `session`
+`ingest`, `member`, `editor`, `owner`, `session` or `diagnostic`
 ([accounts.md](accounts.md#who-may-do-what)) — and the `scope` it asks of a
 project key: `any`, `ingest`, `read`, `write` or `none` ([Scopes](#scopes)):
 
@@ -1221,7 +1221,10 @@ Version, uptime, and two halves, each for the caller it belongs to:
   so does a session for the project its `X-Tracepad-Project` names.
 
 So a key gets the project view, the admin token the deployment view, and an
-owner's session both. `view` says which halves the body holds:
+owner's session both — or the deployment view alone when it sends no
+`X-Tracepad-Project`, as on a fresh install with no project to name. A member's
+session must name its project. The route's policy word is `diagnostic`, which
+is this endpoint's alone. `view` says which halves the body holds:
 
 ```json
 "view": {"project": "a1b2c3d4e5f6", "deployment": false}
@@ -1331,8 +1334,10 @@ overwrite what it unlinked — merge the search index, drain the free pages,
 truncate the write-ahead log ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
 `requested_at` is the latest request still waiting, `null` when none is;
 `completed_at` is when one last finished, `null` before the first. A project
-that erased a person or deleted traces learns when its own compaction is due
-from the deletion's answer, `compaction.expected_by`.
+that deleted traces learns when its compaction is due from the deletion's
+answer, `compaction.expected_by`. An erasure goes further: its status carries
+`compaction.completed_at`, when the pass that covered it finished. That stamp
+is the erasure's own, and a later pass does not move it.
 
 This is the endpoint to read first when something looks wrong, and the one to
 paste into a bug report.
