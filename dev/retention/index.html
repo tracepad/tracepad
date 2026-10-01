@@ -1,0 +1,2279 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/retention/">
+      
+      
+        <link rel="prev" href="../admin/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Retention - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#retention" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Retention
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three windows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-outlives-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What outlives what
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-an-annotation-queue-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What an annotation queue keeps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-run-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run keeps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-clock-is-arrival-not-the-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The clock is arrival, not the client's
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-sweeper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sweeper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-search-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What search costs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deleting traces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-for-a-data-subject-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for a data-subject request
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three windows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-outlives-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What outlives what
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-an-annotation-queue-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What an annotation queue keeps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-run-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run keeps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-clock-is-arrival-not-the-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The clock is arrival, not the client's
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-sweeper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sweeper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-search-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What search costs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deleting traces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-for-a-data-subject-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for a data-subject request
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/retention.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="retention">Retention</h1>
+<p>A store that only grows is a store you eventually delete by hand. Tracepad
+forgets on a schedule, on request, and when a project goes — without an
+operator ever running SQL. One exception is chosen rather than scheduled: a
+trace that belongs to a <strong>live eval run is kept past the window</strong>, because the
+run is the evidence for a number somebody will act on, and the run you want
+to look at is the old one. Retention bounds the file <em>plus what you chose to
+keep</em>; <code>GET /api/v1/system</code> shows the size of that choice, and deleting the
+run releases it. See <a href="#what-a-run-keeps">What a run keeps</a>.</p>
+<p>Nothing is deleted by default. A new install keeps everything forever until
+somebody sets a window, because a self-hosted tool must not quietly discard the
+data of an operator who configured nothing. At the reference rate of a busy
+single-app deployment — roughly 22 MB a month — that is the right default for
+this audience, and the wrong one for a fleet, which is why the window is one
+<code>PATCH</code> away.</p>
+<p>That rate is what the default is sized for: a small deployment, where keeping
+everything costs a few hundred megabytes a year. It is not sized for the top
+of the envelope this is built to serve — around 10 GB of data on the disk, and
+a million spans a day arriving — where that stock is spent in days and a window
+is not optional but the thing that keeps the file a size your disk has. Those
+two figures are a stock and a flow, and they are the README's:
+<a href="https://github.com/tracepad/tracepad/blob/main/README.md#what-it-is-built-for">What it is built for</a>.</p>
+<h2 id="the-three-windows">The three windows</h2>
+<p>Each project has three, all counted in whole days (1 to 36500) and all
+nullable:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Applies to</th>
+<th><code>null</code> means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>retention_days</code></td>
+<td>Traces, and everything hanging off them: observations, payloads, scores, and the annotation-queue items that point at them</td>
+<td>Keep forever (the default)</td>
+</tr>
+<tr>
+<td><code>raw_retention_days</code></td>
+<td>The stored OTLP bodies of <code>TRACEPAD_STORE_RAW</code></td>
+<td>Follow <code>retention_days</code></td>
+</tr>
+<tr>
+<td><code>stats_retention_days</code></td>
+<td>The hourly statistics rollup, and the per-user one beside it (<a href="../users/">users.md</a>)</td>
+<td>Keep forever (the default)</td>
+</tr>
+</tbody>
+</table>
+<p>Setting <code>stats_retention_days</code> deletes the <em>stored summaries</em> past it; it does
+not hide the traces. While the raw rows are still there, statistics for those
+hours are computed from them on the fly, exactly as they were before the
+rollup existed — slower, and correct. Once both windows have passed there is
+nothing left to compute from, and the charts are empty because the data is.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>tracepad<span class="w"> </span>retention<span class="w"> </span>show
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span><span class="w">               </span><span class="c1"># traces: 90 days</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--raw-days<span class="w"> </span><span class="m">14</span><span class="w"> </span>--yes<span class="w">     </span><span class="c1"># raw bodies: 14 days</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--stats-days<span class="w"> </span><span class="m">730</span><span class="w"> </span>--yes<span class="w">  </span><span class="c1"># statistics: two years</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--forever<span class="w">               </span><span class="c1"># traces: keep them all again (the other two windows stay as set)</span>
+</code></pre></div>
+<p><code>retention show</code> reads the project, which any key may do. <code>retention set</code> is
+<code>PATCH /api/v1/projects/{id}</code>, and a key needs the <code>write</code>
+<a href="../api/#scopes">scope</a> for it, as a person needs the <code>editor</code> role.</p>
+<p>"Keep it essentially forever" is spelled <code>--forever</code>, not a very large number
+of days: a window is turned into a nanosecond cutoff, so the day count is
+capped at 36500 rather than allowed to overflow into a date in the future —
+where it would match every row there is.</p>
+<p>Raw follows the parsed window by default rather than being shorter, because raw
+is the insurance policy: it is what makes a mapping bug retroactively fixable
+and what <a href="../export/"><code>tracepad export --otlp</code></a> replays. A default that expired
+it sooner would silently cap all of that. Operators for whom the raw bodies are
+the heavy or the sensitive part shorten them deliberately.</p>
+<p><strong><code>raw_retention_days</code> is the export's reach.</strong> A trace older than that window
+still exists — its rows are in the database and every screen shows it — but the
+body it arrived in is gone, and an export replays bodies. Shortening this window
+is therefore shortening how far back the data can leave whole; nothing else
+about the trace changes. <code>GET /api/v1/system</code> reports the archive's size and its
+two ends beside <code>traces_before_window</code>, which is how many traces already fall
+outside it, and <code>tracepad export --otlp --dry-run</code> prints the same before
+sending anything. Read those before shortening this window, not after.</p>
+<p>A batch is swept by its own age and never because the traces it fed were swept:
+one export body feeds many traces with different fates.</p>
+<h2 id="what-outlives-what">What outlives what</h2>
+<p><strong>Media follows its traces</strong>, with no window of its own: an image or a file
+ingest stored (<a href="../media/">media.md</a>) lives while a trace or a raw batch points
+at it, and every path below — the sweep, erasure, trace deletion, a project's
+purge — deletes the refs of what it deletes and collects the bodies nothing
+points at any more, in the same transaction. A body another project also sent
+survives. The project setting <code>media: placeholder</code> is the answer for "do not
+keep pictures at all".</p>
+<p>The statistics are <strong>not</strong> deleted with the traces they summarize. That is
+deliberate: a month of history is a few thousand rows where the traces behind
+it are millions, and deleting the cheap thing along with the expensive one is
+what used to make configuring retention silently amputate the charts.</p>
+<p>So a project with <code>retention_days = 30</code> keeps answering <code>/api/v1/stats</code> about
+last year — counts, errors, cost and latency percentiles — while the traces
+behind those numbers are long gone. An operator who means "no <em>record</em> older
+than 30 days", which is a different promise, sets <code>stats_retention_days</code> too.</p>
+<p>Two consequences follow, and both are stated here rather than left to be
+discovered:</p>
+<ol>
+<li><strong>A frozen hour cannot be corrected.</strong> Once an hour is older than
+   <code>retention_days</code>, its raw rows are gone by design, so the rollup stops
+   recomputing it — a single late fragment arriving for that hour would
+   otherwise replace five thousand summarized traces with itself. The hour's
+   stored numbers stand as the archive of what was there.</li>
+<li>
+<p><strong>Erasing a user's data, and deleting traces, corrects the hours it can
+   reach.</strong> The rolled hours the erased or deleted traces occupied are
+   recomputed in the same transaction that deletes them — both run in chunks
+   of up to five hundred traces in whole hours, and each chunk commits with
+   its hours already corrected — so the counts drop before the request answers,
+   and a request cut off between chunks leaves no hour counting traces that
+   are gone. Hours already frozen are not recomputed: the project-wide
+   aggregates carry no user id and no prompt or completion text — they are
+   counts, sums and latency buckets, plus, in <code>names_hourly</code>, the <strong>trace
+   names</strong> they count. Trace names are operation names by convention; a
+   deployment that puts personal data into them should know a frozen hour
+   keeps it.</p>
+<p>The <strong>per-user</strong> rollup is the exception to that exception. Those rows are
+about the user by construction, so an erasure deletes them outright rather
+than recomputing them — in every hour, frozen ones included, where a
+recompute could not have run at all. The user leaves <code>/api/v1/users</code>
+immediately; only the project-wide totals for a frozen hour go on counting
+the traces.</p>
+</li>
+</ol>
+<p>The rollup is <strong>four tables</strong>, and one window governs all of them:</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Holds</th>
+<th>Swept by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stats_hourly</code></td>
+<td>traffic, errors, cost, tokens and latency per hour</td>
+<td><code>stats_retention_days</code></td>
+</tr>
+<tr>
+<td><code>users_hourly</code>, <code>users</code></td>
+<td>the same per end user, plus their summary</td>
+<td><code>stats_retention_days</code></td>
+</tr>
+<tr>
+<td><code>scores_hourly</code></td>
+<td>score means, rates and category counts per hour (<a href="../quality/">quality.md</a>)</td>
+<td><code>stats_retention_days</code></td>
+</tr>
+<tr>
+<td><code>names_hourly</code></td>
+<td>how many traces of each name per hour, and how many failed — what <a href="../api/#filter-values"><code>GET /api/v1/facets</code></a> lists</td>
+<td><code>stats_retention_days</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>names_hourly</code> is the youngest of the four, and on an upgraded install it starts
+where the <em>traces</em> do rather than where the other three do: its backfill reads
+the raw rows, and past <code>retention_days</code> there are none to read. If your
+<code>stats_retention_days</code> is the longer of the two, the filter values for that gap
+name the environments and releases and not the trace names.</p>
+<p>They are written by one pass in one transaction and swept together, so the
+dashboard, Users, Quality and filter-value answers can never disagree about
+how far back the history reaches.</p>
+<p>One consequence shows on the dashboard's summary row, whose change is
+measured against the <strong>previous window</strong> of the same length
+(<a href="../ui/#dashboard">ui.md</a>): with <code>stats_retention_days</code> shorter than twice
+the window on screen, the previous window is partly or wholly swept, the
+change is against what remains, and a previous window with nothing left
+reads <em>new</em> rather than a number.</p>
+<p><strong>Freezing is asked of each of the four separately</strong>, because what a freeze
+protects is the rows that already stand. An hour past the window whose rows a
+table already holds is left alone, exactly as the statistics are. An hour it
+holds <em>nothing</em> for has nothing to protect, so the roll may still write it —
+and what it writes is whatever the raw rows say. Usually that is nothing: past
+the window the sweep has taken the traces, and the scores and the per-user
+traffic with them. But the window is measured against the client's timestamp
+while the sweep deletes by <em>arrival</em>, so a year of history imported this
+morning is "past the window" and completely intact — and it gets its per-user,
+score and trace-name rows rather than a permanent gap.</p>
+<h2 id="what-an-annotation-queue-keeps">What an annotation queue keeps</h2>
+<p>Nothing. A queue item is a pointer at a trace (<a href="../annotation/">annotation.md</a>),
+and the sweep that deletes the trace deletes its items in the same job — a
+pointer to a deleted trace is a desk showing an empty page. The queue itself
+stays, with a smaller list.</p>
+<p>The <strong>verdicts</strong> are not items and do not go with them: they are scores on the
+trace, and they expire on their own timestamps like every other score, which
+here means with the trace they are about. Deleting a queue by hand takes its
+items and nothing else, for the same reason — the scores are the work, and the
+queue was only the list of what to do.</p>
+<h2 id="what-a-run-keeps">What a run keeps</h2>
+<p>A trace whose <code>run_id</code> names an existing run of its project
+(<a href="../datasets/">datasets.md</a>) is <strong>not swept</strong>, however old it is. The sweep
+skips it; the retention dry run leaves it out of its counts, so a preview
+never promises to take what the pass would keep; and the retention window can
+be shortened below the age of the pinned traces without touching them. When
+the file does not shrink after a window change, this is where to look:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">"runs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pinned_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">2996</span><span class="p">,</span><span class="w"> </span><span class="nt">"orphan_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+</code></pre></div>
+<p>The pin is per trace and per run, not per dataset: eval traffic is hundreds of
+traces per pass, not a million a day, and its payloads are worth their disk.
+The size is a choice the operator makes per run rather than a window that
+quietly amputates the baseline.</p>
+<p>What releases a pinned trace:</p>
+<ul>
+<li><strong>Deleting the run</strong> (<code>DELETE /api/v1/runs/{id}</code>). The traces are not
+  deleted; they return to the ordinary window and go on the next pass if they
+  are past it. The response says how many.</li>
+<li><strong>Deleting the dataset</strong>, which takes its runs with it.</li>
+<li><strong>Erasing a user's data</strong>, which outranks the pin: the user's traces go
+  whether or not a run holds them, and the dry run names the runs affected.
+  An eval trace ordinarily carries no user id, but a harness that replays
+  production sessions under their real ids is exactly the harness that will
+  receive the request.</li>
+</ul>
+<p>What is not pinned:</p>
+<ul>
+<li><strong>Raw bodies.</strong> A batch feeds many traces with different fates, and raw is
+  the archive, not the evidence. After the raw window a pinned trace keeps its
+  parsed rows and loses its raw body.</li>
+<li><strong>Orphans.</strong> A trace naming a run that does not exist — a typo, or a run
+  whose dataset was deleted — is stored and counted (<code>orphan_traces</code>), and
+  lives on the ordinary window.</li>
+</ul>
+<h2 id="the-clock-is-arrival-not-the-clients">The clock is arrival, not the client's</h2>
+<p>Retention counts from <code>ingested_at</code> — the server's clock when the trace row was
+first created — and never from the <code>timestamp</code> a span carried.</p>
+<p><code>timestamp</code> is client bytes. A client whose clock is behind would have its
+traces deleted on the next sweep; one that sends the future would buy itself
+immortality. "How long do we keep what we received" is a question only our own
+clock can answer.</p>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li>A trace's lease starts once. Later spans joining an existing trace do not
+  refresh it, so a long-running conversation cannot outlive the window by
+  staying chatty.</li>
+<li>A span that arrives after its trace was swept recreates a fragment, which
+  then lives its own full window from <em>its</em> arrival. That is the honest answer
+  for data we genuinely hold again.</li>
+</ul>
+<h2 id="the-sweeper">The sweeper</h2>
+<p>One goroutine, one pass an hour (<code>TRACEPAD_SWEEP_INTERVAL</code>), deleting per
+project in chunks of about a thousand traces. Each chunk is a transaction
+through the same group-commit writer that ingest uses, so a sweep serializes
+with incoming exports for milliseconds at a time instead of holding a lock
+against them.</p>
+<p>Beside it runs the <strong>statistics aggregator</strong> (<code>TRACEPAD_ROLLUP_INTERVAL</code>,
+five minutes), which rolls closed hours into the summary the charts read and
+re-rolls the hours late spans touched. It writes through the same writer, in
+jobs bounded to one hour of one project, and it deletes nothing except what
+<code>stats_retention_days</code> says. Its first pass on an existing database is the
+backfill: it walks from the oldest trace forward, logging progress, while
+every query keeps being answered from the raw rows meanwhile.</p>
+<p>Each sweep pass also:</p>
+<ul>
+<li>collects <strong>orphaned payloads</strong> — rows left behind when a re-delivered span
+  overwrote its input, output or metadata with a new one;</li>
+<li>collects <strong>orphaned search-index entries</strong>, for the same reason: the three
+  paths that delete observations take the index with them inside their own
+  transactions, and this is the belt to those braces;</li>
+<li><strong>purges</strong> projects whose seven-day deletion grace has run out (below);</li>
+<li>removes <strong>expired browser sessions and invitation links</strong>
+  (<a href="../accounts/">accounts.md</a>). This is housekeeping and not access control: a
+  session that has run out stops working the moment it does, and an invitation
+  past its seven days is refused, whether or not a pass has been by;</li>
+<li>deletes the <strong>session-only scores</strong> past the trace window: a score that
+  names a session and no trace, received more than <code>retention_days</code> ago, whose
+  session no trace of the project carries any more — the one its traces were
+  swept with, or one whose session never arrived. A session a pinned run keeps
+  alive keeps its verdicts. The retention dry run counts them as
+  <code>session_scores</code>;</li>
+<li>runs the <strong>compaction</strong> an explicit deletion asked for — an erasure, a trace
+  deletion, a project's purge — when one is pending: the search index merged,
+  the free pages drained, the write-ahead log truncated
+  (<a href="#what-this-means-for-a-data-subject-request">below</a>);</li>
+<li>runs an incremental vacuum, so the file on disk actually shrinks. Deleting
+  rows without one returns nothing to the filesystem.</li>
+</ul>
+<p>A retention change takes effect on the next pass, within the interval. There is
+no run-now endpoint on purpose: an immediate sweep would be a destructive
+trigger with none of the dry-run semantics the rest of the admin surface
+insists on, and the hourly cadence <em>is</em> the margin in which a mistaken window
+can be corrected before it costs anything.</p>
+<p>What the sweeper has done is in <code>GET /api/v1/system</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">"sweeper"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">3600</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">"last_run"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T12:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">"next_run"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T13:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">"traces_deleted"</span><span class="p">:</span><span class="w"> </span><span class="mi">4120</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">"raw_batches_deleted"</span><span class="p">:</span><span class="w"> </span><span class="mi">96</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">"since"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-30T09:14:02Z"</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>The counts are this project's own and since this process started, like every
+other counter that endpoint reports.</p>
+<h2 id="what-search-costs">What search costs</h2>
+<p>The full-text index (<a href="../api/#search">api.md</a>) is the one store beside the
+payloads themselves, and it is worth knowing what it is made of before a large
+deployment upgrades into it.</p>
+<p><strong>Each payload contributes the first 64 KiB of its text.</strong> What is indexed of a
+payload is the values inside its JSON, not the JSON around them
+(<a href="../api/#what-is-and-is-not-matched">api.md</a>), and the 64 KiB is counted on
+that text: a message array's keys and brackets cost the index nothing and take
+none of the budget. The rest is stored and readable — <code>/observations/{id}/io</code>
+still returns all of it — but not searched. This is a size decision, not a
+quality one: a 500 KB document on one observation's input would otherwise cost
+the index as much as a hundred ordinary traces, while the error messages,
+refusals and answers people search for live in the first kilobytes. It is
+written here rather than left to be discovered by a search that came back
+empty.</p>
+<p><strong>Ingest pays for it.</strong> Measured on an Apple M1 Pro over a synthetic corpus of
+one trace and twenty generations per batch, each carrying about 2.5 KB of
+prompt, completion and metadata text: 3.7 ms per batch without the index and
+7.2 ms with it — roughly 5 400 spans a second against 2 700. The index halves
+the write path and leaves it two orders of magnitude above the ceiling this
+product is built for.</p>
+<p><strong>The first start after the upgrade builds the index for what is already
+stored.</strong> It runs before the server listens, because a search that answers
+"nothing" because the index is half-built is worse than a start that takes a
+minute, and it is resumable: a crash halfway carries on where it stopped. On
+the same machine and the same corpus it indexes about <strong>260 traces — 5 200
+observations — a second</strong>, so a store of a million observations spends roughly
+three minutes there, once. The log says it is happening and reports progress.</p>
+<p><strong>An upgrade that changes what a word is rebuilds the index the same way.</strong>
+Schema 0007 is such an upgrade — it is what moved the index off the JSON text
+and onto the text inside it — so a store upgrading into it pays that first
+start again, at the same rate, once. There is nothing to run and nothing to
+decide: the start after the upgrade does it, and says so in the log.</p>
+<h2 id="deleting-a-users-data">Deleting a user's data</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711<span class="w">     </span><span class="c1"># a key with write</span>
+</code></pre></div>
+<p><code>DELETE /api/v1/projects/{id}/users/{user_id}/data</code> erases everything the
+store holds about the traces filed under one user id:</p>
+<ul>
+<li>the traces, their observations, payloads, scores, search entries and the
+  annotation-queue items pointing at them, and the user's per-user
+  statistics;</li>
+<li>the scores given to the <strong>sessions</strong> those traces belonged to — a score
+  with a <code>session_id</code> and no <code>trace_id</code> (<a href="../scores/">scores.md</a>) — including
+  a session another user's traces share;</li>
+<li>every version of the <strong>dataset items</strong> cut from those traces — an item any
+  row of which names one of them in <code>source_trace_id</code>
+  (<a href="../datasets/">datasets.md</a>) — each affected dataset's version advancing by
+  one;</li>
+<li>the user's <strong>spans inside the raw OTLP bodies</strong>: every batch that held one
+  is rewritten without it, or deleted when nothing else was in it, and the
+  pictures only those spans pointed at go with them.</li>
+</ul>
+<p>What it unlinks is overwritten in the file by the next sweep rather than when
+the call returns, and a few things are out of its reach by construction;
+<a href="#what-this-means-for-a-data-subject-request">What this means for a data-subject request</a>
+lists them. Like every destructive endpoint it is a dry run until confirmed;
+the echo here is the user id itself. Traces an eval run is keeping go with the
+rest, and the dry run lists those runs under <code>affected_runs</code>, and the datasets
+that lose items under <code>affected_datasets</code>, so the hole is visible before it
+opens.</p>
+<p><strong>How the raw bodies are found.</strong> No index leads from a trace to the batches
+that carried it, so the erasure reads the batches that arrived inside each of
+the user's traces' arrival windows — from the trace's first arrival to its
+last update, the one clock both are stamped with — decodes each and checks it
+for the user's spans; a batch holding none is left as it was. The dry run's
+<code>raw.batches_to_scan</code> is that count. The order is raw first, then the parsed
+rows, then the batches that arrived for the user's traces while the request
+ran: once the parsed rows are gone nothing names the batches any more. A
+rewritten batch is no longer what the client sent,
+and says so: <code>scrubbed_at</code> on the listing, <code>X-Tracepad-Scrubbed-At</code> on the body
+and <code>scrubbed</code> in the export summary (<a href="../export/">export.md</a>). Nothing records
+whose spans went.</p>
+<p><strong>An erasure is accepted, then runs.</strong> The confirmed request checks what can
+refuse it, records the erasure and answers <code>202 Accepted</code> with where to watch
+it; <code>?wait=</code> up to 30 seconds answers <code>200</code> instead when the erasure ends in
+that time, which a user of a few traces does. The server runs one erasure at a
+time, and its record says how far it is: the phase, and how many of the
+traces it found are gone. Watch it with <code>GET
+/api/v1/projects/{id}/erasures/{erasure_id}</code>, <code>tracepad users erasure &lt;id&gt;</code>,
+or the Settings screen's erase card, which lists the erasures of the last 30
+days. A <strong>restart</strong> does not lose it: every step commits its progress with
+it, and the next start resumes the erasure from its phase — the batches that
+arrived for traces it had already deleted included, which a repeat of the
+request could not find. The <strong>record forgets the user</strong>: it holds the user id
+only while the erasure is queued or running, clears it in the statement that
+ends it, and is itself removed by the sweeper 30 days later. What stays in
+between is that an erasure ran, when, and what it took.</p>
+<h2 id="deleting-traces">Deleting traces</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f<span class="w">     </span><span class="c1"># a key with write</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span><span class="m">2026</span>-09-17T14:02:17Z<span class="w"> </span>--env<span class="w"> </span>loadtest
+</code></pre></div>
+<p><code>DELETE /api/v1/traces/{id}</code> and <code>DELETE /api/v1/traces?&lt;filters&gt;&amp;to=</code> are
+the operator's own door between the sweep and the project's deletion: one
+trace by id, or every trace a listing filter matches before a moment
+(<a href="../admin/#deleting-traces">admin.md</a>). They take what an erasure takes of
+the traces themselves, by the same path — the traces, their observations,
+payloads, scores, search entries and queue items, the hours re-rolled in the
+same transaction, a run's pin overridden — so every promise on this page about
+what outlives what holds for a deletion as it holds for an erasure. What an
+erasure takes <em>beside</em> the traces — the session scores, the dataset items, the
+spans in the raw bodies — a deletion does not. Both void
+the media upload URLs for the traces they remove, and refuse new ones, for the
+hour such a URL lives (<a href="../media/#the-langfuse-sdks-media-channel">media.md</a>): an upload in
+transit for an erased trace would otherwise store its picture after the
+erasure had answered. The bulk
+form works in rounds of at most a thousand traces and fifty chunks of whole hours,
+each chunk a transaction of its own, so a round cut off leaves nothing
+half-deleted and the next request continues. In
+particular the raw OTLP bodies are <strong>not</strong> touched, for the structural
+reason below: a raw batch holds many traces, and a trace cannot be cut out
+of one. The preview says so. A picture a deleted trace pointed at goes with
+it unless a raw batch still points at it, and then when that batch expires
+(<a href="../media/#how-long-they-are-kept">media.md</a>); the preview counts the bodies
+the project would stop holding as <code>media</code> and <code>media_bytes</code>.</p>
+<p><strong>The first start after the upgrade builds four indexes</strong> over the columns
+that reference stored payloads (migration 0020): deleting a payload is a
+foreign-key check in each of them, and without the indexes every check was a
+scan — the reason erasure and the sweep were slower than they needed to be.
+The migration runs before the server listens, once; on a store of a few
+hundred thousand observations it is seconds, and the log names the migration
+as it runs, after the backup every migration takes beside the database — kept
+seven days (<a href="#what-this-means-for-a-data-subject-request">what that means</a>).</p>
+<p>A deletion removes what the store holds at that moment, and nothing is
+remembered about the ids: a span that arrives afterwards for a deleted trace
+creates the trace again from what arrived, as it would for a trace never
+seen. The bulk form's required <code>to</code> makes that rare; for one trace whose
+export is still in flight, wait for it to finish.</p>
+<h3 id="what-this-means-for-a-data-subject-request">What this means for a data-subject request</h3>
+<p>You are the controller; tracepad is the tool. This is what an erasure does,
+and where its reach ends.</p>
+<p><strong>What goes when the call returns.</strong> Every row the store keeps about the
+traces filed under the user id: the traces, their observations, payloads,
+scores, search entries and annotation-queue items; the scores given to the
+sessions those traces belonged to; the dataset items cut from those traces,
+with their history; the per-user statistics; and the user's spans inside the
+raw OTLP bodies — each batch that held them is rewritten without them, or
+deleted when nothing else was in it. From then on no endpoint, CLI command or
+MCP tool returns them, the export does not replay them, and no search finds
+them. The project-wide statistics are corrected where they can be: the hours
+the erased traces occupied are recomputed in the same transaction that
+deletes them, chunk by chunk, so they are right before the call returns and
+stay right if it is cut off; hours whose rows retention already took are
+frozen and keep their totals — see <a href="#what-outlives-what">What outlives what</a>.
+This lands well inside the one-month response window Article 12(3) allows.</p>
+<p><strong>What is overwritten by the next sweep.</strong> Deleting a row unlinks it; its
+bytes stay in the file until something overwrites them. Tracepad zeroes the
+freed space as rows go, and two things still hold the deleted text afterwards:
+the search index, whose segments keep a deleted document's words until they
+are merged, and the write-ahead log, which keeps the pages as they were until
+it is checkpointed. So an erasure asks for a <strong>compaction</strong>, and the next
+sweeper pass — within <code>TRACEPAD_SWEEP_INTERVAL</code>, an hour by default — merges
+the index, drains the free pages and truncates the log. The erasure's answer
+says when that pass is due (<code>compaction.expected_by</code>); <code>GET /api/v1/system</code>
+says when it last completed. Deleting traces and a project's purge ask for one
+too; the retention sweep zeroes what it frees but does not, since rewriting the
+index every hour would cost more than it protects, and the words of swept
+traces leave the index with its ordinary merges. The cost is per pass, not per
+deletion: an explicit deletion, however small — one trace — has the next pass
+compact the whole store, and on a large one that is a rewrite of the search
+index. Deletions made within one interval share one compaction, so a store
+where something is deleted every hour rewrites its index once an hour.</p>
+<p><strong>What erasure cannot reach.</strong></p>
+<ol>
+<li><strong>Copies outside the database file</strong>: your own backups, volume and
+   filesystem snapshots, replicas, an export taken before the erasure, the
+   logs of your application or proxy. Expire those with your own process.</li>
+<li><strong>The backup the server writes before an upgrade.</strong> Before every start that
+   applies a migration the server writes <code>tracepad.db.pre-&lt;migration&gt;.bak</code>
+   beside the database — a complete copy, readable by its owner only. Once
+   that upgrade's migrations have committed it removes the older ones, and the
+   sweeper removes the newest at its first pass seven days or more after it
+   was written. While one exists, the erasure's dry run and answer name it and
+   that date (<code>pre_migration_backup.remove_after</code>);
+   <a href="../docker/#upgrading-and-backing-up-first">docker.md</a> says how to remove it
+   sooner.</li>
+<li><strong>Raw bodies older than the trace window.</strong> With <code>raw_retention_days</code>
+   longer than <code>retention_days</code>, the traces that said whose spans a batch
+   holds are gone, and nothing can attribute them; the dry run counts those
+   batches as <code>raw.unattributable_batches</code> — an estimate, not an exact count
+   (<a href="../admin/#erasing-a-users-data">admin.md</a>). If you answer erasure requests,
+   keep the raw window no longer than the trace window, or run with
+   <code>TRACEPAD_STORE_RAW=off</code>.</li>
+<li><strong>Anything not linked by id</strong>: a name typed into another user's prompt, a
+   dataset item copied without its <code>source_trace_id</code>, a score about the user
+   attached to someone else's trace, a trace deleted by hand earlier (its
+   spans stay in the raw bodies, linked to nobody), spans the ingest could not
+   decode (a <code>ResourceSpans</code> block that did not decode is kept as it arrived).</li>
+<li><strong>What the disk keeps below the file.</strong> A program can overwrite its own
+   file, not the blocks a filesystem or an SSD has already released; full-disk
+   or volume encryption is the layer for that.</li>
+<li>
+<p><strong>What deletions before this version left.</strong> Until this version the freed
+   space was not zeroed. The first sweeper pass after the upgrade compacts
+   once — the index rewritten, the free pages drained — and what older
+   deletions left inside pages still in use stays until those pages are
+   rewritten. A full <code>VACUUM</code> of the stopped database rewrites every page,
+   using the <code>sqlite3</code> shell (3.43 or newer) on the database file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sqlite3<span class="w"> </span>tracepad.db<span class="w"> </span><span class="s2">"INSERT INTO search_fts(search_fts) VALUES('optimize'); VACUUM;"</span>
+</code></pre></div>
+<p>The first statement rewrites the search index without the deleted text,
+the second every page of the file.</p>
+</li>
+</ol>
+<p>The dry run is where these are counted before anything happens: the sessions'
+scores (<code>session_scores</code>), the datasets that lose items
+(<code>affected_datasets</code>), the batches it will read (<code>raw.batches_to_scan</code>) and the
+ones it cannot attribute (<code>raw.unattributable_batches</code>), and the backup.</p>
+<h2 id="deleting-a-project">Deleting a project</h2>
+<p>Deleting a project is the most irreversible thing in the product, so it is not
+irreversible for a week:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>rm<span class="w"> </span>&lt;project-id&gt;<span class="w">     </span><span class="c1"># admin token required</span>
+</code></pre></div>
+<ul>
+<li>The keys stop authenticating <strong>immediately</strong>, and the project vanishes from
+  listings.</li>
+<li>The data is destroyed by the sweeper <strong>seven days later</strong>, and the response
+  says when.</li>
+<li><code>tracepad projects restore &lt;project-id&gt;</code> undoes it until then, with the same
+  credential that deleted it: an owner account or the admin token. A project's
+  own key reaches neither — it lives in application config and in CI, and a
+  leaked application credential must not move a project in either direction.
+  The one thing such a key still reads while its project is deleted is the
+  project itself, so whoever is about to restore can see what they are
+  restoring and until when.</li>
+<li>The name stays reserved throughout, so restore always has its name to come
+  back to. Creating a project with that name meanwhile is a <code>409</code> naming the
+  restorable one.</li>
+</ul>
+<p>Seven days, fixed, not a knob. A safety net whose size depends on how the
+deployment was configured is a safety net nobody can rely on.</p>
+<h2 id="configuration">Configuration</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_SWEEP_INTERVAL</code></td>
+<td><code>1h</code></td>
+<td>How often a pass runs. A Go duration; at least <code>1s</code>.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_ROLLUP_INTERVAL</code></td>
+<td><code>5m</code></td>
+<td>How often the statistics aggregator runs, and so how long a closed hour waits before the rollup holds it. A Go duration; at least <code>1s</code>.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_STORE_RAW</code></td>
+<td><code>on</code></td>
+<td>Keep raw OTLP bodies at all. <code>off</code> stops keeping new ones; those already kept leave by the raw window.</td>
+</tr>
+</tbody>
+</table>
+<p>The windows themselves are per project and live in the database, so changing
+them needs no restart. See <a href="../admin/">admin.md</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

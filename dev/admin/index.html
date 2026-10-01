@@ -1,0 +1,2353 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/admin/">
+      
+      
+        <link rel="prev" href="../accounts/">
+      
+      
+        <link rel="next" href="../retention/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Administration - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#administration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Administration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may ask
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dry-run-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dry run by default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#erasing-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Erasing a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-on-the-mcp-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not on the MCP surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may ask
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dry-run-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dry run by default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#erasing-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Erasing a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-on-the-mcp-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not on the MCP surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/admin.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="administration">Administration</h1>
+<p>Projects, API keys, retention windows and user-data erasure, over the same
+<a href="../api/">JSON API</a> as everything else and through the same binary's CLI. No
+admin console, no SQL.</p>
+<p>Two rules run through all of it: <strong>who may ask</strong>, and <strong>nothing destructive
+happens until it is confirmed by name</strong>.</p>
+<h2 id="who-may-ask">Who may ask</h2>
+<p>Three kinds of caller reach this surface: a project key, a person signed in
+with an <a href="../accounts/">account</a>, and <code>TRACEPAD_ADMIN_TOKEN</code>. What a key may do
+is the <a href="../api/#scopes">scopes</a> it was minted with — <code>ingest</code>, <code>read</code>, <code>write</code>,
+any combination — so the key's column is three:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Key with <code>ingest</code></th>
+<th>Key with <code>read</code></th>
+<th>Key with <code>write</code></th>
+<th><code>viewer</code></th>
+<th><code>editor</code></th>
+<th>Owner</th>
+<th><code>TRACEPAD_ADMIN_TOKEN</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read a project and its windows</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Change its retention</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Create, list and revoke its keys</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Erase a user's data in it</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Anything in another project</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>List every project</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Create a project</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Rename a project</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>Delete or restore a project</strong></td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p>A key that holds <code>write</code> is still the administrator of its own project. That
+is what keeps "retention changes without a restart" true in the default
+install, which has no admin token at all — the key it starts with holds all
+three scopes. A key minted for an application holds <code>ingest</code> alone and can
+change none of this; one minted for an agent holds <code>read</code> and can look at it.</p>
+<p>Its keys are the exception: <strong>no project key lists, mints or revokes keys</strong>,
+and it is answered <code>403</code> on those three routes. A key that could mint keys
+would turn one lost key into as many credentials as its finder wanted, each of
+them outliving the revocation of the first. Issuing a credential is a person's
+act — an owner's or an editor's, signed in — or the operator's, with the
+admin token.</p>
+<p>Creating, deleting, restoring and renaming a project need an owner or the
+token, for one reason: an <code>sk</code> lives in application config and in CI, and a
+leaked application credential must not be able to move a project in or out of
+existence. A project's name is also the echo every destructive confirmation is
+typed against, which is why renaming sits with them.</p>
+<p>A server with no owner and no <code>TRACEPAD_ADMIN_TOKEN</code> answers those rows <code>403</code>
+with a message that names both, rather than <code>401</code>-ing a perfectly good key.</p>
+<p>The token creates owner accounts, so whoever holds it holds the deployment. It
+must be at least 32 characters, or the server refuses to start and says so;
+generate one rather than inventing it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span>
+</code></pre></div>
+<p>A wrong token is refused as fast as a wrong key, with no counter of failures —
+the length is what makes guessing it hopeless. To keep it out of the
+environment every <code>docker inspect</code> prints, put it in a file and name the file
+with <code>TRACEPAD_ADMIN_TOKEN_FILE</code> instead (a mounted Docker or Kubernetes secret,
+say); setting both is refused. The file must be a regular file of at most 4 KiB
+holding the token alone.</p>
+<p>A secret key declared in <code>TRACEPAD_PROJECTS</code> is held to the same 32
+characters when the declaration creates its project: a short one stops the
+start. For a project that already exists the declaration creates nothing — the
+variable never changes a project's keys — so a longer value there does not
+replace a short key. When the declared secret is still a live key of its
+project, the start goes on and warns, every time, with the way out: mint a new
+pair (below), move the applications onto it, revoke the short one, and declare
+the new secret.</p>
+<p>The token is sent in the same header as a key, so the CLI takes it as <code>--key</code>
+or <code>TRACEPAD_API_KEY</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
+</code></pre></div>
+<p>A person's session is a cookie rather than a header, and names the project it
+is asking about with <code>X-Tracepad-Project</code> on the routes that do not carry one
+in the path. See <a href="../accounts/#what-a-session-may-ask">accounts.md</a>.</p>
+<h2 id="dry-run-by-default">Dry run by default</h2>
+<p>Every destructive endpoint changes nothing until <code>?confirm=</code> echoes the
+identity of what it destroys — the project's <strong>name</strong>, the <strong>user id</strong>, or the
+<strong>trace id</strong> when one trace is deleted. Without it, the endpoint answers <code>200</code>
+with a preview:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"dry_run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"would_delete"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">41203</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="mi">180114</span><span class="p">,</span><span class="w"> </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">96</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">                   </span><span class="nt">"prompts"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"raw_batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">"api_keys"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">                   </span><span class="nt">"annotation_queues"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"annotation_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">1408</span><span class="p">},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">"oldest_ingested"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-03-14T08:21:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">"confirm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checkout-service"</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"the keys stop working immediately; the data is restorable for seven days"</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>Sending it back is what makes it happen:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="s2">"localhost:4318/api/v1/projects/</span><span class="nv">$ID</span><span class="s2">?confirm=checkout-service"</span>
+</code></pre></div>
+<p>A wrong <code>confirm</code> is a <code>400</code> that does nothing. An id is a string you paste; a
+name is a thing you mean, so a typoed or hallucinated target cannot match — and
+the echo is checked against the stored row inside the write transaction, so a
+rename between the preview and the commit cannot turn a confirmed request into
+a request for something else.</p>
+<p>The CLI does both steps for you: it shows the preview and asks you to type the
+name back. <code>--yes</code> answers that for a script — it still makes both requests and
+still sends the server's own confirm value, so what it replaces is the typing,
+not the check. A non-interactive run <strong>without</strong> <code>--yes</code> stops with the preview
+on stderr and exit code 1.</p>
+<h2 id="endpoints">Endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects</code></td>
+<td>What the caller can reach: all with the token or an owner, its own with a key, its memberships with a member's session. A key's row carries <code>key: {public_key, name, scopes}</code> — the key itself, whatever its scopes. <code>?include=deleted</code> (owner or token). <code>?activity=24h</code> adds <code>traces_24h</code> to every row — the traces of the last 24 hours, counted the way <code>/api/v1/stats</code> counts them; a soft-deleted project carries <code>0</code>. Any other value is a <code>400</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects</code></td>
+<td>Create; the secret is in the response and nowhere else.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{id}</code></td>
+<td>One project with its windows; for a key, with <code>key</code> as above.</td>
+</tr>
+<tr>
+<td><code>PATCH</code></td>
+<td><code>/api/v1/projects/{id}</code></td>
+<td><code>name</code> (owner or token), <code>retention_days</code>, <code>raw_retention_days</code>, <code>stats_retention_days</code> (a key needs <code>write</code>).</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{id}</code></td>
+<td>Soft delete; <code>202</code> with the purge date.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{id}/restore</code></td>
+<td>Undo it inside the grace window.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{id}/keys</code></td>
+<td>Public keys, their scopes, who minted each and when it was last used. Not with a project key.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{id}/keys</code></td>
+<td>Mint a pair: <code>{"scopes": [...], "name": …}</code>, the name optional. Not with a project key.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{id}/keys/{public_key}</code></td>
+<td>Revoke one. Not with a project key.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{id}/users/{user_id}/data</code></td>
+<td>Erase one user's data: a task, answered <code>202</code> or, within <code>?wait=</code>, <code>200</code> (a key needs <code>write</code>).</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{id}/erasures</code></td>
+<td>The project's erasures, those under way first (a key needs <code>write</code>).</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{id}/erasures/{erasure_id}</code></td>
+<td>One erasure (a key needs <code>write</code>).</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/traces/{id}</code></td>
+<td>Delete one trace — an editor's route, on the data plane, and a <code>write</code> key's. See <a href="#deleting-traces">below</a>.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/traces?…&amp;to=</code></td>
+<td>Delete every trace a listing filter matches before <code>to</code>, in rounds.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{id}/members</code></td>
+<td>Who has a role in this project. See <a href="../accounts/#managing-accounts">accounts.md</a>.</td>
+</tr>
+</tbody>
+</table>
+<p>The people who sign in, their roles and their invitations are
+<a href="../accounts/">accounts.md</a>, and <code>tracepad accounts …</code> manages them from a
+terminal on this same token (<a href="../cli/#accounts">cli.md</a>).</p>
+<h2 id="projects">Projects</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls<span class="w"> </span>--deleted<span class="w">           </span><span class="c1"># with purge dates; admin token</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>show
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>create<span class="w"> </span>checkout-service
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>rename<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>orders-service
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>rm<span class="w"> </span><span class="nv">$ID</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>restore<span class="w"> </span><span class="nv">$ID</span>
+</code></pre></div>
+<p>The four that move a project in or out of existence — <code>create</code>, <code>rename</code>, <code>rm</code>
+and <code>restore</code> — take the admin token; <code>ls</code> and <code>show</code> take any project key.
+The <code>keys</code> commands take the admin token too.</p>
+<p><code>projects show</code> run with a key names the key and what it may do:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>project checkout-service
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  id          9f2c…
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  …
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  key         tp-pk-81c0… (checkout api): ingest
+</code></pre></div>
+<p><code>projects create</code> answers with the project and a fresh key pair, which holds
+all three scopes. The secret is printed once, because only its hash is ever
+stored:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>project checkout-service created (9f2c…)
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  TRACEPAD_API_KEY=tp-sk-…
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>  LANGFUSE_PUBLIC_KEY=tp-pk-…
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>  LANGFUSE_SECRET_KEY=tp-sk-…
+</code></pre></div>
+<p>Deleting and restoring are described in <a href="../retention/#deleting-a-project">retention.md</a>:
+keys die at once, data survives seven days, the name stays reserved.</p>
+<p>Commands that take a project accept <code>--project &lt;id&gt;</code>. Without it, a credential
+that reaches exactly one project answers the question by itself — which is the
+whole of it for the single-project install most deployments are.</p>
+<h2 id="keys">Keys</h2>
+<p>Several key pairs can be active at once, which is what makes rotation
+zero-downtime. An owner or editor does it in the interface, under <strong>Settings →
+Project → API keys</strong>; from a terminal it takes the admin token, because no
+project key manages keys:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls<span class="w">                                      </span><span class="c1"># the project's id</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span><span class="w">  </span><span class="c1"># mint the new pair</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># move your SDKs onto it</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>ls<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w">                            </span><span class="c1"># wait until the old one goes quiet</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>rm<span class="w"> </span>tp-pk-old…<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w">                 </span><span class="c1"># revoke it</span>
+</code></pre></div>
+<p>The token reaches every project, so it needs <code>--project</code> as soon as there is
+more than one; with a single project the command finds it by itself.</p>
+<p>Every key is minted with its <strong>scopes</strong> — one or more of <code>ingest</code>, <code>read</code> and
+<code>write</code> (<a href="../api/#scopes">api.md</a>) — and <code>POST /api/v1/projects/{id}/keys</code>
+requires them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"scopes": ["ingest"], "name": "checkout api"}'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="s2">"localhost:4318/api/v1/projects/</span><span class="nv">$ID</span><span class="s2">/keys"</span>
+</code></pre></div>
+<p>A missing or empty <code>scopes</code>, or a word that is not one of the three, is a
+<code>400</code> that names them; a word given twice counts once. Mint for the program
+that will hold the key: <code>ingest</code> for a production application, <code>read</code> for an
+agent or an MCP client, all three for the eval harness or an operator's
+script. <strong>A key's scopes never change.</strong> Widening a key would widen every copy
+of it, the one that got away included; to narrow or widen one, mint a new key
+with the scopes you want, move the program onto it, and revoke the old — the
+same steps as the rotation above. Every key that predates scopes holds all
+three, and so does the key a project is created with; replacing those with
+narrower ones is the rotation to do first.</p>
+<p>Revoking a key also voids the media upload URLs it obtained
+(<a href="../media/#the-langfuse-sdks-media-channel">media.md</a>): an upload the key
+had in transit is refused rather than landing after the key is gone.</p>
+<p>There is never a window where ingest <code>401</code>s. The secret half of a pair is
+returned exactly once, at creation; the store keeps only its SHA-256 hash, so
+there is nothing to show later even to an administrator. The name is optional,
+at most 64 characters, free of control characters and not unique: it is there
+to say which program holds
+the key.</p>
+<p>The listing says, for each key, who minted it and when it was last used:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>PUBLIC KEY           NAME          SCOPES             CREATED              CREATED BY                   LAST USED
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>tp-pk-3f9a…          -             ingest             2026-09-01 08:00:00  server                       2026-09-26 17:41:12
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>tp-pk-81c0…          checkout api  ingest             2026-09-26 17:30:05  ed@example.com (editor)      never
+</code></pre></div>
+<ul>
+<li><strong>Created by</strong> is the account that minted it, with its email as it was then
+  and its standing in the project now — <code>owner</code>, <code>editor</code>, <code>viewer</code>, <code>removed</code>
+  (no role here any more), <code>disabled</code> or <code>deleted</code>; or <code>admin token</code>; or
+  <code>server</code>, for the key of the first-start project — which holds <code>ingest</code>
+  alone, since it is printed to the log — and those <code>TRACEPAD_PROJECTS</code>
+  declares, which hold all three; or <code>unknown</code>, for a key older than this
+  record. If a key was ever lost, the <code>unknown</code> keys created after it are the
+  ones to rotate first.</li>
+<li><strong>Last used</strong> is the last request the key authenticated, admitted or
+  refused. It is written to the database once a minute; the listing includes
+  uses not yet written, and a crash loses at most that minute. <code>never</code> means not since the server started
+  recording it.</li>
+</ul>
+<p>Taking somebody's access away — removing a membership, demoting an editor,
+disabling or deleting the account — revokes no key: the person who minted a
+key is often the one who wired production with it, and ingest stopping by
+surprise is the worse failure. The Keys card marks a key whose minter can no
+longer manage keys in the project, and deleting an account shows the keys it
+minted before it asks for the email. Rotate those deliberately: mint, move,
+revoke.</p>
+<p>Revoking a project's <strong>last</strong> key leaves a project that cannot ingest, and so
+does revoking the last key that carries <strong><code>ingest</code></strong> while <code>read</code> or <code>write</code>
+keys remain. Both are allowed — an owner or editor can mint a new pair in the
+interface, and so can the admin token — but both ask for the confirmation
+first: the dry run asks for the project's name, and for the last <code>ingest</code> key
+its note says that ingest stops until another key with that scope is minted. <code>TRACEPAD_PROJECTS</code>
+does not re-add it: on restart it creates the projects it names that do not
+exist and leaves an existing project's keys as they are.</p>
+<h2 id="retention">Retention</h2>
+<p>See <a href="../retention/">retention.md</a>. The short version:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>tracepad<span class="w"> </span>retention<span class="w"> </span>show
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--raw-days<span class="w"> </span><span class="m">14</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--forever<span class="w"> </span>--raw-follow
+</code></pre></div>
+<p><code>null</code> — <code>--forever</code> for traces, <code>--raw-follow</code> for raw — is a value, not an
+absence: it means "keep forever" and "follow the trace window", and it is the
+only way to say it: a day count is bounded at 36500. A window that
+<strong>grows</strong> applies immediately. A window that <strong>shrinks</strong> destroys data on the
+next sweep, so it is previewed and confirmed like any other destruction, even
+when nothing is old enough to be affected yet: what is being changed is the
+policy.</p>
+<p>The same <code>PATCH /api/v1/projects/{id}</code> carries the project's media setting,
+<code>"media": "store"</code> (the default) or <code>"placeholder"</code> — whether ingest keeps the
+images and files it takes out of payloads, or only a reference saying it did
+not (<a href="../media/#not-keeping-them-the-placeholder-setting">media.md</a>). It is not
+destructive either way and needs no confirmation: <code>tracepad retention set
+--media placeholder</code>.</p>
+<p>Every dry run of a deletion — a window that shrinks, an erasure, a trace
+deletion, a project's — and every confirmed answer names the media bodies the
+project would stop holding as <code>media</code> and their decoded bytes as
+<code>media_bytes</code>: the bodies none of the project's traces or raw batches staying
+behind points at. The figure is the project's own, like the one
+<code>GET /api/v1/system</code> reports: a body another project also holds is counted,
+although its bytes stay on disk for that project, and a project's deletion no
+longer says how much of what it counts leaves the disk.</p>
+<h2 id="erasing-a-users-data">Erasing a user's data</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711
+</code></pre></div>
+<p>The echo is the user id. The erasure takes the traces filed under it with
+everything hanging off them, the scores on their sessions, the dataset items
+cut from them and their spans in the raw OTLP bodies
+(<a href="../retention/#deleting-a-users-data">retention.md</a> has the whole list). The
+dry run counts each before anything happens:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">"dry_run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">"would_delete"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="mi">240</span><span class="p">,</span><span class="w"> </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="nt">"session_scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="nt">"annotation_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"media"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"media_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">812003</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">  </span><span class="nt">"oldest_ingested"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-06-01T09:14:02Z"</span><span class="p">,</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">  </span><span class="nt">"affected_runs"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">}],</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">  </span><span class="nt">"affected_datasets"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">}],</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">  </span><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"batches_to_scan"</span><span class="p">:</span><span class="w"> </span><span class="mi">41</span><span class="p">,</span><span class="w"> </span><span class="nt">"unattributable_batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">  </span><span class="nt">"confirm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user-4711"</span><span class="p">,</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">  </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"the user's spans are removed from the raw batches that hold them …"</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>session_scores</code> — scores given to one of the user's sessions rather than a
+  trace; a session another user's traces share loses them too.</li>
+<li><code>dataset_items</code> and <code>affected_datasets</code> — the items cut from the user's
+  traces, every version of each: an item that is a verbatim copy of their
+  input and output goes with its history, and each dataset's version advances
+  by one (<a href="../datasets/#where-an-item-came-from">datasets.md</a>).</li>
+<li><code>affected_runs</code> — erasure outranks the pin a run puts on its traces, and the
+  run shows those items as missing afterwards
+  (<a href="../datasets/#what-a-run-keeps">datasets.md</a>).</li>
+<li><code>raw.batches_to_scan</code> — the raw batches received while the user's traces
+  were arriving, which the erasure decodes and checks for the user's spans.
+  <code>raw.unattributable_batches</code> — the batches older than the trace window,
+  which may hold spans of traces the sweep already took and which nothing can
+  attribute to the user any more
+  (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).
+  It is an estimate, not an exact count: it counts every batch received
+  before the window's edge, including ones whose traces a run still keeps,
+  and misses the few later batches of a trace that was open across the edge.
+  Counting exactly would mean decoding the whole archive.</li>
+</ul>
+<p>While an erasure of the user is under way, the dry run says so before its
+counts, which are shrinking under it: <code>"running": {"id": "4f0c…", "state":
+"running", "phase": "parsed"}</code>, and <code>tracepad users rm-data</code> prints <code>an
+erasure of this user is running: 4f0c… (parsed)</code>.</p>
+<p>Confirmed, an erasure is <strong>a task</strong>. Everything that can refuse it — the
+role or the key's scope, a deleted project, a wrong echo, a server that is
+not taking writes — refuses first and records nothing; then the erasure is
+recorded and the answer is <code>202 Accepted</code>, with the erasure as the body and a
+<code>Location</code> to read it at. <code>?wait=&lt;seconds&gt;</code>, up to 30, holds the answer that
+long for the erasure to end, and answers <code>200</code> with the same body when it did:
+a user of a few traces is erased in one round trip. The interface waits 20
+seconds, <code>tracepad users rm-data</code> 30, and both follow a longer one to its end
+(<code>--no-wait</code> prints its id instead). A second request for a user whose
+erasure is queued or running answers that erasure rather than starting
+another.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f0c9d3e8a1b2c3d4e5f60718293a4b5"</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">"state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"done"</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">"phase"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">"user_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user-4711"</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">"dry_run"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:09Z"</span><span class="p">,</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="nt">"started_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:09Z"</span><span class="p">,</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="nt">"finished_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="nt">"progress"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"traces_at_start"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"traces_deleted"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">},</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">  </span><span class="nt">"deleted"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">    </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="mi">240</span><span class="p">,</span><span class="w"> </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="nt">"session_scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">    </span><span class="nt">"payloads"</span><span class="p">:</span><span class="w"> </span><span class="mi">480</span><span class="p">,</span><span class="w"> </span><span class="nt">"annotation_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">    </span><span class="nt">"media"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"media_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">901442</span><span class="p">,</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">    </span><span class="nt">"raw_spans"</span><span class="p">:</span><span class="w"> </span><span class="mi">252</span><span class="p">,</span><span class="w"> </span><span class="nt">"raw_batches_rewritten"</span><span class="p">:</span><span class="w"> </span><span class="mi">38</span><span class="p">,</span><span class="w"> </span><span class="nt">"raw_batches_deleted"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">  </span><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"expected_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T11:00:00Z"</span><span class="p">},</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">  </span><span class="nt">"pre_migration_backup"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-24T08:00:00Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"remove_after"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-01T08:00:00Z"</span><span class="p">},</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>state</code> — <code>queued</code>, <code>running</code>, <code>done</code> or <code>failed</code>; <code>phase</code> — <code>raw</code>,
+  <code>parsed</code> or <code>tail</code> while it runs, the three steps below.</li>
+<li><code>progress</code> — <code>traces_at_start</code> is how many traces the user had when the
+  erasure first read them, and <code>traces_deleted</code> how many are gone so far.
+  <code>deleted</code> counts what has been committed so far, and is the whole once the
+  erasure is <code>done</code>.</li>
+<li><code>user_id</code> — the erasure's record holds the user id only while it is queued
+  or running. When it ends, the id is cleared in the same statement, and
+  from then on <code>user_id</code> is <code>null</code> everywhere but in the answer to the request
+  that started it. The record itself goes 30 days after the end.</li>
+<li><code>error</code> — why a <code>failed</code> erasure failed: the phase and a cause from a fixed
+  list, such as <code>the parsed phase failed: the disk is full</code>. An erasure that
+  ran out of starts says <code>3 starts ended before the erasure did</code>, followed by
+  <code>; its tail last failed with:</code> and a cause when a tail failed. The record
+  never carries an error's own text, so it cannot name the user. Nor does the
+  erasure's log: its lines never carry an error's text, only its cause, type
+  and position — the erasure's id, the phase, the raw batch when it is one's,
+  the Go types of the error (<code>types=*json.SyntaxError</code>) and SQLite's code
+  (<code>sqlite=13</code>) when there is one. That is what there is to go on; there is
+  no setting that gives the text.</li>
+</ul>
+<p><code>GET /api/v1/projects/{id}/erasures/{erasure_id}</code> reads one erasure, and
+<code>GET /api/v1/projects/{id}/erasures</code> the project's hundred, those under way
+first and then the newest
+— both for an editor, or a key with <code>write</code>, like the erasure itself.
+<code>tracepad users erasure &lt;id&gt;</code> and <code>tracepad users erasures</code> print them.</p>
+<ul>
+<li><code>raw_spans</code>, <code>raw_batches_rewritten</code>, <code>raw_batches_deleted</code> — the user's
+  spans taken out of the raw archive, and the batches that held them:
+  rewritten without them, or deleted, when nothing else was in them or a
+  rewrite failed. A rewritten batch is marked <code>scrubbed_at</code>
+  (<a href="../export/#batches-an-erasure-rewrote">export.md</a>). <code>media</code> counts the
+  pictures only those spans pointed at as well.</li>
+<li><code>compaction</code> — the freed space is zeroed as the rows go; the search index
+  and the write-ahead log are rewritten by a sweeper pass, and <code>expected_by</code>
+  is when that pass is due: the next one, or the one after a pass already
+  running. <code>GET /api/v1/system</code> says when it finished. Both fields are <code>null</code>
+  when the erasure found nothing to delete and so asked for nothing.</li>
+<li><code>pre_migration_backup</code> — present while the server keeps a copy of the
+  database from before its last upgrade: the one copy an erasure does not
+  rewrite. <code>remove_after</code> is seven days after it was written; the first
+  sweeper pass after that removes it — not before, and not while the server
+  is down. The dry run names it too.</li>
+</ul>
+<p><strong>What it does not take.</strong> What no id links to the user — a name typed into
+someone else's prompt, an item copied without its source — the raw batches
+older than the trace window, and the pre-migration backup until its date.
+<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a> lists
+each.</p>
+<p>The <strong>annotation-queue items</strong> pointing at the erased traces go with them
+(<a href="../annotation/">annotation.md</a>) — an item is a pointer, and the queues keep
+their shape with shorter lists. Both the dry run and the answer count them
+under <code>annotation_items</code>, beside the traces and the scores. The verdicts
+already given are scores on those traces and go with the traces.</p>
+<p>The user's rows in the <strong>per-user rollup</strong> (<a href="../users/">users.md</a>) go with the
+first chunk of their traces, outright rather than by recomputation: they are about the user,
+and for an hour past the trace-retention window there would be nothing left to
+recompute them from. So the account leaves <code>/api/v1/users</code> immediately, and
+<code>GET /api/v1/users/{id}</code> answers <code>404</code>. The project-wide statistics are
+corrected where they can be, which is the rule
+<a href="../retention/#what-outlives-what">retention.md</a> states.</p>
+<p>One erasure runs at a time on a server; the others wait, oldest first. The
+<strong>raw archive goes first</strong>: the batches that hold the user's spans are found,
+decoded and rewritten one writer job each, before the parsed rows go, because
+once those are gone nothing names the batches any more. The parsed rows then
+go in <strong>chunks</strong> — up to five hundred traces, taken in the order they
+started, whole hours at a time — each one a transaction that leaves the store
+consistent on its own: the chunk's traces go and the hours they occupied are
+recomputed in the same commit, each hour once (an hour holding more than five
+hundred of the user's traces once per chunk it spans), and the writer is held
+for one chunk at a time so ingest keeps flowing between them. A chunk takes
+as many hours as are light to recompute; a dense hour is a chunk of its own.
+20 000 traces spread over a month are about sixty chunks, and seconds rather
+than minutes. Last, the <strong>tail</strong>: the raw batches that arrived for the erased
+traces while the erasure ran are rewritten too.</p>
+<p>Nobody has to wait for it. A closed tab or a client that gives up loses the
+answer and nothing else, and the erasure's record says where it is. A <strong>stop
+of the server</strong> interrupts it without waiting: every job commits its progress
+with it, so the next start <strong>resumes</strong> the erasure from its phase — including
+the tail, which a repeat of the request could not finish, because the traces
+that named those batches are gone. A clean stop does not count against the
+erasure; a crash does, and so does a run that failed where the next could
+succeed — a tail that could not be read, an end that could not be written,
+retried a minute later, after every other erasure waiting. After three of those the next start only rewrites
+those batches and ends the erasure <code>failed</code> rather than trying for ever, with
+what the tail last failed with in its error if it did. A job that meets a
+full write queue or a condition of the database — a full disk, a lock that
+did not clear — is retried for up to two minutes; any other failure ends the
+erasure <code>failed</code>, after the tail has run for the chunks that committed. Repeating
+the request then finds what is left and finishes it.</p>
+<h2 id="deleting-traces">Deleting traces</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span><span class="m">2026</span>-09-17T14:02:17Z<span class="w"> </span>--env<span class="w"> </span>loadtest<span class="w"> </span>--since<span class="w"> </span>24h
+</code></pre></div>
+<p>A trace leaves the store in exactly two ways otherwise: the retention sweep
+takes it when its window runs out, or the project goes whole. In between is
+where the mistakes live — an eval harness that exported under the
+application's key, a load test run against production, one trace holding
+something a person should not have typed — and this is the door for those.
+A deletion also voids the media upload URLs for the traces it removes, and
+refuses new ones, for the hour such a URL lives, so a picture in transit cannot land after its trace
+is gone.
+One trace by id, or every trace a <a href="../api/#filters">listing filter</a> matches:
+<code>DELETE /api/v1/traces/{id}</code>, and <code>DELETE /api/v1/traces?&lt;filters&gt;&amp;to=</code>. An
+editor's route rather than an administrator's — it is the reader's and the
+manager's gesture at the surfaces where they read and choose — and it wears
+the same ceremony as everything above: a dry run until <code>confirm</code> echoes the
+identity of what goes. The SDKs call both from a script, the rounds walked for
+you — <a href="../sdk-python/#deleting-traces">Python</a>, <a href="../sdk-js/#deleting-traces">Node</a>,
+<a href="../sdk-go/#deleting-traces">Go</a>.</p>
+<p><strong>What goes</strong> is what erasure takes, by the same path: the trace, its
+observations, scores, payloads and search entries, the
+<a href="../annotation/">annotation-queue items</a> pointing at it, and the hour it
+started in re-rolled in the same transaction, so the
+<a href="../retention/#what-outlives-what">statistics</a> stop counting it as the <code>200</code>
+arrives. Raw OTLP bodies are <strong>not</strong> touched — a raw batch holds many traces
+of many kinds, and a trace cannot be cut out of one — and the preview says so
+in its <code>note</code>. A trace an eval run holds is deleted like any other; the run
+then shows the item as missing, and the preview names the run under
+<code>affected_runs</code> so the hole is seen before it opens
+(<a href="../datasets/#what-a-run-keeps">datasets.md</a>).</p>
+<p><strong>One trace.</strong> The echo is the trace id, because the id is the trace's only
+identity. Without <code>confirm</code> the endpoint answers the preview — <code>would_delete</code>
+with <code>traces</code>, <code>observations</code>, <code>scores</code> and <code>annotation_items</code>, <code>oldest_ingested</code>,
+<code>affected_runs</code>, <code>confirm</code>, <code>note</code> — and an unknown id is <code>404</code>, dry run and
+confirmed alike. With <code>?confirm=&lt;id&gt;</code> it deletes and answers
+<code>{"dry_run": false, "deleted": {…}, "id", "compaction"}</code>; <code>deleted</code> counts the
+payloads too, and <code>compaction</code> says when the sweeper pass that overwrites what
+the deletion unlinked is due. That pass compacts the whole store, however
+little was deleted — on a large one, a rewrite of the search index; deletions
+within one interval share it (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).</p>
+<p><strong>By filter.</strong> The filters are the trace listing's own — the same names, the
+same validation, <code>400</code> on an unknown one — so "delete what I am looking at"
+is one call with no second grammar; an empty filter is <em>every trace before
+<code>to</code></em>. <code>to</code> is <strong>required</strong>, dry run and confirmed alike: the listing is
+half-open on it, so a trace that starts after it can never qualify, and the
+operator who previewed a thousand does not delete a thousand and forty
+because ingest kept flowing in between. The CLI does not fill it in — a
+script that deletes by filter should say what it means — and the interface
+pins it to the moment its dialog opened, and says so. The preview counts the
+match <strong>exactly</strong> under <code>matched</code> (the listing's own count stops at a
+thousand), and the echo is the <strong>project name</strong>, the one retention shrinking
+already uses for the same act by another door.</p>
+<p>A confirmed request deletes <strong>one round</strong>: the newest <code>limit</code> matches
+(1–1000, default 1000), in chunks of whole hours — at most five hundred
+traces, and as many hours as are light to recompute — each chunk its own
+transaction, and at most fifty such chunks, whichever bound comes first, so a
+set spread thinly over many dense hours does not run past the interface's
+clock — and answers
+<code>{"dry_run": false, "deleted": {…}, "more": true}</code> — repeat the same call
+while <code>more</code> is true. A request that ran for minutes is one the interface's
+thirty-second clock would cut off every time, leaving the operator with an
+error over a store that is in fact fine; a round is a complete, consistent
+act, and the client — the CLI, the dialog — is the one that loops and can say
+<em>2,000 of 12,000</em>. A round cut off between chunks destroys nothing half-way:
+what committed is gone and counted, and the next request continues. Nothing
+is recounted on the way: a confirmed round takes what the filter matches at
+that moment, so a set that shrank since the preview — retention, another
+operator, an earlier round — is not a reason to refuse, and a repeat after
+<code>more: false</code> deletes nothing and is not an error.</p>
+<p><strong>The ingest race is documented, not fought.</strong> A deletion removes what the
+store holds at that moment. A span that arrives afterwards for a deleted
+trace creates the trace again from what arrived, exactly as it would for a
+trace never seen; nothing is remembered about deleted ids. <code>to=</code> makes this
+rare for the bulk form, and an operator deleting a trace whose spans are
+still arriving has a stopwatch problem, not a store problem: wait for the
+export to finish, then delete.</p>
+<p>Not here: moving traces between projects (replay the
+<a href="../export/">raw bodies</a> into the other project with its key), a trash or an
+undo (a project has a grace window because a project is a thing with a name
+and a history; a trace is a row, and a re-export recreates it), deleting one
+observation. A session's traces are <code>?session_id=…&amp;to=</code>.</p>
+<h2 id="in-the-web-interface">In the web interface</h2>
+<p><em>Delete…</em> sits on the trace header beside <em>Add to queue</em>, and on the traces
+listing beside <em>Add to queue…</em> — editors only, like both — each a dialog
+around the same card with the server's dry run on screen
+(<a href="../ui/#deleting-traces">ui.md</a>).</p>
+<p>The same card sits on the user's own page (<code>/users/{id}</code> → <em>Erase data</em>), with
+the id already filled in; on success the page leaves for the listing. It is
+the Settings card with one field fewer — one contract, rendered twice.</p>
+<p>The Settings screen renders this whole contract (see <a href="../ui/#settings-and-administration">ui.md</a>):
+a <strong>Project</strong> tab with the project's own management, and a <strong>Server</strong> tab —
+owners only — with the project lifecycle and the accounts. Every destructive
+card is the dry run above, shown, with the same echo typed into a field: the
+browser is not a softer path to destruction than <code>curl</code>.</p>
+<p><code>TRACEPAD_ADMIN_TOKEN</code> is not entered in the interface at all. It was there
+because one credential unlocked the management plane in a browser; an owner
+<a href="../accounts/">account</a> is that credential now, and the token stays what it is
+for — the CLI, and the recovery when every owner's password is lost
+(<a href="../cli/#accounts">cli.md</a>).</p>
+<h2 id="not-on-the-mcp-surface">Not on the MCP surface</h2>
+<p>None of this is reachable as an MCP tool, and that is structural rather than an
+oversight. An agent should not hold destructive capability at all, so that a
+hallucinated tool call has nothing to destroy. See <a href="../mcp/">mcp.md</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
