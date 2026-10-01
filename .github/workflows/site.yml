@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "dev, or vX.Y for a release's docs"
+        description: "dev (run from main), or vX.Y for a release's docs (built from that line's newest stable tag)"
         default: dev
       alias:
         description: "latest, when the version is the newest stable release"
@@ -46,13 +46,16 @@ on:
 
 permissions: {}
 
-# Two deploys write one branch: the second waits for the first rather than
-# being cancelled with it half done. A later push to `main` builds all of the
-# docs again, so a `dev` run that is replaced while it waits loses nothing; a
-# release's deploy that is replaced is rerun by hand. Concurrency is not what
-# keeps the branch right — `publish` only fast-forwards it.
+# Two deploys write one branch, so the second waits for the first rather than
+# being cancelled with it half done. A waiting run is replaced by a newer one
+# in its group, and that must never be a release's deploy: `dev` and releases
+# are groups of their own. A `dev` that is replaced loses nothing — a later
+# push builds all of the docs again — and releases only wait for releases. A
+# `dev` and a release that overlap can still race for the branch; `publish`
+# only fast-forwards it, so the loser fails loudly and is rerun
+# (`workflow_dispatch`). Concurrency is not what keeps the branch right.
 concurrency:
-  group: docs-site
+  group: docs-site-${{ (inputs.version == '' || inputs.version == 'dev') && 'dev' || 'release' }}
   cancel-in-progress: false
 
 # The uv CI tests with; Dependabot does not move it (spec 020 #19).
@@ -90,16 +93,44 @@ jobs:
           [[ "$ALIAS" =~ ^(latest)?$ ]] || { echo "alias $ALIAS is not latest" >&2; exit 1; }
           [ "$ALIAS" = "" ] || [ "$VERSION" != dev ] || { echo "dev takes no alias" >&2; exit 1; }
 
+          # What this version is built from, whatever ref the run was started
+          # on. `dev` is `main`. A release is its tag — the one that called
+          # this workflow, or, for a run started by hand, the newest stable
+          # tag of the line: a dispatch from `main` must not publish `main`'s
+          # docs as `v0.2`.
+          fail() { echo "$*" >&2; exit 1; }
+          if [ "$VERSION" = dev ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || fail "dev is built from main, not $GITHUB_REF"
+          else
+            case "$GITHUB_REF" in
+              refs/tags/*)
+                tag="$GITHUB_REF_NAME"
+                [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "tag $tag is not vX.Y.Z"
+                [ "${tag%.*}" = "$VERSION" ] || fail "tag $tag is not on $VERSION"
+                ;;
+              *)
+                tag="$(git tag --list "$VERSION.[0-9]*" --sort=-v:refname | awk '!/-/' | head -1)"
+                [ -n "$tag" ] || fail "no stable tag on $VERSION"
+                git checkout --quiet --detach "refs/tags/$tag"
+                ;;
+            esac
+            [ -f scripts/docs-site/deploy.sh ] || fail "$tag predates the docs site"
+            echo "building $VERSION from $tag"
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # The branch as published, if there is one: mike adds to it. The
-          # first deploy finds none and starts it.
-          if git fetch --no-tags origin gh-pages:refs/heads/gh-pages 2>/dev/null; then
+          # checkout fetched every branch (`fetch-depth: 0`), with the
+          # credentials it had, so a missing one is a first deploy and not a
+          # fetch that failed.
+          if git rev-parse --quiet --verify refs/remotes/origin/gh-pages >/dev/null; then
+            git branch --force gh-pages refs/remotes/origin/gh-pages
             base="$(git rev-parse refs/heads/gh-pages)"
           else
             base=""
-            echo "no gh-pages yet: this deploy starts it"
+            echo "::notice::no gh-pages on the remote: this deploy starts it"
           fi
 
           scripts/docs-site/deploy.sh "$VERSION" ${ALIAS:+"$ALIAS"}
@@ -148,10 +179,18 @@ jobs:
 
           git init --quiet "$RUNNER_TEMP/pages"
           cd "$RUNNER_TEMP/pages"
-          # The tip the bundle was cut from has to be here for it to verify;
-          # on the first deploy there is no tip and no such requirement.
-          "${net[@]}" fetch --quiet --no-tags "$remote" gh-pages:refs/remotes/origin/gh-pages 2>/dev/null ||
-            echo "no gh-pages yet"
+          # The tip the bundle was cut from has to be here for it to verify; on
+          # the first deploy there is no tip and no such requirement. `ls-remote`
+          # says 2 for "no such branch" and anything else for a failure, which
+          # stops the run with git's own words instead of reading as a first
+          # deploy.
+          if "${net[@]}" ls-remote --exit-code --heads "$remote" gh-pages >/dev/null; then
+            "${net[@]}" fetch --quiet --no-tags "$remote" gh-pages:refs/remotes/origin/gh-pages
+          else
+            status=$?
+            [ "$status" -eq 2 ] || exit "$status"
+            echo "::notice::no gh-pages on the remote: this bundle starts it"
+          fi
           git bundle verify "$RUNNER_TEMP/docs.bundle"
           git fetch --quiet "$RUNNER_TEMP/docs.bundle" refs/heads/gh-pages:refs/heads/incoming
           # No `--force`: a bundle that is not a fast-forward of the branch as

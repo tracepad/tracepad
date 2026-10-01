@@ -31,18 +31,25 @@ theme:
   # (spec 050 #4).
   font: false
   language: en
+  # The mark without its tile, on the black header: its light strokes are
+  # drawn for a dark ground. The favicon is the mark on its tile.
+  logo: assets/mark-on-dark.svg
+  favicon: assets/favicon.svg
   palette:
     - media: "(prefers-color-scheme)"
+      primary: black
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: black
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: black
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -64,11 +71,13 @@ plugins:
   - search
   # Versions (spec 050 #2). An alias is a page of redirects, not a symlink:
   # a symlink in the branch is a thing a Pages host may or may not follow,
-  # and a redirect is one it cannot get wrong. Every old version names the
-  # newest release as its canonical page, so a search lands there.
+  # and a redirect is one it cannot get wrong. Every version names the newest
+  # release as its canonical page, so a search lands there — once there is
+  # one: `deploy.sh` sets DOCS_CANONICAL when `latest` exists, and until then
+  # no page claims a canonical address that would be a 404 (spec 050 #11).
   - mike:
       alias_type: redirect
-      canonical_version: latest
+      canonical_version: !ENV [DOCS_CANONICAL, null]
 
 # docs/ links to the README, the changelog and scripts/ by relative path, which
 # is right on GitHub and not a page here; the hook points them at GitHub.

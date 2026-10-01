@@ -637,7 +637,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The eval harness in Node | `sdk/js/src/harness.ts` (`stamp`, which `tracing.ts`'s processor calls at `onStart`, `Run`, `Attempt`, `scoreConfigs`, `compare`, `itemId`, the paging loop) and `datasets.ts` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-node`, `docs/sdk-js.md#evals`, spec 032 #10 — the attempt rides the OTel context, so it reaches an `await` and a callback and not a worker; the block opens no span; `wrap` is the close that can `fail`, `Symbol.asyncDispose` the one that cannot see the error and finishes |
 | The eval harness in Go | `sdk/go/harness.go` (the processor, `Run`, `Attempt`, `ScoreConfigs`, `Compare`, `ItemID`, the paging iterator) and `datasets.go` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-go`, `docs/sdk-go.md#evals`, spec 033 #10 — the item block is a context (`run.Item(ctx, item)` returns one), read by a `SpanProcessor` at `OnStart` and never a span the harness opened; `Init` registers it before the exporter and under `WithExport(false)` too; `Items` is an `iter.Seq2` over every page; there is no block that closes a run, so `Fail` on the error path is the caller's (#16) |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
-| The documentation site | `mkdocs.yml`, `docs/index.md`, `scripts/docs-site/` (`run.sh` runs the locked toolchain, `deploy.sh` puts one version on a branch and never pushes, `hooks.py` points `docs/`'s links out of itself at GitHub), `.github/workflows/site.yml` and the `docs` job of `release-server.yml`, spec 050 — a new page goes in the navigation *and* in `docs/index.md` or the strict build fails; nest list content by four spaces; `make docs-site` rehearses on `gh-pages-rehearsal`, never `gh-pages` (#9) |
+| The documentation site | `mkdocs.yml`, `docs/index.md`, `scripts/docs-site/` (`run.sh` runs the locked toolchain, `deploy.sh` puts one version on a branch and never pushes, `hooks.py` points `docs/`'s links out of itself at GitHub, `hooks_test.py` tests it, `docs/assets/` holds the mark), `.github/workflows/site.yml` and the `docs` job of `release-server.yml`, spec 050 — a new page goes in the navigation *and* in `docs/index.md` or the strict build fails; nest list content by four spaces; `make docs-site` rehearses on `gh-pages-rehearsal`, never `gh-pages` (#9) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 | The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
@@ -675,8 +675,8 @@ reason in a comment; adding a dialect should be a table edit.
   `make doc-anchors-self-test` runs the checker over its fixture.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
-  needs `uv`). A link to no file, an anchor on no heading and a page in no
-  navigation each fail it. `make docs-site` deploys `dev` and a stand-in `v0.1`
+  needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
+  file, an anchor on no heading and a page in no navigation each fail it. `make docs-site` deploys `dev` and a stand-in `v0.1`
   with `latest` onto a throwaway local branch and serves it on `localhost:8000`
   (`DOCS_ADDR=…` to move it); `make docs-site-clean` removes the branch.
 - `make dev` — run the server, output mirrored to `.dev.log` (read that file
@@ -781,7 +781,9 @@ its `docs` job: the pages are built from the tag as `vX.Y`, with the alias
 `latest` when the image's `latest` moves too, and published to `gh-pages` by a
 job that builds nothing (spec 050 #6, #7). A pre-release deploys no docs. If
 that job fails the release is already out; rerun it with *Run workflow* on
-`site.yml` (`vX.Y`, and `latest` when it applies).
+`site.yml` (`vX.Y`, and `latest` when it applies) — from any branch: the docs
+are built from the line's newest stable tag, and `dev` only from `main`
+(spec 050 #12).
 
 Before tagging:
 

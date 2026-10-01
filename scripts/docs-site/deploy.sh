@@ -22,6 +22,15 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 run="$ROOT/scripts/docs-site/run.sh"
 
+# `latest` is the canonical page of every version (mkdocs.yml), which is only
+# an address that exists once a release has made it: this deploy's own, or one
+# on the branch already. Before that no page names a canonical version, rather
+# than one that is a 404.
+versions="$(git show "$branch:versions.json" 2>/dev/null || true)"
+if [ "$alias" = latest ] || grep -q '"latest"' <<<"$versions"; then
+	export DOCS_CANONICAL=latest
+fi
+
 # The title is the version as the selector shows it. A release is `vX.Y`:
 # the patch is not part of what the docs are versioned by, so a back-patch
 # replaces its line's pages and the next patch does too.
@@ -30,8 +39,11 @@ run="$ROOT/scripts/docs-site/run.sh"
 
 # The root follows `latest` once a release has taken it and `dev` until then,
 # so a site with no release has a front page and one with a release shows
-# what a user can install.
-if git show "$branch:versions.json" 2>/dev/null | grep -q '"latest"'; then
+# what a user can install. The branch is read again, into a variable and not
+# through a pipe: under `pipefail` a `grep -q` that stops reading early hands
+# the `if` the SIGPIPE of `git show`, which reads as "no `latest`".
+versions="$(git show "$branch:versions.json" 2>/dev/null || true)"
+if grep -q '"latest"' <<<"$versions"; then
 	default=latest
 else
 	default=dev
