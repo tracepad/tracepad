@@ -4,6 +4,9 @@
 # releases what `sdk/js/package.json` calls 0.2.0, and a tag that says
 # anything else fails before a build happens — a version on npm cannot be
 # taken back.
+# The version is read from the tag that triggered the run (`GITHUB_REF_NAME`),
+# never from `git describe`: a commit may carry the server's tag and the other
+# packages' beside this one (spec 020 #28).
 #
 # Credentials: none. npm trusted publishing exchanges this workflow's OIDC
 # token for a publish token, so there is no token in the repository to leak
@@ -92,6 +95,9 @@ jobs:
             *) echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
           echo "publishing $version"
-      - run: npm publish package/*.tgz --provenance --access public --ignore-scripts --tag "$DIST_TAG"
+      # `./`, because npm reads `package/tracepad-0.1.0.tgz` as the GitHub
+      # shorthand `owner/repo` and goes to ssh://git@github.com for it; a path
+      # is a path only when it starts like one (spec 020 #28).
+      - run: npm publish ./package/*.tgz --provenance --access public --ignore-scripts --tag "$DIST_TAG"
         env:
           DIST_TAG: ${{ steps.tag.outputs.tag }}

@@ -3,7 +3,9 @@
 # The tag is the trigger and the version is the package's own: `sdk-py/v0.2.0`
 # releases what `sdk/python/src/tracepad/_config.py` calls 0.2.0, and a tag
 # that says anything else fails before a build happens — a version on PyPI
-# cannot be taken back.
+# cannot be taken back. The version is read from the tag that triggered the
+# run (`GITHUB_REF_NAME`), never from `git describe`: a commit may carry the
+# server's tag and the other packages' beside this one (spec 020 #28).
 #
 # Credentials: none. PyPI trusted publishing exchanges this workflow's OIDC
 # token for an upload token, so there is no API token in the repository to
@@ -44,14 +46,11 @@ jobs:
           python-version: "3.13"
           enable-cache: false
 
+      # The tag spells a pre-release as semver does (`sdk-py/v0.2.0-rc.1`, as
+      # every tag here does) and the script derives PyPI's spelling of it
+      # (`0.2.0rc1`, PEP 440) to hold the package to.
       - name: The tag and the package must agree about the version
-        run: |
-          tagged="${GITHUB_REF_NAME#sdk-py/v}"
-          declared="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' sdk/python/src/tracepad/_config.py)"
-          if [ "$tagged" != "$declared" ]; then
-            echo "tag says $tagged, the package says $declared" >&2
-            exit 1
-          fi
+        run: scripts/sdk-py-release-check.sh "$GITHUB_REF_NAME"
 
       # The test dependencies from the lock, and not the package: building it
       # editable here would run the build backend outside the constraints
