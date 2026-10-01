@@ -1004,6 +1004,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-the-page-may-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the page may load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#builds-without-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1825,6 +1836,17 @@
     <span class="md-ellipsis">
       
         Appearance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-page-may-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the page may load
       
     </span>
   </a>
@@ -2744,6 +2766,40 @@ title — a breadcrumb, an identifier, a count — takes a second line under it,
 and the screen's controls stay on the first one. Wider than that it is the
 single row it has always been, and a name too long for the line is shortened
 to an ellipsis rather than moved.</p>
+<h2 id="what-the-page-may-load">What the page may load</h2>
+<p>The interface renders text it did not write — prompts, completions, tool
+arguments, whatever an application put in a span — so the page it is served in
+carries a <code>Content-Security-Policy</code> that limits what can run in it even if some
+of that text ever reached the page as markup. The server sends it with the
+page and with no other response:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>default-src 'none'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline';
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'none';
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+</code></pre></div>
+<ul>
+<li><strong>Script</strong> is the bundle's own files and the one inline script that starts
+  them, named by its hash. The server takes the hash from the page it is about
+  to send when it starts, so a rebuilt interface needs nothing configured.
+  There is no <code>'unsafe-inline'</code> and no <code>'unsafe-eval'</code>: an injected <code>&lt;script&gt;</code>,
+  an <code>onerror="…"</code> or a string passed to <code>new Function</code> is refused.</li>
+<li><strong>Requests</strong> go to the server the page came from and nowhere else
+  (<code>connect-src 'self'</code>, and <code>form-action 'self'</code> for a form). A script that
+  somehow ran could not post a key or a trace to another origin.</li>
+<li><strong>Pictures</strong> are the server's own, <code>blob:</code> for the ones the interface draws
+  from bytes it fetched with your session (<a href="../media/">media</a>), and <code>data:</code> for
+  the page's empty icon. <strong>Fonts</strong> are two files in the bundle.</li>
+<li><strong>Style</strong> is the exception: it may be inline. The editor writes its
+  stylesheet into a <code>&lt;style&gt;</code> element and the dialogs set the page's <code>style</code>
+  attribute, and neither can carry a hash. It is harmless to the page's data,
+  because a style cannot fetch from anywhere the other lines do not allow.</li>
+<li>Everything else — frames, objects, workers, a <code>&lt;base&gt;</code> — is refused.</li>
+</ul>
+<p>A refusal is a line in the browser's console. If a change to the interface
+trips one, the fix is in the change; the policy is not widened without a
+decision in <a href="https://github.com/tracepad/tracepad/blob/main/specs/051-content-security-policy.md">spec 051</a>. <code>npm run dev</code>
+is Vite's server and sends no policy, so the production build is where to look.
+A reverse proxy that adds a <code>Content-Security-Policy</code> of its own adds a second
+policy, and the browser enforces both: it can narrow this one, never loosen it.</p>
 <h2 id="builds-without-it">Builds without it</h2>
 <p>The interface is compiled by Node and Vite, which <code>go build</code> cannot run. A
 plain source build therefore ships without it and serves a page that says so;
@@ -2766,10 +2822,10 @@ other. The type check is <code>svelte-check</code> on TypeScript 6.0: it imports
 compiler as a library, which TypeScript 7 has no stable API for yet, so the
 <code>typescript</code> package is an alias to 6.0's. The interface moves to 7 when 7.1
 ships that API and <code>svelte-check</code> runs on it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>make<span class="w"> </span>ui<span class="w">          </span><span class="c1"># build the bundle and stage it for embedding</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>make<span class="w"> </span>build<span class="w">       </span><span class="c1"># the above, then `go build -tags ui`</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>make<span class="w"> </span>ui-check<span class="w">    </span><span class="c1"># svelte-check, unit tests, and the API-type drift check</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>make<span class="w"> </span>e2e<span class="w">         </span><span class="c1"># boot the real binary on a temp database, run Playwright</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>make<span class="w"> </span>ui<span class="w">          </span><span class="c1"># build the bundle and stage it for embedding</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>make<span class="w"> </span>build<span class="w">       </span><span class="c1"># the above, then `go build -tags ui`</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>make<span class="w"> </span>ui-check<span class="w">    </span><span class="c1"># svelte-check, unit tests, and the API-type drift check</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>make<span class="w"> </span>e2e<span class="w">         </span><span class="c1"># boot the real binary on a temp database, run Playwright</span>
 </code></pre></div>
 <p><code>npm run dev</code> inside <code>ui/</code> serves the app with hot reload and proxies <code>/api</code>
 to a <code>tracepad serve</code> running on the default port.</p>

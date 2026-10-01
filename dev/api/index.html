@@ -3534,7 +3534,10 @@ paste into a bug report.</p>
 </tbody>
 </table>
 <p>A media body replaces the first with its own sandboxing policy, which refuses
-frames too (<a href="#media">Media</a>).</p>
+frames too (<a href="#media">Media</a>). So do the two HTML documents the server hands
+out, the interface's page and the stub of a build without it: they carry a
+policy that lets the bundle's own files and its one inline script run and
+nothing else (<a href="../ui/#what-the-page-may-load">ui.md</a>).</p>
 <p>A response on a route that needs a credential also carries <code>Cache-Control:
 private, no-store</code> and <code>Vary: Authorization, Cookie, X-Tracepad-Project</code>: it is
 one caller's, and no cache in front of the server may keep it. Prompt reads may
