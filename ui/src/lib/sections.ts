@@ -3,11 +3,11 @@ import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
 import Database from '@lucide/svelte/icons/database';
 import FlaskConical from '@lucide/svelte/icons/flask-conical';
 import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
-import ListTree from '@lucide/svelte/icons/list-tree';
 import MessagesSquare from '@lucide/svelte/icons/messages-square';
 import Ruler from '@lucide/svelte/icons/ruler';
 import ScrollText from '@lucide/svelte/icons/scroll-text';
 import Settings from '@lucide/svelte/icons/settings';
+import SquareChartGantt from '@lucide/svelte/icons/square-chart-gantt';
 import Users from '@lucide/svelte/icons/users';
 import type { Component } from 'svelte';
 import { page } from '$app/state';
@@ -27,7 +27,7 @@ export type Group = { label: string; children: Item[] };
 /** Each screen's icon: a screen added to `SCREENS` without one does not compile. */
 const ICONS: Record<(typeof SCREENS)[number]['href'], Item['icon']> = {
 	'/dashboard': LayoutDashboard,
-	'/traces': ListTree,
+	'/traces': SquareChartGantt,
 	'/sessions': MessagesSquare,
 	'/users': Users,
 	'/prompts': ScrollText,

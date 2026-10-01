@@ -152,9 +152,10 @@ func normalizeNewlines(text []byte) []byte {
 //     the editor writes its stylesheet into a `<style>` element and the
 //     dialogs write the page's `style` attribute, neither of which can carry
 //     a hash or a nonce a static bundle could know.
-//   - `img-src` takes `data:` for the empty icon the document names and
-//     `blob:` for the pictures the interface draws from bytes it fetched with
-//     the session's credentials (spec 041 #15).
+//   - `img-src` takes `data:` for the logo's tile the stub carries inline
+//     (spec 006 #30, spec 051 #10) and `blob:` for the pictures the interface
+//     draws from bytes it fetched with the session's credentials (spec 041
+//     #15).
 //   - `connect-src 'self'`: the interface talks to the API of the server that
 //     served it and to nothing else, which is also what keeps a stolen
 //     credential from being posted elsewhere.

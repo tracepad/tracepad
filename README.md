@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/mark-on-dark.svg">
+  <img src="docs/assets/mark-on-light.svg" alt="Tracepad logo" height="56">
+</picture>
+
 # Tracepad
 
 A lightweight, self-hosted store and viewer for LLM and agent application

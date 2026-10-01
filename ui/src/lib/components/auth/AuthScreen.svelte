@@ -2,6 +2,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { Snippet } from 'svelte';
 	import Button from '../Button.svelte';
+	import BrandMark from '../BrandMark.svelte';
 
 	// The frame the three screens outside the shell share (spec 028 #13):
 	// signing in, setting up the first owner, and accepting an invitation. They
@@ -42,7 +43,9 @@
 			onsubmit();
 		}}
 	>
-		<h1 class="text-xl font-semibold tracking-tight">Tracepad</h1>
+		<h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
+			<BrandMark class="h-4.5" />Tracepad
+		</h1>
 		<p class="text-muted mt-1">{intro}</p>
 
 		{@render children()}

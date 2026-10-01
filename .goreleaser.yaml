@@ -45,6 +45,9 @@ archives:
       - NOTICE
       - THIRD_PARTY_NOTICES
       - README.md
+      # The README's header is a <picture> of these two (spec 006 #30); without
+      # them the archive's copy opens on a broken image.
+      - docs/assets/mark-on-*.svg
       - third_party/**/*
 
 checksum:

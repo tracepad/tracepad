@@ -77,6 +77,13 @@
 	 * rather than a word (spec 021 #3). */
 	--color-ok-soft: light-dark(#f0fdf4, #0d2318);
 
+	/* The mark's two colours, and nothing else's (spec 006 #30): the rows are
+	 * the ink of the theme, the tree is the same grey in both. They are the
+	 * logo's own values rather than `fg` and `subtle`, so the mark beside the
+	 * name is the one on the favicon and in the README. */
+	--color-brand-ink: light-dark(#0a0a0a, #ffffff);
+	--color-brand-tree: #8a8a8a;
+
 	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 

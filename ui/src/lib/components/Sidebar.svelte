@@ -3,6 +3,7 @@
 	import { switcher } from '$lib/project.svelte';
 	import { SECTIONS } from '$lib/sections';
 	import AccountMenu from './AccountMenu.svelte';
+	import BrandMark from './BrandMark.svelte';
 	import NavList from './NavList.svelte';
 	import ProjectSwitcher from './ProjectSwitcher.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
@@ -13,7 +14,8 @@
 </script>
 
 <aside class="border-border bg-surface flex h-full w-52 shrink-0 flex-col border-r">
-	<div class="flex h-12 shrink-0 items-center px-3">
+	<div class="flex h-12 shrink-0 items-center gap-2 px-3">
+		<BrandMark class="h-4" />
 		<span class="text-lg font-semibold tracking-tight">Tracepad</span>
 	</div>
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -198,7 +199,9 @@ func TestMissingFileIsNotTheDocument(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
 	for _, path := range []string{
-		"/favicon.ico",
+		// Not `/favicon.ico`, which this used to be: the bundle carries the
+		// logo since spec 006 #30, and a name it carries is no miss.
+		"/no-such-icon.png",
 		"/_app/immutable/chunks/from-a-previous-build.js",
 		"/_app/immutable/assets/gone.css",
 	} {
@@ -207,6 +210,49 @@ func TestMissingFileIsNotTheDocument(t *testing.T) {
 		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 			t.Errorf("%s: Content-Type = %q, want JSON", path, got)
 		}
+	}
+}
+
+// TestTheLogoIsWhereTheBrowserLooks: the document every route is served links
+// the three icons, and each is a file of the bundle served as itself — the
+// .ico an icon, not the document under the name; a build without the bundle
+// carries the tile inline on every route instead (spec 006 #30).
+func TestTheLogoIsWhereTheBrowserLooks(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	routes := []string{"/", "/traces", "/p/some-project/traces/some-trace", "/login"}
+
+	if !ui.Enabled {
+		for _, route := range routes {
+			if body := h.get(t, route).Body.String(); !strings.Contains(body, `href="data:image/svg+xml,`) {
+				t.Errorf("%s: the stub page carries no icon of its own", route)
+			}
+		}
+		return
+	}
+	icons := map[string]string{
+		"/favicon.ico":          "image/",
+		"/favicon.svg":          "image/svg+xml",
+		"/apple-touch-icon.png": "image/png",
+	}
+	for _, route := range routes {
+		body := h.get(t, route).Body.String()
+		for icon := range icons {
+			if !strings.Contains(body, `href="`+icon+`"`) {
+				t.Errorf("%s: the document does not link %s", route, icon)
+			}
+		}
+	}
+	for path, kind := range icons {
+		rec := h.get(t, path)
+		expectStatus(t, rec, 200)
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, kind) {
+			t.Errorf("%s: Content-Type = %q, want %s…", path, got, kind)
+		}
+	}
+	// The content type above comes from the name; the bytes have to agree.
+	// An ICO starts with a reserved zero word and type 1.
+	if ico := h.get(t, "/favicon.ico").Body.Bytes(); !bytes.HasPrefix(ico, []byte{0, 0, 1, 0}) {
+		t.Errorf("/favicon.ico is not an icon: starts % x", ico[:min(len(ico), 4)])
 	}
 }
 
