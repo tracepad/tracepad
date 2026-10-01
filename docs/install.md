@@ -36,9 +36,13 @@ gh release download v0.1.0 --repo tracepad/tracepad \
 A release marked *pre-release* (`v0.1.0-rc.1`) is a candidate: it is published
 under its own tag and moves nothing that says "latest".
 
+**`go install` is not a way to get it.** It builds without the `ui` build tag,
+which leaves a stub page where the web interface should be. Use an archive, or
+`make build` in a checkout ([the README](../README.md#getting-it)).
+
 ## With Homebrew
 
-On macOS and Linux:
+On macOS:
 
 ```sh
 brew install tracepad/tap/tracepad
@@ -48,15 +52,13 @@ brew upgrade tracepad        # later
 The formula in [`tracepad/homebrew-tap`](https://github.com/tracepad/homebrew-tap)
 installs the release archive for your platform — the same bytes as
 [above](#download), with the checksum Homebrew verifies written in by the release
-workflow. Homebrew downloads it without the macOS quarantine mark, so the Gatekeeper step under
-[Put it on the path](#put-it-on-the-path) does not apply. Only a stable release
+workflow. Homebrew downloads it without the macOS quarantine mark, so the
+Gatekeeper step under [Put it on the path](#put-it-on-the-path) does not apply. Only a stable release
 reaches the tap: a pre-release, and a back-patch of an older line, leave it
-where it is. To check provenance, download the archive and use
+where it is. The formula also lists the two Linux archives, but nobody has
+installed it on Linux yet, so that half is generated, not verified; on Linux,
+use an archive. To check provenance, download the archive and use
 `gh attestation verify` as below.
-
-**`go install` is not a way to get it.** It builds without the `ui` build tag,
-which leaves a stub page where the web interface should be. Use an archive, or
-`make build` in a checkout ([the README](../README.md#getting-it)).
 
 ## Verify what you downloaded
 

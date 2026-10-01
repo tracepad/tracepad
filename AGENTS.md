@@ -844,15 +844,24 @@ it, once:
    user authorisation, and exactly one repository permission: **Contents:
    Read and write**. Generate a private key for it.
 3. Install the App on the organisation, **only on `homebrew-tap`**.
-4. Create the environment `release` on `tracepad/tracepad` (add a required
-   reviewer if every release should wait for a person) and put in it the
-   variable `TAP_APP_CLIENT_ID` — the App's Client ID, from its settings page —
-   and the secret `TAP_APP_PRIVATE_KEY`, the whole `.pem` file. The App's ID is
-   not what the variable takes: `create-github-app-token` deprecated `app-id`
-   for `client-id`.
+4. Create the environment `release` on `tracepad/tracepad` and, under
+   *Deployment branches and tags*, choose *Selected branches and tags* and add
+   a **tag** rule `v*`. Without it a fresh environment has no restriction, and
+   any workflow in the repository that declares `environment: release` — from
+   a branch, a pull request's head included — can read the App's key and mint a
+   token that writes to the tap. Put in the environment the variable
+   `TAP_APP_CLIENT_ID` — the App's Client ID, from its settings page — and the
+   secret `TAP_APP_PRIVATE_KEY`, the whole `.pem` file. The App's ID is not
+   what the variable takes: `create-github-app-token` deprecated `app-id` for
+   `client-id`. A *required reviewer* on the environment is optional and holds
+   `tap` alone: it waits for `release`, so by then the archives and the image
+   are public, and the reviewer decides only whether the formula is committed.
 
-The key is readable by the `tap` job and by no other, and the token the job
-mints lasts an hour and reaches that one repository. Without these four steps
-a tag still releases the archives and the image; only `tap` fails, after the
-release is public, and the formula can be committed by hand from the `formula`
-artifact of the run.
+With the tag rule, the key is readable by a run of a `v*` tag and, in this
+repository, only the `tap` job names the environment; the token it mints lasts
+an hour and reaches that one repository. Without these four steps a tag still
+releases the archives and the image; only `tap` fails, after the release is
+public, and the formula can be committed by hand from the `formula` artifact of
+the run. `tap` also refuses to move the tap backwards: a formula at a newer
+version than the one being published is left as it is, with a notice, which is
+what a manual re-run of an older release meets.

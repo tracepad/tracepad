@@ -321,11 +321,20 @@ jobs:
   # installation token for `homebrew-tap` alone, contents only, revoked when
   # the job ends. The commit goes through the contents API, so there is no
   # clone and nothing to run but `gh`.
+  #
+  # One at a time, and none cancelled: two tags close together would otherwise
+  # read the same blob and the second PUT would fail on a stale sha. And the
+  # tap only moves forward: a manual re-run of an older release's `tap` job
+  # passes `if` on the `latest` that run computed, so the step below compares
+  # the version already in the tap with the one it holds.
   tap:
     needs: [check, release]
     if: needs.check.outputs.latest == 'true'
     runs-on: ubuntu-latest
     environment: release
+    concurrency:
+      group: tap
+      cancel-in-progress: false
     permissions: {}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -346,9 +355,42 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
           TAP: ${{ github.repository_owner }}/homebrew-tap
         run: |
+          set -euo pipefail
           path=Formula/tracepad.rb
+          err="$RUNNER_TEMP/lookup.err"
+
+          # What the tap holds now. Only "there is no such file" means the first
+          # release; a 5xx, a rate limit or a token that cannot read the
+          # repository is not that, and is not read as that: the PUT would go
+          # out without a sha and fail on a 422 that names the wrong cause.
+          sha=""
+          if current="$(gh api "repos/$TAP/contents/$path" 2>"$err")"; then
+            sha="$(jq -r .sha <<< "$current")"
+            jq -r .content <<< "$current" | base64 -d > "$RUNNER_TEMP/current.rb"
+            have="$(sed -n 's/^  version "\(.*\)"$/\1/p' "$RUNNER_TEMP/current.rb" | head -1)"
+            if [ -z "$have" ]; then
+              echo "::error::$TAP has a $path with no version line; not replacing what cannot be read"
+              exit 1
+            fi
+            if cmp -s formula/tracepad.rb "$RUNNER_TEMP/current.rb"; then
+              echo "::notice::$TAP is already at $VERSION, with this formula"
+              exit 0
+            fi
+            # Only stable versions reach the tap, so `sort -V` orders them.
+            newest="$(printf '%s\n%s\n' "$have" "$VERSION" | sort -V | tail -1)"
+            if [ "$have" != "$VERSION" ] && [ "$newest" = "$have" ]; then
+              echo "::notice::$TAP is at $have, newer than $VERSION; leaving it"
+              exit 0
+            fi
+          elif grep -q 'HTTP 404' "$err"; then
+            echo "$TAP has no $path yet: the first release"
+          else
+            echo "::error::could not read $path from $TAP:"
+            cat "$err" >&2
+            exit 1
+          fi
+
           # An update names the blob it replaces; the first release has none.
-          sha="$(gh api "repos/$TAP/contents/$path" --jq .sha 2>/dev/null || true)"
           args=(-f "message=tracepad $VERSION" -f "content=$(base64 < formula/tracepad.rb | tr -d '\n')")
           [ -z "$sha" ] || args+=(-f "sha=$sha")
           gh api --method PUT "repos/$TAP/contents/$path" "${args[@]}"

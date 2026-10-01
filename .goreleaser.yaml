@@ -63,11 +63,15 @@ changelog:
 # App token, without a checkout or a toolchain.
 brews:
   - name: tracepad
+    # The owner and the repository come from the run, as the workflow's `tap`
+    # job takes the tap's owner from `github.repository_owner`: one source for
+    # one fact, so a fork or a renamed organisation moves both. The defaults
+    # are for a local snapshot, where Actions' variables are not set.
     repository:
-      owner: tracepad
+      owner: '{{ envOrDefault "GITHUB_REPOSITORY_OWNER" "tracepad" }}'
       name: homebrew-tap
     directory: Formula
-    homepage: https://github.com/tracepad/tracepad
+    homepage: 'https://github.com/{{ envOrDefault "GITHUB_REPOSITORY" "tracepad/tracepad" }}'
     description: Lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces
     license: Apache-2.0
     skip_upload: true
