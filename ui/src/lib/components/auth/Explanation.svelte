@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { LOGIN_ROUTE } from '$lib/auth.svelte';
+	import BrandMark from '../BrandMark.svelte';
 
 	// What `/setup` shows once this server has an owner, and what `/invite`
 	// shows without a token (spec 028, Application contract): one line saying
@@ -12,7 +13,9 @@
 
 <div class="flex min-h-dvh items-center justify-center p-6">
 	<div class="w-full max-w-sm">
-		<h1 class="text-xl font-semibold tracking-tight">Tracepad</h1>
+		<h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
+			<BrandMark class="h-4.5" />Tracepad
+		</h1>
 		<p class="text-muted mt-1">{@render children()}</p>
 		<a href={LOGIN_ROUTE} class="text-accent mt-4 inline-block font-medium hover:underline">
 			Go to the sign-in form

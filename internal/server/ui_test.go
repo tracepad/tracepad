@@ -198,7 +198,9 @@ func TestMissingFileIsNotTheDocument(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 
 	for _, path := range []string{
-		"/favicon.ico",
+		// Not `/favicon.ico`, which this used to be: the bundle carries the
+		// logo since spec 006 #30, and a name it carries is no miss.
+		"/no-such-icon.png",
 		"/_app/immutable/chunks/from-a-previous-build.js",
 		"/_app/immutable/assets/gone.css",
 	} {
@@ -206,6 +208,31 @@ func TestMissingFileIsNotTheDocument(t *testing.T) {
 		expectStatus(t, rec, 404)
 		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 			t.Errorf("%s: Content-Type = %q, want JSON", path, got)
+		}
+	}
+}
+
+// TestTheLogoIsWhereTheBrowserLooks: the icons `app.html` links to are files
+// of the bundle, served as themselves and not as the document; a build without
+// the bundle carries the tile inline instead (spec 006 #30).
+func TestTheLogoIsWhereTheBrowserLooks(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+
+	if !ui.Enabled {
+		if body := h.get(t, "/traces").Body.String(); !strings.Contains(body, `href="data:image/svg+xml,`) {
+			t.Error("the stub page carries no icon of its own")
+		}
+		return
+	}
+	for path, kind := range map[string]string{
+		"/favicon.ico":          "image/",
+		"/favicon.svg":          "image/svg+xml",
+		"/apple-touch-icon.png": "image/png",
+	} {
+		rec := h.get(t, path)
+		expectStatus(t, rec, 200)
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, kind) {
+			t.Errorf("%s: Content-Type = %q, want %s…", path, got, kind)
 		}
 	}
 }

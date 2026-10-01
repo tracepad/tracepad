@@ -4,6 +4,12 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Tracepad — built without the web interface</title>
+		<!-- The logo's tile inline (spec 006 #30): this build has no files to
+		     serve, so a /favicon.ico request would only meet the 404. -->
+		<link
+			rel="icon"
+			href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='120' fill='%230A0A0A'/><g fill='none' stroke-linecap='round' stroke-linejoin='round' stroke-width='48'><path stroke='%238A8A8A' d='M136 168v68a28 28 0 0 0 28 28h32'/><path stroke='%238A8A8A' d='M136 236v84a28 28 0 0 0 28 28h32'/><path stroke='%23FFF' d='M200 168h180'/><path stroke='%23FFF' d='M252 264h128'/><path stroke='%23FFF' d='M252 348h128'/></g></svg>"
+		/>
 		<style>
 			:root {
 				color-scheme: light dark;

@@ -3,9 +3,12 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<!-- An empty data URL rather than a file: there is no mark yet, and this
-		     keeps the browser from asking the server for /favicon.ico. -->
-		<link rel="icon" href="data:," />
+		<!-- The logo's tile (spec 006 #30), from `ui/static/`: the .ico for what
+		     cannot read SVG, the SVG for everything else, and the 180 px PNG a
+		     phone puts on its home screen. -->
+		<link rel="icon" href="%sveltekit.assets%/favicon.ico" sizes="32x32" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
 		<title>Tracepad</title>
 		%sveltekit.head%
 	</head>
