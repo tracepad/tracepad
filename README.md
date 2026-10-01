@@ -40,6 +40,26 @@ layout of the web interface, the set of MCP tools, how the attribute mapping
 reads conventions that are still moving (the OpenTelemetry GenAI ones), and the
 defaults of a fresh install.
 
+**Not in the beta — planned for after it:**
+
+- **Mapping for more conventions.** Spans written to the OpenInference
+  conventions (Arize Phoenix's instrumentations) and the OpenTelemetry GenAI
+  tool-call spans (`execute_tool`) are stored and shown, but their attributes
+  are not read into model, tokens or the step's kind; they stay in the span's
+  metadata, and the raw bodies are kept for a later reading.
+- **Testing against every version of the instrumentation.** CI runs the
+  OpenTelemetry SDK and the Langfuse SDK at one pinned version each, not
+  against each new release of them.
+- **Memory and throughput limits enforced by CI.** They are measured by hand.
+- **`tracepad doctor`**, a one-shot report to attach to an issue. Until then:
+  `tracepad health`, `tracepad version` and `GET /api/v1/system`.
+- **A log file with rotation.** The server logs to standard error; the
+  service manager or `docker logs` keeps it.
+- **A page per framework** on how to send its traces. [docs/ingest.md](docs/ingest.md)
+  covers OTLP from any SDK and the Langfuse SDK.
+- **The distribution of a score.** A numeric score's trend is its mean and
+  extremes per bucket, not a histogram or percentiles.
+
 **Support** is best effort from a small team: issues are read, fixes go into
 the newest release only ([SECURITY.md](SECURITY.md#supported-versions)).
 
