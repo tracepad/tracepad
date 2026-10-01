@@ -68,3 +68,7 @@ sdk/js/dist/
 
 # The gate's lock-file linter, installed from its own lock (spec 020 #19).
 tools/lockfile-lint/node_modules/
+
+# The documentation site (spec 050): mkdocs builds into `site/`, which is
+# published from the `gh-pages` branch and never committed here.
+/site/

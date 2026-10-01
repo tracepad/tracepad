@@ -1,0 +1,21 @@
+# What builds the documentation site (spec 050 #3): not a package, only a
+# lock. The four pins are the tools; `uv.lock` is the whole set, by hash, and
+# `run.sh` installs from it with `--locked`, so a build never resolves
+# anything. Move a pin by editing it and running `uv lock` here, or let
+# Dependabot (the `uv` ecosystem, like sdk/python) do both.
+#
+# mkdocs stays on 1.6: the 2.x line is a rewrite that Material does not run on.
+[project]
+name = "tracepad-docs-site"
+version = "0"
+description = "Toolchain that builds the Tracepad documentation site"
+requires-python = ">=3.12"
+dependencies = [
+    "mkdocs==1.6.1",
+    "mkdocs-material==9.7.7",
+    "mike==2.2.0",
+    "pymdown-extensions==12.1",
+]
+
+[tool.uv]
+package = false

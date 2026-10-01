@@ -1,0 +1,160 @@
+# The documentation site (spec 050). One version of `docs/` is built and put on
+# the `gh-pages` branch, and GitHub Pages serves that branch at
+# https://tracepad.github.io/tracepad/ once the owner switches Pages on.
+#
+#   - a push to `main` that touches the docs deploys `dev`;
+#   - the server release calls this workflow for `vX.Y` (release-server.yml),
+#     moving `latest` with it when the release is the newest stable one;
+#   - `workflow_dispatch` does either by hand — the first deploy after Pages is
+#     enabled, or a release whose deploy was cancelled.
+#
+# Built where nothing can be published, published where nothing is built
+# (spec 050 #7, the rule release-server.yml states for the archives): `build`
+# installs the pinned toolchain and runs `mkdocs` and `mike` with read access
+# alone, on a local gh-pages, and hands over the commits it made as a git
+# bundle. `publish` holds the write scope, runs no code of the site's and
+# installs nothing: it checks that the bundle is a fast-forward of the branch
+# as it is now and pushes it.
+name: Docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/docs-site/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "dev, or vX.Y for a release's docs"
+        default: dev
+      alias:
+        description: "latest, when the version is the newest stable release"
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: "dev, or vX.Y for a release's docs"
+        type: string
+        required: true
+      alias:
+        description: "latest, when the version is the newest stable release"
+        type: string
+        default: ""
+
+permissions: {}
+
+# Two deploys write one branch: the second waits for the first rather than
+# being cancelled with it half done. A later push to `main` builds all of the
+# docs again, so a `dev` run that is replaced while it waits loses nothing; a
+# release's deploy that is replaced is rerun by hand. Concurrency is not what
+# keeps the branch right — `publish` only fast-forwards it.
+concurrency:
+  group: docs-site
+  cancel-in-progress: false
+
+# The uv CI tests with; Dependabot does not move it (spec 020 #19).
+env:
+  UV_VERSION: "0.11.12"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.deploy.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: false
+
+      - name: Build the version, onto gh-pages
+        id: deploy
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+          ALIAS: ${{ inputs.alias }}
+        run: |
+          # The two inputs end up in a branch name's neighbourhood and a
+          # directory of a public site; a value that is not one of the shapes
+          # this workflow publishes stops here.
+          [[ "$VERSION" =~ ^(dev|v[0-9]+\.[0-9]+)$ ]] || { echo "version $VERSION is not dev or vX.Y" >&2; exit 1; }
+          [[ "$ALIAS" =~ ^(latest)?$ ]] || { echo "alias $ALIAS is not latest" >&2; exit 1; }
+          [ "$ALIAS" = "" ] || [ "$VERSION" != dev ] || { echo "dev takes no alias" >&2; exit 1; }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The branch as published, if there is one: mike adds to it. The
+          # first deploy finds none and starts it.
+          if git fetch --no-tags origin gh-pages:refs/heads/gh-pages 2>/dev/null; then
+            base="$(git rev-parse refs/heads/gh-pages)"
+          else
+            base=""
+            echo "no gh-pages yet: this deploy starts it"
+          fi
+
+          scripts/docs-site/deploy.sh "$VERSION" ${ALIAS:+"$ALIAS"}
+
+          head="$(git rev-parse refs/heads/gh-pages)"
+          if [ "$head" = "$base" ]; then
+            echo "gh-pages already says this; nothing to publish"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only what is new: on an existing branch, the commits after the
+          # one it was fetched at.
+          git bundle create "$RUNNER_TEMP/docs.bundle" refs/heads/gh-pages ${base:+"^$base"}
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.deploy.outputs.changed == 'true'
+        with:
+          name: docs-bundle
+          path: ${{ runner.temp }}/docs.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushing gh-pages, and nothing else
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-bundle
+          path: ${{ runner.temp }}
+      # No checkout: a repository of this job's own, so that nothing of the
+      # source tree — and no hook, no config — is here to be run. The token
+      # goes to `git` as a header for the two commands that talk to GitHub,
+      # and is in no file.
+      - name: Fast-forward gh-pages to the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          net=(git -c "http.extraheader=AUTHORIZATION: basic $auth")
+
+          git init --quiet "$RUNNER_TEMP/pages"
+          cd "$RUNNER_TEMP/pages"
+          # The tip the bundle was cut from has to be here for it to verify;
+          # on the first deploy there is no tip and no such requirement.
+          "${net[@]}" fetch --quiet --no-tags "$remote" gh-pages:refs/remotes/origin/gh-pages 2>/dev/null ||
+            echo "no gh-pages yet"
+          git bundle verify "$RUNNER_TEMP/docs.bundle"
+          git fetch --quiet "$RUNNER_TEMP/docs.bundle" refs/heads/gh-pages:refs/heads/incoming
+          # No `--force`: a bundle that is not a fast-forward of the branch as
+          # it is now — another deploy landed in between — is refused, and the
+          # run is repeated against the new tip.
+          "${net[@]}" push "$remote" refs/heads/incoming:refs/heads/gh-pages

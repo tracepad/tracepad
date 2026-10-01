@@ -238,6 +238,34 @@ SDK_JS_BUDGET := 2345
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)
 
+# --- The documentation site (spec 050) ----------------------------------------
+#
+# docs/ is the source and reads fine on GitHub as it is; mkdocs.yml lays the
+# same files out as a site, versioned by `mike` on the gh-pages branch. `uv`
+# installs the toolchain from the lock beside the scripts, so it is a
+# prerequisite of these targets the way it is of `py-lint`: the gate needs it
+# for `docs-build` too.
+
+docs-build: ## Build the documentation site strictly: a warning or a broken link fails (needs uv)
+	scripts/docs-site/run.sh mkdocs build --strict
+
+# The rehearsal commits to a throwaway branch, never to gh-pages, so nothing a
+# laptop does can become the published site (spec 050 #6). It deploys what a
+# release would — `dev` and a `latest` — so the version selector and the root
+# redirect are the ones to look at, and serves them.
+DOCS_REHEARSAL_BRANCH := gh-pages-rehearsal
+DOCS_ADDR             ?= localhost:8000
+
+docs-site: docs-build ## Rehearse the versioned site on a throwaway local branch and serve it (needs uv)
+	@git branch -D $(DOCS_REHEARSAL_BRANCH) >/dev/null 2>&1 || true
+	DOCS_BRANCH=$(DOCS_REHEARSAL_BRANCH) scripts/docs-site/deploy.sh dev
+	DOCS_BRANCH=$(DOCS_REHEARSAL_BRANCH) scripts/docs-site/deploy.sh v0.1 latest
+	scripts/docs-site/run.sh mike serve --branch $(DOCS_REHEARSAL_BRANCH) --dev-addr $(DOCS_ADDR)
+
+docs-site-clean: ## Delete the rehearsal branch and the build output
+	@git branch -D $(DOCS_REHEARSAL_BRANCH) >/dev/null 2>&1 || true
+	rm -rf site
+
 # The documentation's own cross-references (spec 026 #6): a hundred anchors
 # nothing read until now. Cheap enough for the gate — it is awk over seventeen
 # files — and the failure it catches is invisible in review.
@@ -255,7 +283,7 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 		cmp -s sdk/NOTICE "$$copy" || { echo "sdk-notices: $$copy differs from sdk/NOTICE; copy it again"; exit 1; }; \
 	done
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors docs-build sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -304,5 +332,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices race \
-	doc-anchors doc-anchors-self-test gate precommit \
+	doc-anchors doc-anchors-self-test docs-build docs-site docs-site-clean gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks

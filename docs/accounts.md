@@ -24,12 +24,12 @@ Two levels of standing, and no more.
   has every project there is and every project there will be. There can be
   several, and the last enabled one cannot be demoted, disabled or deleted.
 - Everyone else is a **member** of specific projects, with a role in each:
-  - `viewer` — reads everything in the project and **annotates**: writes and
-    retracts scores, and works an [annotation queue](annotation.md). Reviewing
-    is what a viewer is for.
-  - `editor` — everything a viewer does, plus what a project is made of:
-    prompts, datasets, runs, score configs, queues, the retention windows, the
-    keys, and erasing a user's data.
+    - `viewer` — reads everything in the project and **annotates**: writes and
+      retracts scores, and works an [annotation queue](annotation.md). Reviewing
+      is what a viewer is for.
+    - `editor` — everything a viewer does, plus what a project is made of:
+      prompts, datasets, runs, score configs, queues, the retention windows, the
+      keys, and erasing a user's data.
 
 An account with no memberships and no owner flag can sign in and sees nothing,
 which is the state an invitation leaves it in until somebody gives it a

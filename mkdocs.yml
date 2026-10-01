@@ -1,0 +1,117 @@
+# The documentation site (spec 050). docs/ is the source and stays readable
+# on GitHub as it is; this file only decides how the same files are laid out
+# as a site. `make docs-site` builds it and rehearses the versioned deploy.
+site_name: Tracepad
+site_description: A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.
+site_url: https://tracepad.github.io/tracepad/
+repo_url: https://github.com/tracepad/tracepad
+repo_name: tracepad/tracepad
+edit_uri: edit/main/docs/
+docs_dir: docs
+copyright: Apache-2.0 licensed
+
+# Every warning is a failure (`mkdocs build --strict`), and the three that
+# matter most are said here rather than left to defaults: a link to a file
+# that is not in the site, an anchor that names no heading, and a page the
+# navigation forgot.
+strict: true
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+
+theme:
+  name: material
+  # No Google Fonts: the site, like the product, serves its own type
+  # (spec 050 #4).
+  font: false
+  language: en
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - content.action.edit
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - toc.follow
+
+extra:
+  version:
+    provider: mike
+  # The theme's own "made with" line is not a thing this site needs.
+  generator: false
+
+plugins:
+  - search
+  # Versions (spec 050 #2). An alias is a page of redirects, not a symlink:
+  # a symlink in the branch is a thing a Pages host may or may not follow,
+  # and a redirect is one it cannot get wrong. Every old version names the
+  # newest release as its canonical page, so a search lands there.
+  - mike:
+      alias_type: redirect
+      canonical_version: latest
+
+# docs/ links to the README, the changelog and scripts/ by relative path, which
+# is right on GitHub and not a page here; the hook points them at GitHub.
+hooks:
+  - scripts/docs-site/hooks.py
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: false
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Quickstart: quickstart.md
+      - Installing the binary: install.md
+      - Docker: docker.md
+      - Configuration: configuration.md
+  - Send traces:
+      - Sending traces: ingest.md
+      - Python package: sdk-python.md
+      - Node package: sdk-js.md
+      - Go package: sdk-go.md
+      - Media: media.md
+  - Use it:
+      - Web interface: ui.md
+      - Scores: scores.md
+      - Prompts: prompts.md
+      - Datasets and runs: datasets.md
+      - Annotation queues: annotation.md
+      - Quality: quality.md
+      - Users: users.md
+  - Read it back:
+      - Read API: api.md
+      - CLI: cli.md
+      - MCP: mcp.md
+      - Coding agents: agents.md
+      - Taking the data out: export.md
+  - Operate it:
+      - Accounts: accounts.md
+      - Administration: admin.md
+      - Retention: retention.md
+  - Changelog: https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md
