@@ -827,8 +827,9 @@ Before tagging:
   `v0.1.0-rc.1` for the server, `sdk-js/v0.1.0-rc.1`, `sdk/go/v0.1.0-rc.1`
   and `sdk-py/v0.1.0-rc.1`. The Python workflow derives PyPI's spelling
   (`0.1.0rc1`, PEP 440), which is what `VERSION` in `_config.py` must say;
-  `sdk-py/v0.1.0rc1` is refused. A release candidate needs its version put
-  into the tree first, in four places: `_config.py`, `sdk/js/package.json`
+  `sdk-py/v0.1.0rc1` is refused. The first release of every package is a
+  candidate, `0.1.0-rc.1` (the owner's decision), and a candidate needs its
+  version put into the tree first, in four places: `_config.py`, `sdk/js/package.json`
   with its lock file (`npm version 0.1.0-rc.1 --no-git-tag-version` in
   `sdk/js`) and `const Version`. npm publishes a pre-release under the `next`
   dist-tag, so `npm install tracepad` keeps resolving to the newest stable.
