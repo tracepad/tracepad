@@ -733,7 +733,7 @@ func asStop(err error, target **stopError) bool {
 // encodeRawCursor rebuilds the archive listing's cursor. The grammar is the
 // server's, and it is stated once here so that a resume point and a page's
 // cursor cannot mean different things.
-func encodeRawCursor(receivedAt, id int64) string {
+func encodeRawCursor(receivedAt, number int64) string {
 	return base64.RawURLEncoding.EncodeToString(
-		[]byte(strconv.FormatInt(receivedAt, 10) + ":" + strconv.FormatInt(id, 10)))
+		[]byte("n:" + strconv.FormatInt(receivedAt, 10) + ":" + strconv.FormatInt(number, 10)))
 }

@@ -259,12 +259,13 @@ func TestErasureScrubsTheRawBatches(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			number := f.count(t, `SELECT number FROM raw_batches WHERE id = ?`, mixed)
 			for _, row := range rows {
-				if (row.ScrubbedAt != nil) != (row.ID == mixed) {
-					t.Errorf("batch %d scrubbed_at = %v; only the rewritten one is marked", row.ID, row.ScrubbedAt)
+				if (row.ScrubbedAt != nil) != (row.Number == number) {
+					t.Errorf("batch %d scrubbed_at = %v; only the rewritten one is marked", row.Number, row.ScrubbedAt)
 				}
 			}
-			if body, _ := f.store.RawBatchBody(t.Context(), f.project.ID, mixed); body == nil || body.ScrubbedAt == nil {
+			if body, _ := f.store.RawBatchBody(t.Context(), f.project.ID, number); body == nil || body.ScrubbedAt == nil {
 				t.Error("the rewritten body does not say it was scrubbed")
 			}
 			for _, body := range f.rawBodies(t) {

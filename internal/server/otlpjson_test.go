@@ -251,7 +251,7 @@ func rawPath(t *testing.T, h *harness) string {
 	if len(batches) != 1 {
 		t.Fatalf("raw batches = %d, want exactly one", len(batches))
 	}
-	return fmt.Sprintf("/api/v1/raw/%d", batches[0].ID)
+	return fmt.Sprintf("/api/v1/raw/%d", batches[0].Number)
 }
 
 func readAll(t *testing.T, response *http.Response) ([]byte, error) {

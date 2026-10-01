@@ -34,7 +34,7 @@ $ tracepad export --otlp --to http://collector:4318/v1/traces
 12400 batches, 3.1 GiB
   covering   2026-08-06 04:12:19 .. 2026-09-05 09:44:02
   not covered 214 traces started before the archive begins
---after MTc4NzczODQwMDAwMDAwMDAwMDoxMjQwMA
+--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjEyNDAw
 ```
 
 `not covered` is a lower bound, and deliberately so: it counts the traces whose
@@ -62,7 +62,7 @@ A dry run resumed with `--after` says so rather than letting the number be read
 as what it is about to send:
 
 ```
-$ tracepad export --otlp --to … --after MTc4… --dry-run
+$ tracepad export --otlp --to … --after bjox… --dry-run
 12400 batches in the window; the resume starts inside it, so fewer will be sent
 ```
 
@@ -191,15 +191,19 @@ tracepad: batch 8814 was refused: 413 payload too large
   covering   2026-08-06 04:12:19 .. 2026-08-09 22:03:55
   not covered 214 traces started before the archive begins
   stopped at batch 8814: 413 payload too large
---after MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 ```
 
 Fix what the receiver complained about, then:
 
 ```sh
 tracepad export --otlp --to http://collector:4318/v1/traces \
-  --after MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+  --after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 ```
+
+A cursor printed by a server from before batches were numbered within their
+project is refused with the `--since` to use instead; see
+[api.md](api.md#the-raw-archive).
 
 The cursor resumes **at** the batch that failed, not after it. Re-sending a
 batch a receiver already took is safe — OTLP receivers upsert by span id, this
@@ -214,7 +218,8 @@ Exit codes: `0` finished, `1` stopped, `2` you typed something wrong.
 tracepad export --otlp --dir ./tracepad-export
 ```
 
-One file per batch, named `<received_at_ms>-<id>.pb` — or `.json` for a batch
+One file per batch, named `<received_at_ms>-<id>.pb` — `id` being the batch's
+number within the project ([api.md](api.md#the-raw-archive)) — or `.json` for a batch
 that arrived in the OTLP/JSON encoding — so that a plain `ls` is in replay
 order. Beside them, `manifest.jsonl`: one line per batch, the listing row as the
 API returns it, appended as each file lands. The files are your traces, prompts

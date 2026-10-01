@@ -724,33 +724,20 @@ func fingerprint(t *testing.T, h *harness, projectID string) map[string][]string
 	return out
 }
 
-// pushRawIDs moves the archive's next id to seven digits, so that a raw
-// batch's id is a token no count or size in an answer can be mistaken for,
-// and the ghost's id has the same shape. A copy of one of A's batches under a
-// high id is A's own row, and SQLite numbers the next past it.
-func pushRawIDs(t *testing.T, h *harness, projectID string) {
+// pushRawNumbers moves a project's next raw batch number to seven digits, so
+// that its batch's id is a token no count or size in an answer can be
+// mistaken for, and the ghost's id has the same shape. A batch's number is its
+// project's own (spec 019 #17), so this is B's counter alone; A's batches keep
+// numbers of their own, far below it.
+func pushRawNumbers(t *testing.T, h *harness, projectID string, last int64) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+h.dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	var columns []string
-	rows, err := db.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('raw_batches') WHERE name <> 'id'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatal(err)
-		}
-		columns = append(columns, `"`+name+`"`)
-	}
-	rows.Close()
-	list := strings.Join(columns, ", ")
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO raw_batches (id, `+list+`)
-		SELECT 999999, `+list+` FROM raw_batches WHERE project_id = ? ORDER BY id LIMIT 1`, projectID); err != nil {
+	if _, err := db.ExecContext(t.Context(),
+		`UPDATE projects SET raw_batches_numbered = ? WHERE id = ?`, last, projectID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -814,7 +801,7 @@ func TestIsolationMatrix(t *testing.T) {
 	}
 	ghost := newTenant("ghost", "tp-sk-nobody", ghostID, "tp-pk-nobody", 3)
 	h.seedTenant(t, a)
-	pushRawIDs(t, h, a.projectID)
+	pushRawNumbers(t, h, b.projectID, 9999990+int64(b.n)-1)
 	h.seedTenant(t, b)
 	if len(b.raw) != len(ghost.raw) {
 		t.Fatalf("B's raw batch is %s, the ghost's %s: the two must have one shape", b.raw, ghost.raw)
@@ -1184,6 +1171,25 @@ func TestIsolationMatrix(t *testing.T) {
 		"/api/v1/projects/" + b.projectID + "/erasures/" + b.erasure,
 	} {
 		expectStatus(t, h.call(t, "GET", path, nil, asKey(bSecret)), http.StatusOK)
+	}
+
+	// A's archive is numbered by A's batches alone (spec 019 #17). The id
+	// probes above name B's batch; this is what A learns without naming
+	// anything: B's exports between two of A's leave no gap in A's numbers,
+	// so the ids A reads say nothing of how much B sent, or when.
+	export := func(tn *tenant, secret string) {
+		t.Helper()
+		expectStatus(t, h.call(t, "POST", "/v1/traces", ingestExport(tn, "numbering", nil), asKey(secret),
+			func(r *http.Request) { r.Header.Set("Content-Type", "application/x-protobuf") }), http.StatusOK)
+	}
+	export(a, testSecret)
+	for range 3 {
+		export(b, bSecret)
+	}
+	export(a, testSecret)
+	newest := decodeJSON[rawListing](t, h.get(t, "/api/v1/raw?direction=prev&limit=2")).Batches
+	if len(newest) != 2 || newest[1].ID != newest[0].ID+1 {
+		t.Errorf("A's two newest batches = %+v, want consecutive ids: B's three exports between them are no gap", newest)
 	}
 
 	// A neighbour's traffic is not news to A (spec 004 #37). Everything

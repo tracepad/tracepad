@@ -295,11 +295,21 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		if received == 0 {
 			received = arrived
 		}
+		// The batch's number is its project's next (spec 019 #17), from
+		// a counter in the same transaction: the writer is the one
+		// connection that inserts, so two batches cannot take one number,
+		// and a rolled-back window gives its numbers back.
+		var number int64
+		if err := tx.QueryRow(
+			`UPDATE projects SET raw_batches_numbered = raw_batches_numbered + 1
+			 WHERE id = ? RETURNING raw_batches_numbered`, b.ProjectID).Scan(&number); err != nil {
+			return fmt.Errorf("number raw batch: %w", err)
+		}
 		var rawID int64
 		if err := tx.QueryRow(
-			`INSERT INTO raw_batches (project_id, received_at, dialect, content_type, content_encoding, body)
-			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-			b.ProjectID, received, b.Raw.Dialect,
+			`INSERT INTO raw_batches (project_id, number, received_at, dialect, content_type, content_encoding, body)
+			 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			b.ProjectID, number, received, b.Raw.Dialect,
 			nullString(b.Raw.ContentType), nullString(b.Raw.ContentEncoding),
 			zstdEncoder.EncodeAll(b.Raw.Body, nil),
 		).Scan(&rawID); err != nil {

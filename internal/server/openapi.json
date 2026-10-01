@@ -895,7 +895,8 @@
         "x-tracepad-scope": "read",
         "parameters": [
           {"name": "id", "in": "path", "required": true,
-            "schema": {"type": "integer", "minimum": 1}}
+            "schema": {"type": "integer", "minimum": 1},
+            "description": "The batch's number within the project, as the listing gives it"}
         ],
         "responses": {
           "200": {"description": "The body as received",
@@ -3230,7 +3231,7 @@
         "type": "object",
         "description": "One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`.",
         "properties": {
-          "id": {"type": "integer", "description": "The batch's id; the path segment of the body endpoint"},
+          "id": {"type": "integer", "description": "The batch's number within its project — 1, 2, 3… in the order the project's batches were stored, never reused — and the path segment of the body endpoint. Another project's batches are no gaps in it"},
           "received_at": {"type": "string", "format": "date-time",
             "description": "When the server accepted it, which is the order a replay preserves"},
           "dialect": {"type": "string",

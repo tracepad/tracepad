@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,10 +70,10 @@ func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType stri
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		ids = append(ids, row.ID)
+		ids = append(ids, row.Number)
 	}
-	// Sorted here rather than trusted from the listing: the ids are an
-	// autoincrement and the batches were written in arrival order, so
+	// Sorted here rather than trusted from the listing: the numbers are the
+	// project's own count and the batches were written in arrival order, so
 	// ascending *is* arrival order — and reading it off the listing would
 	// make every order assertion below agree with whatever the listing did.
 	slices.Sort(ids)
@@ -204,29 +205,47 @@ func TestRawListingCounts(t *testing.T) {
 }
 
 // A project key reaches its own archive and nothing else: the batches are the
-// project's data exactly as its traces are (spec 019 #9).
+// project's data exactly as its traces are (spec 019 #9). And a batch's id is
+// the project's own count (#17): another tenant's exports between two of mine
+// leave no gap, and the id another tenant's batch has names my batch of that
+// number, or nothing.
 func TestRawIsScopedToTheProject(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedRaw(t, h, h.project.ID, 2, "")
-	strangers := seedRaw(t, h, other.ID, 2, "")
-
-	listing := h.listRaw(t, "")
-	if len(listing.Batches) != 2 {
-		t.Fatalf("batches = %d, want only this project's two", len(listing.Batches))
-	}
-	for _, row := range listing.Batches {
-		for _, id := range strangers {
-			if row.ID == id {
-				t.Fatalf("the listing carries another project's batch %d", id)
-			}
+	ingest := func(projectID, marker string) {
+		t.Helper()
+		if err := h.writer.Submit(t.Context(), &store.IngestBatch{ProjectID: projectID,
+			Raw: &store.RawBatch{ReceivedAt: seedBase, Body: []byte(marker)}}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", strangers[0]))
-	expectStatus(t, rec, 404)
+	ingest(h.project.ID, "mine-1")
+	for i := range 3 {
+		ingest(other.ID, fmt.Sprintf("theirs-%d", i+1))
+	}
+	ingest(h.project.ID, "mine-2")
+
+	listing := h.listRaw(t, "")
+	var ids []int64
+	for _, row := range listing.Batches {
+		ids = append(ids, row.ID)
+	}
+	if !slices.Equal(ids, []int64{1, 2}) {
+		t.Fatalf("ids = %v, want 1 2: only this project's two, and the other's three are no gap", ids)
+	}
+	for id, want := range map[int64]string{1: "mine-1", 2: "mine-2"} {
+		rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", id))
+		expectStatus(t, rec, 200)
+		if got := rec.Body.String(); got != want {
+			t.Errorf("batch %d = %q, want this project's %q", id, got, want)
+		}
+	}
+	// The other project's third batch has a number this one has not
+	// reached: not found, as a number never issued is.
+	expectError(t, h.get(t, "/api/v1/raw/3"), 404, "raw batch 3 not found")
 }
 
 // The body comes back as the client sent it, under the type it was sent in,
@@ -414,4 +433,33 @@ func (h *harness) systemRaw(t *testing.T) systemRawBlock {
 		t.Fatalf("the raw block is not the documented shape: %v (%s)", err, body.Raw)
 	}
 	return block
+}
+
+// A cursor from before batches were numbered within their project names its
+// batch by the table's rowid, which no longer leaves the server (spec 019
+// #17). It is refused with where to start again, not read as a number — which
+// would land the export at whatever batch of this project has that number.
+func TestRawRefusesACursorFromBeforeTheNumbers(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedRaw(t, h, h.project.ID, 3, "")
+	at := seedBase + ms
+
+	old := encodeCursor(strconv.FormatInt(at, 10), "2")
+	for _, direction := range []string{"", "&direction=prev"} {
+		rec := h.get(t, "/api/v1/raw?cursor="+old+direction)
+		expectError(t, rec, http.StatusBadRequest, "from before raw batches were numbered within their project")
+		since := time.Unix(0, at).UTC().Format(time.RFC3339Nano)
+		if !strings.Contains(rec.Body.String(), "since="+since) {
+			t.Errorf("the refusal does not say where to start again (since=%s): %s", since, rec.Body)
+		}
+	}
+	// What it says to do works, and starts at the cursor's batch.
+	listing := h.listRaw(t, "?since="+time.Unix(0, at).UTC().Format(time.RFC3339Nano))
+	if len(listing.Batches) != 2 || listing.Batches[0].ID != 2 {
+		t.Errorf("since the old cursor's instant = %+v, want batches 2 and 3", listing.Batches)
+	}
+	// Anything else that is not this grammar is just not a cursor.
+	for _, cursor := range []string{"nonsense", encodeCursor("n", "1"), encodeCursor("x", "1", "2"), encodeCursor("a", "b")} {
+		expectError(t, h.get(t, "/api/v1/raw?cursor="+cursor), http.StatusBadRequest, "invalid cursor")
+	}
 }

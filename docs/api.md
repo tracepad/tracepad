@@ -682,7 +682,7 @@ curl … "http://localhost:4318/api/v1/raw?limit=2&count=1"
      "content_type": "application/json", "content_encoding": "",
      "size_bytes": 3810, "scrubbed_at": "2026-09-26T10:02:11Z"}
   ],
-  "next_cursor": "MTc4ODIyMDgwMDAwMTAwMDAwMDoy",
+  "next_cursor": "bjoxNzg4MjIwODAwMDAxMDAwMDAwOjI",
   "prev_cursor": null,
   "total": 12400,
   "total_capped": false
@@ -701,6 +701,14 @@ towards older ones, and rows come back oldest first either way.
 | `since`, `until` | RFC 3339, on `received_at`. Half-open: `since` inclusive, `until` exclusive. |
 | `limit` | 1–500, default 100. |
 | `cursor`, `direction` | Keyset over `(received_at, id)`. |
+
+`id` is the batch's **number within your project**: 1, 2, 3… in the order your
+batches were stored. It is never reused, and other projects' batches are no gaps
+in it. A gap is a batch of yours that retention or an erasure took. A cursor
+from before this numbering (servers before schema 0035) is refused with a `400`
+that names the `since` to list again from. Re-sending the batches of that one
+instant is safe, because receivers upsert by span id. An id written down before
+the upgrade, in a manifest say, now names your batch of that number.
 | `count` | Adds `total` and `total_capped`, counted up to 100000 — high, because this count answers "how much is this export about to send". |
 
 `size_bytes` is the **decoded** length, which is what a fetch of the body

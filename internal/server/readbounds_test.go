@@ -390,7 +390,7 @@ func TestRawBodyMediaAreReadInsideTheGate(t *testing.T) {
 	}
 	t.Cleanup(func() { mediaFor = previous })
 
-	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].ID))
+	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].Number))
 	expectError(t, rec, 503, "the read took longer than 200ms and was stopped")
 }
 

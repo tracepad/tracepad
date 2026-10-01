@@ -340,7 +340,8 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 }
 
 // cursorOf rebuilds the listing's cursor for a row. The grammar is the
-// server's — base64 of `received_at:id` in nanoseconds — and it is rebuilt
+// server's — base64 of `n:received_at:id`, the time in nanoseconds and the id
+// the batch's number within its project (spec 019 #17) — and it is rebuilt
 // here rather than taken from the page because a resume point has to name a
 // *row*, and a page's `next_cursor` names its last one.
 func cursorOf(row rawBatchRow) string {

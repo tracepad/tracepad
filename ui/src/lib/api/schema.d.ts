@@ -1739,7 +1739,7 @@ export interface components {
         };
         /** @description One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`. */
         RawBatch: {
-            /** @description The batch's id; the path segment of the body endpoint */
+            /** @description The batch's number within its project — 1, 2, 3… in the order the project's batches were stored, never reused — and the path segment of the body endpoint. Another project's batches are no gaps in it */
             id: number;
             /**
              * Format: date-time
@@ -3928,6 +3928,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description The batch's number within the project, as the listing gives it */
                 id: number;
             };
             cookie?: never;
