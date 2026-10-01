@@ -18,7 +18,7 @@ code, written for coding agents and useful to people too.
 
 ## Building
 
-You need Go (the version in `go.mod`) and, for the web interface, Node 24 (24.15 or later) —
+You need Go (the version in `go.mod`) and, for the web interface, Node 24.15 or a newer 24.x —
 `make` checks the version and stops at once if it is another. [uv](https://docs.astral.sh/uv/)
 is needed for the Python package and for the gate's lint step.
 

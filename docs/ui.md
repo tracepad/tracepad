@@ -1050,7 +1050,7 @@ CodeMirror 6 (the payload surface, imported statically and pinned by exact
 version; there is no `basicSetup` — the extensions are listed by hand in
 `ui/src/lib/components/json/setup.ts`).
 
-It builds with Node 24 — 24.15 or later — the one Node `ui/package.json` names in `engines`:
+It builds with Node 24.15 or a newer 24.x, the one Node `ui/package.json` names in `engines`:
 the targets below stop at once, naming the version they found, under any
 other. The type check is `svelte-check` on TypeScript 6.0: it imports the
 compiler as a library, which TypeScript 7 has no stable API for yet, so the

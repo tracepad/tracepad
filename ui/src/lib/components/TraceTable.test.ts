@@ -54,9 +54,11 @@ describe('the trace table', () => {
 			'Errors'
 		]);
 		// Declared in rem, so it scales with the reader's root size (spec 006
-		// #22). The declaration, not the computed value: jsdom computes a rem
-		// to pixels at its 16 px root, as a browser does at the reader's.
-		expect(screen.getByRole('table').style.minWidth).toBe('62rem');
+		// #22), and computed to pixels at the root's 16 px, as a browser
+		// computes it at the reader's.
+		const table = screen.getByRole('table');
+		expect(table.style.minWidth).toBe('62rem');
+		expect(getComputedStyle(table).minWidth).toBe('992px');
 		expect(screen.getByRole('link', { name: 'user-1137' })).toBeInTheDocument();
 	});
 
@@ -149,17 +151,28 @@ describe('the trace table by its box', () => {
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toHaveLength(10);
-		expect(screen.getByRole('table').style.minWidth).toBe('62rem');
+		const table = screen.getByRole('table');
+		expect(table.style.minWidth).toBe('62rem');
+		expect(getComputedStyle(table).minWidth).toBe('992px');
 	});
 
 	// The table's columns are rem, so its width is: a reader whose default is
-	// 20 px has a table 1,120 px wide, and a 1,000 px box folds it.
+	// 20 px has a table 1,240 px wide, and a 1,000 px box folds it.
 	it('folds at the table\'s width in rem, for a reader with a larger default size', () => {
 		document.documentElement.style.fontSize = '20px';
 		boxWidth(1000);
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toEqual(['Time', 'Name', 'Errors']);
+	});
+
+	it('is as wide as its rem at the reader\'s size, when the box has room for it', () => {
+		document.documentElement.style.fontSize = '20px';
+		boxWidth(1240);
+		render(TraceTable, { rows: [ROW] });
+
+		expect(heads()).toHaveLength(10);
+		expect(getComputedStyle(screen.getByRole('table')).minWidth).toBe('1240px');
 	});
 
 	it('folds and unfolds as its box is resized after it is on the screen', async () => {

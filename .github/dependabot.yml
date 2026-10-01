@@ -7,7 +7,8 @@
 #
 # Weekly, and one pull request per ecosystem and directory: minor and patch
 # updates are grouped, a major one arrives alone because it is the one that
-# needs reading. A version is proposed a week after it was published, not the
+# needs reading — except in a family whose packages peer one another, where it
+# arrives with them. A version is proposed a week after it was published, not the
 # day it was: a compromised release is usually pulled within days. Security
 # updates are not grouped or delayed by any of this.
 version: 2
@@ -34,6 +35,14 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      # The Testing Library packages peer one another — jest-dom and the
+      # Svelte bindings each name the `@testing-library/dom` majors they run
+      # on (spec 006 #33) — so they move in one pull request, a major
+      # included, rather than one at a time into an install that refuses.
+      # The first group a dependency matches is the one it goes in.
+      testing-library:
+        patterns: ["@testing-library/*"]
+        update-types: [major, minor, patch]
       npm:
         patterns: ["*"]
         update-types: [minor, patch]
@@ -42,12 +51,13 @@ updates:
     ignore:
       - dependency-name: sdk-trace-base-v1
         update-types: ["version-update:semver-major"]
-      # Node's types are the Node the code may use (spec 032 #19, spec 006
-      # #16): 22 in `sdk/js`, the oldest Node the package supports, so that
-      # it cannot call an API 22 does not have; 24 in `ui`, the one Node
-      # that builds it. A newer major would type-check what that Node lacks.
+      # Node's types are the oldest Node the code runs on (spec 032 #19,
+      # spec 006 #33): 22 in `sdk/js`, the oldest Node the package supports,
+      # so that it cannot call an API 22 does not have; in `ui` the newest
+      # types not past its floor of 24.15. A newer minor or major would
+      # type-check what that Node lacks; patches still come.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # TypeScript is two packages until 7.1 ships a stable API (spec 006
       # #16, spec 032 #19): `typescript` is the alias to 6.0's API that
       # svelte-check, openapi-typescript and tsup import, and moving it to 7
