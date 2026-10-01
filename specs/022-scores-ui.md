@@ -48,6 +48,7 @@ trends in *Stats*, scoring from the MCP.
 | 10 | **2026-09-07** — Decision 4's `metadata: {"source": "web"}` and its absent `timestamp` are what a **new** score is stamped with. An **edit** (Decision 5) resends the score's own `metadata`, `timestamp` and **target** — `trace_id`, `observation_id`, `session_id` — unchanged along with its id; only the fields the dialog shows are the reader's to change | "Every field resent" is about a re-POST replacing the row whole, not about overwriting what the row already said. A judge's verdict corrected by a person is still the judge's verdict, and relabelling its source as *web* would make the chip lie about where it came from; moving its event time to now would slide it to the top of a listing ordered by when the graded interaction happened. The target is the same rule one field further: taking it from the block that drew the chip would move an *unknown observation* score onto the trace — the header's target names no observation — and would drop the second id of a score carrying a trace and a session both, which is a score the API takes and `scores add` writes. All of them are facts an edit would have invented. |
 
 | 11 | **2026-09-07** — ***N more on observations* counts only the scores a panel will show.** A score whose `observation_id` is in no observation of this trace is drawn on the header with its *unknown observation* note and is **not** in the count. Supersedes the Edge cases bullet below, which said it was counted | The count is an invitation to go and open panels, so the number has to be what is found behind them. Counting a chip the reader is looking at sends them hunting for a score that is already on screen — and the same sentence that set the count also put the chip in the header, so the bullet contradicted itself. Raised in review of PR #41. |
+| 12 | **2026-10-02** — **A score has an author: the reviewer identity left out of this spec is spec 048's.** Supersedes the out-of-scope line "a reviewer identity on a score (the store has no users)". The store has had users since spec 028 (2026-09-10), and spec 048 (2026-09-29) stamps every score with the account or project key that wrote it and shows it where the score is shown. Bulk scoring stays out of scope. | The reason the line gave stopped being true, and the thing it left out was built; the line read alone says neither. |
 
 ## Application contract
 
@@ -132,4 +133,5 @@ None.
 An annotation queue and its routing; a scores column or filter in the
 traces and sessions listings; score trends and per-name charts in *Stats*
 (spec 013's rollup does not know scores); scoring from the MCP; a
-reviewer identity on a score (the store has no users); bulk scoring.
+reviewer identity on a score (the store has no users — *superseded by #12:
+spec 048 gives every score its author*); bulk scoring.
