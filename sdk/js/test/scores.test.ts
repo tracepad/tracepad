@@ -220,11 +220,18 @@ describe('the queue', () => {
   });
 
   test('flush waits for what is in flight and warns past the timeout', async () => {
+    // Fake timers, not a short real one: the timeout is a clock, and a test
+    // that waits it out on the real one is a test of the machine's load.
+    vi.useFakeTimers();
     let release!: () => void;
     const queue = new ScoreQueue(() => new Promise<void>((done) => (release = done)));
     reset(queue);
     queue.submit({ name: 's', trace_id: 't' });
-    await queue.flush(10);
+    const flushed = queue.flush(10);
+    await vi.advanceTimersByTimeAsync(9);
+    expect(warnings).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushed;
     expect(warnings).toEqual(['tracepad: the score queue did not drain within 10ms']);
     release();
   });
@@ -261,13 +268,20 @@ describe('flush', () => {
   });
 
   test('a score queue that ate the budget leaves the spans to their schedule, and says so', async () => {
+    // Fake timers: `flush` reads what is left of the budget off `performance.now()`
+    // after a real 10ms timer, and a timer may fire a hair before the clock says
+    // 10 — then `left` is positive and the spans are forced, which is the flake
+    // this replaced. Faked, the clock and the timer are the same one.
+    vi.useFakeTimers();
     const queue = new ScoreQueue(() => new Promise<void>(() => undefined));
     reset(queue);
     tracepad.init({ host: HOST, key: KEY, export: false });
     const forced = vi.fn(async () => undefined);
     (registered() as NodeTracerProvider).forceFlush = forced;
     tracepad.score('helpful', 1, { traceId: 'a'.repeat(32) });
-    await tracepad.flush({ timeout: 10 });
+    const flushed = tracepad.flush({ timeout: 10 });
+    await vi.advanceTimersByTimeAsync(10);
+    await flushed;
     expect(forced).not.toHaveBeenCalled();
     expect(warnings).toEqual([
       'tracepad: the score queue did not drain within 10ms',
