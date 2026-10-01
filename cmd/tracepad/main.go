@@ -120,7 +120,12 @@ func isTerminal(file *os.File) bool {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `Tracepad — lightweight OTLP-native store and viewer for LLM traces.
+	fmt.Fprint(os.Stderr, helpText)
+}
+
+// helpText is what `tracepad help` prints; a constant of its own so the test
+// that holds it to the configuration can read it (spec 001 #24).
+const helpText = `Tracepad — lightweight OTLP-native store and viewer for LLM traces.
 
 Usage:
   tracepad [serve] [flags]   run the server (default command)
@@ -156,8 +161,7 @@ Server environment:
   TRACEPAD_TRUSTED_PROXIES        proxies whose X-Forwarded-For counts  (default loopback)
                                   addresses and CIDR ranges, or none
 
-`+cli.Usage)
-}
+` + cli.Usage
 
 func serve(args []string) error {
 	cfg, err := config.Load(args)

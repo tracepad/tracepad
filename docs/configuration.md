@@ -23,11 +23,11 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 | `TRACEPAD_TRUSTED_PROXIES` | loopback | Peers whose `X-Forwarded-For` is believed: addresses and CIDR ranges, or `none`. See [docker.md](docker.md#serving-over-tls). |
 | `TRACEPAD_STORE_RAW` | `on` | Keep every accepted export body, so the archive can be replayed ([export.md](export.md)). Costs disk. |
 | `TRACEPAD_MAX_BODY_BYTES` | `20971520` (20 MiB) | Request body cap, applied to the wire bytes and again to what they decompress to. See [ingest.md](ingest.md). |
-| `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry. |
+| `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry; at least `1`. |
 | `TRACEPAD_BODY_BUDGET_BYTES` | four times the body cap | Request bodies the server holds in memory at once; at least the body cap. Past it a write waits and then gets `429`. |
-| `TRACEPAD_RESPONSE_BUDGET_BYTES` | `51200` | The default byte budget of a read response ([api.md](api.md)); a request may ask for another. |
-| `TRACEPAD_READ_TIMEOUT` | `20s` | Deadline of one read request. |
-| `TRACEPAD_READ_CONCURRENCY` | two per CPU, at least 4 | Reads served at once. |
+| `TRACEPAD_RESPONSE_BUDGET_BYTES` | `51200` | The default byte budget of a read response ([api.md](api.md)); a request may ask for another. From 4 KiB to 5 MiB. |
+| `TRACEPAD_READ_TIMEOUT` | `20s` | Deadline of one read request, its wait for a slot included; from `1s` to `4m`. |
+| `TRACEPAD_READ_CONCURRENCY` | two per CPU, at least 4 | Reads served at once; at least `1`. |
 | `TRACEPAD_MCP` | `on` | Serve MCP at `/mcp` ([mcp.md](mcp.md)). |
 | `TRACEPAD_SWEEP_INTERVAL` | `1h` | Cadence of the retention sweep; at least `1s`. See [retention.md](retention.md). |
 | `TRACEPAD_ROLLUP_INTERVAL` | `5m` | Cadence of the statistics rollup; at least `1s`. |

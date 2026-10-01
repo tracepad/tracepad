@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net"
 	"net/netip"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -245,6 +247,12 @@ var knownEnv = map[string]bool{
 	// which is the whole reason there is one variable and not two.
 	"TRACEPAD_URL":     true,
 	"TRACEPAD_API_KEY": true,
+}
+
+// KnownEnv returns the names in knownEnv, sorted. The binary's tests hold the
+// help text and docs/configuration.md to this list (spec 001 #24).
+func KnownEnv() []string {
+	return slices.Sorted(maps.Keys(knownEnv))
 }
 
 // deprecatedEnv names the variables that were read once, are not any more, and
