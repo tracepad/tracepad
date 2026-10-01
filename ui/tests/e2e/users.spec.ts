@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { clipped, createProject, foldsAt, sideways, signIn as enter, state } from './harness';
 
 // The Users screens (spec 023, Testing — e2e), against the real binary.

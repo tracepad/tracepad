@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, section, sideways, signIn as enter, state } from './harness';
 
 // The Quality screens (spec 025, Testing — e2e), against the real binary.

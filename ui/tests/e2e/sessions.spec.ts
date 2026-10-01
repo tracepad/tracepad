@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { clipped, sideways, signIn as enter, state } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added

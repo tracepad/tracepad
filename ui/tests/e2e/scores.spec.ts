@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, inviteViewer, signIn as enter, state, WIRE_TRACE } from './harness';
 
 // Scores where their target is (spec 022, Testing — e2e), against the real

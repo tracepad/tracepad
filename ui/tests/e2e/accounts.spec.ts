@@ -1,4 +1,5 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expectQuiet, test, watch, type Watch } from './fixtures';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -151,10 +152,13 @@ async function signIn(page: Page, at: Stand, who: { email: string; password: str
  * care — the server it was talking to is stopped first.
  */
 const extra: BrowserContext[] = [];
+/** What each of them was refused, which the suite's own watch cannot see (spec 050 #7). */
+const watched: Watch[] = [];
 
 async function otherBrowser(browser: Browser) {
 	const context = await browser.newContext();
 	extra.push(context);
+	watched.push(await watch(context));
 	return context.newPage();
 }
 
@@ -180,6 +184,7 @@ test.describe('accounts, from the link the server printed', () => {
 		stand?.stop();
 		stand = null;
 		await Promise.all(extra.splice(0).map((context) => context.close()));
+		for (const seen of watched.splice(0)) expectQuiet(seen);
 	});
 
 	test('the printed link creates the first owner and signs them in', async ({ page }) => {

@@ -30,6 +30,20 @@ import (
 // and routed in the browser (spec 006 Decision 1).
 const uiIndex = "index.html"
 
+// useBundle sets the files the interface is served from, and takes the policy
+// its entry will go out under from the bytes it is about to send (spec 050 #3).
+// A nil bundle is a build without the interface, which serves the stub.
+func (s *Server) useBundle(assets fs.FS) {
+	s.assets = assets
+	s.indexPolicy = ""
+	if assets == nil {
+		return
+	}
+	if index, err := fs.ReadFile(assets, uiIndex); err == nil {
+		s.indexPolicy = documentPolicy(index)
+	}
+}
+
 // handleUI answers everything the API did not claim.
 //
 // Three outcomes, in order:
@@ -61,7 +75,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	if s.assets == nil {
 		// A build without the `ui` tag (spec 006 Decision 9): every interface
 		// route gets the one page that explains itself.
-		serveUIDocument(w, r, ui.Stub)
+		serveUIDocument(w, r, ui.Stub, s.stubPolicy)
 		return
 	}
 	s.serveAsset(w, r)
@@ -103,7 +117,10 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := file.Stat()
 	file.Close()
-	if err != nil || info.IsDir() {
+	// The entry is a document whichever way it was asked for, and a document
+	// goes out under its policy: `/index.html` named as a file would
+	// otherwise be the one page of the interface with none (spec 050 #4).
+	if err != nil || info.IsDir() || name == uiIndex {
 		s.serveIndex(w, r)
 		return
 	}
@@ -137,15 +154,18 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the web interface has no entry point")
 		return
 	}
-	serveUIDocument(w, r, index)
+	serveUIDocument(w, r, index, s.indexPolicy)
 }
 
 // serveUIDocument writes an HTML document that must never be cached: it names
 // the hashed assets of exactly this build, and a stale copy would ask a new
-// binary for a bundle it no longer has.
-func serveUIDocument(w http.ResponseWriter, r *http.Request, body []byte) {
+// binary for a bundle it no longer has. It goes out under its own policy
+// (csp.go), which replaces the one every response carries rather than adding a
+// second beside it (spec 050 #4).
+func serveUIDocument(w http.ResponseWriter, r *http.Request, body []byte, policy string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Security-Policy", policy)
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return

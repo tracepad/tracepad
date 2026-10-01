@@ -155,6 +155,10 @@ type Server struct {
 	assets   fs.FS
 	reserved map[string]bool
 	paths    pathMatcher
+	// The policies the two documents are served under (spec 050), taken from
+	// the bytes at start-up: the SPA's entry, and the stub of a build without
+	// the interface.
+	indexPolicy, stubPolicy string
 
 	startedAt time.Time
 	counters  *counters
@@ -240,12 +244,13 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		inflatedLog:     &logpace.Keyed{Every: time.Minute},
 		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
 		cutLog:          &logpace.Keyed{Every: time.Minute},
-		assets:          ui.Assets(),
 		startedAt:       time.Now(),
 		counters:        newCounters(),
 		keyUses:         newKeyUses(),
 		keyUseEvery:     keyUseFlushEvery,
 	}
+	s.stubPolicy = documentPolicy(ui.Stub)
+	s.useBundle(ui.Assets())
 	s.setPublicURL(cfg.URL)
 	if st != nil {
 		s.mediaKey = st.MediaUploadKey()

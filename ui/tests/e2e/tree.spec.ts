@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, signIn, state } from './harness';
 
 // A trace larger than one tree (spec 043 #18): the server answers its first

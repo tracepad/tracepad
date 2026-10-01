@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { signIn as enter, state } from './harness';
 
 // Search, end to end against the real binary (spec 011, Testing): a phrase

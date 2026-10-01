@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import {
 	FAILING_TRACE,
 	LARGE_PAYLOAD_OBSERVATION,

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, signIn as enter, state, type Account } from './harness';
 
 // The filter panel's facet lists, against the real binary (spec 027, Testing —

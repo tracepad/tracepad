@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { section, signIn as enter, state } from './harness';
 
 // The shell's navigation at both widths (spec 006 #20): on a desktop the

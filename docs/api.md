@@ -1321,7 +1321,10 @@ Every response, API and interface alike, carries:
 | `Referrer-Policy` | `same-origin` | A link out of the interface tells the other site nothing. |
 
 A media body replaces the first with its own sandboxing policy, which refuses
-frames too ([Media](#media)).
+frames too ([Media](#media)). So do the two HTML documents the server hands
+out, the interface's page and the stub of a build without it: they carry a
+policy that lets the bundle's own files and its one inline script run and
+nothing else ([ui.md](ui.md#what-the-page-may-load)).
 
 A response on a route that needs a credential also carries `Cache-Control:
 private, no-store` and `Vary: Authorization, Cookie, X-Tracepad-Project`: it is

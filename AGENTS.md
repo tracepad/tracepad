@@ -569,6 +569,21 @@ API. This file routes; it does not duplicate what specs and docs say.
   (#6), built with read access and published by a job that has no toolchain
   (#7). `make docs-build` is in the gate (#10); `make docs-site` rehearses the
   deploy on a throwaway branch (#9).
+- ✅ Spec 050 (a policy for the page) shipped: the two HTML documents the
+  server hands out — the SPA's entry and the stub — go out under a
+  `Content-Security-Policy` that replaces the base `frame-ancestors 'none'`
+  rather than joining it (#1, #4): `script-src 'self'` plus the SHA-256 of
+  each inline script, no `'unsafe-inline'`, no `'unsafe-eval'` (#2),
+  `default-src 'none'` as the floor and `connect-src`, `img-src`, `font-src`
+  named against what the bundle loads (#6). The hash is taken at start from
+  the bytes about to be sent (`documentPolicy`, `internal/server/csp.go`), not
+  by SvelteKit's `kit.csp` (#3). Style keeps `'unsafe-inline'`, because the
+  editor, Svelte and the dialogs write style the policy cannot hash (#5).
+  `/index.html/` used to reach the file server and went out with no policy;
+  it is the entry now. Every end-to-end test fails on a violation, through
+  `ui/tests/e2e/fixtures.ts` (#7), and `csp.spec.ts` opens every screen,
+  checks the header against a hash computed by another hand, and shows an
+  injection refused (#8). New spec files import `test` from `./fixtures`.
 - ✅ Spec 032 (the Node package) shipped: `tracepad` on npm, source in
   `sdk/js/`, the Python package's surface with promises where Python has
   context managers and the same vocabulary on the wire — `init` adapts to
@@ -599,6 +614,7 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Storage, schema, migrations | `internal/store/`, spec 001 |
 | Write pipeline (group commit) | `internal/store/writer.go`, spec 002 #15, #31, spec 003 #9, spec 043 #12, #35, #37, #38 — every durable write is a `WriteJob`, and its `apply` must be idempotent: a window can apply a job more than once |
 | HTTP surface | `internal/server/` |
+| The page's Content-Security-Policy | `internal/server/csp.go` (built from the document it will send), `ui.go` (`useBundle`, `serveUIDocument`), `ui/tests/e2e/fixtures.ts` (the watch every e2e test runs under) and `csp.spec.ts`, spec 050 — a directive is added by a Decision there, never to make a test pass |
 | OTLP ingest | `internal/server/otlp.go`, `docs/ingest.md`, spec 002 |
 | Scores & prompts | `internal/server/scores.go`, `prompts.go`, `docs/scores.md`, `docs/prompts.md`, spec 003 — a version is never edited and never deleted alone; `PromptDelete` in `internal/store/prompts.go` takes a name whole, and the echo is checked inside its transaction (spec 021 #7). A score is the opposite: `ScoreDelete` takes one row with no echo at all, because a re-POST with the same id puts it back (spec 022 #6) |
 | The Scores block (the chips, the dialog, the tree badge) | `ui/src/lib/components/scores/` (the block on all three surfaces, the create/edit dialog), `ui/src/lib/scores.ts` (the pure part: the value per type, the source, the split of one response between the header and the observation panels, the form and the body it posts), `ui/src/lib/scores.svelte.ts` (the one read a trace or a session makes), `docs/ui.md#scores`, spec 022 — the trace reads its scores **once** and the split between the header, the panels and the tree's badge is rendering (#1); a new score is stamped `source: "web"` and an edit resends the row's own `metadata` and `timestamp` (#10) |

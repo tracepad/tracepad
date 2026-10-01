@@ -33,8 +33,9 @@ import (
 //     5), and a link out of the interface tells the other site nothing —
 //     not even the name of the host a self-hosted deployment runs on.
 //
-// A full `script-src` policy is the next step and not this one: it has to be
-// written against what the interface's bundle actually loads.
+// A full `script-src` policy is the interface's two documents' own, and is
+// sent by the handler that serves them in place of the first line (csp.go,
+// spec 050).
 var securityHeaders = [...][2]string{
 	{"Content-Security-Policy", "frame-ancestors 'none'"},
 	{"X-Frame-Options", "DENY"},

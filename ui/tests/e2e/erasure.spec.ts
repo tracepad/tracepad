@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, signIn, state } from './harness';
 
 // A user-data erasure is a task on the server (spec 047, Testing — e2e): the
