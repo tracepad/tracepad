@@ -704,7 +704,7 @@ reason in a comment; adding a dialect should be a table edit.
   the interface with hot reload against it.
 - `make build` — binary with the web interface into `./bin`;
   `make build-server` builds without it and needs no Node. The interface
-  builds on Node 24 alone (`engines` in `ui/package.json`): every target that
+  builds on Node 24 alone, 24.15 or later (`engines` in `ui/package.json`): every target that
   runs its Node checks the version first and stops, naming it, on any other
   — the gate included, so a machine whose default is another Node switches
   before it pushes (`nvm use 24`).

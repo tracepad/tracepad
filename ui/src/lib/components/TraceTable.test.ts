@@ -53,7 +53,10 @@ describe('the trace table', () => {
 			'TTFT',
 			'Errors'
 		]);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '62rem' });
+		// Declared in rem, so it scales with the reader's root size (spec 006
+		// #22). The declaration, not the computed value: jsdom computes a rem
+		// to pixels at its 16 px root, as a browser does at the reader's.
+		expect(screen.getByRole('table').style.minWidth).toBe('62rem');
 		expect(screen.getByRole('link', { name: 'user-1137' })).toBeInTheDocument();
 	});
 
@@ -146,7 +149,7 @@ describe('the trace table by its box', () => {
 		render(TraceTable, { rows: [ROW] });
 
 		expect(heads()).toHaveLength(10);
-		expect(screen.getByRole('table')).toHaveStyle({ minWidth: '62rem' });
+		expect(screen.getByRole('table').style.minWidth).toBe('62rem');
 	});
 
 	// The table's columns are rem, so its width is: a reader whose default is
