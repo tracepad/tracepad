@@ -820,7 +820,8 @@ Before tagging:
   in a subdirectory — and the tag is the whole release: the module proxy
   fetches it from the repository (spec 033 #1). Nothing can hold it back, so
   run `scripts/sdk-go-release-check.sh sdk/go/vX.Y.Z` before pushing it:
-  `const Version` in `sdk/go/http.go` must be the tag's version.
+  `const Version` in `sdk/go/http.go` must be the tag's version, and a major
+  of 2 or more needs `/vN` in the module path.
   `release-sdk-go.yml` runs the same check and the unit suite afterwards and
   goes red if the tag was wrong (spec 020 #28).
 - **A tag spells its version the one way, semver's, for every package**:
