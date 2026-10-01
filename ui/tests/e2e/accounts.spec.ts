@@ -183,6 +183,8 @@ test.describe('accounts, from the link the server printed', () => {
 	test.afterAll(async () => {
 		stand?.stop();
 		stand = null;
+		// Let what is in flight arrive while the pages are still open.
+		for (const seen of watched) await seen.settle();
 		await Promise.all(extra.splice(0).map((context) => context.close()));
 		for (const seen of watched.splice(0)) expectQuiet(seen);
 	});

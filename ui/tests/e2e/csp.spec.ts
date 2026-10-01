@@ -32,22 +32,22 @@ function directives(policy: string): Record<string, string> {
 
 test.describe('what is sent', () => {
 	for (const path of ['/', '/login', '/p/anything/dashboard', '/index.html', '/index.html/']) {
-		test(`${path} carries one policy, and it names its inline script by hash`, async ({
-			request
-		}) => {
-			const response = await request.get(path);
+		test(`${path} carries one policy, and it names its inline script by hash`, async ({ page }) => {
+			// Read by the browser and not by a pattern of ours: what it hashes is
+			// the text of the document's own script elements, so that is what is
+			// compared with (the server's scan is tested in Go against the same
+			// rules, and this is the check that it agrees with a browser).
+			const response = (await page.goto(path))!;
 			expect(response.status()).toBe(200);
-			const policies = response
-				.headersArray()
-				.filter(({ name }) => name.toLowerCase() === 'content-security-policy');
+			if (path.startsWith('/index.html')) expect(new URL(response.url()).pathname).toBe('/');
+			const policies = (await response.headersArray()).filter(
+				({ name }) => name.toLowerCase() === 'content-security-policy'
+			);
 			expect(policies).toHaveLength(1);
 			const policy = directives(policies[0].value);
 
-			// What the document actually runs, hashed here by another hand than
-			// the server's: a policy naming a hash of something else would be
-			// a blank page, and one naming no hash at all would be a hole.
-			const inline = [...(await response.text()).matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
-				(match) => match[1]
+			const inline = await page.evaluate(() =>
+				[...document.scripts].filter((script) => !script.src).map((script) => script.textContent ?? '')
 			);
 			expect(inline).toHaveLength(1);
 			const hash = `'sha256-${createHash('sha256').update(inline[0]).digest('base64')}'`;
@@ -67,6 +67,17 @@ test.describe('what is sent', () => {
 			expect(response.headers()['content-security-policy']).toBe("frame-ancestors 'none'");
 		}
 	});
+});
+
+test('every spec takes its test from the watched fixture', () => {
+	const unwatched = readdirSync(join(process.cwd(), 'tests', 'e2e'))
+		.filter((file) => file.endsWith('.spec.ts'))
+		.filter((file) =>
+			/import\s*(type\s*)?\{[^}]*\btest\b[^}]*\}\s*from\s*['"]@playwright\/test['"]/.test(
+				readFileSync(join(process.cwd(), 'tests', 'e2e', file), 'utf8')
+			)
+		);
+	expect(unwatched, "specs importing `test` from '@playwright/test' instead of './fixtures'").toEqual([]);
 });
 
 test.describe('what is refused', () => {

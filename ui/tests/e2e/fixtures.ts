@@ -10,6 +10,10 @@ import { expect, test as base, type BrowserContext } from '@playwright/test';
 // — in both browsers, at both widths — double as the sweep for it: any
 // `securitypolicyviolation` fails the test it happened in.
 //
+// Every spec takes `test` from here and not from `@playwright/test`, which
+// `csp.spec.ts` checks, because a file that forgot would be an unwatched file
+// that looks like the others.
+//
 // And the watch refuses to be vacuous. A policy that is not sent produces no
 // violations either, so every HTML document the browser receives must itself
 // carry a `script-src`; otherwise "no violations" would be the answer a
@@ -36,6 +40,14 @@ export type Watch = {
 	unguarded: string[];
 	/** Hands back what was seen and forgets it: for a test that provokes one. */
 	take(): Violation[];
+	/**
+	 * Waits until a refusal that is still on its way has arrived. A page
+	 * reports a refusal from a task of its own, and the binding carries it to
+	 * this process afterwards, so reading `violations` the instant a test ends
+	 * can miss the last thing it did. A round trip through every page, with a
+	 * timer in it, is behind both.
+	 */
+	settle(): Promise<void>;
 };
 
 const REPORT = '__tracepadCSPViolation';
@@ -51,6 +63,13 @@ export async function watch(context: BrowserContext): Promise<Watch> {
 		unguarded: [],
 		take() {
 			return seen.violations.splice(0);
+		},
+		async settle() {
+			await Promise.all(
+				context
+					.pages()
+					.map((page) => page.evaluate(() => new Promise((done) => setTimeout(done, 50))).catch(() => {}))
+			);
 		}
 	};
 	await context.exposeBinding(REPORT, ({ page }, violation: Omit<Violation, 'page'>) => {
@@ -71,6 +90,9 @@ export async function watch(context: BrowserContext): Promise<Watch> {
 		);
 	}, REPORT);
 	context.on('response', (response) => {
+		// A redirect's few words of HTML are never drawn: the browser follows it
+		// to the document that is.
+		if (response.status() >= 300 && response.status() < 400) return;
 		const type = response.headers()['content-type'] ?? '';
 		if (!type.startsWith('text/html')) return;
 		const policy = response.headers()['content-security-policy'] ?? '';
@@ -85,12 +107,18 @@ export function expectQuiet(seen: Watch) {
 	expect(seen.violations, 'Content-Security-Policy violations').toEqual([]);
 }
 
+/** Lets what is in flight arrive, and then fails as `expectQuiet` does. */
+export async function quiet(seen: Watch) {
+	await seen.settle();
+	expectQuiet(seen);
+}
+
 export const test = base.extend<{ csp: Watch }>({
 	csp: [
 		async ({ context }, use) => {
 			const seen = await watch(context);
 			await use(seen);
-			expectQuiet(seen);
+			await quiet(seen);
 		},
 		{ auto: true }
 	],

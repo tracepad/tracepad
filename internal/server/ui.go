@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/tracepad/tracepad/internal/mcpserver"
-	"github.com/tracepad/tracepad/internal/ui"
 )
 
 // The web interface is served from the same origin as the API (spec 006): one
@@ -30,17 +29,31 @@ import (
 // and routed in the browser (spec 006 Decision 1).
 const uiIndex = "index.html"
 
-// useBundle sets the files the interface is served from, and takes the policy
-// its entry will go out under from the bytes it is about to send (spec 051 #3).
-// A nil bundle is a build without the interface, which serves the stub.
+// uiDocument is an HTML document the server hands out, with the policy it goes
+// out under. The two are made together, from the same bytes, once: the hash in
+// the policy is of the text that is sent, by construction, and a document with
+// no policy cannot be built (spec 051 #3, #4).
+type uiDocument struct {
+	body   []byte
+	policy string
+}
+
+func newUIDocument(body []byte) *uiDocument {
+	return &uiDocument{body: body, policy: documentPolicy(body)}
+}
+
+// useBundle sets the files the interface is served from, and reads its entry
+// once. A nil bundle is a build without the interface, which serves the stub;
+// a bundle with no entry serves none, and answers `500` where the entry would
+// be (serveIndex).
 func (s *Server) useBundle(assets fs.FS) {
 	s.assets = assets
-	s.indexPolicy = ""
+	s.index = nil
 	if assets == nil {
 		return
 	}
-	if index, err := fs.ReadFile(assets, uiIndex); err == nil {
-		s.indexPolicy = documentPolicy(index)
+	if body, err := fs.ReadFile(assets, uiIndex); err == nil {
+		s.index = newUIDocument(body)
 	}
 }
 
@@ -63,6 +76,15 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "the web interface only answers GET")
 		return
 	}
+	// The entry is a page and not a file to be fetched by name: asked for as
+	// `/index.html`, with or without a trailing slash, it is answered with a
+	// redirect to the root, which is what the file server did for the first
+	// spelling and sent as a bare file, under no policy, for the second (spec
+	// 051 #4). The router in the browser never sees the name.
+	if path.Clean(r.URL.Path) == "/"+uiIndex {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		return
+	}
 	// A path that names a file is never a client-side route, so it must not
 	// resolve to the document. Serving HTML for a missing `…/chunk.js` — a tab
 	// left open across an upgrade asking this binary for a bundle it no longer
@@ -75,7 +97,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	if s.assets == nil {
 		// A build without the `ui` tag (spec 006 Decision 9): every interface
 		// route gets the one page that explains itself.
-		serveUIDocument(w, r, ui.Stub, s.stubPolicy)
+		serveUIDocument(w, r, s.stub)
 		return
 	}
 	s.serveAsset(w, r)
@@ -117,9 +139,9 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := file.Stat()
 	file.Close()
-	// The entry is a document whichever way it was asked for, and a document
-	// goes out under its policy: `/index.html` named as a file would
-	// otherwise be the one page of the interface with none (spec 051 #4).
+	// The entry is a document, and a document goes out under its policy: the
+	// root names it (`/` is `index.html` here) and so must not be sent as a
+	// file (spec 051 #4).
 	if err != nil || info.IsDir() || name == uiIndex {
 		s.serveIndex(w, r)
 		return
@@ -149,12 +171,11 @@ func assetName(urlPath string) string {
 // exists, and a 404 status on the document would make every deep link look
 // broken to anything reading status codes.
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
-	index, err := fs.ReadFile(s.assets, uiIndex)
-	if err != nil {
+	if s.index == nil {
 		writeError(w, http.StatusInternalServerError, "the web interface has no entry point")
 		return
 	}
-	serveUIDocument(w, r, index, s.indexPolicy)
+	serveUIDocument(w, r, s.index)
 }
 
 // serveUIDocument writes an HTML document that must never be cached: it names
@@ -162,15 +183,15 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 // binary for a bundle it no longer has. It goes out under its own policy
 // (csp.go), which replaces the one every response carries rather than adding a
 // second beside it (spec 051 #4).
-func serveUIDocument(w http.ResponseWriter, r *http.Request, body []byte, policy string) {
+func serveUIDocument(w http.ResponseWriter, r *http.Request, document *uiDocument) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Security-Policy", policy)
+	w.Header().Set("Content-Security-Policy", document.policy)
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return
 	}
-	w.Write(body)
+	w.Write(document.body)
 }
 
 // writeAPIMiss answers a request that landed on an API prefix but on no route.

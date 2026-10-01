@@ -580,7 +580,8 @@ API. This file routes; it does not duplicate what specs and docs say.
   by SvelteKit's `kit.csp` (#3). Style keeps `'unsafe-inline'`, because the
   editor, Svelte and the dialogs write style the policy cannot hash (#5).
   `/index.html/` used to reach the file server and went out with no policy;
-  it is the entry now. Every end-to-end test fails on a violation, through
+  both spellings of the entry's name redirect to `/` now, and the entry is read
+  once, so the hash is of the bytes sent (#3, #4). Every end-to-end test fails on a violation, through
   `ui/tests/e2e/fixtures.ts` (#7), and `csp.spec.ts` opens every screen,
   checks the header against a hash computed by another hand, and shows an
   injection refused (#8). New spec files import `test` from `./fixtures`.

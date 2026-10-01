@@ -1,9 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
-	"regexp"
 	"strings"
 )
 
@@ -23,13 +23,121 @@ import (
 // stale and the interface would then be a blank page that only a console
 // explains (spec 051 #3).
 
-// inlineScript matches a `<script>` element and captures its content. One with
-// a `src` has no content, so it matches with an empty body, which is skipped.
-var inlineScript = regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.*?)</script\s*>`)
+// inlineScripts returns the text of every `<script>` element of an HTML
+// document that runs from its own content, as the browser would hash it. It is
+// a scan over the markup and not a regular expression because the three things
+// a pattern gets wrong are the three a hash cannot afford to:
+//
+//   - a comment is skipped *outside* a script and is script text *inside* one:
+//     `<!--` in a script body is part of its source, and cutting it out before
+//     looking for scripts hashes something the browser never sees;
+//   - a start tag ends at the first `>` *outside* a quoted attribute value, so
+//     `<script data-x="a>b">` is one tag and not two;
+//   - a script's text ends at `</script` followed by whitespace, `/` or `>`,
+//     and the browser reads it with its line ends normalised: CR LF and a
+//     lone CR are both LF before the text is hashed, which a source file
+//     checked out with Windows line ends would otherwise turn into a blank
+//     page.
+//
+// An element with a `src` runs the file and ignores its text, so it has no
+// hash. What SvelteKit emits today, checked on the built entry, is one bare
+// `<script>` of tab-indented lines ending in LF, with no comment and no quote
+// in its tag; the scan holds for anything the same builder could emit next.
+func inlineScripts(document []byte) [][]byte {
+	var found [][]byte
+	for i := 0; i < len(document); {
+		switch {
+		case bytes.HasPrefix(document[i:], []byte("<!--")):
+			end := bytes.Index(document[i+4:], []byte("-->"))
+			if end < 0 {
+				return found // an unterminated comment runs to the end
+			}
+			i += 4 + end + 3
+		case isTagStart(document[i:], "script"):
+			tagEnd, hasSrc := scanStartTag(document, i+len("<script"))
+			if tagEnd < 0 {
+				return found
+			}
+			text, next := scriptText(document, tagEnd)
+			if !hasSrc && len(text) > 0 {
+				found = append(found, normalizeNewlines(text))
+			}
+			i = next
+		default:
+			i++
+		}
+	}
+	return found
+}
 
-// htmlComment matches a comment, whose contents the browser never runs and so
-// never needs a hash for.
-var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+// isTagStart reports whether b opens with `<name` and then a character that
+// ends a tag name, so `<scripts>` and `<script-x>` are not scripts.
+func isTagStart(b []byte, name string) bool {
+	return len(b) > 0 && b[0] == '<' && nameAt(b[1:], name)
+}
+
+// nameAt reports whether b opens with name, in any case, and then ends a tag
+// name.
+func nameAt(b []byte, name string) bool {
+	if len(b) <= len(name) || !strings.EqualFold(string(b[:len(name)]), name) {
+		return false
+	}
+	return strings.IndexByte(" \t\n\r\f/>", b[len(name)]) >= 0
+}
+
+// scanStartTag reads attributes from `from` to the `>` that ends the tag,
+// honouring quotes, and reports where the tag ends (the index after the `>`,
+// or -1) and whether it carries a `src`.
+func scanStartTag(document []byte, from int) (end int, hasSrc bool) {
+	i := from
+	for i < len(document) {
+		switch c := document[i]; {
+		case c == '>':
+			return i + 1, hasSrc
+		case c == '"' || c == '\'':
+			close := bytes.IndexByte(document[i+1:], c)
+			if close < 0 {
+				return -1, hasSrc
+			}
+			i += close + 2
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '/':
+			i++
+		default:
+			start := i
+			for i < len(document) && strings.IndexByte(" \t\n\r\f/>=\"'", document[i]) < 0 {
+				i++
+			}
+			if i == start {
+				i++ // a stray `=` is not an attribute name
+				continue
+			}
+			if strings.EqualFold(string(document[start:i]), "src") {
+				hasSrc = true
+			}
+		}
+	}
+	return -1, hasSrc
+}
+
+// scriptText returns a script's content, from the end of its start tag to its
+// closing tag, and the index to carry on from.
+func scriptText(document []byte, from int) (text []byte, next int) {
+	for i := from; i < len(document); i++ {
+		if document[i] == '<' && i+1 < len(document) && document[i+1] == '/' && nameAt(document[i+2:], "script") {
+			return document[from:i], i + 2
+		}
+	}
+	return document[from:], len(document)
+}
+
+// normalizeNewlines applies the HTML parser's preprocessing of line ends.
+func normalizeNewlines(text []byte) []byte {
+	if !bytes.Contains(text, []byte{'\r'}) {
+		return text
+	}
+	text = bytes.ReplaceAll(text, []byte("\r\n"), []byte{'\n'})
+	return bytes.ReplaceAll(text, []byte{'\r'}, []byte{'\n'})
+}
 
 // documentPolicy returns the Content-Security-Policy for one HTML document.
 //
@@ -54,11 +162,8 @@ var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 //     `frame-ancestors 'none'` close what `default-src` does not cover.
 func documentPolicy(document []byte) string {
 	scripts := []string{"'self'"}
-	for _, match := range inlineScript.FindAllSubmatch(htmlComment.ReplaceAll(document, nil), -1) {
-		if len(match[1]) == 0 {
-			continue
-		}
-		sum := sha256.Sum256(match[1])
+	for _, text := range inlineScripts(document) {
+		sum := sha256.Sum256(text)
 		scripts = append(scripts, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
 	}
 	return strings.Join([]string{

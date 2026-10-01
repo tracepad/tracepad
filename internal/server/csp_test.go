@@ -50,6 +50,24 @@ func TestDocumentPolicyNamesTheInlineScripts(t *testing.T) {
 		{"a file is the policy's 'self'", `<script src="/_app/x.js"></script>`, "'self'"},
 		{"a comment is never run", `<!-- <script>evil()</script> --><p>`, "'self'"},
 		{"no script at all", `<p>hello</p>`, "'self'"},
+		// What a pattern over the markup gets wrong, and a browser does not:
+		{"a comment inside a script is its text", "<script>a(); <!-- b --> c();</script>",
+			"'self' " + hashOf("a(); <!-- b --> c();")},
+		{"a comment that opens inside a script and shuts after it", "<script>x(<!--</script><p>-->",
+			"'self' " + hashOf("x(<!--")},
+		{"a > inside a quoted attribute is not the end of the tag", `<script data-x="a>b" data-y='c>d'>run()</script>`,
+			"'self' " + hashOf("run()")},
+		{"a src among quoted attributes", `<script data-x="a>b" src="/x.js">ignored()</script>`, "'self'"},
+		{"CR LF is LF to the parser", "<script>\r\na();\r\nb();\r\n</script>",
+			"'self' " + hashOf("\na();\nb();\n")},
+		{"a lone CR is LF too", "<script>a();\rb();</script>", "'self' " + hashOf("a();\nb();")},
+		{"a name that only starts like script", `<scripts>a()</scripts><script-x>b()</script-x>`, "'self'"},
+		{"a closing tag that only starts like script", `<script>a()</scripts> b()</script>`,
+			"'self' " + hashOf("a()</scripts> b()")},
+		{"a script after a comment and a src script", `<!-- x --><script src="/a.js"></script><script>c()</script>`,
+			"'self' " + hashOf("c()")},
+		{"an unterminated comment hides what follows it", `<script>a()</script><!-- <script>b()</script>`,
+			"'self' " + hashOf("a()")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := directives(t, documentPolicy([]byte(tc.html)))["script-src"]
@@ -57,6 +75,16 @@ func TestDocumentPolicyNamesTheInlineScripts(t *testing.T) {
 				t.Errorf("script-src = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestADocumentAlwaysHasAPolicy: whatever the bytes are, the policy is not
+// empty, because an empty header would replace the base one and say nothing.
+func TestADocumentAlwaysHasAPolicy(t *testing.T) {
+	for _, body := range []string{"", "<", "<script", "<script>", "<!--", "\x00\xff", "<p>"} {
+		if got := newUIDocument([]byte(body)).policy; !strings.HasPrefix(got, "default-src 'none'") {
+			t.Errorf("document %q: policy = %q", body, got)
+		}
 	}
 }
 
@@ -96,23 +124,20 @@ func TestDocumentPolicyAllowsNothingItWasNotToldTo(t *testing.T) {
 	}
 }
 
-// TestInterfaceDocumentsGoOutUnderTheirPolicy: the SPA's entry — however it is
-// asked for — carries the policy with the hash of the script it is made of,
-// once; a file of the bundle and an API answer keep the header every response
-// has.
+// TestInterfaceDocumentsGoOutUnderTheirPolicy: the SPA's entry carries the
+// policy with the hash of the script it is made of, once; a file of the bundle
+// and an API answer keep the header every response has.
 func TestInterfaceDocumentsGoOutUnderTheirPolicy(t *testing.T) {
 	const boot = "{ start(); }"
 	h := newHarness(t, nil, store.WriterOptions{})
-	h.server.useBundle(fstest.MapFS{
+	bundle := fstest.MapFS{
 		"index.html":                    {Data: []byte(`<!doctype html><script>` + boot + `</script>`)},
 		"_app/immutable/entry/start.js": {Data: []byte(`export const start = 1`)},
-	})
+	}
+	h.server.useBundle(bundle)
 
-	for _, path := range []string{"/", "/traces", "/p/abc/dashboard", "/index.html", "/index.html/", "/nowhere"} {
+	for _, path := range []string{"/", "/traces", "/p/abc/dashboard", "/nowhere"} {
 		rec := h.get(t, path)
-		// The entry is the document, whichever way it is spelled: a trailing
-		// slash reached the file server, which sent it as a plain file with
-		// the base header and no policy.
 		expectStatus(t, rec, 200)
 		policies := rec.Header().Values("Content-Security-Policy")
 		if len(policies) != 1 {
@@ -131,6 +156,61 @@ func TestInterfaceDocumentsGoOutUnderTheirPolicy(t *testing.T) {
 	}
 }
 
+// TestTheEntryIsNeverServedAsAFile: asked for by its name, the entry is a
+// redirect to the root, however the name is spelled. A trailing slash used to
+// reach the file server, which sent it as a bare file under no policy.
+func TestTheEntryIsNeverServedAsAFile(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.server.useBundle(fstest.MapFS{"index.html": {Data: []byte(`<script>x()</script>`)}})
+
+	for _, path := range []string{"/index.html", "/index.html/"} {
+		rec := h.get(t, path)
+		expectStatus(t, rec, 301)
+		if got := rec.Header().Get("Location"); got != "/" {
+			t.Errorf("%s: Location = %q, want /", path, got)
+		}
+		if strings.Contains(rec.Body.String(), "<script") {
+			t.Errorf("%s: the entry's source was sent", path)
+		}
+		if got := rec.Header().Values("Content-Security-Policy"); len(got) != 1 || got[0] != "frame-ancestors 'none'" {
+			t.Errorf("%s: Content-Security-Policy = %q, want the base header", path, got)
+		}
+	}
+}
+
+// TestTheHashIsOfTheBytesThatAreSent: the entry is read once, when the bundle
+// is chosen, and that copy is what the policy is taken from and what goes out;
+// a file that changes under the server afterwards cannot make the two differ.
+func TestTheHashIsOfTheBytesThatAreSent(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	bundle := fstest.MapFS{"index.html": {Data: []byte(`<script>first()</script>`)}}
+	h.server.useBundle(bundle)
+	bundle["index.html"] = &fstest.MapFile{Data: []byte(`<script>second()</script>`)}
+
+	rec := h.get(t, "/")
+	expectStatus(t, rec, 200)
+	if got := rec.Body.String(); got != `<script>first()</script>` {
+		t.Fatalf("body = %q, want the copy read at start", got)
+	}
+	if script := directives(t, rec.Header().Get("Content-Security-Policy"))["script-src"]; script != "'self' "+hashOf("first()") {
+		t.Errorf("script-src = %q, want the hash of what was sent", script)
+	}
+}
+
+// TestABundleWithNoEntryIsRefusedWithoutLosingTheBaseHeader: the answer is a
+// `500` and the response keeps `frame-ancestors 'none'`; there is never an
+// empty policy in its place, which would say nothing.
+func TestABundleWithNoEntryIsRefusedWithoutLosingTheBaseHeader(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	h.server.useBundle(fstest.MapFS{"_app/immutable/entry/start.js": {Data: []byte(`1`)}})
+
+	rec := h.get(t, "/traces")
+	expectStatus(t, rec, 500)
+	if got := rec.Header().Values("Content-Security-Policy"); len(got) != 1 || got[0] != "frame-ancestors 'none'" {
+		t.Errorf("Content-Security-Policy = %q, want only frame-ancestors 'none'", got)
+	}
+}
+
 // TestTheStubIsServedUnderAPolicyToo: a build without the interface hands out
 // one page, which has a style of its own and no script, and the policy that
 // goes with it is the same function's.
@@ -139,7 +219,7 @@ func TestTheStubIsServedUnderAPolicyToo(t *testing.T) {
 	rec := h.get(t, "/")
 	expectStatus(t, rec, 200)
 	policies := rec.Header().Values("Content-Security-Policy")
-	if len(policies) != 1 || policies[0] != documentPolicy(ui.Stub) {
+	if len(policies) != 1 || policies[0] != documentPolicy(ui.Stub) || rec.Body.String() != string(ui.Stub) {
 		t.Fatalf("Content-Security-Policy = %q, want %q", policies, documentPolicy(ui.Stub))
 	}
 	if got := directives(t, policies[0])["script-src"]; got != "'self'" {

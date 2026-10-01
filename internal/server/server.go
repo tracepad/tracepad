@@ -155,10 +155,10 @@ type Server struct {
 	assets   fs.FS
 	reserved map[string]bool
 	paths    pathMatcher
-	// The policies the two documents are served under (spec 051), taken from
-	// the bytes at start-up: the SPA's entry, and the stub of a build without
-	// the interface.
-	indexPolicy, stubPolicy string
+	// The two HTML documents the server hands out, each with the policy it goes
+	// out under (spec 051): the SPA's entry, read once at start and nil when
+	// the bundle has none, and the stub of a build without the interface.
+	index, stub *uiDocument
 
 	startedAt time.Time
 	counters  *counters
@@ -249,7 +249,7 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		keyUses:         newKeyUses(),
 		keyUseEvery:     keyUseFlushEvery,
 	}
-	s.stubPolicy = documentPolicy(ui.Stub)
+	s.stub = newUIDocument(ui.Stub)
 	s.useBundle(ui.Assets())
 	s.setPublicURL(cfg.URL)
 	if st != nil {
