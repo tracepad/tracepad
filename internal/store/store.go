@@ -261,6 +261,12 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 // writer exists, so the key is the server's own (spec 045 #8). The API creates
 // projects as a job like every other write (see ProjectCreate).
 func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
+	return s.createProject(name, keys, AllScopes)
+}
+
+// createProject is CreateProject with the first key's scopes, which the
+// bootstrap narrows for the one key it prints (spec 045 #28).
+func (s *Store) createProject(name string, keys KeyPair, scopes string) (*Project, error) {
 	id, err := randomHex(16)
 	if err != nil {
 		return nil, err
@@ -270,7 +276,7 @@ func (s *Store) CreateProject(name string, keys KeyPair) (*Project, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	project, err := insertProject(tx, id, name, keys, KeyOrigin{Via: MintedAtStartup})
+	project, err := insertProject(tx, id, name, keys, scopes, KeyOrigin{Via: MintedAtStartup})
 	if err != nil {
 		return nil, err
 	}

@@ -353,7 +353,7 @@ func (p *ProjectCreate) apply(tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	project, err := insertProject(tx, id, p.Name, p.Keys, p.Origin)
+	project, err := insertProject(tx, id, p.Name, p.Keys, AllScopes, p.Origin)
 	if err != nil {
 		return err
 	}
@@ -361,10 +361,11 @@ func (p *ProjectCreate) apply(tx *sql.Tx) error {
 	return nil
 }
 
-// insertProject writes a project row and its first key, which may do
-// everything a key may (spec 045 #5). Shared with the startup bootstrap, which
-// runs before the writer exists and so cannot be a job (spec 001 #9).
-func insertProject(tx *sql.Tx, id, name string, keys KeyPair, origin KeyOrigin) (*Project, error) {
+// insertProject writes a project row and its first key with the scopes given:
+// every one a key may hold (spec 045 #5), but for the key the first start
+// prints (#28). Shared with the startup bootstrap, which runs before the
+// writer exists and so cannot be a job (spec 001 #9).
+func insertProject(tx *sql.Tx, id, name string, keys KeyPair, scopes string, origin KeyOrigin) (*Project, error) {
 	// RETURNING keeps the returned Project in sync with schema defaults
 	// instead of duplicating them as Go literals.
 	project, err := scanProject(tx.QueryRow(
@@ -372,7 +373,7 @@ func insertProject(tx *sql.Tx, id, name string, keys KeyPair, origin KeyOrigin) 
 	if err != nil {
 		return nil, fmt.Errorf("create project %q: %w", name, err)
 	}
-	if err := insertKey(tx, id, keys, "", AllScopes, origin); err != nil {
+	if err := insertKey(tx, id, keys, "", scopes, origin); err != nil {
 		return nil, err
 	}
 	return project, nil

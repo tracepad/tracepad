@@ -16,7 +16,11 @@ export type Account = { email: string; password: string };
 
 export type State = {
 	baseURL: string;
-	/** The key of the project first run created, which the corpus is in. */
+	/**
+	 * A key with every scope in the project first run created, which the
+	 * corpus is in — minted with the admin token, since the key the server
+	 * printed holds `ingest` alone (spec 045 #28).
+	 */
 	key: string;
 	/** That project's id, which is what the seeded accounts can reach. */
 	project: string;
@@ -62,6 +66,21 @@ export async function createProject(
 	const created = (await response.json()) as { id: string; name: string; secret_key: string };
 	const account = await inviteEditor(baseURL, created.id, unique);
 	return { id: created.id, name: created.name, key: created.secret_key, account };
+}
+
+/**
+ * Mints a key with every scope in a project, with the admin token. The key the
+ * first start prints holds `ingest` alone (spec 045 #28), and a suite that
+ * reads or writes what it seeded needs one that does more.
+ */
+export async function mintFullKey(baseURL: string, project: string, token: string): Promise<string> {
+	const response = await fetch(`${baseURL}/api/v1/projects/${project}/keys`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ scopes: ['ingest', 'read', 'write'], name: 'e2e' })
+	});
+	if (!response.ok) throw new Error(`mint a key: ${response.status} ${await response.text()}`);
+	return ((await response.json()) as { secret_key: string }).secret_key;
 }
 
 /**

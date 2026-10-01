@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -132,7 +133,7 @@ Usage:
                              print the skill, or one of its references
 
 Flags of serve:
-  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default :4318)
+  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default 127.0.0.1:4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
 Server environment:
@@ -373,7 +374,9 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 // project created in this run — both plain OTel and Langfuse-SDK style
 // (spec 001 #9) — and says where the browser interface is.
 //
-// A secret is printed only when this run generated it. One declared in
+// A secret is printed only when this run generated it, and that key holds
+// ingest alone (spec 045 #28): the lines say where a key that reads comes
+// from, since the printed one is for the application. One declared in
 // TRACEPAD_PROJECTS is the operator's already, and printing it would copy it
 // into every log this output is kept in — `docker logs` among them, which
 // keeps it for the life of the container (spec 001 #12). The lines are
@@ -409,6 +412,14 @@ Project %q created%s
   LANGFUSE_SECRET_KEY=%s
 
 `, c.Project.Name, intro, host, secret, host, c.Keys.PublicKey, secret)
+		if c.Scopes == store.ScopeIngest {
+			fmt.Fprint(w, `This key holds the ingest scope alone: it sends spans and scores and fetches
+prompts, and cannot read what was sent. For the CLI, an agent or the eval
+harness, mint a key that reads in Settings → Project → API keys once you are
+signed in, or with the admin token: tracepad keys create --scope read,write
+
+`)
+		}
 	}
 	if !ui.Enabled {
 		return
@@ -451,22 +462,32 @@ func noteSetupOff(log *slog.Logger, cfg *config.Config, srv *server.Server) {
 }
 
 // warnPlainHTTP says so at start when other machines can reach this server
-// over plain HTTP and nothing says a TLS proxy stands in front (spec 001 #12).
+// over plain HTTP (spec 001 #12, #22).
 // A warning, not a refusal. In the image it is one INFO line instead: a
 // container binds every interface by design and is fenced by where its port
 // is published, which the server cannot see, and a warning that fires in the
 // recommended setup teaches people to skip warnings.
 func warnPlainHTTP(log *slog.Logger, listen, publicURL string, inContainer bool) {
-	if !config.PlainHTTPBeyondLoopback(listen, publicURL) {
+	if !config.PlainHTTPBeyondLoopback(listen) {
 		return
 	}
 	if inContainer {
-		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1 "+
-			"or put TLS in front — docs/docker.md", "listen", listen)
+		log.Info("listening on all interfaces inside the container; publish the port on 127.0.0.1, "+
+			"and put a TLS proxy in front before anyone else connects — docs/docker.md", "listen", listen)
+		return
+	}
+	// An https TRACEPAD_URL says where people are meant to connect, not that
+	// nobody connects here directly, so it changes the advice and not whether
+	// there is any (spec 001 #22).
+	if u, err := url.Parse(strings.TrimSpace(publicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
+		log.Warn("TRACEPAD_URL is https, but this listener takes plain HTTP from other machines: a client that "+
+			"connects to it directly skips the TLS proxy. If the proxy runs on this machine, listen on 127.0.0.1, "+
+			"the default; if it does not, the hop from the proxy to here crosses the network unencrypted",
+			"listen", listen)
 		return
 	}
 	log.Warn("serving plain HTTP beyond loopback: passwords, session cookies and keys cross the network unencrypted. "+
-		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on 127.0.0.1 "+
+		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on 127.0.0.1, the default "+
 		"(in a container, publish the port with -p 127.0.0.1:4318:4318)",
 		"listen", listen)
 }

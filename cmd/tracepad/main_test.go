@@ -37,9 +37,11 @@ func TestSplitCommand(t *testing.T) {
 func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 	var out bytes.Buffer
 	printStartup(&out, &store.BootstrapResult{Created: []store.BootstrapCreated{
-		{Project: store.Project{Name: "default"}, Keys: store.KeyPair{PublicKey: "tp-pk-gen", Secret: "tp-sk-generated"}},
-		{Project: store.Project{Name: "app"}, Keys: store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-declared"}, Declared: true},
-	}}, ":4318", "")
+		{Project: store.Project{Name: "default"}, Keys: store.KeyPair{PublicKey: "tp-pk-gen", Secret: "tp-sk-generated"},
+			Scopes: store.ScopeIngest},
+		{Project: store.Project{Name: "app"}, Keys: store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-declared"},
+			Declared: true, Scopes: store.AllScopes},
+	}}, "127.0.0.1:4318", "")
 
 	got := out.String()
 	if strings.Contains(got, "tp-sk-declared") {
@@ -49,6 +51,10 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 		`Project "default" created. Connect your app with either:`,
 		// No gRPC receiver: an exporter left to its default reports nothing.
 		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+		// The default bind is loopback, printed as the host the OTel default
+		// and the docs name (spec 001 #22).
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces",
+		"LANGFUSE_HOST=http://localhost:4318",
 		"Bearer tp-sk-generated",
 		"LANGFUSE_SECRET_KEY=tp-sk-generated",
 		`Project "app" created from TRACEPAD_PROJECTS.`,
@@ -59,12 +65,30 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 			t.Errorf("banner lacks %q:\n%s", want, got)
 		}
 	}
+
+	// The printed key is for the application and says so, with where a key
+	// that reads comes from; the declared one holds all three and needs no
+	// such line (spec 045 #28).
+	ingestOnly := "This key holds the ingest scope alone"
+	if strings.Count(got, ingestOnly) != 1 {
+		t.Errorf("want the ingest-only note once, under the generated key:\n%s", got)
+	}
+	generated, declared, _ := strings.Cut(got, `Project "app"`)
+	if !strings.Contains(generated, ingestOnly) || strings.Contains(declared, ingestOnly) {
+		t.Errorf("the ingest-only note is under the wrong project:\n%s", got)
+	}
+	for _, want := range []string{"Settings → Project → API keys", "tracepad keys create --scope read,write"} {
+		if !strings.Contains(generated, want) {
+			t.Errorf("the note does not say where a reading key comes from (%q):\n%s", want, got)
+		}
+	}
 }
 
-// Other machines reaching a plain-HTTP listener with nothing saying a TLS proxy
-// is in front is a warning at start, naming the address — and, in the image,
-// where the wildcard bind is the design and the publish decides the reach, one
-// INFO line instead (spec 001 #12).
+// Other machines reaching a plain-HTTP listener is a warning at start, naming
+// the address — and, in the image, where the wildcard bind is the design and
+// the publish decides the reach, one INFO line instead (spec 001 #12). An
+// https TRACEPAD_URL silences neither: a proxy in front does not stop anybody
+// from connecting here directly (#22).
 func TestWarnPlainHTTP(t *testing.T) {
 	cases := []struct {
 		listen, url string
@@ -72,10 +96,12 @@ func TestWarnPlainHTTP(t *testing.T) {
 		level       string // "" when nothing is logged
 	}{
 		{":4318", "", false, "WARN"},
-		{":4318", "https://traces.example.com", false, ""},
+		{":4318", "https://traces.example.com", false, "WARN"},
+		{"192.168.1.20:4318", "HTTPS://traces.example.com", false, "WARN"},
 		{"127.0.0.1:4318", "", false, ""},
+		{"127.0.0.1:4318", "https://traces.example.com", false, ""},
 		{":4318", "", true, "INFO"},
-		{":4318", "https://traces.example.com", true, ""},
+		{":4318", "https://traces.example.com", true, "INFO"},
 	}
 	for _, c := range cases {
 		var out bytes.Buffer
@@ -99,6 +125,12 @@ func TestWarnPlainHTTP(t *testing.T) {
 		}
 		if !strings.Contains(logged, fix) {
 			t.Errorf("the line should point at %s:\n%s", fix, logged)
+		}
+		// With an https URL the host's line says what the proxy does not
+		// cover, rather than asking for the URL it already has.
+		if !c.container && c.url != "" && !strings.Contains(logged, "skips the TLS proxy") {
+			t.Errorf("listen %q, url %q: the line should say a direct client skips the proxy:\n%s",
+				c.listen, c.url, logged)
 		}
 	}
 }

@@ -88,8 +88,9 @@ is all an application does; it cannot read what anybody else sent, and the
 store holds your end users' prompts and outputs. Mint one in the interface
 (Settings → Project → API keys, where `ingest` is ticked by default) or with
 `tracepad keys create --scope ingest` and the admin token
-([admin.md](admin.md#keys)); the first key a project gets holds all three
-scopes, so it can be used for everything while you try things out. A key the server
+([admin.md](admin.md#keys)). The key the first start prints is one already;
+the first key of a project made in the interface, with `tracepad projects
+create` or from `TRACEPAD_PROJECTS` holds all three scopes. A key the server
 could not check — the database did not answer the lookup within five seconds —
 gets `503` with `Retry-After: 1` instead, which an exporter retries: a `401`
 would make it drop the batch.

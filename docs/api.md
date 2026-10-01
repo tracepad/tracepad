@@ -41,9 +41,9 @@ that will hold it:
 | The [eval harness](datasets.md), a CI job, an operator's script | `ingest`, `read`, `write` |
 
 Every key that existed before scopes did holds all three, and so do the keys
-the server makes by itself: the first-start project's, those
-`TRACEPAD_PROJECTS` declares, and the key `POST /api/v1/projects` answers
-with. Every other key holds what it was minted with
+`TRACEPAD_PROJECTS` declares and the key `POST /api/v1/projects` answers
+with. The key the first start generates and prints for project `default`
+holds `ingest` alone: it goes to a log. Every other key holds what it was minted with
 ([admin.md](admin.md#keys)). No key, whatever its scopes, lists, mints or
 revokes keys.
 

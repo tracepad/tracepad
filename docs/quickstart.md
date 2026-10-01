@@ -21,15 +21,15 @@ Everything below is the same either way; the container prints to its log what
 the binary prints to your terminal. See [docker.md](docker.md) for the volume,
 the permissions and upgrades.
 
-The `127.0.0.1:` keeps the port on this machine, as `tracepad --listen
-127.0.0.1:4318` does for the binary. Tracepad speaks plain HTTP, and the binary
-warns at start while other machines can reach it that way (the container, which
-cannot see where its port is published, says it as a note);
-[docker.md](docker.md#serving-over-tls) says how to put TLS in front before you
-open it up.
+The `127.0.0.1:` keeps the port on this machine, which is where the binary
+listens by default too. Tracepad speaks plain HTTP, and the binary warns at
+start whenever other machines can reach it that way — after `--listen :4318`,
+say (the container, which cannot see where its port is published, says it as a
+note); [docker.md](docker.md#serving-over-tls) says how to put TLS in front
+before you open it up.
 
-The first run creates the database, a project called `default`, and its key
-pair — then prints them, once:
+The first run creates the database, a project called `default`, and a key for
+your application — then prints it, once:
 
 ```
 Project "default" created. Connect your app with either:
@@ -43,15 +43,23 @@ Project "default" created. Connect your app with either:
   LANGFUSE_HOST=http://localhost:4318
   LANGFUSE_PUBLIC_KEY=tp-pk-…
   LANGFUSE_SECRET_KEY=tp-sk-…
+
+This key holds the ingest scope alone: it sends spans and scores and fetches
+prompts, and cannot read what was sent. For the CLI, an agent or the eval
+harness, mint a key that reads in Settings → Project → API keys once you are
+signed in, or with the admin token: tracepad keys create --scope read,write
 ```
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
 time it is printable; a lost key is replaced in Settings → Project → API keys,
 or with `tracepad keys create` and the admin token — not recovered.
 
-This first key holds all three of a key's [scopes](api.md#scopes) — `ingest`
-to send, `read` to look, `write` to change — so it works for everything on
-this page.
+This key holds one of a key's three [scopes](api.md#scopes): `ingest`, which
+is everything an application does. It cannot read, because the first run's
+output is a log — in Docker one that is kept for the container's life — and a
+printed key that read would hand every prompt and answer your users send to
+whoever reads that log. To look with the CLI or an agent you mint a key that
+holds `read`, in [step 3](#3-look-at-them), once you have signed in.
 
 Underneath it is a second link, which is how you get into the browser
 interface:
@@ -200,12 +208,14 @@ It registers an exporter on the `TracerProvider` your application already has
 A `200` from the export means the spans are committed and fsynced, so a
 trace is queryable the moment its exporter's batch returns.
 
-**Before it goes to production, give the application a key of its own** that
-holds `ingest` and nothing else. Every exporter above, the `tracepad` packages'
-scores and prompt fetch included, needs no more — and a key that cannot read
-is a key whose leak exposes nothing your users sent. In the interface it is
-Settings → Project → API keys → mint, where `ingest` is ticked by default;
-from a terminal, with the admin token:
+**Before it goes to production, give each application a key of its own.** The
+printed key already holds `ingest` and nothing else — every exporter above, the
+`tracepad` packages' scores and prompt fetch included, needs no more, and a key
+that cannot read is a key whose leak exposes nothing your users sent — but it
+has been in a log since the first run, and one key per program is what lets you
+revoke one without stopping the others. In the interface it is Settings →
+Project → API keys → mint, where `ingest` is ticked by default; from a
+terminal, with the admin token:
 
 ```sh
 TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope ingest --name "checkout api"
@@ -213,9 +223,7 @@ TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope ingest --nam
 
 It prints the lines to paste: `TRACEPAD_API_KEY` for the `tracepad` packages,
 and the `LANGFUSE_*` pair for a Langfuse SDK; an OpenTelemetry exporter takes
-the same secret as `authorization=Bearer …`. The first key
-stays for you, the CLI and the eval harness — or give each of those a key of
-its own as well ([admin.md](admin.md#keys)).
+the same secret as `authorization=Bearer …`. See [admin.md](admin.md#keys).
 
 ## 3. Look at them
 
@@ -231,19 +239,30 @@ Every screen carries its project in the address, and the switcher at the top
 of the sidebar moves between projects. See [ui.md](ui.md) and
 [accounts.md](accounts.md).
 
+**A key that reads.** The CLI, an agent and `curl` read the API, and the
+printed key cannot. Signed in, open Settings → Project → API keys, mint a key,
+tick `read` — and `write` too if the CLI should also delete traces, move
+prompt labels or run evals — and copy the `TRACEPAD_API_KEY` line the dialog
+shows. It is shown once, in your browser, and never printed to a log. Without
+the interface, the admin token mints one:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope read,write --name "my terminal"
+```
+
 **The terminal.** The CLI is the same binary:
 
 ```sh
-export TRACEPAD_API_KEY=tp-sk-…
+export TRACEPAD_API_KEY=tp-sk-…       # the key that reads
 tracepad traces                  # the newest traces
 tracepad traces last --error --full   # the last failure, payloads included
 ```
 
 See [cli.md](cli.md).
 
-**An agent.** Point an MCP client at `http://localhost:4318/mcp` with the
-same key — or, better, a key that holds `read` alone, which can look at
-everything and change nothing — or `curl` the API directly:
+**An agent.** Point an MCP client at `http://localhost:4318/mcp` with a key
+that holds `read` alone, which can look at everything and change nothing — or
+`curl` the API directly:
 
 ```sh
 curl -H "Authorization: Bearer tp-sk-…" \

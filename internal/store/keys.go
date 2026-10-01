@@ -31,7 +31,8 @@ var scopeOrder = [...]string{ScopeIngest, ScopeRead, ScopeWrite}
 
 // AllScopes is what a key the server makes by itself may do, and what every
 // key that predates scopes was given (spec 045 #5): the three, spelled as the
-// column stores them.
+// column stores them. The one exception is the key the first start generates
+// and prints, which holds ingest alone (#28).
 const AllScopes = "ingest read write"
 
 // CanonicalScopes spells a set of scopes as the column stores it — the words

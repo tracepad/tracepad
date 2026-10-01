@@ -3,7 +3,15 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { BCRYPT_WAIT, FAILING_TRACE, fromOwnAddress, openDialog, PASSWORD } from './harness';
+import {
+	ADMIN_TOKEN,
+	BCRYPT_WAIT,
+	FAILING_TRACE,
+	fromOwnAddress,
+	mintFullKey,
+	openDialog,
+	PASSWORD
+} from './harness';
 
 // The whole of spec 028 as one story, against a server of its own: the setup
 // link the binary printed creates the first owner, that owner invites a
@@ -37,7 +45,14 @@ let invitation = '';
 function boot(): Promise<Stand> {
 	const dataDir = mkdtempSync(join(tmpdir(), 'tracepad-accounts-'));
 	const server = spawn(join(ROOT, 'bin', 'tracepad'), ['serve', '--listen', `127.0.0.1:${PORT}`], {
-		env: { ...process.env, TRACEPAD_DATA_DIR: dataDir, TRACEPAD_ROLLUP_INTERVAL: '1s' },
+		env: {
+			...process.env,
+			TRACEPAD_DATA_DIR: dataDir,
+			TRACEPAD_ROLLUP_INTERVAL: '1s',
+			// For one thing: the key that writes the story's prompt. The key
+			// the server prints holds `ingest` alone (spec 045 #28).
+			TRACEPAD_ADMIN_TOKEN: ADMIN_TOKEN
+		},
 		stdio: ['ignore', 'pipe', 'pipe']
 	});
 	const stop = () => {
@@ -95,19 +110,21 @@ async function seed(at: Stand) {
 		});
 		if (!response.ok) throw new Error(`ingest ${name}: ${response.status}`);
 	}
-	// One prompt, so that "a viewer is offered no editor" has something to be
-	// offered it on.
-	const written = await fetch(`${at.base}/api/v1/prompts/support-answer/versions`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at.key}` },
-		body: JSON.stringify({ type: 'text', prompt: 'Answer the question.' })
-	});
-	if (!written.ok) throw new Error(`seed the prompt: ${written.status}`);
 	const projects = await fetch(`${at.base}/api/v1/projects`, {
 		headers: { Authorization: `Bearer ${at.key}` }
 	});
 	const { projects: rows } = (await projects.json()) as { projects: { id: string }[] };
 	at.project = rows[0].id;
+	// One prompt, so that "a viewer is offered no editor" has something to be
+	// offered it on — written with a key that may write, since the printed
+	// one may only send.
+	const writer = await mintFullKey(at.base, at.project, ADMIN_TOKEN);
+	const written = await fetch(`${at.base}/api/v1/prompts/support-answer/versions`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${writer}` },
+		body: JSON.stringify({ type: 'text', prompt: 'Answer the question.' })
+	});
+	if (!written.ok) throw new Error(`seed the prompt: ${written.status}`);
 }
 
 /** Signs in through the form, on this file's own server. */

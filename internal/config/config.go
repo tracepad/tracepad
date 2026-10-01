@@ -11,7 +11,6 @@ import (
 	"math"
 	"net"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,9 +23,11 @@ import (
 
 // Config is the resolved runtime configuration.
 type Config struct {
-	// Listen is the HTTP listen address. Defaults to :4318 so that
-	// unconfigured OTel SDK exporters (default endpoint localhost:4318)
-	// reach a locally running Tracepad (spec 001 #2).
+	// Listen is the HTTP listen address. Defaults to 127.0.0.1:4318:
+	// the OTLP port, so that unconfigured OTel SDK exporters (default
+	// endpoint localhost:4318) reach a locally running Tracepad (spec 001
+	// #2), on loopback, so that nothing else does until the operator says so
+	// (#22). The image sets :4318 itself.
 	Listen string
 	// DataDir holds the SQLite database and, later, payload storage.
 	DataDir string
@@ -348,7 +349,7 @@ func Load(args []string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{
-		Listen:              envOr("TRACEPAD_LISTEN", ":4318"),
+		Listen:              envOr("TRACEPAD_LISTEN", DefaultListen),
 		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
 		Projects:            os.Getenv("TRACEPAD_PROJECTS"),
 		StoreRaw:            storeRaw,
@@ -569,9 +570,16 @@ func (c *Config) DBPath() string {
 	return filepath.Join(c.DataDir, "tracepad.db")
 }
 
+// DefaultListen is where the server listens when nothing says otherwise: the
+// OTLP port, on this machine only (spec 001 #22).
+const DefaultListen = "127.0.0.1:4318"
+
 // DisplayHost turns a listen address into a connectable host:port. Wildcard
 // bind hosts (empty, 0.0.0.0, ::) are not valid connect targets, so they are
-// shown as localhost.
+// shown as localhost — and so is the loopback address of either family, which
+// is what the default binds (spec 001 #22): localhost is the address the OTel
+// default and the docs use, and a session cookie is kept per host, so a setup
+// link on 127.0.0.1 and a bookmark on localhost would be two sign-ins.
 //
 // It lives here because two things print addresses and must print the same
 // one: the startup banner's connection lines, and the setup link the server
@@ -583,26 +591,25 @@ func DisplayHost(listen string) string {
 		return listen
 	}
 	switch host {
-	case "", "0.0.0.0", "::":
+	case "", "0.0.0.0", "::", "127.0.0.1", "::1":
 		return "localhost:" + port
 	}
 	return listen
 }
 
-// PlainHTTPBeyondLoopback reports whether a server listening on listen, and
-// told by publicURL where its people reach it, takes passwords, session
-// cookies and keys in clear from other machines (spec 001 #12). Tracepad
-// serves no TLS itself, so the listener is plain HTTP whatever it binds; what
-// decides is whether anything but this machine can reach it, and whether an
-// https TRACEPAD_URL says a proxy in front is where people actually connect.
+// PlainHTTPBeyondLoopback reports whether a server listening on listen takes
+// passwords, session cookies and keys in clear from other machines (spec 001
+// #12). Tracepad serves no TLS itself, so the listener is plain HTTP whatever
+// it binds; what decides is whether anything but this machine can reach it.
+//
+// TRACEPAD_URL is not consulted (#22): an https one says where people are
+// meant to connect, not that nobody can connect here directly, and the
+// server has no way to check it.
 //
 // A hostname other than localhost counts as reachable: it names some
 // interface, and which one is the resolver's business, not a thing to guess
 // at here.
-func PlainHTTPBeyondLoopback(listen, publicURL string) bool {
-	if u, err := url.Parse(strings.TrimSpace(publicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
-		return false
-	}
+func PlainHTTPBeyondLoopback(listen string) bool {
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil {
 		return false

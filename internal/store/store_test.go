@@ -66,11 +66,12 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	if err != nil || p == nil || p.Name != "default" {
 		t.Fatalf("KeyBySecret: p=%+v err=%v", p, err)
 	}
-	// The server made this key by itself, and it may do everything a key
-	// may (spec 045 #5, #8).
+	// The server made this key by itself, and since it is the one it prints,
+	// it may send and nothing else (spec 045 #8, #28).
 	if key.PublicKey != boot.Created[0].Keys.PublicKey || key.CreatedBy.Via != MintedAtStartup ||
-		strings.Join(key.Scopes, " ") != AllScopes {
-		t.Fatalf("the first-start key = %+v, want the server's own with every scope", key)
+		strings.Join(key.Scopes, " ") != ScopeIngest || boot.Created[0].Scopes != ScopeIngest {
+		t.Fatalf("the first-start key = %+v (reported %q), want the server's own with ingest alone",
+			key, boot.Created[0].Scopes)
 	}
 	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-wrong"); p != nil || key != nil {
 		t.Fatalf("wrong secret resolved to %+v, %+v", p, key)
@@ -100,9 +101,12 @@ func TestBootstrapDeclarativeIdempotent(t *testing.T) {
 	if len(boot.Created) != 0 {
 		t.Fatalf("re-bootstrap created %+v", boot.Created)
 	}
+	// A declared key is the operator's own and never printed, so it keeps
+	// all three scopes (spec 045 #5, #28).
 	if p, key, _ := s.KeyBySecret(context.Background(), "tp-sk-b"); p == nil || p.Name != "eval" ||
-		key.CreatedBy.Via != MintedAtStartup {
-		t.Fatalf("declared key does not resolve as the server's own, got %+v, %+v", p, key)
+		key.CreatedBy.Via != MintedAtStartup || strings.Join(key.Scopes, " ") != AllScopes ||
+		first.Created[1].Scopes != AllScopes {
+		t.Fatalf("declared key does not resolve as the server's own with every scope, got %+v, %+v", p, key)
 	}
 	// Declared projects present, no stray "default".
 	if p, _ := s.ProjectByName(t.Context(), "default"); p != nil {
