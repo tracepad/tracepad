@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { clipped, inviteEditor, sideways, signIn as enter, state } from './harness';
 
 // The dashboard over the fixed corpus (spec 007 Testing, spec 034). The

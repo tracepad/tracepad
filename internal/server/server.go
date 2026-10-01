@@ -155,6 +155,10 @@ type Server struct {
 	assets   fs.FS
 	reserved map[string]bool
 	paths    pathMatcher
+	// The two HTML documents the server hands out, each with the policy it goes
+	// out under (spec 051): the SPA's entry, read once at start and nil when
+	// the bundle has none, and the stub of a build without the interface.
+	index, stub *uiDocument
 
 	startedAt time.Time
 	counters  *counters
@@ -240,12 +244,13 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		inflatedLog:     &logpace.Keyed{Every: time.Minute},
 		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
 		cutLog:          &logpace.Keyed{Every: time.Minute},
-		assets:          ui.Assets(),
 		startedAt:       time.Now(),
 		counters:        newCounters(),
 		keyUses:         newKeyUses(),
 		keyUseEvery:     keyUseFlushEvery,
 	}
+	s.stub = newUIDocument(ui.Stub)
+	s.useBundle(ui.Assets())
 	s.setPublicURL(cfg.URL)
 	if st != nil {
 		s.mediaKey = st.MediaUploadKey()

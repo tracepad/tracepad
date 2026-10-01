@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { BCRYPT_WAIT, createProject, FAILING_TRACE, openDialog, signIn, signInAsOwner, state } from './harness';
 
 // The project in the URL and the switcher (spec 029, Testing): every screen

@@ -407,6 +407,13 @@ location / {
   nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
   large batch is then lost at the proxy with a `413` the server never sees.
 
+The proxy should not add a `Content-Security-Policy` of its own unless it is
+meant to narrow the page. The server already sends one with the interface
+([ui.md](ui.md#what-the-page-may-load)), the browser enforces every policy it
+is given, and a proxy that *replaces* the header owns what the interface may
+load from then on. The same goes for `X-Frame-Options` and `Referrer-Policy`,
+which the server sets too ([api.md](api.md#response-headers)).
+
 Then tell the server where people reach it, and it prints its setup and
 invitation links there. The note about plain HTTP stays: the direct listener
 is still reachable without the proxy, which is why the port stays on loopback,

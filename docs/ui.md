@@ -991,6 +991,44 @@ and the screen's controls stay on the first one. Wider than that it is the
 single row it has always been, and a name too long for the line is shortened
 to an ellipsis rather than moved.
 
+## What the page may load
+
+The interface renders text it did not write — prompts, completions, tool
+arguments, whatever an application put in a span — so the page it is served in
+carries a `Content-Security-Policy` that limits what can run in it even if some
+of that text ever reached the page as markup. The server sends it with the
+page and with no other response:
+
+```
+default-src 'none'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'none';
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+- **Script** is the bundle's own files and the one inline script that starts
+  them, named by its hash. The server takes the hash from the page it is about
+  to send when it starts, so a rebuilt interface needs nothing configured.
+  There is no `'unsafe-inline'` and no `'unsafe-eval'`: an injected `<script>`,
+  an `onerror="…"` or a string passed to `new Function` is refused.
+- **Requests** go to the server the page came from and nowhere else
+  (`connect-src 'self'`, and `form-action 'self'` for a form). A script that
+  somehow ran could not post a key or a trace to another origin.
+- **Pictures** are the server's own, `blob:` for the ones the interface draws
+  from bytes it fetched with your session ([media](media.md)), and `data:` for
+  the page's empty icon. **Fonts** are two files in the bundle.
+- **Style** is the exception: it may be inline. The editor writes its
+  stylesheet into a `<style>` element and the dialogs set the page's `style`
+  attribute, and neither can carry a hash. It is harmless to the page's data,
+  because a style cannot fetch from anywhere the other lines do not allow.
+- Everything else — frames, objects, workers, a `<base>` — is refused.
+
+A refusal is a line in the browser's console. If a change to the interface
+trips one, the fix is in the change; the policy is not widened without a
+decision in [spec 051](../specs/051-content-security-policy.md). `npm run dev`
+is Vite's server and sends no policy, so the production build is where to look.
+A reverse proxy that adds a `Content-Security-Policy` of its own adds a second
+policy, and the browser enforces both: it can narrow this one, never loosen it.
+
 ## Builds without it
 
 The interface is compiled by Node and Vite, which `go build` cannot run. A

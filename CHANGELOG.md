@@ -50,6 +50,10 @@ one.
   key its first run prints holds `ingest` alone — a key that reads is minted
   in the interface, never printed to a log.
 - Export of the raw archive to any OTLP receiver or to a directory, resumably.
+- Response headers that refuse framing and sniffing, and a
+  `Content-Security-Policy` on the web interface's page that lets only the
+  bundle's own script run — no inline script, no `eval` — and sends requests
+  nowhere but home.
 
 #### CLI, MCP and the agent skill
 

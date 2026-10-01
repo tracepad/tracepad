@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { clipped, createProject, foldsAt, section, sideways, signIn as enter, state } from './harness';
 
 // The Prompts screens (spec 021, Testing — e2e) against the real binary. The

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, inviteViewer, signIn as enter, state } from './harness';
 
 // Deleting traces (spec 035, Testing — UI), against the real binary: one from

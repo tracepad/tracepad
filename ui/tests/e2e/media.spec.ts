@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, signIn as enter, state } from './harness';
 
 // Media in a trace (spec 041, Testing — UI), against the real binary: ingest

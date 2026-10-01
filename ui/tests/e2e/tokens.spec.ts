@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { createProject, signIn as enter, state } from './harness';
 
 // Tokens on the screens (spec 049 PR 2, Testing — E2E), against the real

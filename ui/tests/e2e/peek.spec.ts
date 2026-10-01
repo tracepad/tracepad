@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './fixtures';
 import { signIn as enter, state } from './harness';
 
 // The peek panel (spec 008), end to end against the real binary: a row opens
