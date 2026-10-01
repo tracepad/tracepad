@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { clipped, sideways, signIn as enter, state } from './harness';
+import { clipped, sideways, signInAsMember } from './harness';
 
 // Sessions, end to end against the real binary and the endpoint spec 007 added
 // (Testing): the listing's aggregates, the session view, and a trace opened
@@ -11,7 +11,7 @@ import { clipped, sideways, signIn as enter, state } from './harness';
 const SESSION_TRACE = '4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f';
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 test('the listing rolls the corpus up by session', async ({ page }) => {

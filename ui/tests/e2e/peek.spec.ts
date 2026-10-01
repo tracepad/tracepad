@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { signIn as enter, state } from './harness';
+import { signInAsMember } from './harness';
 
 // The peek panel (spec 008), end to end against the real binary: a row opens
 // beside the listing it came from, the listing survives underneath, and what
@@ -8,7 +8,7 @@ import { signIn as enter, state } from './harness';
 
 /** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 	await page.goto('/traces');
 }
 

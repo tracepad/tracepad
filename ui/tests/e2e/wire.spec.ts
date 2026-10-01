@@ -1,8 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
 import {
-	signIn as enter,
-	state,
+	signInAsMember,
 	WIRE_GENERATION,
 	WIRE_GUARDRAIL,
 	WIRE_TRACE
@@ -13,7 +12,7 @@ import {
 // tree, and the prompt badge that leads to the traces that ran it.
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 test('the type filter narrows the listing and survives a reload', async ({ page }) => {

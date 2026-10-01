@@ -7,8 +7,7 @@ import {
 	PLAIN_TEXT_OBSERVATION,
 	PLAIN_TEXT_TRACE,
 	plainTextPayloads,
-	signIn as enter,
-	state
+	signInAsMember
 } from './harness';
 
 // The payload surface against the real binary (spec 015, Testing): a marker
@@ -21,7 +20,7 @@ import {
 // what puts a truncation marker on the screen to click.
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 /** The observation whose metadata carries a nested `events` array to fold. */

@@ -7,6 +7,7 @@ import {
 	LARGE_PAYLOAD_OBSERVATION,
 	LARGE_PAYLOAD_TRACE,
 	signIn as enter,
+	signInAsMember,
 	state
 } from './harness';
 
@@ -18,7 +19,7 @@ import {
 // Read inside the tests, never at module scope: Playwright collects the test
 // files before it runs the global setup that writes this.
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 test('an unauthenticated visit lands on the login form', async ({ page }) => {
@@ -60,7 +61,9 @@ test('an unknown email is refused with the same sentence', async ({ page }) => {
 });
 
 test('signing out ends the session and the next screen asks again', async ({ page }) => {
-	await signIn(page);
+	// Through the form, on a session of its own: signing out ends the session
+	// server-side, and the one `signInAsMember` hands out is every other test's.
+	await enter(page, state().member);
 
 	await page.getByRole('button', { name: /^Signed in as/ }).click();
 	await page.getByRole('menuitem', { name: 'Sign out' }).click();

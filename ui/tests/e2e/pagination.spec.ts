@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { signIn as enter, state } from './harness';
+import { signInAsMember } from './harness';
 
 // Turning pages against the real binary (spec 009). The corpus is smaller
 // than a page, so the pages here are asked for through the URL — the API takes
@@ -9,7 +9,7 @@ import { signIn as enter, state } from './harness';
 
 /** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 	await page.goto('/traces');
 }
 
