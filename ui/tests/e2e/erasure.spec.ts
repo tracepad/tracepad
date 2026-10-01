@@ -104,6 +104,13 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	expect(started.status).toBe(202);
 	const { id } = (await started.json()) as { id: string };
 
+	/** What every read of the erasure says while it is held: 16 of 40, parsed. */
+	const running = () => ({
+		state: 'running',
+		phase: 'parsed',
+		finished_at: null,
+		progress: { traces_at_start: 40, traces_deleted: 16 }
+	});
 	// The page's reads say "running" until the test lets them through: the
 	// listing it finds the erasure in, the erasure it follows, and the user,
 	// still there.
@@ -117,8 +124,11 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 		const body = await answer.json();
 		if (held) {
 			for (const one of body.erasures) {
-				if (one.id === id)
-					Object.assign(one, { state: 'running', phase: 'parsed', user_id: 'reload-e2e' });
+				// The listing is where the page first finds the erasure and
+				// paints its banner from it, two seconds before its poll reads
+				// the erasure itself, so it says the same of it — progress
+				// included, which is the real 40 of 40 otherwise.
+				if (one.id === id) Object.assign(one, running(), { user_id: 'reload-e2e' });
 			}
 		}
 		await route.fulfill({ response: answer, json: body });
@@ -126,15 +136,7 @@ test("a user's page shows an erasure under way, across a reload, until it ends",
 	await page.route(new RegExp(`/erasures/${id}$`), async (route) => {
 		const answer = await route.fetch();
 		const body = await answer.json();
-		if (held) {
-			Object.assign(body, {
-				state: 'running',
-				phase: 'parsed',
-				user_id: 'reload-e2e',
-				finished_at: null
-			});
-			body.progress = { traces_at_start: 40, traces_deleted: 16 };
-		}
+		if (held) Object.assign(body, running(), { user_id: 'reload-e2e' });
 		await route.fulfill({ response: answer, json: body });
 	});
 

@@ -28,6 +28,12 @@ export type State = {
 	owner: Account & { id: string };
 	/** An editor of the seeded project, for the suites that only read it. */
 	member: Account;
+	/**
+	 * The session cookie of that editor, signed in once at boot — before any
+	 * worker or browser exists, so the bcrypt it costs is paid on a quiet
+	 * machine. See `signInAsMember`.
+	 */
+	memberSession: string;
 };
 
 /**
@@ -204,6 +210,30 @@ export async function signIn(page: Page, account: Account) {
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/, { timeout: BCRYPT_WAIT });
 }
+
+/**
+ * Signs in as the seeded editor on the session the boot opened, not through
+ * the form. The form's bcrypt is a quarter of a second on an idle machine and
+ * most of the test's thirty seconds on a loaded one, and the first test of
+ * every worker pays it while its browser is still cold — which is how a
+ * suite that only reads the corpus came to time out at the title of a chart
+ * it had not got to yet. The form is walked by every suite about accounts and
+ * by the specs that sign in as an account of their own; this is for the ones
+ * that only need somebody who can read the corpus. It ends where the form
+ * does: on the remembered project's dashboard.
+ */
+export async function signInAsMember(page: Page) {
+	const { baseURL, memberSession } = state();
+	await page.context().addCookies([
+		{ name: SESSION_COOKIE, value: memberSession, url: baseURL, httpOnly: true, sameSite: 'Lax' }
+	]);
+	await fromOwnAddress(page);
+	await page.goto('/');
+	await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/dashboard(\?|$)/);
+}
+
+/** The name of the session's cookie (`sessionCookie` in `internal/server/auth.go`). */
+export const SESSION_COOKIE = 'tracepad_session';
 
 /**
  * Signs in as the owner with one project pinned. An owner reaches every
