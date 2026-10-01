@@ -26,6 +26,12 @@ docs/
 sdk/
 scratch
 
+# The documentation site's build output and the environment of its toolchain
+# (spec 050): `COPY . .` would carry both, a virtualenv's worth, into the
+# context.
+site/
+scripts/docs-site/.venv/
+
 # What a working checkout accumulates and an image has no use for.
 *.db
 *.db-wal

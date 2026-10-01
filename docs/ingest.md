@@ -246,16 +246,16 @@ the database and the server its memory:
   whole, whatever its size, after a burst. An exporter treats `413` as final
   and drops the batch, so bound the Collector's batches explicitly:
 
-  ```yaml
-  processors:
-    batch:
-      send_batch_size: 8192
-      send_batch_max_size: 8192   # never more than this in one export
-  ```
+    ```yaml
+    processors:
+      batch:
+        send_batch_size: 8192
+        send_batch_max_size: 8192   # never more than this in one export
+    ```
 
-  Batching in the exporter instead, as newer Collectors can, the same bound is
-  the OTLP/HTTP exporter's `sending_queue::batch::max_size` (counted in items,
-  which for traces are spans); its default of 0 means no maximum.
+    Batching in the exporter instead, as newer Collectors can, the same bound is
+    the OTLP/HTTP exporter's `sending_queue::batch::max_size` (counted in items,
+    which for traces are spans); its default of 0 means no maximum.
 - **Slices.** An export is written in slices of at most 1,000 rows — traces and
   observations — one after another, and other projects' writes run between
   them; a trace larger than a slice is spread across consecutive ones. The

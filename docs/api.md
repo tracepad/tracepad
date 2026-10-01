@@ -477,18 +477,18 @@ a client parses:
   that fits both — the part of the run that happened first — and says what it
   left out:
 
-  ```json
-  {"id": "…", "observation_count": 10001, "observations_omitted": 1, "observations": […]}
-  ```
+    ```json
+    {"id": "…", "observation_count": 10001, "observations_omitted": 1, "observations": […]}
+    ```
 
-  `observations_omitted` is `observation_count` minus the observations in the
-  tree, and is present only when that is more than zero. The 32 MiB counts the
-  observations' own fields — `usage`, `model_parameters` and `cost_details`
-  are what make one heavy; the trace's own fields and metadata are rendered
-  whole. An observation whose parent was left out renders at the root with
-  its `parent_observation_id`, as an orphan does. Every observation is still
-  one `/api/v1/observations/{id}/io` away, and the listing row's
-  `observation_count` still counts all of them.
+    `observations_omitted` is `observation_count` minus the observations in the
+    tree, and is present only when that is more than zero. The 32 MiB counts the
+    observations' own fields — `usage`, `model_parameters` and `cost_details`
+    are what make one heavy; the trace's own fields and metadata are rendered
+    whole. An observation whose parent was left out renders at the root with
+    its `parent_observation_id`, as an orphan does. Every observation is still
+    one `/api/v1/observations/{id}/io` away, and the listing row's
+    `observation_count` still counts all of them.
 - **At most 100 levels deep.** An observation that would sit at depth 101 is
   detached from its parent and rendered at the root with its
   `parent_observation_id`, keeping its own children, so a chain of a thousand

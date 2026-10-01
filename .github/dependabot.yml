@@ -69,6 +69,24 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
+  # The toolchain that builds the documentation site (spec 050 #3): four pins
+  # in pyproject.toml and the lock under them, moved together.
+  - package-ecosystem: uv
+    directory: /scripts/docs-site
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docs-site:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # mkdocs 2.x is a rewrite Material does not run on (spec 050 #2): the pin
+    # moves on a decision, not on a Monday.
+    ignore:
+      - dependency-name: mkdocs
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

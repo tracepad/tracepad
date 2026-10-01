@@ -42,6 +42,7 @@ jobs:
       prerelease: ${{ steps.meta.outputs.prerelease }}
       latest: ${{ steps.meta.outputs.latest }}
       previous: ${{ steps.meta.outputs.previous }}
+      line: ${{ steps.meta.outputs.line }}
     steps:
       # Tags and all of them: which image tags this release may move is a
       # question about the ones already published (#16).
@@ -127,6 +128,7 @@ jobs:
             echo "prerelease=$prerelease"
             echo "latest=$latest"
             echo "previous=$previous"
+            echo "line=v${version%.*}"
           } >> "$GITHUB_OUTPUT"
 
   # The six archives and their checksums, with no way to publish them: GoReleaser
@@ -272,3 +274,21 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # The documentation for this release (spec 050 #6), under `vX.Y` — the line,
+  # not the patch: a back-patch replaces its line's pages. `latest` moves with
+  # it exactly when the image's does. A pre-release has no docs of its own;
+  # `dev` is where its docs are. After `release`, so that a tag that refuses
+  # to publish does not leave docs for a release nobody can download; and not
+  # a gate of anything, so that a docs failure cannot hold an image back.
+  # The scope is this job's alone: site.yml builds with read access and
+  # publishes with the write scope in a job of its own.
+  docs:
+    needs: [check, release]
+    if: needs.check.outputs.prerelease != 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/site.yml
+    with:
+      version: ${{ needs.check.outputs.line }}
+      alias: ${{ needs.check.outputs.latest == 'true' && 'latest' || '' }}

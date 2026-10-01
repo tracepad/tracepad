@@ -54,6 +54,24 @@ While iterating, run what you touched — `go test ./internal/<package>/`,
 `npx vitest run <file>` in `ui/`, `npx playwright test <spec>` — and the whole
 gate once, before you push.
 
+## The documentation
+
+`docs/` is what users read, on GitHub and as a versioned site
+(<https://tracepad.github.io/tracepad/>, built from the same files by
+[MkDocs](https://www.mkdocs.org/) with `mkdocs.yml`). Edit the Markdown; the
+site follows.
+
+```sh
+make docs-build   # the strict build the gate runs: a broken link or anchor fails it
+make docs-site    # rehearse the versioned site locally and serve it on :8000
+```
+
+Both need [uv](https://docs.astral.sh/uv/), which installs the pinned toolchain
+on first use. A new page goes into the navigation in `mkdocs.yml` and the list
+in `docs/index.md`. Two habits keep a page right in both renderers: nest lists,
+code blocks and second paragraphs inside a list item by **four** spaces, and
+link to other pages by file name (`install.md#upgrading`), not by URL.
+
 ## Specs first
 
 A feature is written down before it is built. [`specs/`](specs/) holds one file

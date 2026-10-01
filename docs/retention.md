@@ -117,12 +117,12 @@ discovered:
    deployment that puts personal data into them should know a frozen hour
    keeps it.
 
-   The **per-user** rollup is the exception to that exception. Those rows are
-   about the user by construction, so an erasure deletes them outright rather
-   than recomputing them — in every hour, frozen ones included, where a
-   recompute could not have run at all. The user leaves `/api/v1/users`
-   immediately; only the project-wide totals for a frozen hour go on counting
-   the traces.
+    The **per-user** rollup is the exception to that exception. Those rows are
+    about the user by construction, so an erasure deletes them outright rather
+    than recomputing them — in every hour, frozen ones included, where a
+    recompute could not have run at all. The user leaves `/api/v1/users`
+    immediately; only the project-wide totals for a frozen hour go on counting
+    the traces.
 
 The rollup is **four tables**, and one window governs all of them:
 
@@ -516,12 +516,12 @@ where something is deleted every hour rewrites its index once an hour.
    rewritten. A full `VACUUM` of the stopped database rewrites every page,
    using the `sqlite3` shell (3.43 or newer) on the database file:
 
-   ```sh
-   sqlite3 tracepad.db "INSERT INTO search_fts(search_fts) VALUES('optimize'); VACUUM;"
-   ```
+    ```sh
+    sqlite3 tracepad.db "INSERT INTO search_fts(search_fts) VALUES('optimize'); VACUUM;"
+    ```
 
-   The first statement rewrites the search index without the deleted text,
-   the second every page of the file.
+    The first statement rewrites the search index without the deleted text,
+    the second every page of the file.
 
 The dry run is where these are counted before anything happens: the sessions'
 scores (`session_scores`), the datasets that lose items

@@ -8,8 +8,10 @@ OpenTelemetry-instrumented app at it and browse your traces.
 still change before 1.0 is written down in [What beta means](#what-beta-means).
 
 New here? [docs/quickstart.md](docs/quickstart.md) goes from nothing to a
-trace on screen. Changes are listed in [CHANGELOG.md](CHANGELOG.md), and
-[CONTRIBUTING.md](CONTRIBUTING.md) is the way in for a patch.
+trace on screen. The documentation is also a searchable, versioned site at
+<https://tracepad.github.io/tracepad/>, with a version per release. Changes are
+listed in [CHANGELOG.md](CHANGELOG.md), and [CONTRIBUTING.md](CONTRIBUTING.md)
+is the way in for a patch.
 
 ## What beta means
 

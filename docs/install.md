@@ -201,12 +201,12 @@ upgrade is only as safe as the copy you took before it.
 3. Download and [verify](#verify-what-you-downloaded) the new archive, stop the
    service, replace the binary, start it:
 
-   ```sh
-   sudo systemctl stop tracepad
-   sudo install -m 0755 tracepad /usr/local/bin/tracepad
-   sudo systemctl start tracepad
-   tracepad version
-   ```
+    ```sh
+    sudo systemctl stop tracepad
+    sudo install -m 0755 tracepad /usr/local/bin/tracepad
+    sudo systemctl start tracepad
+    tracepad version
+    ```
 
 4. Watch `journalctl -u tracepad` until it says it is serving. A migration on a
    large database takes a while and logs its progress.
