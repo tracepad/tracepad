@@ -213,9 +213,12 @@ func TestABundleWithNoEntryIsRefusedWithoutLosingTheBaseHeader(t *testing.T) {
 
 // TestTheStubIsServedUnderAPolicyToo: a build without the interface hands out
 // one page, which has a style of its own and no script, and the policy that
-// goes with it is the same function's.
+// goes with it is the same function's. The harness takes no bundle, as a build
+// without the interface has none, so the test holds under `-tags ui` too: it
+// asks for the stub's path rather than reading which build it is in.
 func TestTheStubIsServedUnderAPolicyToo(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
+	h.server.useBundle(nil)
 	rec := h.get(t, "/")
 	expectStatus(t, rec, 200)
 	policies := rec.Header().Values("Content-Security-Policy")
