@@ -51,6 +51,9 @@ before it is trusted (spec 028 #34).
 
 At the end B's rows are compared, column by column, with what they were before
 any of it: every table that carries a project id, and the project row itself.
+Then B exports and deletes, and every listing A reads must answer as it did
+before: a number of A's that moves with B's traffic is a leak no identifier
+crosses (spec 028 #35, spec 004 #37).
 */
 
 // isolationKind is what a route does with the identifiers it is given.
@@ -1182,6 +1185,74 @@ func TestIsolationMatrix(t *testing.T) {
 	} {
 		expectStatus(t, h.call(t, "GET", path, nil, asKey(bSecret)), http.StatusOK)
 	}
+
+	// A neighbour's traffic is not news to A (spec 004 #37). Everything
+	// above names B's rows; this is the other channel, the one no
+	// identifier crosses: a number of A's that moves when B ingests or
+	// deletes. Every listing A's three callers read answers the same before
+	// B exports and deletes its traces as after — once the process's own
+	// clock is taken out — and so `/system` cannot carry the file's growth,
+	// the queue, the budget or a compaction B asked for. Last, because the
+	// deletion takes B's traces.
+	quiet := func() map[string]string {
+		answers := map[string]string{}
+		for _, rt := range routes {
+			if isolationMatrix[rt.Method+" "+rt.Path].kind != listing {
+				continue
+			}
+			for _, c := range callers {
+				if !mayCall(rt, c) {
+					continue
+				}
+				path, _ := pathWith(rt.Path, nil)
+				rec := send(c, rt, path, "", nil)
+				answers[c.who.String()+" "+rt.Method+" "+path] = fmt.Sprint(rec.Code, " ",
+					withoutClock(t, rt.Method+" "+rt.Path, rec.Body.Bytes()))
+			}
+		}
+		return answers
+	}
+	still := quiet()
+	expectStatus(t, h.call(t, "POST", "/v1/traces", ingestExport(b, "traffic", nil), asKey(bSecret),
+		func(r *http.Request) { r.Header.Set("Content-Type", "application/x-protobuf") }), http.StatusOK)
+	expectStatus(t, h.call(t, "DELETE", "/api/v1/traces?to="+farFuture+"&confirm="+bProjectName, nil,
+		asKey(bSecret)), http.StatusOK)
+	for asked, answer := range quiet() {
+		if answer != still[asked] {
+			t.Errorf("%s moved when B exported and deleted:\n  before %s\n  after  %s", asked, still[asked], answer)
+		}
+	}
+}
+
+// clockFields are the fields of a quiet listing that move with the clock and
+// nobody's traffic, by route, each with the reason. Everything else is
+// compared exactly. The sweeper's `next_run` and `last_run` are not here: they
+// move when a pass runs, and none runs between the two readings.
+var clockFields = map[string][]struct {
+	field, why string
+}{
+	"GET /api/v1/system": {{"uptime_seconds", "how long the process has been up"}},
+	"GET /api/v1/facets": {{"to", "the window's end, which defaults to the moment of asking"}},
+}
+
+// withoutClock is a listing's answer with its route's clockFields taken out.
+func withoutClock(t *testing.T, route string, body []byte) string {
+	t.Helper()
+	fields := clockFields[route]
+	if len(fields) == 0 {
+		return string(body)
+	}
+	var answer map[string]any
+	if err := json.Unmarshal(body, &answer); err != nil {
+		t.Fatalf("%s: %v", route, err)
+	}
+	for _, f := range fields {
+		if _, ok := answer[f.field]; !ok {
+			t.Errorf("%s has no %s to take out (%s)", route, f.field, f.why)
+		}
+		delete(answer, f.field)
+	}
+	return string(mustJSONBytes(answer))
 }
 
 // uploadFor is a live upload token of A's, for a body A has not stored: the

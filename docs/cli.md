@@ -716,12 +716,16 @@ and needs `--yes` off a terminal. The scores written while annotating stay.
 tracepad system
 ```
 
-Version, uptime, database size, row counts, the raw archive, the writer queue,
-the ingest counters and what the retention sweeper has done since the server
-started. The first thing to run when something looks wrong, and the thing to
-paste into a bug report.
+Version and uptime, then what your credential is given
+([api.md](api.md#system)). With a project key: the project's row counts, the
+raw archive, the ingest counters and what the retention sweeper has done since
+the server started. With the admin token as `--key`: the deployment's database
+size, how many projects share it, the writer queue and the compaction. An
+owner's session sees both, but the CLI holds no session. A line says which half
+was not shown, so a missing line is never read as a zero. The first thing to
+run when something looks wrong, and the thing to paste into a bug report.
 
-A line under the database says whether a compaction is waiting for the next
+Under the admin token a line says whether a compaction is waiting for the next
 sweep — `compaction pending since …` after an erasure or a deletion — or when
 one last finished ([retention.md](retention.md#what-this-means-for-a-data-subject-request)).
 

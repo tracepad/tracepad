@@ -69,7 +69,10 @@ type Erasure struct {
 	// Compaction is the latest compaction the erasure asked for, zero
 	// while it has deleted nothing (spec 044 #17).
 	Compaction int64
-	Error      string
+	// CompactedAt is when a pass covering that request completed, zero
+	// until one has (spec 044 #22).
+	CompactedAt int64
+	Error       string
 
 	since, now int64
 	attempts   int
@@ -81,21 +84,21 @@ type Erasure struct {
 func (e *Erasure) Ended() bool { return e.State == ErasureDone || e.State == ErasureFailed }
 
 const erasureColumns = `id, project_id, user_id, state, phase, created_at, started_at, finished_at,
-	since, now, attempts, traces_at_start, counts, compaction, error, last_failure`
+	since, now, attempts, traces_at_start, counts, compaction, compacted_at, error, last_failure`
 
 func scanErasure(row interface{ Scan(...any) error }) (*Erasure, error) {
 	var (
-		e                           Erasure
-		user, phase, failure, last  sql.NullString
-		started, finished, since, n sql.NullInt64
-		counts                      string
+		e                                      Erasure
+		user, phase, failure, last             sql.NullString
+		started, finished, since, n, compacted sql.NullInt64
+		counts                                 string
 	)
 	if err := row.Scan(&e.ID, &e.ProjectID, &user, &e.State, &phase, &e.CreatedAt, &started, &finished,
-		&since, &e.now, &e.attempts, &n, &counts, &e.Compaction, &failure, &last); err != nil {
+		&since, &e.now, &e.attempts, &n, &counts, &e.Compaction, &compacted, &failure, &last); err != nil {
 		return nil, err
 	}
 	e.UserID, e.Phase, e.Error, e.lastFailure = user.String, phase.String, failure.String, last.String
-	e.StartedAt, e.FinishedAt, e.since = started.Int64, finished.Int64, since.Int64
+	e.StartedAt, e.FinishedAt, e.since, e.CompactedAt = started.Int64, finished.Int64, since.Int64, compacted.Int64
 	if n.Valid {
 		e.TracesAtStart = &n.Int64
 	}
@@ -134,8 +137,16 @@ func recordProgress(tx *sql.Tx, id string, counts DeleteCounts, compaction int64
 	if err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec(`UPDATE erasures SET counts = ?, compaction = MAX(compaction, ?),
-		phase = COALESCE(NULLIF(?, ''), phase) WHERE id = ?`, string(encoded), compaction, phase, id); err != nil {
+	// A job that asked for a compaction asked in this transaction, so the
+	// count it took is the count now. It is later than any the erasure
+	// held, and a stamp a pass left for an earlier one goes until a pass
+	// covers this one too (spec 044 #22).
+	if _, err := tx.Exec(`UPDATE erasures SET counts = ?1,
+		compaction = MAX(compaction, ?2),
+		compaction_request = CASE WHEN ?2 > 0 THEN (SELECT requests FROM compaction WHERE id = 1)
+		                          ELSE compaction_request END,
+		compacted_at = CASE WHEN ?2 > 0 THEN NULL ELSE compacted_at END,
+		phase = COALESCE(NULLIF(?3, ''), phase) WHERE id = ?4`, string(encoded), compaction, phase, id); err != nil {
 		return false, fmt.Errorf("record erasure %s's progress: %w", id, err)
 	}
 	return true, nil

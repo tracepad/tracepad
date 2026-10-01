@@ -486,8 +486,8 @@
     "/api/v1/system": {
       "get": {
         "tags": ["meta"],
-        "summary": "Version, uptime, database size and ingest counters since start",
-        "description": "Self-diagnosis without a metrics stack. The counters are in-memory and cover this process only, which is what `counters.since` says. Row counts and counters are the asking project's own — `payloads` is absent because it cannot be attributed to one, `projects` is how many tenants share this process (naming none of them), and `size_bytes` is the whole deployment's file on disk.",
+        "summary": "Version and uptime, the deployment's gauges for the admin token or an owner, and the project's figures for its callers",
+        "description": "Self-diagnosis without a metrics stack, in two halves, each to the caller it belongs to. The deployment view — `database.size_bytes`, `database.rows.projects`, `writer_queue`, `worker_panics`, `body_budget`, `read_slots` and `compaction` — moves with every tenant's traffic, so only the admin token and an owner session get it; the admin token is the one caller outside a project this route admits. The project view — the asking project's `database.rows`, `sweeper`, `runs`, `raw`, `media` and `counters` — goes to a key and to a session for its `X-Tracepad-Project`. `view` says which halves the body holds, and a withheld field is absent, never zero. The counters are in-memory and cover this process only, which is what `counters.since` says; `payloads` is not counted because it cannot be attributed to a project.",
         "operationId": "system",
         "x-tracepad-scope": "read",
         "responses": {
@@ -498,16 +498,25 @@
               "go_version": {"type": "string"},
               "started_at": {"type": "string", "format": "date-time"},
               "uptime_seconds": {"type": "integer"},
+              "view": {"type": "object",
+                "description": "Which halves this body holds. A field of a half that is withheld is absent rather than zero",
+                "properties": {
+                  "project": {"type": ["string", "null"], "description": "The project the project view is about; null when there is none — for the admin token, which has no project, and for an owner's session that named none or named one that is not there"},
+                  "deployment": {"type": "boolean", "description": "Whether the deployment view is here: true for the admin token and an owner session"},
+                  "project_error": {"type": "string", "description": "Present only when an owner's session named a project that is not there, absent or deleted: why the project view is missing (`no such project`). The deployment view is answered all the same"}
+                },
+                "required": ["project", "deployment"]},
               "database": {"type": "object", "properties": {
-                "size_bytes": {"type": "integer", "description": "The database file plus its write-ahead log, for the whole deployment"},
+                "size_bytes": {"type": "integer", "description": "The database file plus its write-ahead log, for the whole deployment. Deployment view only"},
                 "rows": {"type": "object", "additionalProperties": {"type": "integer"},
-                  "description": "Row counts within the asking project, plus `projects` as a bare tenant count"}
-              }},
-              "writer_queue": {"type": "object", "properties": {
+                  "description": "Row counts within the asking project (project view), and `projects`, how many tenants share this process (deployment view)"}
+              },
+              "required": ["rows"]},
+              "writer_queue": {"type": "object", "description": "The group-commit writer's queue, for the whole deployment. Deployment view only", "properties": {
                 "waiting": {"type": "integer"}, "capacity": {"type": "integer"}
               }},
               "worker_panics": {"type": "object",
-                "description": "Panics in a write job or a background pass that the process recovered and went on from since it started, for the whole deployment; each has an `ERROR` line with its stack. `given_up` counts the projects and the shared steps of the sweeper and the rollup that panicked in every one of three passes and are left out until the process restarts (the asking project's own retention is `sweeper.given_up`). It names no project",
+                "description": "Panics in a write job or a background pass that the process recovered and went on from since it started, for the whole deployment (deployment view only); each has an `ERROR` line with its stack. `given_up` counts the projects and the shared steps of the sweeper and the rollup that panicked in every one of three passes and are left out until the process restarts (the asking project's own retention is `sweeper.given_up`). It names no project",
                 "properties": {
                   "recovered": {"type": "integer"}, "given_up": {"type": "integer"},
                   "last_where": {"type": "string", "description": "What the last one was in: a kind of work, never a project's name"},
@@ -515,13 +524,13 @@
                 },
                 "required": ["recovered", "given_up", "last_where", "last_at"]},
               "body_budget": {"type": "object",
-                "description": "Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429`",
+                "description": "Request bodies held in memory now, for the whole deployment, against TRACEPAD_BODY_BUDGET_BYTES; deployment view only. A body that declares its length and is not compressed reserves that length whole before it is read; a gzip or chunked body reserves 64 KiB at a time as it is read. A body that does not fit is `429`",
                 "properties": {
                   "held_bytes": {"type": "integer"}, "capacity_bytes": {"type": "integer"}
                 },
                 "required": ["held_bytes", "capacity_bytes"]},
               "read_slots": {"type": "object",
-                "description": "Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY; a read that finds none free waits within its deadline",
+                "description": "Reads being served now, for the whole deployment, against TRACEPAD_READ_CONCURRENCY (deployment view only); a read that finds none free waits within its deadline",
                 "properties": {
                   "busy": {"type": "integer"}, "capacity": {"type": "integer"}
                 },
@@ -557,7 +566,7 @@
                 },
                 "required": ["setting", "count", "bytes"]},
               "compaction": {"type": "object",
-                "description": "The deployment's compaction: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file",
+                "description": "The deployment's compaction, in the deployment view only: after an erasure, a trace deletion or a project's purge, the next sweeper pass merges the search index, drains the freelist and truncates the write-ahead log, so what the deletion unlinked is overwritten rather than left in the file",
                 "properties": {
                   "requested_at": {"type": ["string", "null"], "format": "date-time", "description": "The latest request still pending; null when none is"},
                   "completed_at": {"type": ["string", "null"], "format": "date-time", "description": "When one last finished; null before the first"}
@@ -584,7 +593,7 @@
                 "queue_adds_over_target_cap": {"type": "integer", "description": "This project's queue adds refused with 400 for carrying more than 1,000 targets"}
               }}
             },
-            "required": ["version", "started_at", "uptime_seconds", "database", "counters"]
+            "required": ["version", "started_at", "uptime_seconds", "view", "database"]
           }}}},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
@@ -3597,7 +3606,7 @@
             },
             "required": ["traces_at_start", "traces_deleted"]},
           "deleted": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "compaction": {"$ref": "#/components/schemas/Compaction"},
+          "compaction": {"$ref": "#/components/schemas/ErasureCompaction"},
           "pre_migration_backup": {"$ref": "#/components/schemas/PreMigrationBackup", "description": "Only while a backup exists"},
           "error": {"type": ["string", "null"], "description": "Why a failed erasure failed: the phase and a cause from a fixed list (\"the parsed phase failed: the disk is full\"), or, when it ran out of starts, \"3 starts ended before the erasure did\" with the tail's last cause; never the error's own text, which neither the record nor the server's log carries"}
         },
@@ -3611,6 +3620,16 @@
           "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "When the pass that runs it is due: the next one, or the one after a pass already under way; never earlier than the answer"}
         },
         "required": ["requested_at", "expected_by"]
+      },
+      "ErasureCompaction": {
+        "type": "object",
+        "description": "The compaction this erasure asked for, and when a pass that covered it finished. `completed_at` is the erasure's own, so a project learns that its erasure reached the search index and the write-ahead log without the deployment's compaction stamps, which `/system` gives the admin token and owners alone. All null when it deleted nothing and so asked for nothing.",
+        "properties": {
+          "requested_at": {"type": ["string", "null"], "format": "date-time"},
+          "expected_by": {"type": ["string", "null"], "format": "date-time", "description": "When the pass that runs it is due, while none has; null once `completed_at` is set"},
+          "completed_at": {"type": ["string", "null"], "format": "date-time", "description": "When the pass covering this erasure's latest request finished; null until then"}
+        },
+        "required": ["requested_at", "expected_by", "completed_at"]
       },
       "PreMigrationBackup": {
         "type": "object",

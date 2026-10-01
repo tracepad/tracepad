@@ -28,7 +28,7 @@ func newReadHarness(t *testing.T, timeout time.Duration, slots int) *harness {
 	t.Helper()
 	return newHarness(t, &config.Config{
 		Listen: ":0", StoreRaw: true, MaxBodyBytes: config.DefaultMaxBodyBytes,
-		ReadTimeout: timeout, ReadConcurrency: slots,
+		ReadTimeout: timeout, ReadConcurrency: slots, AdminToken: adminToken,
 	}, store.WriterOptions{})
 }
 
@@ -293,8 +293,9 @@ func TestTagFilterCap(t *testing.T) {
 		400, "tag: at most 50 values")
 }
 
-// The system endpoint shows the read slots in use and, per project, the reads
-// each bound refused (spec 043 #21).
+// The system endpoint shows the read slots in use to the deployment's
+// credential and, per project, the reads each bound refused (spec 043 #21,
+// #43).
 func TestSystemReportsReadBounds(t *testing.T) {
 	const timeout = 300 * time.Millisecond
 	h := newReadHarness(t, timeout, 2)
@@ -302,7 +303,7 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	holdReads(t)
 
 	type system struct {
-		ReadSlots struct {
+		ReadSlots *struct {
 			Busy     int `json:"busy"`
 			Capacity int `json:"capacity"`
 		} `json:"read_slots"`
@@ -318,8 +319,21 @@ func TestSystemReportsReadBounds(t *testing.T) {
 		})
 		return decodeJSON[system](t, rec)
 	}
+	// The gauge is the deployment's (#43): the admin token reads it, and a
+	// key does not.
+	gauge := func() system {
+		t.Helper()
+		body := read(adminToken)
+		if body.ReadSlots == nil {
+			t.Fatal("the admin token's system read has no read_slots")
+		}
+		return body
+	}
+	if mine := read(testSecret); mine.ReadSlots != nil {
+		t.Errorf("a project key read the deployment's read_slots: %+v", *mine.ReadSlots)
+	}
 
-	idle := read(testSecret)
+	idle := gauge()
 	if idle.ReadSlots.Busy != 0 || idle.ReadSlots.Capacity != 2 {
 		t.Errorf("read_slots = %+v, want none of 2 busy: the system read takes no slot", idle.ReadSlots)
 	}
@@ -330,7 +344,7 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	release := make(chan struct{})
 	first := h.holdRead(t, "/api/v1/traces", testSecret, release)
 	second := h.holdRead(t, "/api/v1/traces", testSecret, release)
-	if full := read(testSecret); full.ReadSlots.Busy != 2 {
+	if full := gauge(); full.ReadSlots.Busy != 2 {
 		t.Errorf("read_slots = %+v while both are held, want 2 busy", full.ReadSlots)
 	}
 	expectStatus(t, h.get(t, "/api/v1/traces"), 503)
@@ -347,10 +361,10 @@ func TestSystemReportsReadBounds(t *testing.T) {
 	// The gauge reads in a lane of its own: one at a time, so a flood of
 	// them cannot take the connections the rest of the server needs.
 	lane := make(chan struct{})
-	gauge := h.holdRead(t, "/api/v1/system", testSecret, lane)
+	held := h.holdRead(t, "/api/v1/system", testSecret, lane)
 	expectError(t, h.get(t, "/api/v1/system"), 503, "the server is busy; retry shortly")
 	close(lane)
-	<-gauge
+	<-held
 
 	theirs := read("tp-sk-other")
 	if theirs.Counters.RefusedBusy != 0 || theirs.Counters.TimedOut != 0 {

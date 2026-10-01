@@ -617,8 +617,18 @@ func TestTheSweeperRemovesABackupAfterSevenDays(t *testing.T) {
 func pendingAgain(t *testing.T, s *Store, keepTable bool) {
 	t.Helper()
 	if !keepTable {
-		if _, err := s.db.Exec(`DROP TABLE compaction`); err != nil {
-			t.Fatal(err)
+		// A store from before 0024 is from before 0034 too, which adds a
+		// column to the table and two to the erasures.
+		for _, stmt := range []string{
+			`DROP TABLE compaction`,
+			`DROP INDEX idx_erasures_awaiting_compaction`,
+			`ALTER TABLE erasures DROP COLUMN compacted_at`,
+			`ALTER TABLE erasures DROP COLUMN compaction_request`,
+			`DELETE FROM schema_migrations WHERE filename = '0034_erasure_compacted.sql'`,
+		} {
+			if _, err := s.db.Exec(stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
 		}
 	}
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE filename = '0024_compaction.sql'`); err != nil {

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/store"
@@ -242,12 +243,8 @@ func TestSystemReportsIngest(t *testing.T) {
 	body := decodeJSON[struct {
 		Version  string `json:"version"`
 		Database struct {
-			SizeBytes int64            `json:"size_bytes"`
-			Rows      map[string]int64 `json:"rows"`
+			Rows map[string]int64 `json:"rows"`
 		} `json:"database"`
-		WriterQueue struct {
-			Capacity int `json:"capacity"`
-		} `json:"writer_queue"`
 		Counters struct {
 			Since    string `json:"since"`
 			Dialects map[string]struct {
@@ -261,14 +258,8 @@ func TestSystemReportsIngest(t *testing.T) {
 	if body.Version != "test" {
 		t.Errorf("version = %q, want the build's", body.Version)
 	}
-	if body.Database.SizeBytes == 0 {
-		t.Errorf("database size = 0, want the file on disk")
-	}
 	if body.Database.Rows["traces"] < 2 {
 		t.Errorf("rows = %v, want both the seeded and the exported trace", body.Database.Rows)
-	}
-	if body.WriterQueue.Capacity == 0 {
-		t.Errorf("writer queue = %+v, want the depth that says whether writes keep up", body.WriterQueue)
 	}
 	langfuse := body.Counters.Dialects["langfuse"]
 	if langfuse.Batches != 1 || langfuse.SpansStored != 2 {
@@ -284,10 +275,10 @@ func TestSystemReportsIngest(t *testing.T) {
 
 // TestSystemCountsOnlyTheAskingProject: a project key is a tenant credential,
 // and whole-table counts told one tenant how much data the others held and how
-// many keys they had. Cross-project access is what the admin token is for, and
-// it does not exist yet (Decision 33, found in review of PR #5).
+// many keys they had (Decision 33, found in review of PR #5). Even how many
+// tenants there are is the deployment's to know (#37).
 func TestSystemCountsOnlyTheAskingProject(t *testing.T) {
-	h := newHarness(t, nil, store.WriterOptions{})
+	h := newAdminHarness(t)
 
 	// A second tenant with traces of its own, and two keys.
 	other, err := h.store.CreateProject("other",
@@ -329,14 +320,159 @@ func TestSystemCountsOnlyTheAskingProject(t *testing.T) {
 	if got := body.Database.Rows["api_keys"]; got != 1 {
 		t.Errorf("api_keys = %d, want only this project's own key", got)
 	}
-	// How many tenants share the process is an operator fact and names
-	// none of them; how much data they hold is not.
-	if got := body.Database.Rows["projects"]; got != 2 {
-		t.Errorf("projects = %d, want the count of tenants", got)
+	// How many tenants share the process names none of them, and it is
+	// still the deployment's: a new tenant moves it (#37).
+	if got, reported := body.Database.Rows["projects"]; reported {
+		t.Errorf("projects = %d, reported to a project key", got)
 	}
 	if _, reported := body.Database.Rows["payloads"]; reported {
 		t.Errorf("payloads is reported, but it cannot be attributed to a project")
 	}
+	rec = h.call(t, "GET", "/api/v1/system", nil, asAdmin)
+	expectStatus(t, rec, 200)
+	admin := decodeJSON[struct {
+		Database struct {
+			Rows map[string]int64 `json:"rows"`
+		} `json:"database"`
+	}](t, rec)
+	if got := admin.Database.Rows["projects"]; got != 2 || len(admin.Database.Rows) != 1 {
+		t.Errorf("the admin token's rows = %v, want the count of tenants alone", admin.Database.Rows)
+	}
+}
+
+// TestSystemGivesEachCallerItsView: the deployment's gauges go to the
+// deployment's credentials, the project's figures to whoever the project was
+// resolved for, and `view` says which halves the body holds — a withheld field
+// is absent, never zero (#37).
+func TestSystemGivesEachCallerItsView(t *testing.T) {
+	h := newAccountHarness(t)
+	common := []string{"version", "go_version", "started_at", "uptime_seconds", "view",
+		"database", "mcp", "source", "response_budget_bytes"}
+	deployment := []string{"writer_queue", "worker_panics", "body_budget", "read_slots", "compaction"}
+	project := []string{"sweeper", "runs", "raw", "media", "counters"}
+	owner, viewer := h.owner(t), h.viewer(t)
+
+	for _, tc := range []struct {
+		name       string
+		ask        []func(*http.Request)
+		project    bool
+		deployment bool
+	}{
+		{"a project key", nil, true, false},
+		{"a viewer session", []func(*http.Request){asSession(viewer), inProject(h.project.ID)}, true, false},
+		{"an owner session", []func(*http.Request){asSession(owner), inProject(h.project.ID)}, true, true},
+		// An owner on a fresh install, or one whose projects are all gone,
+		// has no project to name, and still sees the deployment.
+		{"an owner session naming no project", []func(*http.Request){asSession(owner)}, false, true},
+		// The header is a session's, and the token has no project to name.
+		{"the admin token", []func(*http.Request){asAdmin, inProject(h.project.ID)}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := h.call(t, "GET", "/api/v1/system", nil, tc.ask...)
+			expectStatus(t, rec, 200)
+			body := decodeJSON[map[string]json.RawMessage](t, rec)
+
+			want := slices.Clone(common)
+			if tc.deployment {
+				want = append(want, deployment...)
+			}
+			if tc.project {
+				want = append(want, project...)
+			}
+			var got []string
+			for key := range body {
+				got = append(got, key)
+			}
+			slices.Sort(got)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("fields = %v, want %v", got, want)
+			}
+
+			view := decodeRaw[struct {
+				Project    *string `json:"project"`
+				Deployment bool    `json:"deployment"`
+			}](t, body["view"])
+			if view.Deployment != tc.deployment || (view.Project != nil) != tc.project ||
+				(view.Project != nil && *view.Project != h.project.ID) {
+				t.Errorf("view = %s, want project %v and deployment %v", body["view"], tc.project, tc.deployment)
+			}
+
+			database := decodeRaw[struct {
+				SizeBytes *int64           `json:"size_bytes"`
+				Rows      map[string]int64 `json:"rows"`
+			}](t, body["database"])
+			if (database.SizeBytes != nil) != tc.deployment {
+				t.Errorf("database = %s, want size_bytes only in the deployment view", body["database"])
+			}
+			if _, counted := database.Rows["projects"]; counted != tc.deployment {
+				t.Errorf("rows = %v, want projects only in the deployment view", database.Rows)
+			}
+			if _, counted := database.Rows["traces"]; counted != tc.project {
+				t.Errorf("rows = %v, want the project's tables only in the project view", database.Rows)
+			}
+		})
+	}
+}
+
+// TestSystemAsksASessionForAProject: a member's session names the project it
+// asks about, as on every other read; an owner may leave it out and gets the
+// deployment alone, and a project that is gone is gone here too (#37).
+func TestSystemAsksASessionForAProject(t *testing.T) {
+	h := newAccountHarness(t)
+	owner, viewer := h.owner(t), h.viewer(t)
+	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(viewer)),
+		http.StatusBadRequest, "a session must name the project")
+
+	if err := h.writer.Submit(t.Context(), &store.ProjectDelete{
+		ProjectID: h.project.ID, Confirm: "test", Now: time.Now().UnixNano(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type answer struct {
+		View struct {
+			Project      *string `json:"project"`
+			Deployment   bool    `json:"deployment"`
+			ProjectError *string `json:"project_error"`
+		} `json:"view"`
+		Counters *json.RawMessage `json:"counters"`
+		Database struct {
+			SizeBytes *int64 `json:"size_bytes"`
+		} `json:"database"`
+	}
+	ghost := strings.Repeat("f", 32)
+	for name, ask := range map[string][]func(*http.Request){
+		"no project":           {asSession(owner)},
+		"the deleted project":  {asSession(owner), inProject(h.project.ID)},
+		"a project never made": {asSession(owner), inProject(ghost)},
+	} {
+		rec := h.call(t, "GET", "/api/v1/system", nil, ask...)
+		expectStatus(t, rec, http.StatusOK)
+		got := decodeJSON[answer](t, rec)
+		if got.View.Project != nil || !got.View.Deployment || got.Database.SizeBytes == nil || got.Counters != nil {
+			t.Errorf("naming %s: %s, want the deployment alone", name, rec.Body)
+		}
+		// Naming a project that is not there says so; naming none is no
+		// error to report.
+		named := name != "no project"
+		if (got.View.ProjectError != nil) != named ||
+			(named && *got.View.ProjectError != "no such project") {
+			t.Errorf("naming %s: project_error = %v", name, got.View.ProjectError)
+		}
+	}
+	// A member gets no such leniency: a project that is gone is gone.
+	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(viewer), inProject(h.project.ID)),
+		http.StatusNotFound, "no such project")
+}
+
+// decodeRaw decodes one field of a body decoded as raw messages.
+func decodeRaw[T any](t *testing.T, raw json.RawMessage) T {
+	t.Helper()
+	var out T
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	return out
 }
 
 // TestSystemCountersAreScopedToTheProject: the ingest counters are the same

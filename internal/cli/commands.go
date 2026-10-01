@@ -1337,11 +1337,19 @@ func (r *run) system(ctx context.Context, args []string) error {
 		GoVersion     string `json:"go_version"`
 		StartedAt     string `json:"started_at"`
 		UptimeSeconds int64  `json:"uptime_seconds"`
-		Database      struct {
-			SizeBytes int64            `json:"size_bytes"`
+		// Which halves the answer holds (spec 004 #37): the deployment's
+		// gauges for the admin token or an owner, the project's figures
+		// for a key or a member. A withheld field is absent, and so is its
+		// line here.
+		View *struct {
+			Project    *string `json:"project"`
+			Deployment bool    `json:"deployment"`
+		} `json:"view"`
+		Database struct {
+			SizeBytes *int64           `json:"size_bytes"`
 			Rows      map[string]int64 `json:"rows"`
 		} `json:"database"`
-		WriterQueue struct {
+		WriterQueue *struct {
 			Waiting  int `json:"waiting"`
 			Capacity int `json:"capacity"`
 		} `json:"writer_queue"`
@@ -1349,7 +1357,7 @@ func (r *run) system(ctx context.Context, args []string) error {
 			Enabled bool   `json:"enabled"`
 			Path    string `json:"path"`
 		} `json:"mcp"`
-		Compaction struct {
+		Compaction *struct {
 			RequestedAt *string `json:"requested_at"`
 			CompletedAt *string `json:"completed_at"`
 		} `json:"compaction"`
@@ -1376,31 +1384,54 @@ func (r *run) system(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// A server older than the views answers every caller with both halves,
+	// and says nothing about it.
+	deployment, project := true, true
+	if info.View != nil {
+		deployment, project = info.View.Deployment, info.View.Project != nil
+	}
+
 	fmt.Fprintf(r.opt.Stdout, "tracepad %s (%s), client %s\n",
 		termsafe.String(info.Version), termsafe.String(info.GoVersion), r.opt.Version)
 	fmt.Fprintf(r.opt.Stdout, "  up since   %s (%s)\n", shortTime(info.StartedAt), uptime(info.UptimeSeconds))
-	fmt.Fprintf(r.opt.Stdout, "  database   %s\n", byteSize(int(info.Database.SizeBytes)))
-	fmt.Fprintf(r.opt.Stdout, "  writes     %d of %d queued\n",
-		info.WriterQueue.Waiting, info.WriterQueue.Capacity)
+	if info.Database.SizeBytes != nil {
+		fmt.Fprintf(r.opt.Stdout, "  database   %s\n", byteSize(int(*info.Database.SizeBytes)))
+	}
+	if projects, known := info.Database.Rows["projects"]; known {
+		fmt.Fprintf(r.opt.Stdout, "  projects   %d\n", projects)
+	}
+	if info.WriterQueue != nil {
+		fmt.Fprintf(r.opt.Stdout, "  writes     %d of %d queued\n",
+			info.WriterQueue.Waiting, info.WriterQueue.Capacity)
+	}
 	if info.MCP.Path != "" {
 		fmt.Fprintf(r.opt.Stdout, "  mcp        %s at %s\n", enabled(info.MCP.Enabled), termsafe.String(info.MCP.Path))
 	}
 	// Whether what an explicit deletion unlinked is still waiting for the
-	// pass that overwrites it (spec 044 #11).
+	// pass that overwrites it (spec 044 #11, #22).
 	switch {
+	case info.Compaction == nil:
 	case info.Compaction.RequestedAt != nil:
 		fmt.Fprintf(r.opt.Stdout, "  compaction pending since %s, runs with the next sweep\n",
 			shortTime(*info.Compaction.RequestedAt))
 	case info.Compaction.CompletedAt != nil:
 		fmt.Fprintf(r.opt.Stdout, "  compaction last completed %s\n", shortTime(*info.Compaction.CompletedAt))
 	}
+	// Said rather than left blank, so that a missing line is never read as
+	// a zero (spec 004 #37).
+	if !deployment {
+		fmt.Fprintln(r.opt.Stdout, "  the deployment's size, queue and compaction are shown to the admin token or an owner")
+	}
+	if !project {
+		fmt.Fprintln(r.opt.Stdout, "  no project: a project's rows, archive and counters are shown to its key")
+		return nil
+	}
 
-	// This project's rows, not the deployment's (spec 004 Decision 33);
-	// `projects` is the exception and is only a count of tenants.
+	// This project's rows, not the deployment's (spec 004 Decision 33).
 	fmt.Fprintln(r.opt.Stdout, "\nrows in this project")
 	rows := newTable(r.opt.Stdout)
 	for _, table := range []string{"traces", "observations", "raw_batches",
-		"scores", "prompts", "prompt_labels", "api_keys", "projects"} {
+		"scores", "prompts", "prompt_labels", "api_keys"} {
 		if count, known := info.Database.Rows[table]; known {
 			rows.row("  "+table, strconv.FormatInt(count, 10))
 		}

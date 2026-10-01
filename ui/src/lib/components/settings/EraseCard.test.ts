@@ -20,7 +20,7 @@ const RUNNING = {
 	finished_at: null,
 	progress: { traces_at_start: 20000, traces_deleted: 5123 },
 	deleted: { traces: 5123 },
-	compaction: { requested_at: null, expected_by: null },
+	compaction: { requested_at: null, expected_by: null, completed_at: null },
 	error: null
 };
 

@@ -45,7 +45,11 @@ type erasureView struct {
 	} `json:"progress"`
 	Deleted    map[string]int64 `json:"deleted"`
 	Compaction struct {
-		ExpectedBy *string `json:"expected_by"`
+		RequestedAt *string `json:"requested_at"`
+		ExpectedBy  *string `json:"expected_by"`
+		// CompletedAt is when the pass that covered this erasure finished:
+		// set once it has ended and been compacted (spec 044 #22).
+		CompletedAt *string `json:"completed_at"`
 	} `json:"compaction"`
 	Backup *struct {
 		CreatedAt   string `json:"created_at"`
@@ -225,12 +229,18 @@ func (r *run) renderErased(erasure erasureView) {
 		fmt.Fprintf(r.opt.Stdout, "\nthe server reported nothing about its raw archive: "+
 			"a server that predates erasing it keeps the user's spans there until the batches expire\n")
 	}
-	// What the rows left in the file is overwritten by the next pass, and
-	// the one copy of the database an erasure does not rewrite goes on its
-	// own date (spec 044 #11, #12).
-	if erasure.Compaction.ExpectedBy != nil {
+	// What the rows left in the file is overwritten by a pass — done, due,
+	// or never asked for — and the one copy of the database an erasure does
+	// not rewrite goes on its own date (spec 044 #11, #12, #22).
+	switch c := erasure.Compaction; {
+	case c.CompletedAt != nil:
+		fmt.Fprintf(r.opt.Stdout, "freed bytes were overwritten by the sweep that finished %s\n",
+			shortTime(*c.CompletedAt))
+	case c.ExpectedBy != nil:
 		fmt.Fprintf(r.opt.Stdout, "freed bytes are overwritten by the next sweep, expected by %s\n",
-			shortTime(*erasure.Compaction.ExpectedBy))
+			shortTime(*c.ExpectedBy))
+	case c.RequestedAt == nil:
+		fmt.Fprintln(r.opt.Stdout, "nothing was freed, so no sweep was asked to overwrite anything")
 	}
 	if erasure.Backup != nil {
 		fmt.Fprintf(r.opt.Stdout, "the pre-migration backup of %s is not rewritten; the first sweep after %s removes it\n",

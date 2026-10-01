@@ -34,8 +34,10 @@ func bulkBody(t *testing.T, seed, traces, spansPerTrace int) []byte {
 }
 
 // ingestSystem is the part of `GET /api/v1/system` the ingest bounds report.
+// The gauge is the deployment's, and only the admin token and an owner read it
+// (spec 004 #37); the counters are the asking project's.
 type ingestSystem struct {
-	BodyBudget struct {
+	BodyBudget *struct {
 		Held     int64 `json:"held_bytes"`
 		Capacity int64 `json:"capacity_bytes"`
 	} `json:"body_budget"`
@@ -50,7 +52,23 @@ func (h *harness) ingestSystem(t *testing.T, secret string) ingestSystem {
 	t.Helper()
 	rec := h.call(t, "GET", "/api/v1/system", nil, asKey(secret))
 	expectStatus(t, rec, 200)
-	return decodeJSON[ingestSystem](t, rec)
+	body := decodeJSON[ingestSystem](t, rec)
+	if body.BodyBudget != nil {
+		t.Errorf("a project key read the deployment's body budget: %+v", *body.BodyBudget)
+	}
+	return body
+}
+
+// gauges reads the deployment view with the admin token.
+func (h *harness) gauges(t *testing.T) ingestSystem {
+	t.Helper()
+	rec := h.call(t, "GET", "/api/v1/system", nil, asAdmin)
+	expectStatus(t, rec, 200)
+	body := decodeJSON[ingestSystem](t, rec)
+	if body.BodyBudget == nil {
+		t.Fatalf("the admin token's system read has no body budget: %s", rec.Body)
+	}
+	return body
 }
 
 // dump is a project's traces and observations as text, every column the
@@ -326,7 +344,7 @@ func counted(counter *tallyReader) func(*http.Request) {
 func TestBodyBudget(t *testing.T) {
 	const bodyCap = 256 << 10
 	h := newHarness(t, &config.Config{Listen: ":0", StoreRaw: true, MaxBodyBytes: bodyCap,
-		BodyBudgetBytes: 2 * bodyCap}, store.WriterOptions{})
+		BodyBudgetBytes: 2 * bodyCap, AdminToken: adminToken}, store.WriterOptions{})
 	h.second(t, "other", "tp-sk-other")
 
 	full := func(seed int) []byte {
@@ -356,7 +374,7 @@ func TestBodyBudget(t *testing.T) {
 		go func() { held <- h.post(t, "/v1/traces", body) }()
 	}
 	waitUntil(t, func() bool { return h.server.bodies.heldBytes() == spent })
-	if gauge := h.ingestSystem(t, testSecret).BodyBudget; gauge.Held != spent || gauge.Capacity != spent {
+	if gauge := h.gauges(t).BodyBudget; gauge.Held != spent || gauge.Capacity != spent {
 		t.Errorf("body_budget = %+v, want the two bodies held of %d", gauge, spent)
 	}
 

@@ -102,6 +102,14 @@ const (
 	// lists it (spec 004 #27); it is in the guard's table all the same, so
 	// that one guard decides its headers, its caller and its scope.
 	stream
+	// diagnostic is the system read (spec 004 #37), whose answer has a half
+	// for each kind of caller: every credential is admitted, and the
+	// handler gives each the half that is theirs. A key — with the route's
+	// scope — or a member's session for its `X-Tracepad-Project` get the
+	// project's figures; the admin token and an owner's session the
+	// deployment's, an owner's both when it names a project. The admin token
+	// reaches no project here either: it gets the deployment view alone.
+	diagnostic
 )
 
 // String names a policy for the endpoint map and for test failures.
@@ -121,6 +129,8 @@ func (p policy) String() string {
 		return "session"
 	case stream:
 		return "stream"
+	case diagnostic:
+		return "diagnostic"
 	}
 	return "unset"
 }
@@ -190,6 +200,10 @@ type caller struct {
 	// `viewer`. Empty for a key and for the admin token, whose reach the
 	// policy already settled.
 	role string
+	// unresolved is why the project an owner's session named on the system
+	// read is not there — absent or deleted — which costs it the project's
+	// half of the answer and not the deployment's (spec 004 #37).
+	unresolved string
 }
 
 // isSession reports a cookie-authenticated caller.
@@ -650,6 +664,11 @@ func (s *Server) admits(w http.ResponseWriter, rt route, c *caller) bool {
 		}
 		return true
 
+	case diagnostic:
+		// Every credential: what each is given is the handler's to say,
+		// by the kind of caller (spec 004 #37).
+		return true
+
 	case member, editor:
 		if c.isKey() {
 			// Both admit a key; what it may do among them is its scopes'
@@ -705,7 +724,12 @@ func (s *Server) inProject(w http.ResponseWriter, r *http.Request, rt route, c *
 		// `/api/v1/projects` that are about no single project, so there
 		// is nothing to scope and no header to ask for.
 		return true
-	case rt.Policy == member || rt.Policy == editor:
+	case rt.Policy == diagnostic && r.Header.Get(projectHeader) == "" && c.account.Owner:
+		// An owner asking about no project gets the deployment's half
+		// alone — on a fresh install, or one whose projects are all
+		// gone, there is no project to name (spec 004 #37).
+		return true
+	case rt.Policy == member || rt.Policy == editor || rt.Policy == diagnostic:
 		id = r.Header.Get(projectHeader)
 		if id == "" {
 			writeError(w, http.StatusBadRequest,
@@ -726,6 +750,13 @@ func (s *Server) inProject(w http.ResponseWriter, r *http.Request, rt route, c *
 		return false
 	}
 	project, role := found.project, found.role
+	if rt.Policy == diagnostic && c.account.Owner && (project == nil || project.Deleted()) {
+		// The deployment's half is an owner's whatever it names; the
+		// project's half needs a project, and the answer says why there
+		// is none rather than refusing the whole of it (spec 004 #37).
+		c.unresolved = "no such project"
+		return true
+	}
 	if role == "" {
 		// 403 rather than 404 for a project you are not in: ids are
 		// random, so there is nothing to enumerate, and "not a member" is
