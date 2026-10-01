@@ -120,7 +120,13 @@ func isTerminal(file *os.File) bool {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `Tracepad — lightweight OTLP-native store and viewer for LLM traces.
+	fmt.Fprint(os.Stderr, helpText())
+}
+
+// helpText is what `tracepad help` prints, a function of its own so the test
+// that holds it to the configuration can read it (spec 001 #24).
+func helpText() string {
+	return `Tracepad — lightweight OTLP-native store and viewer for LLM traces.
 
 Usage:
   tracepad [serve] [flags]   run the server (default command)
@@ -135,28 +141,7 @@ Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default localhost:4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
-Server environment:
-  TRACEPAD_STORE_RAW              keep raw OTLP bodies for export       (default on)
-  TRACEPAD_PROJECTS               name:public_key:secret_key,… to declare projects at start
-  TRACEPAD_URL                    address people reach the server at (links it prints; CLI target)
-  TRACEPAD_MAX_BODY_BYTES         request body cap in bytes             (default 20971520)
-  TRACEPAD_MAX_SPANS_PER_REQUEST  spans one export may carry            (default 20000)
-  TRACEPAD_BODY_BUDGET_BYTES      request bodies held in memory at once (default 4x the body cap)
-  TRACEPAD_RESPONSE_BUDGET_BYTES  default read response budget          (default 51200)
-  TRACEPAD_READ_TIMEOUT           deadline of one read request          (default 20s)
-  TRACEPAD_READ_CONCURRENCY       reads served at once                  (default 2 per CPU, at least 4)
-  TRACEPAD_MCP                    serve MCP at /mcp                     (default on)
-  TRACEPAD_SWEEP_INTERVAL         retention sweep cadence               (default 1h)
-  TRACEPAD_ROLLUP_INTERVAL        statistics rollup cadence             (default 5m)
-  TRACEPAD_ADMIN_TOKEN            bearer token for cross-project admin  (default unset)
-                                  at least 32 characters: openssl rand -hex 32
-  TRACEPAD_ADMIN_TOKEN_FILE       read the admin token from this file   (default unset)
-  TRACEPAD_SETUP                  mint and print the setup link         (default on)
-  TRACEPAD_SESSION_DAYS           days a browser sign-in lasts          (default 30)
-  TRACEPAD_TRUSTED_PROXIES        proxies whose X-Forwarded-For counts  (default loopback)
-                                  addresses and CIDR ranges, or none
-
-`+cli.Usage)
+` + config.EnvHelp() + "\n" + cli.Usage
 }
 
 func serve(args []string) error {

@@ -303,7 +303,8 @@ docker run -d -e TRACEPAD_LISTEN=:8080 -p 8080:8080 … ghcr.io/tracepad/tracepa
 
 Two settings size what one export may cost everything else. Neither needs
 tuning on a laptop or a small server; both are checked at start, and a value
-out of range refuses to start.
+out of range refuses to start. ([configuration.md](configuration.md) has them
+with every other variable.)
 
 | Variable | Default | Meaning |
 |---|---|---|

@@ -557,6 +557,9 @@ deployment was configured is a safety net nobody can rely on.
 
 ## Configuration
 
+The settings that bear on retention; [configuration.md](configuration.md) lists
+every variable the server reads.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `TRACEPAD_SWEEP_INTERVAL` | `1h` | How often a pass runs. A Go duration; at least `1s`. |

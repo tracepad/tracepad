@@ -397,6 +397,9 @@ one in this section.
 
 ## Configuration
 
+The settings that bear on accounts; [configuration.md](configuration.md) lists
+every variable the server reads.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `TRACEPAD_SESSION_DAYS` | `30` | How long a browser session lasts. It slides, so this is "how long since you last opened it", not "how long since you signed in". Minimum 1. |

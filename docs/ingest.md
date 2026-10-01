@@ -587,6 +587,9 @@ price on the span at the source, where it is exact and needs no credential.
 
 ## Configuration
 
+The settings that bear on ingest; [configuration.md](configuration.md) lists
+every variable the server reads.
+
 | Environment variable | Default | Meaning |
 |---|---|---|
 | `TRACEPAD_STORE_RAW` | `on` | Keep every accepted body (zstd) so mapping can be replayed later |

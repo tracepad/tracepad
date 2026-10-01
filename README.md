@@ -76,7 +76,7 @@ Rough figures, measured on a synthetic corpus of about 2,000 traces (the binary
 size is that of the current build; the other four date from 2026-08-30 and have
 not been re-measured since):
 
-- **Binary** — 19.4 MiB on `darwin/arm64`, 7.6 MiB gzipped.
+- **Binary** — 19.6 MiB on `darwin/arm64`, 7.6 MiB gzipped.
 - **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
 - **Ingest** — ~1,900 spans/s from one sequential client, which is headroom
   rather than the ceiling: the envelope above is set by what the file and the
