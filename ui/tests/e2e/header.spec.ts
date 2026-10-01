@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { createProject, signIn as enter, state, type Account } from './harness';
+import { createProject, signIn as enter, signInAsMember, state, type Account } from './harness';
 
 // The page header at both ends of the rule (spec 026 #5, #14), against the real
 // binary.
@@ -36,7 +36,7 @@ const LONG_SCORE =
 const ROW = 48;
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 async function header(page: Page) {

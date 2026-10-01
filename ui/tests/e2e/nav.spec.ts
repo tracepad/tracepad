@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { overlapping, section, signIn as enter, state } from './harness';
+import { overlapping, section, signInAsMember } from './harness';
 
 // The shell's navigation at both widths (spec 006 #20): on a desktop the
 // column of every section; on a phone a 48px bar on top, four tabs under the
@@ -8,7 +8,7 @@ import { overlapping, section, signIn as enter, state } from './harness';
 // swipe down all close.
 
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 }
 
 test('a desktop keeps the column and has no More', async ({ page }, testInfo) => {

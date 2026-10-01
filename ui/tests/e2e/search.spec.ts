@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { signIn as enter, state } from './harness';
+import { signInAsMember } from './harness';
 
 // Search, end to end against the real binary (spec 011, Testing): a phrase
 // seeded into a fixture payload, the snippet under the row, the click that
@@ -13,7 +13,7 @@ const CHAT_GENERATION = '2b3c4d5e6f7a8b9c';
 
 /** Signs in and opens the listing: the front page is the dashboard (spec 034 #1). */
 async function signIn(page: Page) {
-	await enter(page, state().member);
+	await signInAsMember(page);
 	await page.goto('/traces');
 }
 
