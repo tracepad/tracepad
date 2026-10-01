@@ -122,8 +122,8 @@ carried by a hand-edited link, is dropped rather than sent
 ([api.md](api.md#tokens)). The **Tokens** column shows the same number — input
 plus output, compact (`950`, `12.4k`, `3.1M`) — and a dash where the trace
 carried neither; its tooltip lists every class the trace reported, exact, so
-reasoning and cache tokens are read there and are never added to the figure.
-The Sessions and Users tables have the same column
+reasoning and cache tokens are read there and are never added to the figure
+(spec 049 #1, #3, #9). The Sessions and Users tables have the same column
 over their own sums, and fold it under the id on a narrow screen with the cost.
 
 Three of them — **environment**, **release** and **name** — are checkbox lists

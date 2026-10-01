@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"math"
 	"net"
 	"net/netip"
@@ -16,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -221,40 +219,6 @@ func SecretLength(secret string) int { return utf8.RuneCountInString(secret) }
 // whether the declaration creates a project (spec 001 #18).
 const GenerateHint = "generate one with: openssl rand -hex 32"
 
-// knownEnv lists every TRACEPAD_* variable the binary understands.
-var knownEnv = map[string]bool{
-	"TRACEPAD_LISTEN":                true,
-	"TRACEPAD_DATA_DIR":              true,
-	"TRACEPAD_PROJECTS":              true,
-	"TRACEPAD_STORE_RAW":             true,
-	"TRACEPAD_MAX_BODY_BYTES":        true,
-	"TRACEPAD_RESPONSE_BUDGET_BYTES": true,
-	"TRACEPAD_MAX_SPANS_PER_REQUEST": true,
-	"TRACEPAD_BODY_BUDGET_BYTES":     true,
-	"TRACEPAD_READ_TIMEOUT":          true,
-	"TRACEPAD_READ_CONCURRENCY":      true,
-	"TRACEPAD_MCP":                   true,
-	"TRACEPAD_SWEEP_INTERVAL":        true,
-	"TRACEPAD_ROLLUP_INTERVAL":       true,
-	"TRACEPAD_ADMIN_TOKEN":           true,
-	"TRACEPAD_ADMIN_TOKEN_FILE":      true,
-	"TRACEPAD_SETUP":                 true,
-	"TRACEPAD_SESSION_DAYS":          true,
-	"TRACEPAD_IN_CONTAINER":          true,
-	"TRACEPAD_TRUSTED_PROXIES":       true,
-	// The server reads TRACEPAD_URL too since spec 028 #11 — as the host
-	// of the links it prints — but it is still the CLI's "which server",
-	// which is the whole reason there is one variable and not two.
-	"TRACEPAD_URL":     true,
-	"TRACEPAD_API_KEY": true,
-}
-
-// KnownEnv returns the names in knownEnv, sorted. The binary's tests hold the
-// help text and docs/configuration.md to this list (spec 001 #24).
-func KnownEnv() []string {
-	return slices.Sorted(maps.Keys(knownEnv))
-}
-
 // deprecatedEnv names the variables that were read once, are not any more, and
 // still turn up in a shared .env: the server says what replaced them at Info,
 // not as the typo warning an unknown name gets.
@@ -262,6 +226,13 @@ var deprecatedEnv = map[string]string{
 	// The packages' name for the store's address before TRACEPAD_URL (spec
 	// 017 #21). The server never read it; a shared .env carries it here.
 	"TRACEPAD_HOST": "TRACEPAD_URL",
+}
+
+// IsDeprecatedEnv reports whether the variable was read once and is not any
+// more (see deprecatedEnv).
+func IsDeprecatedEnv(name string) bool {
+	_, ok := deprecatedEnv[name]
+	return ok
 }
 
 // Load resolves configuration from env and the given flag arguments.
@@ -728,7 +699,7 @@ func warnUnknownEnv() {
 		name, _, _ := strings.Cut(kv, "=")
 		if now, ok := deprecatedEnv[name]; ok {
 			slog.Info("deprecated environment variable, not read by the server", "name", name, "use", now)
-		} else if strings.HasPrefix(name, "TRACEPAD_") && !knownEnv[name] {
+		} else if strings.HasPrefix(name, "TRACEPAD_") && !IsKnownEnv(name) {
 			slog.Warn("unknown TRACEPAD_* environment variable", "name", name)
 		}
 	}

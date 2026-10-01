@@ -493,8 +493,26 @@ func TestInContainer(t *testing.T) {
 	if cfg, err = Load(nil); err != nil || !cfg.InContainer {
 		t.Errorf("TRACEPAD_IN_CONTAINER=1: InContainer = %v, err = %v", cfg != nil && cfg.InContainer, err)
 	}
-	if !knownEnv["TRACEPAD_IN_CONTAINER"] {
+	if !IsKnownEnv("TRACEPAD_IN_CONTAINER") {
 		t.Error("TRACEPAD_IN_CONTAINER would be warned about as unknown")
+	}
+}
+
+// A shared .env carries the packages' variables to the server (the docs
+// recommend one), and none of them is a typo (spec 001 #24).
+func TestWarnUnknownEnvAcceptsThePackagesVariables(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for _, v := range Env {
+		t.Setenv(v.Name, "x")
+	}
+
+	warnUnknownEnv()
+
+	if strings.Contains(logs.String(), "unknown TRACEPAD_*") {
+		t.Errorf("a variable of config.Env is warned about: %s", logs.String())
 	}
 }
 
