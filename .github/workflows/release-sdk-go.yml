@@ -1,0 +1,45 @@
+# Checking the Go module's tag (spec 033 #1, spec 020 #28).
+#
+# Unlike the two other packages this one publishes nothing: the tag
+# `sdk/go/v0.2.0` is the release, and the module proxy serves what the tag holds
+# to whoever asks first and for good. So this workflow cannot hold a release
+# back, as the other two do before they build. What it can do is tell the owner
+# within minutes that the tag names a version `Version` in `sdk/go/http.go` does
+# not, or that the module does not pass its own suite, while nobody has asked the
+# proxy for it yet — a tag that nobody fetched can still be deleted. Run
+# `scripts/sdk-go-release-check.sh sdk/go/vX.Y.Z` before pushing the tag, and
+# the red run is for the day it was forgotten.
+#
+# The version is read from the tag that triggered the run (`GITHUB_REF_NAME`),
+# never from `git describe`: a commit may carry the server's tag and the other
+# packages' beside this one.
+#
+# Credentials: none, and nothing to mint one for. It does not run the end-to-end
+# half of the suite, which wants a server binary and has run on this commit's
+# pull request.
+name: Check the Go module's tag
+
+on:
+  push:
+    tags: ["sdk/go/v*"]
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: The tag and the package must agree about the version
+        run: scripts/sdk-go-release-check.sh "$GITHUB_REF_NAME"
+
+      - run: SDK_SKIP_E2E=1 scripts/sdk-go-test.sh

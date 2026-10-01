@@ -817,10 +817,46 @@ Before tagging:
   (`sdk-js/v*`, `release-sdk-js.yml`, npm trusted publishing); the server's
   tag moves neither.
 - The Go package's tag is `sdk/go/vX.Y.Z` — the toolchain's rule for a module
-  in a subdirectory — and the tag is the whole release: no workflow, the
-  module proxy fetches it from the repository (spec 033 #1).
+  in a subdirectory — and the tag is the whole release: the module proxy
+  fetches it from the repository (spec 033 #1). Nothing can hold it back, so
+  run `scripts/sdk-go-release-check.sh sdk/go/vX.Y.Z` before pushing it:
+  `const Version` in `sdk/go/http.go` must be the tag's version.
+  `release-sdk-go.yml` runs the same check and the unit suite afterwards and
+  goes red if the tag was wrong (spec 020 #28).
+- **A tag spells its version the one way, semver's, for every package**:
+  `v0.1.0-rc.1` for the server, `sdk-js/v0.1.0-rc.1`, `sdk/go/v0.1.0-rc.1`
+  and `sdk-py/v0.1.0-rc.1`. The Python workflow derives PyPI's spelling
+  (`0.1.0rc1`, PEP 440), which is what `VERSION` in `_config.py` must say;
+  `sdk-py/v0.1.0rc1` is refused. A release candidate needs its version put
+  into the tree first, in four places: `_config.py`, `sdk/js/package.json`
+  with its lock file (`npm version 0.1.0-rc.1 --no-git-tag-version` in
+  `sdk/js`) and `const Version`. npm publishes a pre-release under the `next`
+  dist-tag, so `npm install tracepad` keeps resolving to the newest stable.
+- **Push the tags one at a time.** A commit may carry four of them (the
+  server's and the three packages'), but GitHub starts no workflow for the
+  tags of a push that creates more than three at once. Each workflow reads
+  its version from the tag that triggered it, so the order between them is
+  only the order in which you want the results; the server's goes last for a
+  stable release, because `latest` and `X.Y` move with it.
 
-One-time, and the owner's to do by hand:
+One-time, and the owner's to do by hand. Before the first tag:
+
+- **Create the `pypi` and `npm` environments with a tag-only policy first.**
+  A workflow run that names an environment which does not exist creates it
+  *unprotected*, open to any ref that triggers the job. Create both beforehand
+  with deployment tags limited to `sdk-py/v*` and `sdk-js/v*` respectively (and
+  the owner as a required reviewer, if a second click after the tag is wanted):
+  Settings → Environments, or the API's `deployment-branch-policies` with
+  `type=tag`.
+- **Add the trusted publishers to the existing projects.** `tracepad` exists on
+  PyPI and on npm as `0.0.1` placeholders, so the publisher goes on the
+  *existing* project, not as a pending one: owner `tracepad`, repository
+  `tracepad`, workflow `release-sdk-py.yml` and environment `pypi` on PyPI;
+  `release-sdk-js.yml` and environment `npm` on npm. Nothing public says
+  whether they are set, and a missing one fails `publish` after `build`, with
+  nothing published.
+
+After the first push of the image:
 
 - **Make the GHCR package public.** The first push creates
   `ghcr.io/tracepad/tracepad` as a *private* package, which means the

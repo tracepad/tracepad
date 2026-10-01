@@ -291,7 +291,13 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 		cmp -s sdk/NOTICE "$$copy" || { echo "sdk-notices: $$copy differs from sdk/NOTICE; copy it again"; exit 1; }; \
 	done
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+# The release workflows never run before the first tag, so the part of them that
+# is a script is run here: each package's tag check against its own version
+# (spec 020 #28).
+sdk-release-check: ## Assert the SDK tag checks against the versions in the tree
+	scripts/sdk-release-check-test.sh
+
+gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -339,6 +345,6 @@ install-hooks: ## (Re)install both hooks
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
-	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices race \
+	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race \
 	doc-anchors doc-anchors-self-test release-tag-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
