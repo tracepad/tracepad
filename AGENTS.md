@@ -690,6 +690,8 @@ reason in a comment; adding a dialect should be a table edit.
 - `make doc-anchors` — check every anchor in `docs/`, `README.md` and
   `AGENTS.md` against the heading it names (part of the gate);
   `make doc-anchors-self-test` runs the checker over its fixture.
+- `make release-tag-test` — which tags the release workflow accepts (`vX.Y.Z`,
+  `vX.Y.Z-(alpha|beta|rc).N`) and which it refuses; part of the gate.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
@@ -786,7 +788,9 @@ A version tag is the one act that publishes anything. `v0.2.0` runs
 tags it may move, GoReleaser puts the archives and checksums on GitHub
 Releases, then `buildx` pushes `ghcr.io/tracepad/tracepad` as `0.2.0`, `0.2`
 and `latest`. A pre-release tag (`v0.2.0-rc.1`) publishes its exact tag alone —
-no `X.Y`, no `latest`. Nothing about this runs on a push to `main`.
+no `X.Y`, no `latest`. Two shapes are tags and nothing else is: `vX.Y.Z` and
+`vX.Y.Z-(alpha|beta|rc).N`; `v0.2.0rc1`, `v0.2.0+build` and the like are
+refused before anything is built (`scripts/release-tag.sh`). Nothing about this runs on a push to `main`.
 
 **A back-patch is safe to tag.** `latest` and `X.Y` move only when the tag is
 the newest of its kind, so releasing `v0.2.5` after `v0.3.0` publishes `0.2.5`

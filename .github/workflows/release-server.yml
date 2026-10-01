@@ -58,11 +58,11 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           # A tag that is not a version would otherwise publish an image named
-          # after it. A tag on GHCR is as public as a version on PyPI.
-          case "$version" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "tag $GITHUB_REF_NAME is not vX.Y.Z" >&2; exit 1 ;;
-          esac
+          # after it. A tag on GHCR is as public as a version on PyPI. Two
+          # shapes pass — vX.Y.Z and vX.Y.Z-(alpha|beta|rc).N — and the script
+          # says which; `v0.1.0rc1`, `v0.1.0-` and `v1.0.0+build` are refused,
+          # where a glob took them for stable releases (#27).
+          kind="$(scripts/release-tag.sh "$GITHUB_REF_NAME")"
 
           image="ghcr.io/${GITHUB_REPOSITORY}"
           tags="$image:$version"
@@ -75,27 +75,27 @@ jobs:
           # for the person who asked for it, and neither `X.Y` — what an
           # operator pins to for patches but not surprises — nor `latest` is
           # that (#6).
-          case "$version" in
-            *-*)
+          case "$kind" in
+            prerelease)
               echo "pre-release: publishing $version alone"
               prerelease=true
               ;;
-            *)
+            stable)
               # A moving tag may only move forward. Releasing a back-patch
               # (v0.2.5 after v0.3.0) must not walk `latest` backwards onto an
               # older build: that is a silent downgrade for everyone tracking
               # it, and it lands them in the older-binary-newer-schema case
               # docs/docker.md says is not supported (#16).
               #
-              # Pre-release tags are excluded from the comparison because git's
-              # version sort puts `v0.3.0-rc.1` *after* `v0.3.0`. Dropped with
-              # awk rather than `grep -v -- -`, where the pattern is a lone
-              # dash and not every grep agrees that `--` ended the options.
+              # Only stable tags are compared, by the shape and not by the
+              # lack of a dash: git's version sort puts `v0.3.0-rc.1` *after*
+              # `v0.3.0`, and a tag that is no release at all (`v0.3.0+x`,
+              # pushed before #27 refused them) must not be the newest.
               newest="$(git tag --list 'v[0-9]*' --sort=-v:refname |
-                        awk '!/-/' | head -1)"
+                        awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
               line="v${version%.*}"
               newest_on_line="$(git tag --list "$line.[0-9]*" --sort=-v:refname |
-                                awk '!/-/' | head -1)"
+                                awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
 
               if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
                 tags="$tags,$image:${version%.*}"
@@ -165,7 +165,8 @@ jobs:
           # The server's tag, named rather than found: the repository carries
           # the SDKs' tags too (`sdk/go/vX.Y.Z`, `sdk-py/v…`, `sdk-js/v…`), and
           # when two sit on one commit GoReleaser would pick between them by
-          # itself. `check` has already refused a tag that is not vX.Y.Z.
+          # itself. `check` has already refused any tag that is not vX.Y.Z or
+          # vX.Y.Z-(alpha|beta|rc).N (scripts/release-tag.sh).
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -280,6 +280,9 @@ doc-anchors: ## Check every anchor in docs/, README.md and AGENTS.md against its
 doc-anchors-self-test: ## Assert the anchor checker against its fixture
 	scripts/doc-anchors.sh --self-test
 
+release-tag-test: ## Assert which tags the release workflow accepts, as stable, as pre-release, or not at all (part of the gate)
+	scripts/release-tag.sh --self-test
+
 sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE
 	@for copy in sdk/js/LICENSE sdk/python/LICENSE; do \
 		cmp -s LICENSE "$$copy" || { echo "sdk-notices: $$copy differs from ./LICENSE; copy it again"; exit 1; }; \
@@ -288,7 +291,7 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 		cmp -s sdk/NOTICE "$$copy" || { echo "sdk-notices: $$copy differs from sdk/NOTICE; copy it again"; exit 1; }; \
 	done
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -337,5 +340,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices race \
-	doc-anchors doc-anchors-self-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
+	doc-anchors doc-anchors-self-test release-tag-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
