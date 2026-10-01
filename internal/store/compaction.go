@@ -41,20 +41,27 @@ type CompactionState struct {
 	RequestedAt int64
 	CompletedAt int64
 	PreparedFor int64
+	// Requests counts every request there has been. It only goes up, unlike
+	// the clock RequestedAt is read from, so it is what says which requests
+	// a pass covered (spec 044 #22).
+	Requests int64
 }
 
 // Compaction reads the deployment's compaction state.
 func (s *Store) Compaction(ctx context.Context) (CompactionState, error) {
 	var requested, completed, prepared sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT requested_at, completed_at, prepared_for FROM compaction WHERE id = 1`).
-		Scan(&requested, &completed, &prepared)
+	var requests int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT requested_at, completed_at, prepared_for, requests FROM compaction WHERE id = 1`).
+		Scan(&requested, &completed, &prepared, &requests)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompactionState{}, nil
 	}
 	if err != nil {
 		return CompactionState{}, fmt.Errorf("read compaction state: %w", err)
 	}
-	return CompactionState{RequestedAt: requested.Int64, CompletedAt: completed.Int64, PreparedFor: prepared.Int64}, nil
+	return CompactionState{RequestedAt: requested.Int64, CompletedAt: completed.Int64,
+		PreparedFor: prepared.Int64, Requests: requests}, nil
 }
 
 // requestCompaction records that a deletion wants the next pass to compact,
@@ -73,8 +80,9 @@ func requestCompaction(tx *sql.Tx, now int64) (int64, error) {
 	// commit, and gets its row back from the first one.
 	var stamp int64
 	if err := tx.QueryRow(
-		`INSERT INTO compaction (id, requested_at) VALUES (1, ?1)
-		 ON CONFLICT (id) DO UPDATE SET requested_at = MAX(COALESCE(requested_at, 0) + 1, ?1)
+		`INSERT INTO compaction (id, requested_at, requests) VALUES (1, ?1, 1)
+		 ON CONFLICT (id) DO UPDATE SET requested_at = MAX(COALESCE(requested_at, 0) + 1, ?1),
+		                                requests = requests + 1
 		 RETURNING requested_at`, now).Scan(&stamp); err != nil {
 		return 0, fmt.Errorf("request a compaction: %w", err)
 	}
@@ -162,7 +170,10 @@ func (p *compactionPrepared) apply(tx *sql.Tx) error {
 // stamp and stays pending for the next pass.
 type compactionDone struct {
 	Started int64 // the requested_at the compaction read before its first step
-	At      int64
+	// Covers is the request count it read with it: every request numbered
+	// up to it was made before the pass began (spec 044 #22).
+	Covers int64
+	At     int64
 }
 
 func (d *compactionDone) apply(tx *sql.Tx) error {
@@ -174,12 +185,17 @@ func (d *compactionDone) apply(tx *sql.Tx) error {
 		return err
 	}
 	// The erasures this compaction covered learn it on their own row
-	// (spec 044 #22): every one whose latest request is at or before the
-	// one it started from, since requests coalesce into the latest stamp.
-	_, err := tx.Exec(`UPDATE erasures SET compacted_at = ?
-	  WHERE compacted_at IS NULL AND compaction > 0 AND compaction <= ?`, d.At, d.Started)
+	// (spec 044 #22): every one whose latest request is numbered at or
+	// before the count the pass started from. A seek on the partial index
+	// of the ones still waiting, inside the writer's transaction.
+	_, err := tx.Exec(stampCovered, d.At, d.Covers)
 	return err
 }
+
+// stampCovered stamps the erasures a finished pass covered. Its own statement,
+// so that a test can hand it to EXPLAIN QUERY PLAN.
+const stampCovered = `UPDATE erasures SET compacted_at = ?
+  WHERE compacted_at IS NULL AND compaction_request > 0 AND compaction_request <= ?`
 
 // compact runs a pending compaction: the index merged, the freelist drained,
 // the log checkpointed and truncated. It reports whether it completed and
@@ -210,7 +226,8 @@ func (sw *Sweeper) compact(ctx context.Context) (done, drained bool, err error) 
 		logger().Info("compaction waits for the next pass: a reader held the write-ahead log")
 		return false, drained, nil
 	}
-	if err := sw.writer.Submit(ctx, &compactionDone{Started: state.RequestedAt, At: sw.now().UnixNano()}); err != nil {
+	if err := sw.writer.Submit(ctx, &compactionDone{Started: state.RequestedAt, Covers: state.Requests,
+		At: sw.now().UnixNano()}); err != nil {
 		return false, drained, err
 	}
 	return true, drained, nil

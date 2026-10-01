@@ -244,3 +244,24 @@ func expectUniqueKeys(t *testing.T, rec *httptest.ResponseRecorder) {
 		t.Fatalf("the answer is not JSON: %v", err)
 	}
 }
+
+// A running erasure never says it was compacted, even when a pass has stamped
+// its row: a later chunk may delete more and ask again, which takes the stamp
+// away, and a status that said "compacted" and then did not would be read as
+// done the first time (spec 044 #22).
+func TestARunningErasureSaysNothingOfItsCompaction(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	for state, wantDone := range map[string]bool{store.ErasureRunning: false, store.ErasureDone: true} {
+		answer := mustJSONBytes(h.server.erasureCompaction(&store.Erasure{
+			State: state, Compaction: 1_000, CompactedAt: 2_000}))
+		var got struct {
+			CompletedAt *time.Time `json:"completed_at"`
+		}
+		if err := json.Unmarshal(answer, &got); err != nil {
+			t.Fatal(err)
+		}
+		if (got.CompletedAt != nil) != wantDone {
+			t.Errorf("%s: %s, want completed_at only once it has ended", state, answer)
+		}
+	}
+}

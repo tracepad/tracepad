@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -856,5 +857,32 @@ func TestTheRetryHintRepeatsTheProjectAndQuotes(t *testing.T) {
 	if one := usersCommand(fs, "erasure", "4f0c"); one !=
 		`tracepad users erasure --project 'shop eu' --url https://t.example:4318 4f0c` {
 		t.Errorf("hint for one erasure = %s", one)
+	}
+}
+
+// An erasure's report says what became of the bytes its rows left in the file:
+// overwritten by a pass that finished, due by one, or never asked for (spec 044
+// #11, #22).
+func TestErasureReportSaysWhereItsCompactionIs(t *testing.T) {
+	at := func(s string) *string { return &s }
+	for _, c := range []struct {
+		name                           string
+		requested, expected, completed *string
+		want                           string
+	}{
+		{"done", at("2026-10-02T10:00:00Z"), nil, at("2026-10-02T11:00:00Z"), "overwritten by the sweep that finished"},
+		{"due", at("2026-10-02T10:00:00Z"), at("2026-10-02T11:00:00Z"), nil, "expected by"},
+		{"not asked", nil, nil, nil, "nothing was freed"},
+	} {
+		var out bytes.Buffer
+		r := &run{opt: Options{Stdout: &out, Now: time.Now}}
+		var view erasureView
+		view.Deleted = map[string]int64{"raw_spans": 0}
+		view.Compaction.RequestedAt, view.Compaction.ExpectedBy, view.Compaction.CompletedAt =
+			c.requested, c.expected, c.completed
+		r.renderErased(view)
+		if !strings.Contains(out.String(), c.want) {
+			t.Errorf("%s: %q, want %q", c.name, out.String(), c.want)
+		}
 	}
 }

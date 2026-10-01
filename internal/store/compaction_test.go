@@ -2,14 +2,14 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 )
 
 // An erasure learns its own compaction finished from the pass that covered its
-// latest request, and only that one (spec 044 #22): a pass that started from an
-// earlier request does not cover it, a later pass does not move the stamp, and
-// a request the erasure makes after being covered takes the stamp away until a
-// pass covers that too.
+// latest request, and only that one (spec 044 #22). Coverage is counted, not
+// timed: a request's stamp comes from a clock, and after a pass has cleared the
+// pending one, a clock stepped back makes a later request's stamp the smaller.
 func TestAnErasureIsStampedByThePassThatCoveredIt(t *testing.T) {
 	s := openFresh(t)
 	project, err := s.CreateProject("app", KeyPair{PublicKey: "tp-pk-1", Secret: "tp-sk-1"})
@@ -42,34 +42,70 @@ func TestAnErasureIsStampedByThePassThatCoveredIt(t *testing.T) {
 		}
 		return at
 	}
-	progress := func(requested int64) {
-		in(func(tx *sql.Tx) error { _, err := recordProgress(tx, "e1", DeleteCounts{}, requested, ""); return err })
+	// ask is what an erasure's job does: request, and record the request on
+	// its row, in one transaction.
+	ask := func(clock int64) {
+		in(func(tx *sql.Tx) error {
+			requested, err := requestCompaction(tx, clock)
+			if err != nil {
+				return err
+			}
+			_, err = recordProgress(tx, "e1", DeleteCounts{}, requested, "")
+			return err
+		})
 	}
-	done := func(started, at int64) {
-		in((&compactionDone{Started: started, At: at}).apply)
+	// pass is what the sweeper does: read the state, then finish.
+	pass := func(at int64) {
+		t.Helper()
+		state, err := s.Compaction(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		in((&compactionDone{Started: state.RequestedAt, Covers: state.Requests, At: at}).apply)
 	}
 
-	progress(100)
-	done(99, 1000)
+	ask(1000) // request 1
+	in((&compactionDone{Started: 0, Covers: 0, At: 1500}).apply)
 	if got := stamp(); got.Valid {
-		t.Errorf("a pass started from an earlier request stamped the erasure at %d", got.Int64)
+		t.Errorf("a pass that began before the request stamped the erasure at %d", got.Int64)
 	}
-	done(100, 2000)
+	pass(2000)
 	if got := stamp(); got.Int64 != 2000 {
-		t.Errorf("compacted_at = %v, want the pass that covered request 100", got)
+		t.Errorf("compacted_at = %v, want the pass that covered request 1", got)
 	}
-	done(300, 3000)
+	in((&compactionDone{Started: 0, Covers: 1, At: 2500}).apply)
 	if got := stamp(); got.Int64 != 2000 {
 		t.Errorf("compacted_at = %v after a later pass, want it unmoved at 2000", got)
 	}
-	progress(400)
+
+	// The clock steps back: request 2's stamp is 10, below request 1's 1000.
+	// It is still the later request, and the stamp goes.
+	ask(10)
 	if got := stamp(); got.Valid {
-		t.Errorf("compacted_at = %v after a later request, want none until a pass covers it", got)
+		t.Errorf("compacted_at = %v after a later request under a clock stepped back, want none", got)
 	}
-	progress(350)
-	done(400, 4000)
+	in((&compactionDone{Started: 0, Covers: 1, At: 3000}).apply)
+	if got := stamp(); got.Valid {
+		t.Errorf("a pass that covered only request 1 stamped the erasure at %d", got.Int64)
+	}
+	pass(4000)
 	if got := stamp(); got.Int64 != 4000 {
-		t.Errorf("compacted_at = %v, want the pass that covered request 400", got)
+		t.Errorf("compacted_at = %v, want the pass that covered request 2", got)
+	}
+}
+
+// A finished pass stamps the erasures it covered by a seek on the partial
+// index of the ones waiting, inside the writer's transaction: never a walk of
+// every erasure there has been.
+func TestStampingCoveredErasuresSeeks(t *testing.T) {
+	s := openFresh(t)
+	plan, err := s.explainQueryPlan(stampCovered, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "idx_erasures_awaiting_compaction") || strings.Contains(joined, "SCAN erasures") {
+		t.Errorf("the stamp does not seek its index:\n%s", joined)
 	}
 }
 
@@ -84,7 +120,10 @@ func TestMigration0034StampsTheErasuresAlreadyCompacted(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, stmt := range []string{
+			`DROP INDEX idx_erasures_awaiting_compaction`,
 			`ALTER TABLE erasures DROP COLUMN compacted_at`,
+			`ALTER TABLE erasures DROP COLUMN compaction_request`,
+			`ALTER TABLE compaction DROP COLUMN requests`,
 			`DELETE FROM schema_migrations WHERE filename = '0034_erasure_compacted.sql'`,
 			`INSERT INTO erasures (id, project_id, state, created_at, now, compaction) VALUES
 			   ('asked', '` + project.ID + `', 'done', 1, 1, 100), ('nothing', '` + project.ID + `', 'done', 1, 1, 0)`,
@@ -106,6 +145,22 @@ func TestMigration0034StampsTheErasuresAlreadyCompacted(t *testing.T) {
 		upgraded, err := Open(path)
 		if err != nil {
 			t.Fatalf("upgrade: %v", err)
+		}
+		// Pending, the erasure that asked waits for request 1, which the
+		// next pass covers.
+		if pending {
+			state, err := upgraded.Compaction(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var request int64
+			if err := upgraded.db.QueryRow(`SELECT compaction_request FROM erasures WHERE id = 'asked'`).
+				Scan(&request); err != nil {
+				t.Fatal(err)
+			}
+			if state.Requests != 1 || request != 1 {
+				t.Errorf("requests = %d, the erasure's = %d, want both 1", state.Requests, request)
+			}
 		}
 		for id, want := range map[string]int64{"asked": 500, "nothing": 0} {
 			if pending {

@@ -3417,10 +3417,12 @@ export interface operations {
                         uptime_seconds: number;
                         /** @description Which halves this body holds. A field of a half that is withheld is absent rather than zero */
                         view: {
-                            /** @description The project the project view is about; null for the admin token, which has none and gets no project view */
+                            /** @description The project the project view is about; null when there is none — for the admin token, which has no project, and for an owner's session that named none or named one that is not there */
                             project: string | null;
                             /** @description Whether the deployment view is here: true for the admin token and an owner session */
                             deployment: boolean;
+                            /** @description Present only when an owner's session named a project that is not there, absent or deleted: why the project view is missing (`no such project`). The deployment view is answered all the same */
+                            project_error?: string;
                         };
                         database: {
                             /** @description The database file plus its write-ahead log, for the whole deployment. Deployment view only */

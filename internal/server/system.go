@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"runtime"
 	"sort"
@@ -301,16 +300,12 @@ func (c *counters) orphanTraces(projectID string) int64 {
 // the project was resolved for. A withheld half is absent rather than zero, and
 // `view` says which halves the body holds.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
+	// Every caller the guard admits holds at least one half: a key has its
+	// project, a member's session must name one, and the admin token and an
+	// owner's session hold the deployment (policy `diagnostic`).
+	// TestSystemGivesEachCallerItsView walks every kind.
 	c := callerFrom(r.Context())
-	deployment := c != nil && (c.admin || (c.isSession() && c.account.Owner))
-	if c == nil || (c.project == nil && !deployment) {
-		// The guard admits no such caller: a key always has its project,
-		// and a member's session must name one. A body with neither half
-		// would be an answer that says nothing, so it is a refusal.
-		slog.Error("the system handler ran for a caller with neither view", "path", r.URL.Path)
-		writeError(w, http.StatusInternalServerError, "the request was not authorized")
-		return
-	}
+	deployment := c.admin || (c.isSession() && c.account.Owner)
 	if _, err := queryParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -325,7 +320,8 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		put("go_version", runtime.Version()).
 		put("started_at", formatTime(s.startedAt.UnixNano())).
 		put("uptime_seconds", int64(time.Since(s.startedAt).Seconds())).
-		put("view", object{}.put("project", projectID).put("deployment", deployment))
+		put("view", object{}.put("project", projectID).put("deployment", deployment).
+			putSome("project_error", c.unresolved))
 
 	// `database` is the one block both halves write into: the project's
 	// row counts, and the file's size and the tenant count beside them.
@@ -545,9 +541,13 @@ func (s *Server) compactionAnswer(requested int64) object {
 // and an owner's to read (spec 044 #22). Until then `completed_at` is null and
 // `expected_by` names the pass that will; after, `expected_by` is null, since
 // no pass is due on its account.
+//
+// Only an erasure that has ended says it was compacted. While it runs, a later
+// chunk may delete more and ask again, which takes a stamp away; an answer that
+// said "compacted" and then did not would be read as done the first time.
 func (s *Server) erasureCompaction(e *store.Erasure) object {
 	answer := s.compactionAnswer(e.Compaction)
-	if e.CompactedAt == 0 {
+	if e.CompactedAt == 0 || !e.Ended() {
 		return answer.put("completed_at", nil)
 	}
 	return object{}.

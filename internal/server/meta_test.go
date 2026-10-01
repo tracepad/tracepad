@@ -429,19 +429,40 @@ func TestSystemAsksASessionForAProject(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(owner), inProject(h.project.ID)),
-		http.StatusNotFound, "no such project")
-	rec := h.call(t, "GET", "/api/v1/system", nil, asSession(owner))
-	expectStatus(t, rec, http.StatusOK)
-	view := decodeJSON[struct {
+	type answer struct {
 		View struct {
-			Project    *string `json:"project"`
-			Deployment bool    `json:"deployment"`
+			Project      *string `json:"project"`
+			Deployment   bool    `json:"deployment"`
+			ProjectError *string `json:"project_error"`
 		} `json:"view"`
-	}](t, rec).View
-	if view.Project != nil || !view.Deployment {
-		t.Errorf("view = %+v, want the deployment alone once the only project is gone", view)
+		Counters *json.RawMessage `json:"counters"`
+		Database struct {
+			SizeBytes *int64 `json:"size_bytes"`
+		} `json:"database"`
 	}
+	ghost := strings.Repeat("f", 32)
+	for name, ask := range map[string][]func(*http.Request){
+		"no project":           {asSession(owner)},
+		"the deleted project":  {asSession(owner), inProject(h.project.ID)},
+		"a project never made": {asSession(owner), inProject(ghost)},
+	} {
+		rec := h.call(t, "GET", "/api/v1/system", nil, ask...)
+		expectStatus(t, rec, http.StatusOK)
+		got := decodeJSON[answer](t, rec)
+		if got.View.Project != nil || !got.View.Deployment || got.Database.SizeBytes == nil || got.Counters != nil {
+			t.Errorf("naming %s: %s, want the deployment alone", name, rec.Body)
+		}
+		// Naming a project that is not there says so; naming none is no
+		// error to report.
+		named := name != "no project"
+		if (got.View.ProjectError != nil) != named ||
+			(named && *got.View.ProjectError != "no such project") {
+			t.Errorf("naming %s: project_error = %v", name, got.View.ProjectError)
+		}
+	}
+	// A member gets no such leniency: a project that is gone is gone.
+	expectError(t, h.call(t, "GET", "/api/v1/system", nil, asSession(viewer), inProject(h.project.ID)),
+		http.StatusNotFound, "no such project")
 }
 
 // decodeRaw decodes one field of a body decoded as raw messages.

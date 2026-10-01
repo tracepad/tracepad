@@ -439,7 +439,8 @@ first and then the newest
   and the write-ahead log are rewritten by a sweeper pass, and `expected_by`
   is when that pass is due: the next one, or the one after a pass already
   running. `completed_at` is when the pass that covered this erasure finished,
-  `null` until it has; once it is set, `expected_by` is `null`. It is the
+  `null` until it has and for as long as the erasure runs; once it is set,
+  `expected_by` is `null`. It is the
   erasure's own: `GET /api/v1/system`'s compaction stamps are the deployment's,
   and only the admin token or an owner reads them. All three are `null` when
   the erasure found nothing to delete and so asked for nothing.

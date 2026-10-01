@@ -200,6 +200,10 @@ type caller struct {
 	// `viewer`. Empty for a key and for the admin token, whose reach the
 	// policy already settled.
 	role string
+	// unresolved is why the project an owner's session named on the system
+	// read is not there — absent or deleted — which costs it the project's
+	// half of the answer and not the deployment's (spec 004 #37).
+	unresolved string
 }
 
 // isSession reports a cookie-authenticated caller.
@@ -746,6 +750,13 @@ func (s *Server) inProject(w http.ResponseWriter, r *http.Request, rt route, c *
 		return false
 	}
 	project, role := found.project, found.role
+	if rt.Policy == diagnostic && c.account.Owner && (project == nil || project.Deleted()) {
+		// The deployment's half is an owner's whatever it names; the
+		// project's half needs a project, and the answer says why there
+		// is none rather than refusing the whole of it (spec 004 #37).
+		c.unresolved = "no such project"
+		return true
+	}
 	if role == "" {
 		// 403 rather than 404 for a project you are not in: ids are
 		// random, so there is nothing to enumerate, and "not a member" is

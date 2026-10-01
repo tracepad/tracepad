@@ -1233,7 +1233,12 @@ is this endpoint's alone. `view` says which halves the body holds:
 A field of a half you were not given is **absent** — not `0`, not `null`. A
 `"waiting": 0` in the writer queue says writes are keeping up, and from a key
 it would be a claim about other tenants' traffic, not about yours. `project`
-is `null` for the admin token, which has no project.
+is `null` when the body has no project's half. That happens for the admin
+token, which has no project, and for an owner's session that named none. It
+also happens when an owner's session named a project that is not there, absent
+or deleted. The owner still gets the deployment half, and
+`"project_error": "no such project"` says why the other half is missing. A
+member's session naming such a project is refused, as on every read.
 
 The counters are since this process started and in memory, and say so:
 `counters.since` is when they started. They count how many batches and spans

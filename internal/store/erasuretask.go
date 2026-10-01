@@ -137,12 +137,16 @@ func recordProgress(tx *sql.Tx, id string, counts DeleteCounts, compaction int64
 	if err != nil {
 		return false, err
 	}
-	// A later request than the one a pass already covered is not covered:
-	// the stamp goes until a pass covers this one too (spec 044 #22).
-	if _, err := tx.Exec(`UPDATE erasures SET counts = ?,
-		compacted_at = CASE WHEN ? > compaction THEN NULL ELSE compacted_at END,
-		compaction = MAX(compaction, ?),
-		phase = COALESCE(NULLIF(?, ''), phase) WHERE id = ?`, string(encoded), compaction, compaction, phase, id); err != nil {
+	// A job that asked for a compaction asked in this transaction, so the
+	// count it took is the count now. It is later than any the erasure
+	// held, and a stamp a pass left for an earlier one goes until a pass
+	// covers this one too (spec 044 #22).
+	if _, err := tx.Exec(`UPDATE erasures SET counts = ?1,
+		compaction = MAX(compaction, ?2),
+		compaction_request = CASE WHEN ?2 > 0 THEN (SELECT requests FROM compaction WHERE id = 1)
+		                          ELSE compaction_request END,
+		compacted_at = CASE WHEN ?2 > 0 THEN NULL ELSE compacted_at END,
+		phase = COALESCE(NULLIF(?3, ''), phase) WHERE id = ?4`, string(encoded), compaction, phase, id); err != nil {
 		return false, fmt.Errorf("record erasure %s's progress: %w", id, err)
 	}
 	return true, nil
