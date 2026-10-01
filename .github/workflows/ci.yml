@@ -202,6 +202,64 @@ jobs:
           go-version-file: go.mod
       - run: make race
 
+  # The release, rehearsed (spec 020 #27). Nothing else exercises
+  # `.goreleaser.yaml` before a tag does, and `goreleaser check` cannot: it
+  # exits 1 on the deprecated `brews` key the Homebrew formula is written with.
+  # So a snapshot builds the six archives and the formula, and
+  # `scripts/formula-check.sh` holds the formula to what `tap` will commit: valid
+  # Ruby, four downloads, each with the checksum the archive has. It runs only
+  # when what feeds it changes — the config, the release workflow (where the
+  # GoReleaser pin lives), the checker — because it costs the interface's build.
+  # The version is the pin's own: read from the workflow, so a bump of it is
+  # rehearsed by the pull request that makes it.
+  release-rehearsal:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: What this run is for
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=false
+          if [ "$EVENT" = workflow_dispatch ]; then
+            run=true
+          else
+            for f in $(git diff --name-only "$BASE" HEAD); do
+              case "$f" in
+                .goreleaser.yaml|.github/workflows/release-server.yml|scripts/formula-check.sh) run=true ;;
+              esac
+            done
+          fi
+          pin="$(grep -m1 -oE 'version: "v[0-9]+\.[0-9]+\.[0-9]+"' .github/workflows/release-server.yml | grep -oE 'v[0-9.]+')"
+          [ -n "$pin" ] || { echo "no GoReleaser pin in release-server.yml" >&2; exit 1; }
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "goreleaser=$pin" >> "$GITHUB_OUTPUT"
+          echo "rehearsing: $run (GoReleaser $pin)"
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+      - if: steps.scope.outputs.run == 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: ${{ steps.scope.outputs.goreleaser }}
+          args: release --snapshot --clean
+      - if: steps.scope.outputs.run == 'true'
+        run: scripts/formula-check.sh dist/homebrew/Formula/tracepad.rb dist/checksums.txt
+
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so
   # that a network hiccup installing SDKs never blocks a code review.

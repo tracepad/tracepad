@@ -1,5 +1,7 @@
 # Release configuration. Runs on version tags (v*) in release-server.yml, as
-# `release --skip=publish`; `goreleaser check` validates this file.
+# `release --skip=publish`. `goreleaser check` reports `brews` as deprecated and
+# exits 1 on it (spec 020 #27); `goreleaser release --snapshot --clean` is the
+# rehearsal that validates this file.
 version: 2
 
 project_name: tracepad
@@ -52,3 +54,26 @@ checksum:
 # notes are `gh release create --generate-notes` in release-server.yml.
 changelog:
   disable: true
+
+# The Homebrew tap (spec 020 #27). A formula, not a cask: the binary is not
+# notarized, a cask's download carries the quarantine mark and Gatekeeper
+# refuses it, and a formula's does not. GoReleaser writes the formula into
+# `dist/` and pushes nothing (`skip_upload`): the release workflow's build half
+# has no token, and its `tap` job commits the finished file with a short-lived
+# App token, without a checkout or a toolchain.
+brews:
+  - name: tracepad
+    # The owner and the repository come from the run, as the workflow's `tap`
+    # job takes the tap's owner from `github.repository_owner`: one source for
+    # one fact, so a fork or a renamed organisation moves both. The defaults
+    # are for a local snapshot, where Actions' variables are not set.
+    repository:
+      owner: '{{ envOrDefault "GITHUB_REPOSITORY_OWNER" "tracepad" }}'
+      name: homebrew-tap
+    directory: Formula
+    homepage: 'https://github.com/{{ envOrDefault "GITHUB_REPOSITORY" "tracepad/tracepad" }}'
+    description: Lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces
+    license: Apache-2.0
+    skip_upload: true
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/tracepad version")

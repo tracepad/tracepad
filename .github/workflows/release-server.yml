@@ -7,15 +7,17 @@
 # that a contributor, a fork or an operator with a patch can build the artifact
 # the docs describe.
 #
-# Credentials: none of ours. The release and the image are published with the
-# repository's own token, and their provenance is signed through the
-# workflow's OIDC identity (#19).
+# Credentials: the release and the image are published with the repository's
+# own token, and their provenance is signed through the workflow's OIDC
+# identity (#19). The one credential that is ours is the Homebrew tap's: a
+# GitHub App's key, held by the `release` environment and used by the `tap`
+# job alone, to mint a token good for an hour and for one repository (#27).
 #
 # Built where nothing can be published, published where nothing is built
 # (#19): `archives` and `image-build` run GoReleaser, `make ui`, `npm ci` and
 # buildx with read access alone and hand their outputs over as artifacts;
-# `release` and `image` hold the write scopes and only attest and upload what
-# they were handed — no checkout, no toolchain, no install.
+# `release`, `image` and `tap` hold the write scopes and only attest, upload
+# and commit what they were handed — no checkout, no toolchain, no install.
 #
 # Nothing here runs on `main`. The tag is the one act the owner performs
 # deliberately, and `latest` moves only with it (#6).
@@ -56,11 +58,11 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           # A tag that is not a version would otherwise publish an image named
-          # after it. A tag on GHCR is as public as a version on PyPI.
-          case "$version" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "tag $GITHUB_REF_NAME is not vX.Y.Z" >&2; exit 1 ;;
-          esac
+          # after it. A tag on GHCR is as public as a version on PyPI. Two
+          # shapes pass — vX.Y.Z and vX.Y.Z-(alpha|beta|rc).N — and the script
+          # says which; `v0.1.0rc1`, `v0.1.0-` and `v1.0.0+build` are refused,
+          # where a glob took them for stable releases (#27).
+          kind="$(scripts/release-tag.sh "$GITHUB_REF_NAME")"
 
           image="ghcr.io/${GITHUB_REPOSITORY}"
           tags="$image:$version"
@@ -73,27 +75,27 @@ jobs:
           # for the person who asked for it, and neither `X.Y` — what an
           # operator pins to for patches but not surprises — nor `latest` is
           # that (#6).
-          case "$version" in
-            *-*)
+          case "$kind" in
+            prerelease)
               echo "pre-release: publishing $version alone"
               prerelease=true
               ;;
-            *)
+            stable)
               # A moving tag may only move forward. Releasing a back-patch
               # (v0.2.5 after v0.3.0) must not walk `latest` backwards onto an
               # older build: that is a silent downgrade for everyone tracking
               # it, and it lands them in the older-binary-newer-schema case
               # docs/docker.md says is not supported (#16).
               #
-              # Pre-release tags are excluded from the comparison because git's
-              # version sort puts `v0.3.0-rc.1` *after* `v0.3.0`. Dropped with
-              # awk rather than `grep -v -- -`, where the pattern is a lone
-              # dash and not every grep agrees that `--` ended the options.
+              # Only stable tags are compared, by the shape and not by the
+              # lack of a dash: git's version sort puts `v0.3.0-rc.1` *after*
+              # `v0.3.0`, and a tag that is no release at all (`v0.3.0+x`,
+              # pushed before #27 refused them) must not be the newest.
               newest="$(git tag --list 'v[0-9]*' --sort=-v:refname |
-                        awk '!/-/' | head -1)"
+                        awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
               line="v${version%.*}"
               newest_on_line="$(git tag --list "$line.[0-9]*" --sort=-v:refname |
-                                awk '!/-/' | head -1)"
+                                awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
 
               if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
                 tags="$tags,$image:${version%.*}"
@@ -159,6 +161,13 @@ jobs:
           distribution: goreleaser
           version: "v2.18.2"
           args: release --clean --skip=publish
+        env:
+          # The server's tag, named rather than found: the repository carries
+          # the SDKs' tags too (`sdk/go/vX.Y.Z`, `sdk-py/v…`, `sdk-js/v…`), and
+          # when two sit on one commit GoReleaser would pick between them by
+          # itself. `check` has already refused any tag that is not vX.Y.Z or
+          # vX.Y.Z-(alpha|beta|rc).N (scripts/release-tag.sh).
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: archives
@@ -166,6 +175,14 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+      # The Homebrew formula GoReleaser wrote beside the archives, with their
+      # checksums in it and nothing pushed (`skip_upload`). `tap` commits it.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: formula
+          path: dist/homebrew/Formula/tracepad.rb
           if-no-files-found: error
           retention-days: 1
 
@@ -292,3 +309,88 @@ jobs:
     with:
       version: ${{ needs.check.outputs.line }}
       alias: ${{ needs.check.outputs.latest == 'true' && 'latest' || '' }}
+
+  # The Homebrew tap (#27). It runs only for a release that moves `latest`: a
+  # pre-release is for the person who asked for it, and a back-patch must not
+  # walk `brew upgrade` backwards, the downgrade #16 refuses for the image.
+  # After `release`, because the formula names URLs that must exist and checksums
+  # of files that must be the ones published.
+  #
+  # The App's key is an environment secret, so this is the only job that can
+  # read it, and the job's own `GITHUB_TOKEN` is empty: the credential is an
+  # installation token for `homebrew-tap` alone, contents only, revoked when
+  # the job ends. The commit goes through the contents API, so there is no
+  # clone and nothing to run but `gh`.
+  #
+  # One at a time, and none cancelled: two tags close together would otherwise
+  # read the same blob and the second PUT would fail on a stale sha. And the
+  # tap only moves forward: a manual re-run of an older release's `tap` job
+  # passes `if` on the `latest` that run computed, so the step below compares
+  # the version already in the tap with the one it holds.
+  tap:
+    needs: [check, release]
+    if: needs.check.outputs.latest == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: tap
+      cancel-in-progress: false
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: formula
+          path: formula
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+      - name: Commit the formula to the tap
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          TAP: ${{ github.repository_owner }}/homebrew-tap
+        run: |
+          set -euo pipefail
+          path=Formula/tracepad.rb
+          err="$RUNNER_TEMP/lookup.err"
+
+          # What the tap holds now. Only "there is no such file" means the first
+          # release; a 5xx, a rate limit or a token that cannot read the
+          # repository is not that, and is not read as that: the PUT would go
+          # out without a sha and fail on a 422 that names the wrong cause.
+          sha=""
+          if current="$(gh api "repos/$TAP/contents/$path" 2>"$err")"; then
+            sha="$(jq -r .sha <<< "$current")"
+            jq -r .content <<< "$current" | base64 -d > "$RUNNER_TEMP/current.rb"
+            have="$(sed -n 's/^  version "\(.*\)"$/\1/p' "$RUNNER_TEMP/current.rb" | head -1)"
+            if [ -z "$have" ]; then
+              echo "::error::$TAP has a $path with no version line; not replacing what cannot be read"
+              exit 1
+            fi
+            if cmp -s formula/tracepad.rb "$RUNNER_TEMP/current.rb"; then
+              echo "::notice::$TAP is already at $VERSION, with this formula"
+              exit 0
+            fi
+            # Only stable versions reach the tap, so `sort -V` orders them.
+            newest="$(printf '%s\n%s\n' "$have" "$VERSION" | sort -V | tail -1)"
+            if [ "$have" != "$VERSION" ] && [ "$newest" = "$have" ]; then
+              echo "::notice::$TAP is at $have, newer than $VERSION; leaving it"
+              exit 0
+            fi
+          elif grep -q 'HTTP 404' "$err"; then
+            echo "$TAP has no $path yet: the first release"
+          else
+            echo "::error::could not read $path from $TAP:"
+            cat "$err" >&2
+            exit 1
+          fi
+
+          # An update names the blob it replaces; the first release has none.
+          args=(-f "message=tracepad $VERSION" -f "content=$(base64 < formula/tracepad.rb | tr -d '\n')")
+          [ -z "$sha" ] || args+=(-f "sha=$sha")
+          gh api --method PUT "repos/$TAP/contents/$path" "${args[@]}"

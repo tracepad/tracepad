@@ -690,6 +690,8 @@ reason in a comment; adding a dialect should be a table edit.
 - `make doc-anchors` — check every anchor in `docs/`, `README.md` and
   `AGENTS.md` against the heading it names (part of the gate);
   `make doc-anchors-self-test` runs the checker over its fixture.
+- `make release-tag-test` — which tags the release workflow accepts (`vX.Y.Z`,
+  `vX.Y.Z-(alpha|beta|rc).N`) and which it refuses; part of the gate.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
@@ -786,7 +788,9 @@ A version tag is the one act that publishes anything. `v0.2.0` runs
 tags it may move, GoReleaser puts the archives and checksums on GitHub
 Releases, then `buildx` pushes `ghcr.io/tracepad/tracepad` as `0.2.0`, `0.2`
 and `latest`. A pre-release tag (`v0.2.0-rc.1`) publishes its exact tag alone —
-no `X.Y`, no `latest`. Nothing about this runs on a push to `main`.
+no `X.Y`, no `latest`. Two shapes are tags and nothing else is: `vX.Y.Z` and
+`vX.Y.Z-(alpha|beta|rc).N`; `v0.2.0rc1`, `v0.2.0+build` and the like are
+refused before anything is built (`scripts/release-tag.sh`). Nothing about this runs on a push to `main`.
 
 **A back-patch is safe to tag.** `latest` and `X.Y` move only when the tag is
 the newest of its kind, so releasing `v0.2.5` after `v0.3.0` publishes `0.2.5`
@@ -828,3 +832,36 @@ One-time, and the owner's to do by hand:
   the branch. Until then the site's address in the README is a dead link, and
   the first release's docs are the first `vX.Y` (spec 050 #1). A domain of our
   own is a separate step.
+
+**The Homebrew tap** (spec 020 #27) is `tracepad/homebrew-tap`, and a stable
+release writes `Formula/tracepad.rb` into it from the `tap` job. A pre-release
+and a back-patch leave it alone. Nothing of this exists until the owner makes
+it, once:
+
+1. Create the repository `tracepad/homebrew-tap`, **public** (`brew tap`
+   clones it anonymously), with a `README.md` on `main` so the branch exists.
+2. Create a GitHub App owned by the `tracepad` organisation — no webhook, no
+   user authorisation, and exactly one repository permission: **Contents:
+   Read and write**. Generate a private key for it.
+3. Install the App on the organisation, **only on `homebrew-tap`**.
+4. Create the environment `release` on `tracepad/tracepad` and, under
+   *Deployment branches and tags*, choose *Selected branches and tags* and add
+   a **tag** rule `v*`. Without it a fresh environment has no restriction, and
+   any workflow in the repository that declares `environment: release` — from
+   a branch, a pull request's head included — can read the App's key and mint a
+   token that writes to the tap. Put in the environment the variable
+   `TAP_APP_CLIENT_ID` — the App's Client ID, from its settings page — and the
+   secret `TAP_APP_PRIVATE_KEY`, the whole `.pem` file. The App's ID is not
+   what the variable takes: `create-github-app-token` deprecated `app-id` for
+   `client-id`. A *required reviewer* on the environment is optional and holds
+   `tap` alone: it waits for `release`, so by then the archives and the image
+   are public, and the reviewer decides only whether the formula is committed.
+
+With the tag rule, the key is readable by a run of a `v*` tag and, in this
+repository, only the `tap` job names the environment; the token it mints lasts
+an hour and reaches that one repository. Without these four steps a tag still
+releases the archives and the image; only `tap` fails, after the release is
+public, and the formula can be committed by hand from the `formula` artifact of
+the run. `tap` also refuses to move the tap backwards: a formula at a newer
+version than the one being published is left as it is, with a notice, which is
+what a manual re-run of an older release meets.
