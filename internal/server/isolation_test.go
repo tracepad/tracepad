@@ -81,7 +81,8 @@ const (
 // isolationRow is a route's line in the matrix.
 type isolationRow struct {
 	kind isolationKind
-	// why is what makes an aboutPeople route nobody's project.
+	// why is what makes an aboutPeople route nobody's project, or why none
+	// of A's three callers may call a route that is a project's.
 	why string
 	// query is sent on every call; `{field}` names one of the variant
 	// tenant's identifiers.
@@ -144,7 +145,7 @@ func newTenant(tag, secret, projectID, publicKey string, n int) *tenant {
 		// What the ghost names and nothing holds; a seeded tenant's
 		// are overwritten by what the server gives it.
 		score: fmt.Sprintf("%032x", 0xf000+n), queueItem: fmt.Sprintf("%032x", 0xf100+n),
-		erasure: fmt.Sprintf("%032x", 0xf200+n), raw: strconv.Itoa(900000 + n),
+		erasure: fmt.Sprintf("%032x", 0xf200+n), raw: strconv.Itoa(9999990 + n),
 	}
 }
 
@@ -397,8 +398,8 @@ var isolationMatrix = map[string]isolationRow{
 	"POST /api/v1/projects":                          {kind: aboutPeople, why: "an owner creating a project; names none"},
 	"GET /api/v1/projects/{id}":                      {kind: projectScoped},
 	"PATCH /api/v1/projects/{id}":                    {kind: projectScoped, body: fixedBody(map[string]any{"retention_days": 7})},
-	"DELETE /api/v1/projects/{id}":                   {kind: projectScoped, query: "confirm=other"},
-	"POST /api/v1/projects/{id}/restore":             {kind: projectScoped},
+	"DELETE /api/v1/projects/{id}":                   {kind: projectScoped, query: "confirm=other", why: ownersOnly},
+	"POST /api/v1/projects/{id}/restore":             {kind: projectScoped, why: ownersOnly},
 	"GET /api/v1/projects/{id}/keys":                 {kind: projectScoped},
 	"POST /api/v1/projects/{id}/keys":                {kind: projectScoped, body: fixedBody(map[string]any{"scopes": []string{"read"}})},
 	"DELETE /api/v1/projects/{id}/keys/{public_key}": {kind: projectScoped},
@@ -408,7 +409,7 @@ var isolationMatrix = map[string]isolationRow{
 		query: "confirm={user}&wait=10"},
 	"GET /api/v1/projects/{id}/erasures":              {kind: projectScoped},
 	"GET /api/v1/projects/{id}/erasures/{erasure_id}": {kind: projectScoped},
-	"GET /api/v1/projects/{id}/members":               {kind: projectScoped},
+	"GET /api/v1/projects/{id}/members":               {kind: projectScoped, why: ownersOnly},
 
 	"GET /api/v1/accounts":                               {kind: aboutPeople, why: "the owner's accounts table"},
 	"POST /api/v1/accounts":                              {kind: aboutPeople, why: "the owner's accounts table"},
@@ -450,6 +451,52 @@ func mediaAsk(picture []byte, trace string) map[string]any {
 	sum := sha256.Sum256(picture)
 	return map[string]any{"traceId": trace, "observationId": spanHex(1), "contentType": "image/png",
 		"contentLength": len(picture), "sha256Hash": base64.StdEncoding.EncodeToString(sum[:]), "field": "input"}
+}
+
+// pathVariants are the ways a path can name a foreign row: every value
+// foreign, and, where there are two, each one alone under A's other.
+func pathVariants(pattern string) []map[string]bool {
+	params := pathParams(pattern)
+	all := map[string]bool{}
+	for _, p := range params {
+		all[p] = true
+	}
+	out := []map[string]bool{all}
+	if len(params) > 1 {
+		for _, p := range params {
+			out = append(out, map[string]bool{p: true})
+		}
+	}
+	return out
+}
+
+// plannedPairs is how many paired calls — B's ids, then the ghost's — one
+// caller makes on a route, by its row: what the walk below must have made.
+func plannedPairs(rt route, row isolationRow) int {
+	n := len(row.refs)
+	switch row.kind {
+	case oneRow:
+		n += len(pathVariants(rt.Path))
+	case projectScoped:
+		for _, foreign := range pathVariants(rt.Path) {
+			// An action's variants under A's own project are its
+			// one call of phase two.
+			if foreign["id"] || !row.action {
+				n++
+			}
+		}
+		if row.action {
+			n++
+		}
+	case listing:
+		n += len(row.probes)
+	case createsByName:
+		n++
+	}
+	if row.kind != aboutPeople && strings.HasPrefix(rt.Path, "/api/v1/") {
+		n += 2 // ?project= and ?project_id=
+	}
+	return n
 }
 
 // isolationCaller is one of the three who belong to A alone.
@@ -554,9 +601,54 @@ func (h *harness) mediaHeldBy(t *testing.T, projectID, sha string) bool {
 	return held != nil
 }
 
-// fingerprint is every row of a project, column by column: each table that
-// carries a project id, and the project's own row. Read from the file, not the
-// API, so that a column no route shows is compared too.
+// relatedTables are the tables with no project id of their own, and how a
+// project's rows in each are found: through the rows that point at them. `?1`
+// is the project.
+var relatedTables = map[string]string{
+	"projects": `SELECT * FROM projects WHERE id = ?1`,
+	// A payload is the body of a trace's metadata or an observation's
+	// input, output or metadata, and belongs to the row that points at it.
+	"payloads": `SELECT * FROM payloads WHERE id IN (
+		SELECT metadata_id FROM traces WHERE project_id = ?1
+		UNION SELECT input_id FROM observations WHERE project_id = ?1
+		UNION SELECT output_id FROM observations WHERE project_id = ?1
+		UNION SELECT metadata_id FROM observations WHERE project_id = ?1)`,
+	// A body is shared by every project that holds it or points at it.
+	"media": `SELECT * FROM media WHERE sha256 IN (
+		SELECT sha256 FROM media_holders WHERE project_id = ?1
+		UNION SELECT sha256 FROM media_refs WHERE project_id = ?1)`,
+	"erasure_tail": `SELECT * FROM erasure_tail WHERE erasure_id IN (
+		SELECT id FROM erasures WHERE project_id = ?1)`,
+	// The people with a role in the project, and their ways in.
+	"accounts": `SELECT * FROM accounts WHERE id IN (
+		SELECT account_id FROM memberships WHERE project_id = ?1)`,
+	"account_sessions": `SELECT * FROM account_sessions WHERE account_id IN (
+		SELECT account_id FROM memberships WHERE project_id = ?1)`,
+	"account_tokens": `SELECT * FROM account_tokens WHERE account_id IN (
+		SELECT account_id FROM memberships WHERE project_id = ?1)`,
+}
+
+// unrelatedTables hold nothing of any one project, and say why. The full-text
+// index is contentless — what it holds of a project is its `search_entries`
+// rows, compared above, and B's own search at the end of the matrix.
+var unrelatedTables = map[string]string{
+	"schema_migrations":  "the migrations this file has applied",
+	"compaction":         "the one row saying when the file was last compacted",
+	"search_backfill":    "the one row saying whether the index was backfilled",
+	"server_keys":        "the process's own signing keys",
+	"search_fts":         "the contentless index over search_entries",
+	"search_fts_data":    "the index's own storage",
+	"search_fts_idx":     "the index's own storage",
+	"search_fts_docsize": "the index's own storage",
+	"search_fts_config":  "the index's own storage",
+}
+
+// fingerprint is every row of a project, column by column, in every table of
+// the schema: by its project id where the table has one, through relatedTables
+// where it does not. A table in neither, and not in unrelatedTables, fails the
+// test: a new table says how it belongs to a project before it is trusted.
+// Read from the file, not the API, so that a column no route shows is
+// compared too.
 func fingerprint(t *testing.T, h *harness, projectID string) map[string][]string {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+h.dbPath+"?mode=ro&_pragma=busy_timeout(5000)")
@@ -565,32 +657,45 @@ func fingerprint(t *testing.T, h *harness, projectID string) map[string][]string
 	}
 	defer db.Close()
 	tables, err := db.QueryContext(t.Context(), `
-		SELECT m.name FROM sqlite_master m
-		 WHERE m.type = 'table'
-		   AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'project_id')
+		SELECT m.name, EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'project_id')
+		  FROM sqlite_master m
+		 WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'
 		 ORDER BY m.name`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	queries := map[string]string{}
 	for tables.Next() {
 		var name string
-		if err := tables.Scan(&name); err != nil {
+		var scoped bool
+		if err := tables.Scan(&name, &scoped); err != nil {
 			t.Fatal(err)
 		}
-		names = append(names, name)
+		related, isRelated := relatedTables[name]
+		_, isUnrelated := unrelatedTables[name]
+		switch {
+		case scoped && !isRelated && !isUnrelated:
+			queries[name] = `SELECT * FROM "` + name + `" WHERE project_id = ?1`
+		case !scoped && isRelated:
+			queries[name] = related
+		case !scoped && isUnrelated:
+		default:
+			t.Errorf("table %s (project id: %v) is not classified: give it a relation in relatedTables "+
+				"or a reason in unrelatedTables", name, scoped)
+		}
 	}
 	tables.Close()
-	if len(names) < 15 {
-		t.Fatalf("found %d tables with a project id, want every one: %v", len(names), names)
+	for name := range relatedTables {
+		if _, ok := queries[name]; !ok {
+			t.Errorf("relatedTables names %s, which the schema does not have, or which has a project id", name)
+		}
 	}
 	out := map[string][]string{}
-	read := func(label, query string) {
+	for label, query := range queries {
 		rows, err := db.QueryContext(t.Context(), query, projectID)
 		if err != nil {
 			t.Fatalf("%s: %v", label, err)
 		}
-		defer rows.Close()
 		columns, _ := rows.Columns()
 		for rows.Next() {
 			values := make([]any, len(columns))
@@ -610,37 +715,64 @@ func fingerprint(t *testing.T, h *harness, projectID string) map[string][]string
 			}
 			out[label] = append(out[label], line.String())
 		}
+		rows.Close()
 		sort.Strings(out[label])
 	}
-	for _, name := range names {
-		read(name, `SELECT * FROM "`+name+`" WHERE project_id = ?`)
-	}
-	read("projects", `SELECT * FROM projects WHERE id = ?`)
 	return out
 }
 
-// normalized is an answer with every identifier of the tenant replaced by its
-// field's name, so that B's answer and the ghost's compare equal exactly when
-// they say the same thing.
-func normalized(body string, tn *tenant) string {
-	fields := tn.fields()
-	names := make([]string, 0, len(fields))
-	for name := range fields {
-		names = append(names, name)
+// pushRawIDs moves the archive's next id to seven digits, so that a raw
+// batch's id is a token no count or size in an answer can be mistaken for,
+// and the ghost's id has the same shape. A copy of one of A's batches under a
+// high id is A's own row, and SQLite numbers the next past it.
+func pushRawIDs(t *testing.T, h *harness, projectID string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+h.dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Longest first: a session id contains the tenant's tag, a URL-escaped
-	// one is longer than its plain form.
-	sort.Slice(names, func(i, j int) bool { return len(fields[names[i]]) > len(fields[names[j]]) })
-	for _, name := range names {
-		for _, value := range []string{url.QueryEscape(fields[name]), fields[name]} {
-			if value == "" {
-				continue
-			}
-			// Whole words only: a raw batch's id is a short integer.
-			body = regexp.MustCompile(`\b`+regexp.QuoteMeta(value)+`\b`).ReplaceAllString(body, "<"+name+">")
+	defer db.Close()
+	var columns []string
+	rows, err := db.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('raw_batches') WHERE name <> 'id'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
 		}
+		columns = append(columns, `"`+name+`"`)
 	}
-	return body
+	rows.Close()
+	list := strings.Join(columns, ", ")
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO raw_batches (id, `+list+`)
+		SELECT 999999, `+list+` FROM raw_batches WHERE project_id = ? ORDER BY id LIMIT 1`, projectID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// normalizer replaces every identifier of the tenant in an answer by its
+// field's name, so that B's answer and the ghost's compare equal exactly when
+// they say the same thing. Whole words only, longest first, in one pass.
+func (tn *tenant) normalizer() func(string) string {
+	names := map[string]string{}
+	for name, value := range tn.fields() {
+		if value == "" {
+			continue
+		}
+		names[value] = "<" + name + ">"
+		names[url.QueryEscape(value)] = "<" + name + ">"
+	}
+	values := make([]string, 0, len(names))
+	for value := range names {
+		values = append(values, regexp.QuoteMeta(value))
+	}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	pattern := regexp.MustCompile(`\b(?:` + strings.Join(values, "|") + `)\b`)
+	return func(body string) string {
+		return pattern.ReplaceAllStringFunc(body, func(match string) string { return names[match] })
+	}
 }
 
 func TestIsolationMatrix(t *testing.T) {
@@ -679,8 +811,24 @@ func TestIsolationMatrix(t *testing.T) {
 	}
 	ghost := newTenant("ghost", "tp-sk-nobody", ghostID, "tp-pk-nobody", 3)
 	h.seedTenant(t, a)
+	pushRawIDs(t, h, a.projectID)
 	h.seedTenant(t, b)
+	if len(b.raw) != len(ghost.raw) {
+		t.Fatalf("B's raw batch is %s, the ghost's %s: the two must have one shape", b.raw, ghost.raw)
+	}
+	normalB, normalGhost := b.normalizer(), ghost.normalizer()
 	before := fingerprint(t, h, b.projectID)
+	// The fingerprint finds what the seeding made, through each relation as
+	// well as by the project id: a comparison of empty sets would be no
+	// comparison at all.
+	for _, table := range []string{"projects", "api_keys", "traces", "observations", "payloads", "raw_batches",
+		"media", "media_holders", "media_refs", "media_raw_refs", "search_entries", "scores", "prompts",
+		"prompt_labels", "datasets", "dataset_items", "dataset_runs", "score_configs", "annotation_queues",
+		"annotation_items", "erasures"} {
+		if len(before[table]) == 0 {
+			t.Errorf("the fingerprint holds no row of B's in %s", table)
+		}
+	}
 
 	editor, viewer := h.editor(t), h.viewer(t)
 	callers := []isolationCaller{
@@ -711,10 +859,11 @@ func TestIsolationMatrix(t *testing.T) {
 		if body == nil {
 			return []byte(`{}`)
 		}
-		if raw, ok := body(foreign, a).([]byte); ok {
+		value := body(foreign, a)
+		if raw, ok := value.([]byte); ok {
 			return raw
 		}
-		return mustJSONBytes(body(foreign, a))
+		return mustJSONBytes(value)
 	}
 	// leaks reports B's identifiers in an answer that the request did not
 	// itself carry.
@@ -743,7 +892,7 @@ func TestIsolationMatrix(t *testing.T) {
 		// A refusal is compared whole, and so is a listing's answer: the
 		// same rows of A's, whatever the filter named.
 		if recB.Code >= 400 || rt.Method == "GET" && !strings.Contains(rt.Path, "{") {
-			if nb, ng := normalized(recB.Body.String(), b), normalized(recGhost.Body.String(), ghost); nb != ng {
+			if nb, ng := normalB(recB.Body.String()), normalGhost(recGhost.Body.String()); nb != ng {
 				t.Errorf("%s: %s %s (%s): B's answer and nothing's differ:\n  B:     %s\n  ghost: %s",
 					c.who, rt.Method, rt.Path, label, strings.TrimSpace(nb), strings.TrimSpace(ng))
 			}
@@ -757,8 +906,11 @@ func TestIsolationMatrix(t *testing.T) {
 			}
 		}
 	}
-	admitted := func(rt route, c isolationCaller) bool { return decision(rt, c.who) == admitted }
+	mayCall := func(rt route, c isolationCaller) bool { return decision(rt, c.who) == admitted }
 
+	// walked counts the paired calls each row made, against what the matrix
+	// plans for it below.
+	walked := map[string]int{}
 	// pair calls a route twice, once naming B and once naming the ghost,
 	// with the tenants `from` assigns: `foreign` stands for whichever of the
 	// two the call is about.
@@ -780,23 +932,8 @@ func TestIsolationMatrix(t *testing.T) {
 			}
 		}
 		compare(c, rt, label, recs[0], recs[1], carries)
+		walked[rt.Method+" "+rt.Path]++
 		return recs[0], recs[1]
-	}
-	// variants are the ways a path can name a foreign row: every value
-	// foreign, and, where there are two, each one alone under A's other.
-	variants := func(rt route) []map[string]bool {
-		params := pathParams(rt.Path)
-		all := map[string]bool{}
-		for _, p := range params {
-			all[p] = true
-		}
-		out := []map[string]bool{all}
-		if len(params) > 1 {
-			for _, p := range params {
-				out = append(out, map[string]bool{p: true})
-			}
-		}
-		return out
 	}
 	assign := func(rt route, foreignParams map[string]bool) func(*tenant) map[string]*tenant {
 		return func(foreign *tenant) map[string]*tenant {
@@ -823,16 +960,15 @@ func TestIsolationMatrix(t *testing.T) {
 	// Phase one: everything that names one of B's rows and must find none,
 	// and every listing filtered by B's identifiers. Nothing here may
 	// change a row anywhere, so the order does not matter.
-	walked := 0
 	for _, rt := range routes {
 		row := isolationMatrix[rt.Method+" "+rt.Path]
 		for _, c := range callers {
-			if !admitted(rt, c) {
+			if !mayCall(rt, c) {
 				continue
 			}
 			switch row.kind {
 			case oneRow, projectScoped:
-				for _, foreignParams := range variants(rt) {
+				for _, foreignParams := range pathVariants(rt.Path) {
 					want := row.status
 					if want == 0 {
 						want = http.StatusNotFound
@@ -852,7 +988,6 @@ func TestIsolationMatrix(t *testing.T) {
 						query = "token=" + url.QueryEscape(upload)
 					}
 					recB, _ := pair(c, rt, "", label(foreignParams), assign(rt, foreignParams), query, row.body)
-					walked++
 					if recB.Code != want {
 						t.Errorf("%s: %s %s (%s) = %d (%s), want %d",
 							c.who, rt.Method, rt.Path, label(foreignParams), recB.Code,
@@ -868,7 +1003,6 @@ func TestIsolationMatrix(t *testing.T) {
 				}
 				for _, probe := range row.probes {
 					recB, _ := pair(c, rt, "", probe, func(*tenant) map[string]*tenant { return nil }, probe, nil)
-					walked++
 					if want := cmp.Or(row.status, http.StatusOK); recB.Code != want {
 						t.Errorf("%s: %s %s?%s = %d (%s), want %d and nothing of B's",
 							c.who, rt.Method, rt.Path, b.expand(probe), recB.Code, strings.TrimSpace(recB.Body.String()), want)
@@ -877,25 +1011,22 @@ func TestIsolationMatrix(t *testing.T) {
 			}
 			// No route takes the project from the query: the strict
 			// parser refuses a parameter it does not know, and a
-			// project parameter is one nobody knows. Aimed at the
-			// ghost's rows, so that a route that let the parameter
-			// through would find nothing to change. The Langfuse
-			// routes read the SDK's requests leniently (spec 002 #17),
-			// and their project is the key's alone.
+			// project parameter is one nobody knows — before it looks
+			// anything up, so B's real rows and the ghost's are
+			// refused alike. Under A's own project: the guard has a
+			// refusal of its own for a project the caller is not in.
+			// The Langfuse routes read the SDK's requests leniently
+			// (spec 002 #17), and their project is the key's alone.
 			if row.kind != aboutPeople && strings.HasPrefix(rt.Path, "/api/v1/") {
-				// The ghost's rows under A's project: the guard has
-				// a refusal of its own for a project the caller is not in.
 				foreignParams := map[string]bool{}
 				for _, p := range pathParams(rt.Path) {
 					foreignParams[p] = !projectRoute(rt.Path) || p != "id"
 				}
-				path, _ := pathWith(rt.Path, assign(rt, foreignParams)(ghost))
 				for _, name := range []string{"project", "project_id"} {
-					rec := send(c, rt, path, name+"="+b.projectID, encode(row.body, ghost))
-					leaks(c, rt, path, rec)
-					if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unknown query parameter") {
-						t.Errorf("%s: %s %s?%s=<B> = %d (%s), want 400 for an unknown parameter", c.who, rt.Method, path,
-							name, rec.Code, strings.TrimSpace(rec.Body.String()))
+					recB, _ := pair(c, rt, "", "?"+name+"=", assign(rt, foreignParams), name+"={project}", row.body)
+					if recB.Code != http.StatusBadRequest || !strings.Contains(recB.Body.String(), "unknown query parameter") {
+						t.Errorf("%s: %s %s?%s=<B> = %d (%s), want 400 for an unknown parameter", c.who, rt.Method,
+							rt.Path, name, recB.Code, strings.TrimSpace(recB.Body.String()))
 					}
 				}
 			}
@@ -932,7 +1063,7 @@ func TestIsolationMatrix(t *testing.T) {
 	for _, rt := range routes {
 		row := isolationMatrix[rt.Method+" "+rt.Path]
 		for _, c := range callers {
-			if !admitted(rt, c) {
+			if !mayCall(rt, c) {
 				continue
 			}
 			own := func(*tenant) map[string]*tenant { return assign(rt, nil)(a) }
@@ -940,7 +1071,6 @@ func TestIsolationMatrix(t *testing.T) {
 				pair(c, rt, "", "created by B's name", func(f *tenant) map[string]*tenant {
 					return map[string]*tenant{"name": f}
 				}, row.query, row.body)
-				walked++
 			}
 			if row.kind == projectScoped && row.action {
 				foreignParams := map[string]bool{}
@@ -948,7 +1078,6 @@ func TestIsolationMatrix(t *testing.T) {
 					foreignParams[p] = true
 				}
 				pair(c, rt, "", "acting on A's project", assign(rt, foreignParams), row.query, row.body)
-				walked++
 			}
 			for i, ref := range row.refs {
 				body := ref.body
@@ -956,7 +1085,6 @@ func TestIsolationMatrix(t *testing.T) {
 					body = row.body
 				}
 				recB, _ := pair(c, rt, ref.carries, fmt.Sprintf("ref %d", i), own, ref.query, body)
-				walked++
 				if recB.Code >= 400 && recB.Code != http.StatusNotFound && recB.Code != http.StatusUnprocessableEntity {
 					t.Errorf("%s: %s %s (ref %d) = %d (%s): a call that names B's ids must be judged on them, not refused as malformed",
 						c.who, rt.Method, rt.Path, i, recB.Code, strings.TrimSpace(recB.Body.String()))
@@ -964,10 +1092,29 @@ func TestIsolationMatrix(t *testing.T) {
 			}
 		}
 	}
-	if walked < 300 {
-		t.Errorf("made %d paired calls, want the whole matrix", walked)
+	// Every row made the calls the matrix plans for it, and every row that
+	// is about a project's rows made some — or says why none of A's three
+	// may call it.
+	total := 0
+	for _, rt := range routes {
+		key := rt.Method + " " + rt.Path
+		row := isolationMatrix[key]
+		want := 0
+		for _, c := range callers {
+			if !mayCall(rt, c) {
+				continue
+			}
+			want += plannedPairs(rt, row)
+		}
+		if walked[key] != want {
+			t.Errorf("%s made %d paired calls, the matrix plans %d", key, walked[key], want)
+		}
+		if want == 0 && row.kind != aboutPeople && row.why == "" {
+			t.Errorf("%s: none of A's key, editor and viewer may call it, and the row does not say why", key)
+		}
+		total += walked[key]
 	}
-	t.Logf("%d paired calls", walked)
+	t.Logf("%d paired calls", total)
 
 	// B's rows are as they were, column by column, and by B's own eyes.
 	after := fingerprint(t, h, b.projectID)
@@ -980,6 +1127,51 @@ func TestIsolationMatrix(t *testing.T) {
 		if _, ok := before[table]; !ok && len(rows) > 0 {
 			t.Errorf("B gained rows in %s: %v", table, rows)
 		}
+	}
+	// The routes about people refuse the parameter too, as every caller
+	// they admit — anonymously for a public one, an owner for the accounts.
+	// Last, and each with fresh sessions, because two of them end sessions.
+	owner := h.owner(t)
+	ghostAccount, err := store.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rt := range routes {
+		if isolationMatrix[rt.Method+" "+rt.Path].kind != aboutPeople || !strings.HasPrefix(rt.Path, "/api/v1") {
+			continue
+		}
+		path := strings.NewReplacer("{id}", ghostAccount, "{project_id}", ghost.projectID).Replace(rt.Path)
+		askers := map[who]func(*http.Request){}
+		if rt.Policy == public {
+			askers[noCredential] = anonymous
+		} else {
+			sessions := map[who]*signedIn{editorSession: editor, viewerSession: viewer, ownerSession: owner}
+			for _, w := range []who{projectKey, editorSession, viewerSession, ownerSession} {
+				if decision(rt, w) != admitted {
+					continue
+				}
+				askers[w] = func(*http.Request) {}
+				if person, ok := sessions[w]; ok {
+					askers[w] = asSession(h.resume(t, person, "probe-"+rt.Method+rt.Path))
+				}
+			}
+		}
+		if len(askers) == 0 {
+			t.Errorf("%s %s: nobody may call it to ask", rt.Method, rt.Path)
+		}
+		for w, ask := range askers {
+			for _, name := range []string{"project", "project_id"} {
+				rec := h.call(t, rt.Method, path+"?"+name+"="+b.projectID, []byte(`{}`), ask, asJSON)
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unknown query parameter") {
+					t.Errorf("%s: %s %s?%s=<B> = %d (%s), want 400 for an unknown parameter", w, rt.Method, path,
+						name, rec.Code, strings.TrimSpace(rec.Body.String()))
+				}
+			}
+		}
+	}
+
+	if rec := h.call(t, "GET", "/api/v1/traces?q="+b.content, nil, asKey(bSecret)); !strings.Contains(rec.Body.String(), b.trace) {
+		t.Errorf("B's own search for its content = %d %s, want its trace", rec.Code, rec.Body)
 	}
 	for _, path := range []string{
 		"/api/v1/traces/" + b.trace, "/api/v1/scores/" + b.score, "/api/v1/prompts/" + b.prompt,
@@ -1041,6 +1233,7 @@ func TestAReferenceStringIsNotProofOfPossession(t *testing.T) {
 	reference := mapping.LangfuseMarker + "type=image/png|id=" + b.mediaID + "|source=bytes@@@"
 	span := otlptest.ProbeSpan("langfuse.observation.input", reference)
 	span.TraceId, _ = hex.DecodeString(traceHex(7))
+	span.SpanId, _ = hex.DecodeString(spanHex(7))
 	expectStatus(t, h.post(t, "/v1/traces", encodeExport(t, otlptest.Export(span))), http.StatusOK)
 	// And the SDK's own ask for B's body, for that trace: answered with an
 	// upload URL, which is a request for the bytes A does not have.
@@ -1050,7 +1243,7 @@ func TestAReferenceStringIsNotProofOfPossession(t *testing.T) {
 		t.Fatalf("A's ask for B's body = %s, want an upload URL", rec.Body)
 	}
 
-	rec = h.get(t, "/api/v1/observations/"+spanHex(0x11223344556677)+"/io?trace_id="+traceHex(7))
+	rec = h.get(t, "/api/v1/observations/"+spanHex(7)+"/io?trace_id="+traceHex(7))
 	expectStatus(t, rec, http.StatusOK)
 	if strings.Contains(rec.Body.String(), b.sha) || !strings.Contains(rec.Body.String(), b.mediaID) {
 		t.Errorf("A's input = %s, want B's reference string as sent and no body of B's", rec.Body)
@@ -1061,3 +1254,7 @@ func TestAReferenceStringIsNotProofOfPossession(t *testing.T) {
 		t.Error("A holds B's body without having sent it")
 	}
 }
+
+// ownersOnly is why a project's route is called by none of A's three: an owner
+// reaches every project by design, and nobody else may call it.
+const ownersOnly = "an owner's: an owner reaches every project, and none of A's key, editor and viewer may call it"
