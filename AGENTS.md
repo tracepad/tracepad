@@ -830,9 +830,9 @@ Before tagging:
   (`0.1.0rc1`, PEP 440), which is what `VERSION` in `_config.py` must say;
   `sdk-py/v0.1.0rc1` is refused. The first release of every package is a
   candidate, `0.1.0-rc.1` (the owner's decision), and a candidate needs its
-  version put into the tree first, in four places: `_config.py`, `sdk/js/package.json`
-  with its lock file (`npm version 0.1.0-rc.1 --no-git-tag-version` in
-  `sdk/js`) and `const Version`. npm publishes a pre-release under the `next`
+  version put into the tree first, in four places: `_config.py`,
+  `sdk/js/package.json` with its lock file (`npm version 0.1.0-rc.1
+  --no-git-tag-version` in `sdk/js`) and `const Version`. npm publishes a pre-release under the `next`
   dist-tag, so `npm install tracepad` keeps resolving to the newest stable.
 - **Push the tags one at a time.** A commit may carry four of them (the
   server's and the three packages'), but GitHub starts no workflow for the
