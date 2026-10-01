@@ -45,8 +45,8 @@ one.
   undoable for a week.
 - Bounds on what one request may cost (body, spans per request, read
   concurrency and timeout), and rate limiting by source.
-- Safe defaults for a bare binary: it listens on `127.0.0.1:4318` until told
-  otherwise and warns while it serves plain HTTP to other machines, and the
+- Safe defaults for a bare binary: it listens on `localhost:4318` — both
+  loopback addresses — until told otherwise and warns while it serves plain HTTP to other machines, and the
   key its first run prints holds `ingest` alone — a key that reads is minted
   in the interface, never printed to a log.
 - Export of the raw archive to any OTLP receiver or to a directory, resumably.

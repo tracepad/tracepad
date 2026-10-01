@@ -47,8 +47,11 @@ Project "default" created. Connect your app with either:
 This key holds the ingest scope alone: it sends spans and scores and fetches
 prompts, and cannot read what was sent. For the CLI, an agent or the eval
 harness, mint a key that reads in Settings → Project → API keys once you are
-signed in, or with the admin token: tracepad keys create --scope read,write
+signed in.
 ```
+
+(With an admin token configured the note names `tracepad keys create` too, and
+on a server nobody can sign in to, how to configure the token.)
 
 **Copy the secret key somewhere.** It is stored hashed, so this is the only
 time it is printable; a lost key is replaced in Settings → Project → API keys,

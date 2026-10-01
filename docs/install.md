@@ -101,7 +101,9 @@ before they run a downloaded program:
 tracepad
 ```
 
-The server listens on `127.0.0.1:4318`: this machine only. It serves plain
+The server listens on `localhost:4318`: this machine only, on both loopback
+addresses, `127.0.0.1` and `::1`, so a client reaches it whichever one it tries
+first (on a host without IPv6 it says so and serves `127.0.0.1`). It serves plain
 HTTP, so reaching it from anywhere else — `--listen :4318` for every interface,
 or one address of this host — is a choice to make with a TLS proxy in front,
 and until there is one it warns at start while other machines can reach it.
@@ -142,7 +144,10 @@ Description=Tracepad
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/tracepad serve --listen 127.0.0.1:4318
+# Listens on localhost:4318, the default: this machine only. To move it, set
+# TRACEPAD_LISTEN below rather than passing --listen, so that `tracepad
+# health` finds it too.
+ExecStart=/usr/local/bin/tracepad serve
 Restart=on-failure
 
 # The data directory: /var/lib/tracepad, owned by a user that exists only

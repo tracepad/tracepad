@@ -31,9 +31,14 @@ var scopeOrder = [...]string{ScopeIngest, ScopeRead, ScopeWrite}
 
 // AllScopes is what a key the server makes by itself may do, and what every
 // key that predates scopes was given (spec 045 #5): the three, spelled as the
-// column stores them. The one exception is the key the first start generates
-// and prints, which holds ingest alone (#28).
+// column stores them. The one exception is GeneratedKeyScopes.
 const AllScopes = "ingest read write"
+
+// GeneratedKeyScopes is what the key the first start generates for project
+// "default" may do: it is the one secret the start prints, to a log that
+// outlives it, and an application is what it is printed for (spec 045 #28).
+// The start banner reads it to say where a key that reads comes from.
+const GeneratedKeyScopes = ScopeIngest
 
 // CanonicalScopes spells a set of scopes as the column stores it — the words
 // in the canonical order, each once — or reports false for a set that is empty

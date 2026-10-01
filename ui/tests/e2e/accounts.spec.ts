@@ -91,7 +91,13 @@ function boot(): Promise<Stand> {
 	});
 }
 
-/** One request as the project key, which is how this file seeds what it reads. */
+/**
+ * One request as the project key, which is how this file seeds what it reads.
+ * That key is the one the server printed, which holds `ingest` alone (spec 045
+ * #28): it sends the corpus, and `GET /api/v1/projects` answers it only because
+ * that route is open to every key whatever its scopes (`any`). The prompt needs
+ * `write`, so it is written with a key the admin token mints.
+ */
 async function seed(at: Stand) {
 	for (let attempt = 0; attempt < 100; attempt++) {
 		try {

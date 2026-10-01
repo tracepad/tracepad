@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -133,7 +132,7 @@ Usage:
                              print the skill, or one of its references
 
 Flags of serve:
-  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default 127.0.0.1:4318)
+  --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default localhost:4318)
   --data-dir path    data directory             (env TRACEPAD_DATA_DIR)
 
 Server environment:
@@ -234,7 +233,7 @@ func serve(args []string) error {
 	// After the server, because the server is what knows whether this
 	// deployment still needs its first owner and what the link to create
 	// one is (spec 028 #9).
-	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL())
+	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL(), cfg.AdminToken != "")
 	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
 	// Once, so that "whose X-Forwarded-For does this server believe" is
@@ -390,7 +389,7 @@ func checkDeclaredSecrets(log *slog.Logger, st *store.Store, specs []store.Provi
 // moment the server prints a line, so the line is the credential — and so is
 // the fragment, which never reaches the server and which the app strips from
 // the URL as soon as it has read it.
-func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL string) {
+func printStartup(w io.Writer, boot *store.BootstrapResult, listen, setupURL string, adminToken bool) {
 	host := config.DisplayHost(listen)
 	for _, c := range boot.Created {
 		intro, secret := ". Connect your app with either:", c.Keys.Secret
@@ -412,13 +411,8 @@ Project %q created%s
   LANGFUSE_SECRET_KEY=%s
 
 `, c.Project.Name, intro, host, secret, host, c.Keys.PublicKey, secret)
-		if c.Scopes == store.ScopeIngest {
-			fmt.Fprint(w, `This key holds the ingest scope alone: it sends spans and scores and fetches
-prompts, and cannot read what was sent. For the CLI, an agent or the eval
-harness, mint a key that reads in Settings → Project → API keys once you are
-signed in, or with the admin token: tracepad keys create --scope read,write
-
-`)
+		if c.Scopes == store.GeneratedKeyScopes {
+			fmt.Fprint(w, readKeyHint(ui.Enabled && setupURL != "", adminToken))
 		}
 	}
 	if !ui.Enabled {
@@ -438,6 +432,39 @@ new one printed.
 		return
 	}
 	fmt.Fprintf(w, "\nWeb interface: http://%s/\n\n", host)
+}
+
+// readKeyHint is the note under a printed key that holds ingest alone (spec
+// 045 #28): what it cannot do, and the way to a key that reads that this
+// server actually offers. The interface is one when it is built in and the
+// setup link was printed — on a first start nobody has signed in yet, so with
+// setup off there is no one to sign in — and the admin token is the other;
+// with neither, the way is to configure the token.
+func readKeyHint(signIn, adminToken bool) string {
+	const intro = `This key holds the ingest scope alone: it sends spans and scores and fetches
+prompts, and cannot read what was sent. For the CLI, an agent or the eval
+harness, mint a key that reads`
+	const command = "  TRACEPAD_API_KEY=<the admin token> tracepad keys create --scope read,write\n\n"
+	switch {
+	case signIn && adminToken:
+		return intro + ` in Settings → Project → API keys once you are
+signed in, or with the admin token:
+
+` + command
+	case signIn:
+		return intro + ` in Settings → Project → API keys once you are
+signed in.
+
+`
+	case adminToken:
+		return intro + ` with the admin token:
+
+` + command
+	}
+	return intro + `. This server has no admin token and no way to sign
+in: set TRACEPAD_ADMIN_TOKEN (openssl rand -hex 32), restart, and run
+
+` + command
 }
 
 // noteSetupOff says, on a server with no owner yet and TRACEPAD_SETUP=off,
@@ -479,15 +506,15 @@ func warnPlainHTTP(log *slog.Logger, listen, publicURL string, inContainer bool)
 	// An https TRACEPAD_URL says where people are meant to connect, not that
 	// nobody connects here directly, so it changes the advice and not whether
 	// there is any (spec 001 #22).
-	if u, err := url.Parse(strings.TrimSpace(publicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
+	if config.HTTPSURL(publicURL) {
 		log.Warn("TRACEPAD_URL is https, but this listener takes plain HTTP from other machines: a client that "+
-			"connects to it directly skips the TLS proxy. If the proxy runs on this machine, listen on 127.0.0.1, "+
+			"connects to it directly skips the TLS proxy. If the proxy runs on this machine, listen on localhost, "+
 			"the default; if it does not, the hop from the proxy to here crosses the network unencrypted",
 			"listen", listen)
 		return
 	}
 	log.Warn("serving plain HTTP beyond loopback: passwords, session cookies and keys cross the network unencrypted. "+
-		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on 127.0.0.1, the default "+
+		"Put a TLS proxy in front and set TRACEPAD_URL to its https:// address, or listen on localhost, the default "+
 		"(in a container, publish the port with -p 127.0.0.1:4318:4318)",
 		"listen", listen)
 }

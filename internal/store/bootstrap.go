@@ -33,9 +33,8 @@ type BootstrapCreated struct {
 // Bootstrap provisions projects idempotently. Declared projects that already
 // exist are left untouched (keys are never rotated from env). With no specs
 // and an empty database it creates project "default" with a generated key that
-// holds ingest alone: it is the one secret the start prints, to a log that
-// outlives it, and an application is what it is printed for (spec 045 #28).
-// A declared key holds all three (#5).
+// holds GeneratedKeyScopes (spec 045 #28). A declared key holds all three
+// (#5).
 func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 	res := &BootstrapResult{}
 
@@ -73,7 +72,7 @@ func (s *Store) Bootstrap(specs []ProvisionSpec) (*BootstrapResult, error) {
 		}
 		scopes := AllScopes
 		if !declared {
-			scopes = ScopeIngest
+			scopes = GeneratedKeyScopes
 		}
 		p, err := s.createProject(spec.Name, KeyPair{PublicKey: spec.PublicKey, Secret: spec.SecretKey}, scopes)
 		if err != nil {

@@ -3448,12 +3448,12 @@
       },
       "KeyScopes": {
         "type": "array",
-        "description": "What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, and a key the server made by itself, holds all three. Fetching one prompt is open to every key, whatever its scopes",
+        "description": "What the key may do, in this order: `ingest` (send spans, the Langfuse media channel, write scores), `read` (every read of the project's data), `write` (every change a key may make). A key that predates scopes, one declared in `TRACEPAD_PROJECTS` and a new project's first key hold all three; the key the first start generates and prints holds `ingest` alone. Fetching one prompt is open to every key, whatever its scopes",
         "items": {"type": "string", "enum": ["ingest", "read", "write"]}
       },
       "KeyMinter": {
         "type": "object",
-        "description": "Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record",
+        "description": "Who minted a key. `account`: an owner or editor signed in; `admin_token`: the admin token; `startup`: the server itself, for the first-start project (whose key holds `ingest` alone) or one `TRACEPAD_PROJECTS` declares; `unknown`: the key predates the record",
         "properties": {
           "kind": {"type": "string", "enum": ["account", "admin_token", "startup", "unknown"]},
           "account_id": {"type": "string", "description": "`account` only, and only while the account exists"},

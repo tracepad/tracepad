@@ -55,17 +55,18 @@ func TestParseProjects(t *testing.T) {
 	}
 }
 
-// With neither the variable nor the flag the server listens on loopback only:
-// a bare binary is not reachable from the network until the operator says it
-// should be (spec 001 #22).
+// With neither the variable nor the flag the server listens on loopback only
+// — both addresses of it, which the server binds for the name (spec 001 #22,
+// #23): a bare binary is not reachable from the network until the operator
+// says it should be.
 func TestListenDefaultsToLoopback(t *testing.T) {
 	t.Setenv("TRACEPAD_LISTEN", "")
 	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != "127.0.0.1:4318" {
-		t.Fatalf("Listen = %q, want 127.0.0.1:4318", cfg.Listen)
+	if cfg.Listen != "localhost:4318" {
+		t.Fatalf("Listen = %q, want localhost:4318", cfg.Listen)
 	}
 	if PlainHTTPBeyondLoopback(cfg.Listen) {
 		t.Fatal("the default bind counts as reachable beyond loopback")
@@ -524,9 +525,9 @@ func TestDisplayHost(t *testing.T) {
 		":4318":          "localhost:4318",
 		"0.0.0.0:4318":   "localhost:4318",
 		"[::]:4318":      "localhost:4318",
-		"127.0.0.1:4318": "localhost:4318",
-		"[::1]:4318":     "localhost:4318",
-		"127.0.0.2:4318": "127.0.0.2:4318",
+		"localhost:4318": "localhost:4318",
+		"127.0.0.1:4318": "127.0.0.1:4318",
+		"[::1]:4318":     "[::1]:4318",
 		"10.0.0.5:4318":  "10.0.0.5:4318",
 		"myhost:4318":    "myhost:4318",
 	}
@@ -558,6 +559,22 @@ func TestPlainHTTPBeyondLoopback(t *testing.T) {
 	for listen, want := range cases {
 		if got := PlainHTTPBeyondLoopback(listen); got != want {
 			t.Errorf("PlainHTTPBeyondLoopback(%q) = %v, want %v", listen, got, want)
+		}
+	}
+}
+
+// An https TRACEPAD_URL is the operator's word that people come in through a
+// TLS proxy (spec 001 #12); the warning reads it for its wording (#22).
+func TestHTTPSURL(t *testing.T) {
+	for publicURL, want := range map[string]bool{
+		"https://traces.example.com":   true,
+		" HTTPS://traces.example.com ": true,
+		"http://traces.example.com":    false,
+		"":                             false,
+		"traces.example.com":           false,
+	} {
+		if got := HTTPSURL(publicURL); got != want {
+			t.Errorf("HTTPSURL(%q) = %v, want %v", publicURL, got, want)
 		}
 	}
 }

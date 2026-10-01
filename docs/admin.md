@@ -245,15 +245,16 @@ The listing says, for each key, who minted it and when it was last used:
 
 ```
 PUBLIC KEY           NAME          SCOPES             CREATED              CREATED BY                   LAST USED
-tp-pk-3f9a…          -             ingest,read,write  2026-09-01 08:00:00  server                       2026-09-26 17:41:12
+tp-pk-3f9a…          -             ingest             2026-09-01 08:00:00  server                       2026-09-26 17:41:12
 tp-pk-81c0…          checkout api  ingest             2026-09-26 17:30:05  ed@example.com (editor)      never
 ```
 
 - **Created by** is the account that minted it, with its email as it was then
   and its standing in the project now — `owner`, `editor`, `viewer`, `removed`
   (no role here any more), `disabled` or `deleted`; or `admin token`; or
-  `server`, for the key of the first-start project and those
-  `TRACEPAD_PROJECTS` declares; or `unknown`, for a key older than this
+  `server`, for the key of the first-start project — which holds `ingest`
+  alone, since it is printed to the log — and those `TRACEPAD_PROJECTS`
+  declares, which hold all three; or `unknown`, for a key older than this
   record. If a key was ever lost, the `unknown` keys created after it are the
   ones to rotate first.
 - **Last used** is the last request the key authenticated, admitted or

@@ -24,8 +24,8 @@ path. Keep `127.0.0.1:` for applications on the same machine; to serve anyone
 else, put a TLS proxy in front — [Serving over TLS](#serving-over-tls). Inside
 the container the server cannot see where its port was published, so it says
 this once at every start, as an `INFO` line, whatever `TRACEPAD_URL` says. (The
-same binary on a host listens on `127.0.0.1` unless told otherwise, and bound
-beyond loopback it makes this a `WARN`.) The note reads the same whatever the
+same binary on a host listens on loopback unless told otherwise, and bound
+beyond it makes this a `WARN`.) The note reads the same whatever the
 publish is, so it does not tell you when the port *is* exposed: with
 `--network host`, in a Kubernetes pod, or with `-p 4318:4318`, other machines
 reach the server over plain HTTP and nothing louder is printed.
@@ -154,7 +154,7 @@ keys as they are. See [admin.md](admin.md) and [cli.md](cli.md).
 | Entrypoint | `/tracepad` — arguments are the server's flags |
 | Port | `4318` |
 | Volume | `/data` |
-| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note) |
+| Set in the image | `TRACEPAD_DATA_DIR=/data`, `TRACEPAD_LISTEN=:4318`, `TRACEPAD_IN_CONTAINER=1` (turns the plain-HTTP warning into a note, printed at every start whatever `TRACEPAD_URL` is) |
 | Health | `HEALTHCHECK` running `tracepad health` |
 | Licences | `/usr/share/doc/tracepad/` — `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES` (every Go module and npm package the binary carries) and `third_party/` |
 
@@ -282,7 +282,8 @@ them — so a short declared secret that is still its key is a warning at every
 start, saying how to replace it.
 
 `TRACEPAD_LISTEN` is already right, and the way to break it is to set it to
-`127.0.0.1:4318`. Inside a container, loopback is the container's own: the
+`127.0.0.1:4318` — or to `localhost:4318`, the binary's default, which the image
+overrides for this reason. Inside a container, loopback is the container's own: the
 server would answer its own health check and nothing else, and `-p` would
 publish a port nothing accepts on. Bind to `:4318` — the container **is** the
 isolation boundary — and control who can reach it with `-p 127.0.0.1:4318:4318`

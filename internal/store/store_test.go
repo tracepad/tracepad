@@ -69,7 +69,7 @@ func TestBootstrapDefaultOnceAndIdempotent(t *testing.T) {
 	// The server made this key by itself, and since it is the one it prints,
 	// it may send and nothing else (spec 045 #8, #28).
 	if key.PublicKey != boot.Created[0].Keys.PublicKey || key.CreatedBy.Via != MintedAtStartup ||
-		strings.Join(key.Scopes, " ") != ScopeIngest || boot.Created[0].Scopes != ScopeIngest {
+		strings.Join(key.Scopes, " ") != ScopeIngest || boot.Created[0].Scopes != GeneratedKeyScopes {
 		t.Fatalf("the first-start key = %+v (reported %q), want the server's own with ingest alone",
 			key, boot.Created[0].Scopes)
 	}

@@ -38,10 +38,10 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 	var out bytes.Buffer
 	printStartup(&out, &store.BootstrapResult{Created: []store.BootstrapCreated{
 		{Project: store.Project{Name: "default"}, Keys: store.KeyPair{PublicKey: "tp-pk-gen", Secret: "tp-sk-generated"},
-			Scopes: store.ScopeIngest},
+			Scopes: store.GeneratedKeyScopes},
 		{Project: store.Project{Name: "app"}, Keys: store.KeyPair{PublicKey: "tp-pk-app", Secret: "tp-sk-declared"},
 			Declared: true, Scopes: store.AllScopes},
-	}}, "127.0.0.1:4318", "")
+	}}, "localhost:4318", "", true)
 
 	got := out.String()
 	if strings.Contains(got, "tp-sk-declared") {
@@ -51,8 +51,8 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 		`Project "default" created. Connect your app with either:`,
 		// No gRPC receiver: an exporter left to its default reports nothing.
 		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
-		// The default bind is loopback, printed as the host the OTel default
-		// and the docs name (spec 001 #22).
+		// The default bind is both loopback addresses, printed as the name
+		// that reaches both (spec 001 #22, #23).
 		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces",
 		"LANGFUSE_HOST=http://localhost:4318",
 		"Bearer tp-sk-generated",
@@ -77,9 +77,39 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 	if !strings.Contains(generated, ingestOnly) || strings.Contains(declared, ingestOnly) {
 		t.Errorf("the ingest-only note is under the wrong project:\n%s", got)
 	}
-	for _, want := range []string{"Settings → Project → API keys", "tracepad keys create --scope read,write"} {
-		if !strings.Contains(generated, want) {
-			t.Errorf("the note does not say where a reading key comes from (%q):\n%s", want, got)
+	if !strings.Contains(generated, "tracepad keys create --scope read,write") {
+		t.Errorf("the note does not say where a reading key comes from:\n%s", got)
+	}
+}
+
+// The way to a key that reads is one this server offers: the interface when
+// somebody can sign in to it, the admin token when there is one, and with
+// neither, how to configure the token — never a screen nobody can reach or a
+// token that does not exist (spec 045 #28).
+func TestReadKeyHint(t *testing.T) {
+	cases := []struct {
+		signIn, token bool
+		want, not     []string
+	}{
+		{true, true, []string{"Settings → Project → API keys", "with the admin token", "--scope read,write"}, []string{"set TRACEPAD_ADMIN_TOKEN"}},
+		{true, false, []string{"Settings → Project → API keys"}, []string{"admin token", "keys create"}},
+		{false, true, []string{"with the admin token", "--scope read,write"}, []string{"Settings", "set TRACEPAD_ADMIN_TOKEN"}},
+		{false, false, []string{"set TRACEPAD_ADMIN_TOKEN", "restart", "--scope read,write"}, []string{"Settings"}},
+	}
+	for _, c := range cases {
+		hint := readKeyHint(c.signIn, c.token)
+		if !strings.HasPrefix(hint, "This key holds the ingest scope alone") {
+			t.Errorf("sign-in %v, token %v: the hint does not say what the key is:\n%s", c.signIn, c.token, hint)
+		}
+		for _, want := range c.want {
+			if !strings.Contains(hint, want) {
+				t.Errorf("sign-in %v, token %v: want %q in\n%s", c.signIn, c.token, want, hint)
+			}
+		}
+		for _, not := range c.not {
+			if strings.Contains(hint, not) {
+				t.Errorf("sign-in %v, token %v: %q offers a way this server does not have:\n%s", c.signIn, c.token, not, hint)
+			}
 		}
 	}
 }
