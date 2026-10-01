@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { section, signIn as enter, state } from './harness';
+import { overlapping, section, signIn as enter, state } from './harness';
 
 // The shell's navigation at both widths (spec 006 #20): on a desktop the
 // column of every section; on a phone a 48px bar on top, four tabs under the
@@ -91,4 +91,32 @@ test('a swipe down the grip closes the sheet, a short one does not', async ({ pa
 	await expect(sheet).toBeVisible();
 	await drag(120);
 	await expect(sheet).toHaveCount(0);
+});
+
+// Spec 006 #30: the mark beside the name takes 28 px of the phone's bar, and
+// at the narrowest phone the project switcher must still have room to name
+// the project — nothing crossing, nothing out of the window.
+test('at 320 px the phone bar keeps the mark and still names the project', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'mobile', 'the bar is the narrow shape');
+	await page.setViewportSize({ width: 320, height: 640 });
+	await signIn(page);
+
+	const bar = page.locator('header').first();
+	await expect(bar.locator('svg[aria-hidden="true"]').first()).toBeVisible();
+	await expect(bar).toContainText('Tracepad');
+	expect(await overlapping(bar)).toEqual([]);
+	const parts = await bar.evaluate((node) =>
+		[...node.children].map((one) => {
+			const box = one.getBoundingClientRect();
+			return { left: box.left, right: box.right, width: box.width, wants: one.scrollWidth };
+		})
+	);
+	for (const part of parts) {
+		expect(part.left).toBeGreaterThanOrEqual(0);
+		expect(part.right).toBeLessThanOrEqual(320);
+	}
+	// The switcher is the part between the name and the account: it has the
+	// room it wants, or 120 px of it — a dozen characters of a project's name.
+	const switcher = parts[2];
+	expect(switcher.width).toBeGreaterThanOrEqual(Math.min(120, switcher.wants));
 });
