@@ -7,15 +7,17 @@
 # that a contributor, a fork or an operator with a patch can build the artifact
 # the docs describe.
 #
-# Credentials: none of ours. The release and the image are published with the
-# repository's own token, and their provenance is signed through the
-# workflow's OIDC identity (#19).
+# Credentials: the release and the image are published with the repository's
+# own token, and their provenance is signed through the workflow's OIDC
+# identity (#19). The one credential that is ours is the Homebrew tap's: a
+# GitHub App's key, held by the `release` environment and used by the `tap`
+# job alone, to mint a token good for an hour and for one repository (#27).
 #
 # Built where nothing can be published, published where nothing is built
 # (#19): `archives` and `image-build` run GoReleaser, `make ui`, `npm ci` and
 # buildx with read access alone and hand their outputs over as artifacts;
-# `release` and `image` hold the write scopes and only attest and upload what
-# they were handed — no checkout, no toolchain, no install.
+# `release`, `image` and `tap` hold the write scopes and only attest, upload
+# and commit what they were handed — no checkout, no toolchain, no install.
 #
 # Nothing here runs on `main`. The tag is the one act the owner performs
 # deliberately, and `latest` moves only with it (#6).
@@ -159,6 +161,12 @@ jobs:
           distribution: goreleaser
           version: "v2.18.2"
           args: release --clean --skip=publish
+        env:
+          # The server's tag, named rather than found: the repository carries
+          # the SDKs' tags too (`sdk/go/vX.Y.Z`, `sdk-py/v…`, `sdk-js/v…`), and
+          # when two sit on one commit GoReleaser would pick between them by
+          # itself. `check` has already refused a tag that is not vX.Y.Z.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: archives
@@ -166,6 +174,14 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+      # The Homebrew formula GoReleaser wrote beside the archives, with their
+      # checksums in it and nothing pushed (`skip_upload`). `tap` commits it.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: formula
+          path: dist/homebrew/Formula/tracepad.rb
           if-no-files-found: error
           retention-days: 1
 
@@ -292,3 +308,46 @@ jobs:
     with:
       version: ${{ needs.check.outputs.line }}
       alias: ${{ needs.check.outputs.latest == 'true' && 'latest' || '' }}
+
+  # The Homebrew tap (#27). It runs only for a release that moves `latest`: a
+  # pre-release is for the person who asked for it, and a back-patch must not
+  # walk `brew upgrade` backwards, the downgrade #16 refuses for the image.
+  # After `release`, because the formula names URLs that must exist and checksums
+  # of files that must be the ones published.
+  #
+  # The App's key is an environment secret, so this is the only job that can
+  # read it, and the job's own `GITHUB_TOKEN` is empty: the credential is an
+  # installation token for `homebrew-tap` alone, contents only, revoked when
+  # the job ends. The commit goes through the contents API, so there is no
+  # clone and nothing to run but `gh`.
+  tap:
+    needs: [check, release]
+    if: needs.check.outputs.latest == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: formula
+          path: formula
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+      - name: Commit the formula to the tap
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          TAP: ${{ github.repository_owner }}/homebrew-tap
+        run: |
+          path=Formula/tracepad.rb
+          # An update names the blob it replaces; the first release has none.
+          sha="$(gh api "repos/$TAP/contents/$path" --jq .sha 2>/dev/null || true)"
+          args=(-f "message=tracepad $VERSION" -f "content=$(base64 < formula/tracepad.rb | tr -d '\n')")
+          [ -z "$sha" ] || args+=(-f "sha=$sha")
+          gh api --method PUT "repos/$TAP/contents/$path" "${args[@]}"

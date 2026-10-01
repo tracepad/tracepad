@@ -828,3 +828,27 @@ One-time, and the owner's to do by hand:
   the branch. Until then the site's address in the README is a dead link, and
   the first release's docs are the first `vX.Y` (spec 050 #1). A domain of our
   own is a separate step.
+
+**The Homebrew tap** (spec 020 #27) is `tracepad/homebrew-tap`, and a stable
+release writes `Formula/tracepad.rb` into it from the `tap` job. A pre-release
+and a back-patch leave it alone. Nothing of this exists until the owner makes
+it, once:
+
+1. Create the repository `tracepad/homebrew-tap`, **public** (`brew tap`
+   clones it anonymously), with a `README.md` on `main` so the branch exists.
+2. Create a GitHub App owned by the `tracepad` organisation — no webhook, no
+   user authorisation, and exactly one repository permission: **Contents:
+   Read and write**. Generate a private key for it.
+3. Install the App on the organisation, **only on `homebrew-tap`**.
+4. Create the environment `release` on `tracepad/tracepad` (add a required
+   reviewer if every release should wait for a person) and put in it the
+   variable `TAP_APP_CLIENT_ID` — the App's Client ID, from its settings page —
+   and the secret `TAP_APP_PRIVATE_KEY`, the whole `.pem` file. The App's ID is
+   not what the variable takes: `create-github-app-token` deprecated `app-id`
+   for `client-id`.
+
+The key is readable by the `tap` job and by no other, and the token the job
+mints lasts an hour and reaches that one repository. Without these four steps
+a tag still releases the archives and the image; only `tap` fails, after the
+release is public, and the formula can be committed by hand from the `formula`
+artifact of the run.
