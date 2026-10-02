@@ -1768,8 +1768,8 @@ and signs in, and the token is single-use.</p>
 cookie:</p>
 <ul>
 <li><code>tracepad_session</code>, <code>HttpOnly</code>, <code>SameSite=Lax</code>, <code>Path=/</code>, and <code>Secure</code>
-  whenever the request arrived over TLS or through a proxy that said so with
-  <code>X-Forwarded-Proto: https</code>.</li>
+  whenever the request arrived over TLS or through a trusted proxy
+  (<code>TRACEPAD_TRUSTED_PROXIES</code>) that said so with <code>X-Forwarded-Proto: https</code>.</li>
 <li>Thirty days by default (<code>TRACEPAD_SESSION_DAYS</code>), <strong>sliding</strong>: a request more
   than a day after the last one moves the expiry forward. Open this daily and
   you sign in about once a month.</li>
@@ -1854,7 +1854,8 @@ hosts it compared it with, once a minute for each origin. Set <code>TRACEPAD_URL
 public address, or have the proxy forward <code>Host</code>
 (<a href="../docker/#serving-over-tls">docker.md</a>).</p>
 <p>Three hosts count as this server's: the request's own <code>Host</code>, the first value
-of <code>X-Forwarded-Host</code>, and the host of <code>TRACEPAD_URL</code>. The last two matter
+of <code>X-Forwarded-Host</code> when a proxy in <code>TRACEPAD_TRUSTED_PROXIES</code> sent it, and the
+host of <code>TRACEPAD_URL</code>. The last two matter
 behind a reverse proxy that rewrites <code>Host</code> — the browser sends the address
 your people typed, and without them every write from the interface would be
 refused while a project key went on working.</p>
@@ -2135,7 +2136,7 @@ every variable the server reads.</p>
 <tr>
 <td><code>TRACEPAD_TRUSTED_PROXIES</code></td>
 <td><code>loopback</code></td>
-<td>The proxies whose <code>X-Forwarded-For</code> the server believes when it works out a client's address: IP addresses and CIDR ranges, comma-separated, and <code>loopback</code> for <code>127.0.0.0/8</code> and <code>::1</code>. <code>none</code> trusts no proxy. An entry that does not parse, or a range wider than <code>/8</code> (IPv4) or <code>/16</code> (IPv6), stops the start.</td>
+<td>The proxies whose <code>X-Forwarded-For</code>, <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Host</code> the server believes — the client's address, whether the browser is on https, and the host it typed: IP addresses and CIDR ranges, comma-separated, and <code>loopback</code> for <code>127.0.0.0/8</code> and <code>::1</code>. <code>none</code> trusts no proxy. An entry that does not parse, or a range wider than <code>/8</code> (IPv4) or <code>/16</code> (IPv6), stops the start.</td>
 </tr>
 </tbody>
 </table>

@@ -2199,6 +2199,15 @@ attributes participate at lower priority than the span's own.</p>
 </tr>
 </tbody>
 </table>
+<p>Trace tags and trace metadata are not single values but sets every span adds
+to, in one export or across several, in whatever order the spans arrive: the
+tags are the union of every span's, in the order first seen and at most 50, and
+the metadata is every span's keys, a later value winning where two name the
+same key. A span that carries neither leaves them as they are. Metadata stops
+at 512 keys or 1 MiB: past either, a span's new keys are not added — the keys
+already there still take its values — and the server logs it once per project. This is how
+Langfuse keeps them too. An observation is different: a span sent again is the
+same span, and its latest delivery replaces it whole.</p>
 <p>The usage row is a chain like every other one: the first source that yields a
 count wins whole, and the losers stay in metadata rather than being merged into
 it. An exporter that sends both <code>gen_ai.usage.input_tokens</code> and <code>input_tokens</code>

@@ -1528,7 +1528,7 @@ does not know is logged as a warning at start, which catches a typo.</p>
 <tr>
 <td><code>TRACEPAD_TRUSTED_PROXIES</code></td>
 <td>loopback</td>
-<td>Peers whose <code>X-Forwarded-For</code> is believed: addresses and CIDR ranges, or <code>none</code>. See <a href="../docker/#serving-over-tls">docker.md</a>.</td>
+<td>Peers whose <code>X-Forwarded-For</code>, <code>-Proto</code> and <code>-Host</code> are believed: addresses and CIDR ranges, or <code>none</code>. See <a href="../docker/#serving-over-tls">docker.md</a>.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_STORE_RAW</code></td>
@@ -1564,6 +1564,16 @@ does not know is logged as a warning at start, which catches a typo.</p>
 <td><code>TRACEPAD_READ_CONCURRENCY</code></td>
 <td>two per CPU, at least 4</td>
 <td>Reads served at once; at least <code>1</code>.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_MAX_CONNECTIONS</code></td>
+<td><code>1024</code></td>
+<td>Client connections held at once; at least <code>16</code>. Past it a new connection waits to be accepted, and the connection idle longest, or else one that has sent nothing for two seconds, is closed to make room for it.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_MAX_CONNECTIONS_PER_SOURCE</code></td>
+<td>a quarter of <code>TRACEPAD_MAX_CONNECTIONS</code></td>
+<td>Connections one address (an IPv6 /64) may hold; from <code>1</code> to <code>TRACEPAD_MAX_CONNECTIONS</code>. Past it the source's own idle ones make room, and a new one is refused when all are busy. A proxy in <code>TRACEPAD_TRUSTED_PROXIES</code> is exempt.</td>
 </tr>
 <tr>
 <td><code>TRACEPAD_MCP</code></td>

@@ -2065,7 +2065,7 @@ nginx needs told:</p>
 </code></pre></div>
 <ul>
 <li><strong><code>X-Forwarded-Proto: https</code></strong> is how the server knows the browser is on
-  https, and it then marks the session cookie <code>Secure</code>
+  https, when a trusted proxy (below) sends it, and it then marks the session cookie <code>Secure</code>
   (<a href="../accounts/#signing-in">accounts.md</a>) and refuses writes from an
   <code>http://</code> page on the same name. Configure the proxy to set
   <code>X-Forwarded-Proto</code>, not append to it, as nginx's <code>proxy_set_header</code> does:
@@ -2073,8 +2073,8 @@ nginx needs told:</p>
   one a client sent.</li>
 <li><strong><code>Host</code> or <code>X-Forwarded-Host</code></strong> carries the name the browser typed. Writes
   from the interface are refused unless their <code>Origin</code> is one of this server's
-  hosts, and behind a proxy that rewrites <code>Host</code> the forwarded one is how it
-  recognises its own.</li>
+  hosts, and behind a proxy that rewrites <code>Host</code> the forwarded one, from a
+  trusted proxy, is how it recognises its own.</li>
 <li><strong><code>X-Forwarded-For</code>, appended to</strong> (<code>$proxy_add_x_forwarded_for</code> in nginx;
   Caddy writes it on its own). The server reads it from the right, and only
   when the connection comes from a proxy it trusts, to learn the client's
@@ -2083,10 +2083,10 @@ nginx needs told:</p>
   trusted by default. A container's proxy is not: to the container, the host
   is the bridge's gateway (<code>172.17.0.1</code> on Docker's default network), so name
   it with <code>TRACEPAD_TRUSTED_PROXIES</code>. Otherwise every client counts as one, and
-  the log says so once an hour. Only this header waits for a trusted proxy:
-  <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Host</code> describe the sender's own request
-  (its cookie, its origin), and a page elsewhere cannot make a browser send
-  them, while <code>X-Forwarded-For</code> picks a limit that other people share.</li>
+  the log says so once an hour. The same list governs <code>X-Forwarded-Proto</code> and
+  <code>X-Forwarded-Host</code>: from any other peer they are ignored, so behind an
+  untrusted proxy the cookie is not marked <code>Secure</code>, and only <code>Host</code> and
+  <code>TRACEPAD_URL</code> name the server's address.</li>
 <li><strong>A body limit at least <code>TRACEPAD_MAX_BODY_BYTES</code></strong> (20 MiB by default).
   nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
   large batch is then lost at the proxy with a <code>413</code> the server never sees.</li>
@@ -2165,15 +2165,25 @@ line; one that wants to choose the day pins the exact version.</p>
 <a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tracepad:/data</span>
 <a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
 <a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="w">      </span><span class="nt">TRACEPAD_ADMIN_TOKEN_FILE</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/tracepad_admin_token</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">tracepad_admin_token</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>
-<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="w">  </span><span class="nt">tracepad_admin_token</span><span class="p">:</span>
-<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="w">    </span><span class="nt">file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./admin-token</span><span class="w">     </span><span class="c1"># not in git; made as below</span>
-<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>
-<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a><span class="w">  </span><span class="nt">tracepad</span><span class="p">:</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">      </span><span class="c1"># Behind a TLS proxy, its address as this container sees it (below).</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="w">      </span><span class="c1"># TRACEPAD_TRUSTED_PROXIES: 172.18.0.1</span>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">tracepad_admin_token</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a><span class="w">  </span><span class="nt">tracepad_admin_token</span><span class="p">:</span>
+<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="w">    </span><span class="nt">file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./admin-token</span><span class="w">     </span><span class="c1"># not in git; made as below</span>
+<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a>
+<a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a><span class="w">  </span><span class="nt">tracepad</span><span class="p">:</span>
 </code></pre></div>
+<p>Behind a <a href="#serving-over-tls">TLS proxy</a>, name it in <code>TRACEPAD_TRUSTED_PROXIES</code>,
+or the server ignores its <code>X-Forwarded-*</code> headers: session cookies lose
+<code>Secure</code>, and the log says so once an hour. Compose puts the stack on a network
+of its own, so a proxy on the host reaches the container from that network's
+gateway rather than <code>172.17.0.1</code>: <code>docker network inspect &lt;project&gt;_default</code>
+shows it. A proxy in another service of the same stack has an address Compose
+picks at each start; give the network a fixed <code>subnet</code> and the proxy a fixed
+<code>ipv4_address</code>, and name that address.</p>
 <p>Compose mounts the file as it is on the host, owner and mode included, so make
 it the way the <code>docker run</code> example above does — readable by the image's user
 and by nobody else:</p>

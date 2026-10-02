@@ -1797,7 +1797,11 @@ towards a gap.</p>
 <p>One file per batch, named <code>&lt;received_at_ms&gt;-&lt;id&gt;.pb</code> — or <code>.json</code> for a batch
 that arrived in the OTLP/JSON encoding — so that a plain <code>ls</code> is in replay
 order. Beside them, <code>manifest.jsonl</code>: one line per batch, the listing row as the
-API returns it, appended as each file lands.</p>
+API returns it, appended as each file lands. The files are your traces, prompts
+and completions included, so they are readable by you alone (<code>0600</code>), and so is
+the directory when the export creates it (<code>0700</code>). One that already exists keeps
+its mode, and the export says so on stderr when it is open to others. A resume
+brings the files an earlier export left to <code>0600</code> too.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>$ ls tracepad-export | head -3
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>1788220800000-1.pb
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>1788220800001-2.pb
