@@ -223,9 +223,9 @@ func serve(args []string) error {
 	printStartup(os.Stdout, boot, cfg.Listen, srv.SetupURL(), cfg.AdminToken != "")
 	noteSetupOff(slog.Default(), cfg, srv)
 	warnPlainHTTP(slog.Default(), cfg.Listen, cfg.URL, cfg.InContainer)
-	// Once, so that "whose X-Forwarded-For does this server believe" is
-	// in the log beside the address it listens on (spec 046 #1).
-	slog.Info("client addresses: X-Forwarded-For is read from these proxies",
+	// Once, so that "whose forwarded headers does this server believe" is
+	// in the log beside the address it listens on (spec 046 #1, #19).
+	slog.Info("X-Forwarded-For, -Host and -Proto are read from these proxies",
 		"trusted_proxies", srv.TrustedProxies())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

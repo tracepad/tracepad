@@ -96,8 +96,8 @@ and signs in, and the token is single-use.
 cookie:
 
 - `tracepad_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure`
-  whenever the request arrived over TLS or through a proxy that said so with
-  `X-Forwarded-Proto: https`.
+  whenever the request arrived over TLS or through a trusted proxy
+  (`TRACEPAD_TRUSTED_PROXIES`) that said so with `X-Forwarded-Proto: https`.
 - Thirty days by default (`TRACEPAD_SESSION_DAYS`), **sliding**: a request more
   than a day after the last one moves the expiry forward. Open this daily and
   you sign in about once a month.
@@ -196,7 +196,8 @@ public address, or have the proxy forward `Host`
 ([docker.md](docker.md#serving-over-tls)).
 
 Three hosts count as this server's: the request's own `Host`, the first value
-of `X-Forwarded-Host`, and the host of `TRACEPAD_URL`. The last two matter
+of `X-Forwarded-Host` when a proxy in `TRACEPAD_TRUSTED_PROXIES` sent it, and the
+host of `TRACEPAD_URL`. The last two matter
 behind a reverse proxy that rewrites `Host` — the browser sends the address
 your people typed, and without them every write from the interface would be
 refused while a project key went on working.
@@ -410,7 +411,7 @@ every variable the server reads.
 | `TRACEPAD_URL` | — | The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's `Host` — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An `https://` address also tells the server a TLS proxy is in front, which changes what its plain-HTTP warning says but does not silence it: a client that connects to the port directly still skips the proxy ([docker.md](docker.md#serving-over-tls)). |
 | `TRACEPAD_ADMIN_TOKEN` | — | Unchanged from [administration](admin.md), and now also the account routes. At least 32 characters, or the server does not start; `TRACEPAD_ADMIN_TOKEN_FILE` reads it from a file instead. |
 | `TRACEPAD_SETUP` | `on` | `off` mints no setup link and refuses `POST /api/v1/setup`; make the first owner with the admin token. |
-| `TRACEPAD_TRUSTED_PROXIES` | `loopback` | The proxies whose `X-Forwarded-For` the server believes when it works out a client's address: IP addresses and CIDR ranges, comma-separated, and `loopback` for `127.0.0.0/8` and `::1`. `none` trusts no proxy. An entry that does not parse, or a range wider than `/8` (IPv4) or `/16` (IPv6), stops the start. |
+| `TRACEPAD_TRUSTED_PROXIES` | `loopback` | The proxies whose `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` the server believes — the client's address, whether the browser is on https, and the host it typed: IP addresses and CIDR ranges, comma-separated, and `loopback` for `127.0.0.0/8` and `::1`. `none` trusts no proxy. An entry that does not parse, or a range wider than `/8` (IPv4) or `/16` (IPv6), stops the start. |
 
 Expired sessions and invitations are removed by the
 [retention sweeper](retention.md) on its usual pass. A session that has run out

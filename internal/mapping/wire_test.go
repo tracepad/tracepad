@@ -1,7 +1,10 @@
 package mapping_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -522,6 +525,46 @@ func TestChainPrioritySurvivesTheTraceMerge(t *testing.T) {
 					c.name, got, c.want)
 			}
 		})
+	}
+}
+
+// Within one export the spans' tags and metadata are merged as they are
+// across exports (spec 002 #32): the tags a union in the order first seen,
+// the metadata key by key with the later span winning.
+func TestTagsAndMetadataMergeAcrossTheSpans(t *testing.T) {
+	result := mapping.Map(otlptest.ExportLevels(otlptest.Levels{
+		ScopeName: "langfuse-sdk", ScopeVersion: "4.7.0",
+		Spans: [][]string{
+			{"langfuse.trace.tags", `["alpha","shared"]`, "langfuse.trace.metadata.kept", "first", "langfuse.trace.metadata.both", "first"},
+			nil,
+			{"langfuse.trace.tags", "shared,omega", "langfuse.trace.metadata.both", "second"},
+		},
+	}))
+
+	trace := result.Traces[0]
+	if want := []string{"alpha", "shared", "omega"}; !reflect.DeepEqual(trace.Tags, want) {
+		t.Errorf("tags = %q, want %q", trace.Tags, want)
+	}
+	if want := map[string]any{"kept": "first", "both": "second"}; !reflect.DeepEqual(trace.Metadata, want) {
+		t.Errorf("metadata = %v, want %v", trace.Metadata, want)
+	}
+}
+
+// The union of the spans' tags stops at MaxTags as it is built: the first
+// fifty distinct tags are kept, whatever the later spans repeat or add.
+func TestTagUnionAcrossTheSpansKeepsTheCap(t *testing.T) {
+	spans := make([][]string, 3)
+	for i := range spans {
+		tags := make([]string, 40)
+		for j := range tags {
+			tags[j] = fmt.Sprintf("tag-%02d", i*20+j)
+		}
+		encoded, _ := json.Marshal(tags)
+		spans[i] = []string{"langfuse.trace.tags", string(encoded)}
+	}
+	trace := mapping.Map(otlptest.ExportLevels(otlptest.Levels{Spans: spans})).Traces[0]
+	if len(trace.Tags) != mapping.MaxTags || trace.Tags[0] != "tag-00" || trace.Tags[mapping.MaxTags-1] != "tag-49" {
+		t.Errorf("tags = %q, want tag-00 … tag-49", trace.Tags)
 	}
 }
 

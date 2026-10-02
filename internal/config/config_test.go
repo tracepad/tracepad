@@ -389,6 +389,46 @@ func TestReadBounds(t *testing.T) {
 	}
 }
 
+// The connection limit is validated at start (spec 043 #45): 1024 unless set,
+// at least 16, and a value that is not a number refuses to start.
+func TestMaxConnections(t *testing.T) {
+	t.Setenv("TRACEPAD_MAX_CONNECTIONS", "")
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxConnections != 1024 {
+		t.Errorf("MaxConnections = %d, want the documented 1024", cfg.MaxConnections)
+	}
+	t.Setenv("TRACEPAD_MAX_CONNECTIONS", "16")
+	if cfg, err := Load(nil); err != nil || cfg.MaxConnections != 16 {
+		t.Errorf("16, the floor: cfg = %+v, err = %v", cfg, err)
+	}
+	for _, value := range []string{"15", "0", "-1", "many"} {
+		t.Setenv("TRACEPAD_MAX_CONNECTIONS", value)
+		if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_MAX_CONNECTIONS") {
+			t.Errorf("TRACEPAD_MAX_CONNECTIONS=%q: Load = %v, want a refusal naming it", value, err)
+		}
+	}
+
+	// One source's share: a quarter unless set, from 1 to the total.
+	t.Setenv("TRACEPAD_MAX_CONNECTIONS", "100")
+	t.Setenv("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE", "")
+	if cfg, err := Load(nil); err != nil || cfg.MaxConnectionsPerSource != 25 {
+		t.Errorf("per source by default = %+v, %v; want a quarter, 25", cfg, err)
+	}
+	t.Setenv("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE", "100")
+	if cfg, err := Load(nil); err != nil || cfg.MaxConnectionsPerSource != 100 {
+		t.Errorf("per source at the total refused: %v", err)
+	}
+	for _, value := range []string{"0", "101", "some"} {
+		t.Setenv("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE", value)
+		if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "TRACEPAD_MAX_CONNECTIONS_PER_SOURCE") {
+			t.Errorf("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE=%q: Load = %v, want a refusal naming it", value, err)
+		}
+	}
+}
+
 // The two ingest bounds are validated at start (spec 043 #10, #13, #22): the
 // budget follows the body cap unless set, and a budget smaller than the cap —
 // one that would refuse a body the cap admits on an idle server — refuses to

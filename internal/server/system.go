@@ -48,6 +48,11 @@ type projectCounters struct {
 	// so each is logged once per process rather than once per span.
 	orphanTraces int64
 	unknownRuns  map[string]bool
+	// metadataCapLogged is whether this project's first trace whose
+	// metadata the bounds kept a key out of has been logged (spec 002 #32):
+	// once per process, since a trace sent piecemeal would say it on every
+	// export. A flag, not a count: nothing reads one.
+	metadataCapLogged bool
 	// readsTimedOut and readsRefusedBusy count the reads the read gate
 	// stopped at their deadline and refused for want of a slot (spec 043
 	// #21).
@@ -182,19 +187,21 @@ func (c *counters) observeBodyRefused(projectID string) {
 	c.forProject(projectID).bodiesRefusedForBudget++
 }
 
-// observeSDKVersion records an ingestion-version header.
-func (c *counters) observeSDKVersion(projectID, version string) {
+// observeSDKVersion records an ingestion-version header, and reports whether
+// this project had not sent that value before: the log names a value once,
+// when it first appears, and the counter carries the rest.
+func (c *counters) observeSDKVersion(projectID, version string) (first bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	project := c.forProject(projectID)
+	_, known := project.sdkVersions[version]
 	// Bounded on purpose: the header is client-controlled, and an
 	// unbounded map keyed by it is a memory leak a client can trigger.
-	if len(project.sdkVersions) >= maxTrackedSDKVersions {
-		if _, known := project.sdkVersions[version]; !known {
-			return
-		}
+	if !known && len(project.sdkVersions) >= maxTrackedSDKVersions {
+		return false
 	}
 	project.sdkVersions[version]++
+	return !known
 }
 
 // maxTrackedSDKVersions bounds the distinct header values kept per project.
@@ -230,6 +237,17 @@ func (c *counters) observeOrphanRuns(projectID string, runIDs []string) []string
 		fresh = append(fresh, id)
 	}
 	return fresh
+}
+
+// observeMetadataCapped reports whether a trace whose metadata the bounds
+// kept a key out of is the project's first in this process.
+func (c *counters) observeMetadataCapped(projectID string) (first bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	project := c.forProject(projectID)
+	first = !project.metadataCapLogged
+	project.metadataCapLogged = true
+	return first
 }
 
 // maxTrackedUnknownRuns bounds the distinct unknown run ids kept per project.

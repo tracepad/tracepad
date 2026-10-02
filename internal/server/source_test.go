@@ -456,6 +456,42 @@ func TestAnUntrustedProxyIsWarnedAbout(t *testing.T) {
 	}
 }
 
+// TestIgnoredForwardingIsWarnedAbout: a proxy nobody named that sends
+// X-Forwarded-Proto or X-Forwarded-Host has them ignored (spec 028 #36), and
+// the log says so — once an hour, naming the proxy and the setting. A public
+// peer's headers are a client's own, and a trusted proxy's are read: neither
+// is logged.
+func TestIgnoredForwardingIsWarnedAbout(t *testing.T) {
+	h := newAccountHarness(t)
+	logs := recordLogs(t)
+	login := func(mutate ...func(*http.Request)) {
+		h.call(t, "POST", "/api/v1/auth/login",
+			mustJSON(t, map[string]any{"email": "nobody@example.com", "password": "not the password"}),
+			append([]func(*http.Request){anonymous, asJSON, func(r *http.Request) {
+				r.Header.Set("Origin", "https://traces.example.com")
+			}}, mutate...)...)
+	}
+	proto := func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }
+	host := func(r *http.Request) { r.Header.Set("X-Forwarded-Host", "traces.example.com") }
+	for range 3 {
+		login(from("172.17.0.1:5000"), proto)
+	}
+	login(from("172.17.0.1:5000"), host)
+	login(from("203.0.113.8:5000"), proto, host)
+	login(from("127.0.0.1:5000"), proto, host)
+
+	text := logs()
+	if n := strings.Count(text, "from a proxy this server does not trust are ignored"); n != 1 {
+		t.Fatalf("the warning was logged %d times, want once:\n%s", n, text)
+	}
+	if !strings.Contains(text, "proxy=172.17.0.1") || !strings.Contains(text, "TRACEPAD_TRUSTED_PROXIES") {
+		t.Errorf("the warning names neither the proxy nor the setting:\n%s", text)
+	}
+	if strings.Contains(text, "proxy=203.0.113.8") || strings.Contains(text, "proxy=127.0.0.1") {
+		t.Errorf("a client or a trusted proxy was warned about:\n%s", text)
+	}
+}
+
 // TestARefusedTrustedProxySaysWhy: a trusted proxy that forwards no client —
 // nginx without proxy_set_header X-Forwarded-For — makes every client behind
 // it one source, and the refusal says that is the proxy's to fix. A client

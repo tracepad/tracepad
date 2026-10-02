@@ -199,6 +199,42 @@ func TestLangfuseMediaDeadTokensReadNothing(t *testing.T) {
 	}
 }
 
+// TestLangfuseMediaUploadURLLivesAnHour: the URL the server issues — not one
+// signed by hand — carries an expiry of store.MediaUploadWindow from the ask,
+// is good to its last second and refused the second after (#14).
+func TestLangfuseMediaUploadURLLivesAnHour(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	picture, _, _ := pictureOf(68)
+	before := time.Now()
+	mediaID, upload := h.langfuseAsk(t, picture, probeTrace, testSecret)
+	after := time.Now()
+	if upload == nil {
+		t.Fatal("no upload URL for a body the project does not hold")
+	}
+	parsed, err := url.Parse(*upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := h.server.verifyUpload(parsed.Query().Get("token"))
+	if err != nil {
+		t.Fatalf("the issued token does not verify: %v", err)
+	}
+	earliest, latest := before.Add(store.MediaUploadWindow).Unix(), after.Add(store.MediaUploadWindow).Unix()
+	if grant.Expires < earliest || grant.Expires > latest {
+		t.Fatalf("expires = %d, want between %d and %d: an hour from the ask", grant.Expires, earliest, latest)
+	}
+	if store.MediaUploadWindow != time.Hour {
+		t.Errorf("the upload window is %s; spec 041 #14 says an hour", store.MediaUploadWindow)
+	}
+	lastSecond := time.Unix(grant.Expires, 999_999_999)
+	if err := grant.refusal(mediaID, lastSecond); err != nil {
+		t.Errorf("refused in its last second: %v", err)
+	}
+	if err := grant.refusal(mediaID, time.Unix(grant.Expires+1, 0)); err == nil {
+		t.Error("accepted a second past its hour")
+	}
+}
+
 // TestLangfuseMediaRefusalBeforeTheBody: over a real connection, a refused
 // upload hears its status before it has sent a byte of its body, and the
 // connection is kept once the body is drained; a client that sent

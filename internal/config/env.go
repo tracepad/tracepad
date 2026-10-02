@@ -53,6 +53,8 @@ var Env = []EnvVar{
 	{Name: "TRACEPAD_RESPONSE_BUDGET_BYTES", Default: "51200", Help: "default read response budget"},
 	{Name: "TRACEPAD_READ_TIMEOUT", Default: "20s", Help: "deadline of one read request"},
 	{Name: "TRACEPAD_READ_CONCURRENCY", Default: "2 per CPU, at least 4", Help: "reads served at once"},
+	{Name: "TRACEPAD_MAX_CONNECTIONS", Default: "1024", Help: "client connections held at once"},
+	{Name: "TRACEPAD_MAX_CONNECTIONS_PER_SOURCE", Default: "a quarter of the above", Help: "connections one address may hold\na trusted proxy is exempt"},
 	{Name: "TRACEPAD_MCP", Default: "on", Help: "serve MCP at /mcp"},
 	{Name: "TRACEPAD_SWEEP_INTERVAL", Default: "1h", Help: "retention sweep cadence"},
 	{Name: "TRACEPAD_ROLLUP_INTERVAL", Default: "5m", Help: "statistics rollup cadence"},
@@ -60,7 +62,7 @@ var Env = []EnvVar{
 	{Name: "TRACEPAD_ADMIN_TOKEN_FILE", Default: "unset", Help: "read the admin token from this file"},
 	{Name: "TRACEPAD_SETUP", Default: "on", Help: "mint and print the setup link"},
 	{Name: "TRACEPAD_SESSION_DAYS", Default: "30", Help: "days a browser sign-in lasts"},
-	{Name: "TRACEPAD_TRUSTED_PROXIES", Default: "loopback", Help: "proxies whose X-Forwarded-For counts\naddresses and CIDR ranges, or none"},
+	{Name: "TRACEPAD_TRUSTED_PROXIES", Default: "loopback", Help: "proxies whose X-Forwarded-* headers count\naddresses and CIDR ranges, or none"},
 	{Name: "TRACEPAD_IN_CONTAINER", Kind: EnvInternal},
 
 	{Name: "TRACEPAD_API_KEY", Kind: EnvClient},

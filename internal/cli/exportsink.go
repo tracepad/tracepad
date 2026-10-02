@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -217,8 +219,20 @@ type directory struct {
 	manifest *os.File
 }
 
+// exportDirMode and exportFileMode are the modes an export writes with
+// (spec 019 #18): the files are the traces themselves — prompts, completions,
+// whatever the application put in its spans — so they are the owner's alone,
+// as the data directory they came from is (spec 044 #13). A directory that
+// already exists keeps its mode — it may be a mount, or somebody else's — and
+// a resume says so when it is open to others; the files in it guard
+// themselves, including the ones an earlier export left (tightenResumed).
+const (
+	exportDirMode  = 0o700
+	exportFileMode = 0o600
+)
+
 func (r *run) directory(path string, resuming bool) (destination, error) {
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, exportDirMode); err != nil {
 		return nil, fmt.Errorf("cannot create %s: %w", path, err)
 	}
 	entries, err := os.ReadDir(path)
@@ -232,6 +246,17 @@ func (r *run) directory(path string, resuming bool) (destination, error) {
 		return nil, usageErrorf("%s is not empty; export into an empty directory, "+
 			"or pass --after to resume the export that filled it", path)
 	}
+	if resuming {
+		r.tightenResumed(path, entries)
+	}
+	// A directory the export created is exportDirMode; one that was there
+	// already is the operator's, and is named when it is open to others.
+	// Not on Windows, whose ACLs the mode bits do not describe: Go reports
+	// every directory there as 0777, and the line would be said every time.
+	if info, err := os.Stat(path); err == nil && runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		fmt.Fprintf(r.opt.Stderr, "tracepad: %s is open to others (mode %o); the exported files are not, "+
+			"but `chmod 700 %s` keeps their names private too\n", path, info.Mode().Perm(), path)
+	}
 	// The manifest is opened on the first batch, not here. Creating it up
 	// front makes the directory non-empty before anything has been written
 	// to it, so an export that fails on its first batch — or matches none —
@@ -240,6 +265,31 @@ func (r *run) directory(path string, resuming bool) (destination, error) {
 	// would be told to resume an export that never started.
 	return &directory{path: path}, nil
 }
+
+// tightenResumed brings what an earlier export left — its manifest and its
+// batch files, written before exports were private or loosened by hand since —
+// to exportFileMode. Files of other names are not the export's and are left
+// alone. A file that cannot be tightened — another account's, a filesystem
+// without modes — is named on stderr, and the export goes on: its new files
+// are private all the same.
+func (r *run) tightenResumed(path string, entries []os.DirEntry) {
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && (entry.Name() == "manifest.jsonl" || exportFileName.MatchString(entry.Name())) {
+			info, err := entry.Info()
+			if err != nil || info.Mode().Perm()&^exportFileMode == 0 {
+				continue
+			}
+			file := filepath.Join(path, entry.Name())
+			if err := os.Chmod(file, exportFileMode); err != nil {
+				fmt.Fprintf(r.opt.Stderr, "tracepad: could not make %s private (mode %o): %v\n",
+					file, info.Mode().Perm(), err)
+			}
+		}
+	}
+}
+
+// exportFileName is the name batchFileName gives a batch.
+var exportFileName = regexp.MustCompile(`^[0-9]{13}-[0-9]+\.(pb|json)$`)
 
 func (d *directory) close() error {
 	if d.manifest == nil {
@@ -254,7 +304,7 @@ func (d *directory) open() error {
 		return nil
 	}
 	manifest, err := os.OpenFile(filepath.Join(d.path, "manifest.jsonl"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, exportFileMode)
 	if err != nil {
 		return fmt.Errorf("cannot open the manifest: %w", err)
 	}
@@ -272,7 +322,7 @@ func (d *directory) send(_ context.Context, row rawBatchRow, body []byte) (strin
 	if err != nil {
 		return "", &stopError{id: row.ID, message: err.Error()}
 	}
-	if err := os.WriteFile(filepath.Join(d.path, name), body, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(d.path, name), body, exportFileMode); err != nil {
 		return "", &stopError{id: row.ID, message: err.Error()}
 	}
 	line, err := json.Marshal(row)

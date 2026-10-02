@@ -118,10 +118,16 @@ type Server struct {
 	// password checks each source may ask for, sourceLog paces the warning
 	// for what it refuses, and proxyLog the one about a proxy nobody named
 	// (#7, #10, #12).
-	trusted   trustedProxies
+	trusted trustedProxies
+	// conns is TRACEPAD_MAX_CONNECTIONS, the listener's bound (spec 043
+	// #45).
+	conns     *connLimit
 	sources   *sourceLimiter
 	sourceLog *logpace.Keyed
 	proxyLog  *logpace.Keyed
+	// forwardingLog paces the warning about a proxy nobody named whose
+	// X-Forwarded-Proto or -Host was ignored (spec 028 #36).
+	forwardingLog *logpace.Keyed
 	// running counts the handlers in flight, and handlerGrace is how long
 	// a stop waits for them once their connections are closed (spec 001
 	// #16).
@@ -211,6 +217,15 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 	if readConcurrency <= 0 {
 		readConcurrency = config.DefaultReadConcurrency(runtime.GOMAXPROCS(0))
 	}
+	maxConnections := cfg.MaxConnections
+	if maxConnections <= 0 {
+		maxConnections = config.DefaultMaxConnections
+	}
+	perSource := cfg.MaxConnectionsPerSource
+	if perSource <= 0 || perSource > maxConnections {
+		perSource = config.DefaultMaxConnectionsPerSource(maxConnections)
+	}
+	trusted := newTrustedProxies(cfg.TrustedProxies)
 	sessionLife := cfg.SessionLife
 	if sessionLife <= 0 {
 		sessionLife = config.DefaultSessionLife
@@ -236,10 +251,12 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		passwordChanges: newLoginLimiter(),
 		passwords:       newPasswordGate(),
 		passwordLog:     &logpace.Keyed{Every: time.Minute},
-		trusted:         newTrustedProxies(cfg.TrustedProxies),
+		trusted:         trusted,
+		conns:           newConnLimit(maxConnections, perSource, trusted.trusts),
 		sources:         newSourceLimiter(),
 		sourceLog:       &logpace.Keyed{Every: time.Minute, Keys: 16},
 		proxyLog:        &logpace.Keyed{Every: time.Hour, Keys: 8},
+		forwardingLog:   &logpace.Keyed{Every: time.Hour, Keys: 8},
 		handlerGrace:    defaultHandlerGrace,
 		inflatedLog:     &logpace.Keyed{Every: time.Minute},
 		originLog:       &logpace.Keyed{Every: time.Minute, Keys: 64},
@@ -313,6 +330,9 @@ func New(cfg *config.Config, version string, st *store.Store, writer JobWriter, 
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  120 * time.Second,
+		// The idle connections are the ones the connection limit may
+		// close to make room (spec 043 #45).
+		ConnState: s.conns.track,
 	}
 	s.stopping, s.stopStreams = context.WithCancel(context.Background())
 	s.http.RegisterOnShutdown(s.stopStreams)
@@ -340,8 +360,9 @@ func (s *Server) ListenAndServe() error {
 	if err != nil {
 		return err
 	}
-	for _, listener := range listeners {
+	for i, listener := range listeners {
 		slog.Info("listening", "addr", listener.Addr().String())
+		listeners[i] = s.conns.listener(listener)
 	}
 	s.startKeyUseFlusher()
 	errc := make(chan error, len(listeners))

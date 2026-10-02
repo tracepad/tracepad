@@ -20,7 +20,7 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 | `TRACEPAD_ADMIN_TOKEN_FILE` | unset | Read the admin token from this file instead; readable by the server's user and nobody else. |
 | `TRACEPAD_SETUP` | `on` | `off` mints and prints no setup link — for a deployment that makes its first owner with the admin token. |
 | `TRACEPAD_SESSION_DAYS` | `30` | How long a browser sign-in lasts, sliding; at least `1`. |
-| `TRACEPAD_TRUSTED_PROXIES` | loopback | Peers whose `X-Forwarded-For` is believed: addresses and CIDR ranges, or `none`. See [docker.md](docker.md#serving-over-tls). |
+| `TRACEPAD_TRUSTED_PROXIES` | loopback | Peers whose `X-Forwarded-For`, `-Proto` and `-Host` are believed: addresses and CIDR ranges, or `none`. See [docker.md](docker.md#serving-over-tls). |
 | `TRACEPAD_STORE_RAW` | `on` | Keep every accepted export body, so the archive can be replayed ([export.md](export.md)). Costs disk. |
 | `TRACEPAD_MAX_BODY_BYTES` | `20971520` (20 MiB) | Request body cap, applied to the wire bytes and again to what they decompress to. See [ingest.md](ingest.md). |
 | `TRACEPAD_MAX_SPANS_PER_REQUEST` | `20000` | Spans one export may carry; at least `1`. |
@@ -28,6 +28,8 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 | `TRACEPAD_RESPONSE_BUDGET_BYTES` | `51200` | The default byte budget of a read response ([api.md](api.md)); a request may ask for another. From 4 KiB to 5 MiB. |
 | `TRACEPAD_READ_TIMEOUT` | `20s` | Deadline of one read request, its wait for a slot included; from `1s` to `4m`. |
 | `TRACEPAD_READ_CONCURRENCY` | two per CPU, at least 4 | Reads served at once; at least `1`. |
+| `TRACEPAD_MAX_CONNECTIONS` | `1024` | Client connections held at once; at least `16`. Past it a new connection waits to be accepted, and the connection idle longest, or else one that has sent nothing for two seconds, is closed to make room for it. |
+| `TRACEPAD_MAX_CONNECTIONS_PER_SOURCE` | a quarter of `TRACEPAD_MAX_CONNECTIONS` | Connections one address (an IPv6 /64) may hold; from `1` to `TRACEPAD_MAX_CONNECTIONS`. Past it the source's own idle ones make room, and a new one is refused when all are busy. A proxy in `TRACEPAD_TRUSTED_PROXIES` is exempt. |
 | `TRACEPAD_MCP` | `on` | Serve MCP at `/mcp` ([mcp.md](mcp.md)). |
 | `TRACEPAD_SWEEP_INTERVAL` | `1h` | Cadence of the retention sweep; at least `1s`. See [retention.md](retention.md). |
 | `TRACEPAD_ROLLUP_INTERVAL` | `5m` | Cadence of the statistics rollup; at least `1s`. |

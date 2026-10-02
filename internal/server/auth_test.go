@@ -301,10 +301,23 @@ func TestSessionCookieAttributes(t *testing.T) {
 			// one would be the downgrade Decision 30 refuses.
 			r.Header.Set("Origin", "https://"+r.Host)
 			r.Header.Set("X-Forwarded-Proto", "https")
-		}, asJSON)
+		}, asJSON, viaLocalProxy)
 	expectStatus(t, behindTLS, 200)
 	if cookie := sessionCookieOf(behindTLS); cookie == nil || !cookie.Secure {
 		t.Errorf("cookie = %+v behind a TLS proxy, want Secure", cookie)
+	}
+
+	// The same header from a peer TRACEPAD_TRUSTED_PROXIES does not name
+	// is the client's own word, and is not read (Decision 36).
+	untrusted := h.call(t, "POST", "/api/v1/auth/login",
+		mustJSON(t, map[string]any{"email": "owner@example.com", "password": testAccountPassword}),
+		anonymous, func(r *http.Request) {
+			r.Header.Set("Origin", "http://"+r.Host)
+			r.Header.Set("X-Forwarded-Proto", "https")
+		}, asJSON)
+	expectStatus(t, untrusted, 200)
+	if cookie := sessionCookieOf(untrusted); cookie == nil || cookie.Secure {
+		t.Errorf("cookie = %+v from an untrusted peer claiming TLS, want it without Secure", cookie)
 	}
 }
 
@@ -463,7 +476,7 @@ func TestCrossOriginWriteIsRefused(t *testing.T) {
 			if forwarded != "" {
 				r.Header.Set("X-Forwarded-Host", forwarded)
 			}
-		})
+		}, viaLocalProxy)
 	}
 
 	// What the proxy says it was asked for. A list when a request crossed
@@ -875,3 +888,9 @@ func TestSetupLinkHost(t *testing.T) {
 // asJSON declares the body JSON, which the three public routes require of a
 // caller (spec 028 Decision 29) and no other route does (spec 003 #19).
 func asJSON(r *http.Request) { r.Header.Set("Content-Type", "application/json") }
+
+// viaLocalProxy makes the request's peer a loopback address, which the default
+// TRACEPAD_TRUSTED_PROXIES trusts: its X-Forwarded-Host and X-Forwarded-Proto
+// are read only from such a peer (spec 028 #36). httptest's own peer,
+// 192.0.2.1, is nobody's proxy.
+func viaLocalProxy(r *http.Request) { r.RemoteAddr = "127.0.0.1:52000" }

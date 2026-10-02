@@ -369,6 +369,16 @@ attributes participate at lower priority than the span's own.
 | status message | `langfuse.observation.status_message` · `tracepad.observation.status_message` · the span's status message |
 | observation metadata | `langfuse.observation.metadata` and `langfuse.observation.metadata.*` · the same two under `tracepad.`, **plus every attribute no rule above consumed**, plus the span's events under `events`, plus the instrumentation scope's own name and version under `scope.name` and `scope.version` |
 
+Trace tags and trace metadata are not single values but sets every span adds
+to, in one export or across several, in whatever order the spans arrive: the
+tags are the union of every span's, in the order first seen and at most 50, and
+the metadata is every span's keys, a later value winning where two name the
+same key. A span that carries neither leaves them as they are. Metadata stops
+at 512 keys or 1 MiB: past either, a span's new keys are not added — the keys
+already there still take its values — and the server logs it once per project. This is how
+Langfuse keeps them too. An observation is different: a span sent again is the
+same span, and its latest delivery replaces it whole.
+
 The usage row is a chain like every other one: the first source that yields a
 count wins whole, and the losers stay in metadata rather than being merged into
 it. An exporter that sends both `gen_ai.usage.input_tokens` and `input_tokens`

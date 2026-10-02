@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -687,6 +688,86 @@ func TestExportToADirectory(t *testing.T) {
 		if row.ContentType == "" || row.ReceivedAt == "" || row.SizeBytes == 0 {
 			t.Errorf("manifest row = %+v, want the listing's fields", row)
 		}
+	}
+}
+
+// The files an export writes are the traces themselves, so the directory it
+// creates is the owner's alone and so is every file in it (spec 019 #18).
+func TestExportToADirectoryIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	dir := filepath.Join(t.TempDir(), "archive")
+
+	got := h.run(t.Context(), false, "export", "--otlp", "--dir", dir)
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	modeOf := func(path string) os.FileMode {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Mode().Perm()
+	}
+	if mode := modeOf(dir); mode != 0o700 {
+		t.Errorf("directory mode = %o, want 700", mode)
+	}
+	files := append(batchFiles(t, dir), "manifest.jsonl")
+	for _, name := range files {
+		if mode := modeOf(filepath.Join(dir, name)); mode != 0o600 {
+			t.Errorf("%s mode = %o, want 600", name, mode)
+		}
+	}
+}
+
+// A resume brings the files an earlier export left — written before exports
+// were private, or loosened since — to 0600, leaves files of other names
+// alone, and names a directory that is open to others rather than changing
+// its mode (spec 019 #18).
+func TestExportResumeTightensWhatItLeft(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	h := newHarness(t)
+	seedArchive(t, h, 4)
+	dir := filepath.Join(t.TempDir(), "archive")
+	first := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--until", instantAfter(2))
+	if first.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", first.code, first.stderr)
+	}
+	left := append(batchFiles(t, dir), "manifest.jsonl")
+	for _, name := range left {
+		os.Chmod(filepath.Join(dir, name), 0o644)
+	}
+	notOurs := filepath.Join(dir, "README")
+	os.WriteFile(notOurs, []byte("notes"), 0o644)
+	os.Chmod(notOurs, 0o644)
+	os.Chmod(dir, 0o755)
+
+	cursor := decodeSummary(t, first.stdout).LastCursor
+	second := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--after", cursor)
+	if second.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", second.code, second.stderr)
+	}
+	for _, name := range append(batchFiles(t, dir), "manifest.jsonl") {
+		if name == "README" {
+			continue
+		}
+		if info, _ := os.Stat(filepath.Join(dir, name)); info.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode = %o, want 600", name, info.Mode().Perm())
+		}
+	}
+	if info, _ := os.Stat(notOurs); info.Mode().Perm() != 0o644 {
+		t.Errorf("a file the export did not write was changed to %o", info.Mode().Perm())
+	}
+	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o755 {
+		t.Errorf("the operator's directory was changed to %o", info.Mode().Perm())
+	}
+	if !strings.Contains(second.stderr, "open to others") || !strings.Contains(second.stderr, "chmod 700") {
+		t.Errorf("stderr = %q, want the open directory named", second.stderr)
 	}
 }
 

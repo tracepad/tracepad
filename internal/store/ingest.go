@@ -1,11 +1,16 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/model"
 )
 
@@ -58,6 +63,11 @@ type IngestBatch struct {
 	// the same — refusing it would drop the one artifact that shows what
 	// went wrong — and the handler counts and logs what it finds here.
 	UnknownRuns []string
+	// MetadataCapped is filled by apply: every trace of the batch whose
+	// metadata a delivery could not add to, because the merge would have
+	// passed TraceMetadataMaxKeys or TraceMetadataMaxBytes (spec 002 #32).
+	// The trace is stored with the metadata it had, updated where that fits.
+	MetadataCapped []string
 }
 
 // RawBatch is the request body as received, kept verbatim for replay.
@@ -310,6 +320,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 
 	indexing := !b.skipSearchIndex
 	b.UnknownRuns = b.UnknownRuns[:0]
+	b.MetadataCapped = b.MetadataCapped[:0]
 	for _, t := range b.Traces {
 		if b.continued[t.ID] {
 			touched, err := touchTrace(tx, b.ProjectID, t.ID, arrived)
@@ -320,7 +331,7 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 				continue
 			}
 		}
-		if err := upsertTrace(tx, b.ProjectID, t, arrived, indexing); err != nil {
+		if err := upsertTrace(tx, b, b.ProjectID, t, arrived, indexing); err != nil {
 			return err
 		}
 		// One primary-key lookup per trace that carries the attribute,
@@ -362,14 +373,27 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 // exists because of it: the rollup has to know which hours changed since its
 // last pass, and a span joining an existing trace changes one without moving
 // its arrival (spec 013 #15).
-func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64, indexing bool) error {
-	metadataID, _, err := writePayload(tx, t.Metadata)
+//
+// Tags and metadata are the other exception, and are merged rather than
+// overwritten (spec 002 #32): a delivery adds its tags to the stored ones and
+// its metadata keys to the stored keys, its value winning where both name one.
+// They are sets that any span may contribute to, and the span that carries
+// them is not always the last to arrive.
+func upsertTrace(tx *sql.Tx, b *IngestBatch, projectID string, t *model.Trace, ingestedAt int64, indexing bool) error {
+	tagList, metadataValue, capped, err := mergeStoredSets(tx, projectID, t)
+	if err != nil {
+		return err
+	}
+	if capped {
+		b.MetadataCapped = append(b.MetadataCapped, t.ID)
+	}
+	metadataID, _, err := writePayload(tx, metadataValue)
 	if err != nil {
 		return err
 	}
 	var tags any
-	if len(t.Tags) > 0 {
-		encoded, err := json.Marshal(t.Tags)
+	if len(tagList) > 0 {
+		encoded, err := json.Marshal(tagList)
 		if err != nil {
 			return fmt.Errorf("encode trace tags: %w", err)
 		}
@@ -438,6 +462,170 @@ func upsertTrace(tx *sql.Tx, projectID string, t *model.Trace, ingestedAt int64,
 		return nil
 	}
 	return indexTraceName(tx, projectID, t.ID, stored.String)
+}
+
+// TraceMetadataMaxKeys and TraceMetadataMaxBytes bound a trace's metadata
+// (spec 002 #32): every key a delivery would add to it, its first delivery
+// included, is added only while the result stays within both. A trace sent
+// piecemeal would otherwise grow — and be read and rewritten whole on each
+// delivery — without end.
+const (
+	TraceMetadataMaxKeys  = 512
+	TraceMetadataMaxBytes = 1 << 20
+)
+
+// mergeStoredSets is what a delivery makes of the stored trace's tags and
+// metadata (spec 002 #32): the stored tags with the delivery's after them, as
+// mapping.UnionTags bounds them, and the stored metadata with the delivery's
+// keys merged in by mergeMetadata. Nil for either is "the stored one stands",
+// which the upsert's COALESCE keeps: what the delivery did not carry, and what
+// it carried and changed nothing in, so that a span sent again writes no new
+// payload. capped reports a key the bounds kept out.
+func mergeStoredSets(tx *sql.Tx, projectID string, t *model.Trace) (tags []string, metadata any, capped bool, err error) {
+	if len(t.Tags) == 0 && len(t.Metadata) == 0 {
+		return nil, nil, false, nil
+	}
+	var (
+		storedTags     sql.NullString
+		storedMetadata sql.NullInt64
+	)
+	err = tx.QueryRow(`SELECT tags, metadata_id FROM traces WHERE project_id = ? AND id = ?`, projectID, t.ID).
+		Scan(&storedTags, &storedMetadata)
+	found := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, false, fmt.Errorf("read the stored tags and metadata of trace %s: %w", t.ID, err)
+	}
+
+	tags = t.Tags
+	if len(t.Tags) > 0 && storedTags.Valid {
+		var stored []string
+		if err := json.Unmarshal([]byte(storedTags.String), &stored); err != nil {
+			return nil, nil, false, fmt.Errorf("decode the stored tags of trace %s: %w", t.ID, err)
+		}
+		if tags, _ = mapping.UnionTags(stored, nil, t.Tags); len(tags) == len(stored) {
+			// A union no longer than the stored tags is the stored tags.
+			tags = nil
+		}
+	}
+
+	if len(t.Metadata) == 0 {
+		return tags, nil, false, nil
+	}
+	stored := map[string]any{}
+	if found && storedMetadata.Valid {
+		raw, err := rawPayload(context.Background(), tx, storedMetadata)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		stored = decodeStoredObject(raw)
+	}
+	merged, changed, capped, err := mergeMetadata(stored, t.Metadata)
+	if err != nil || !changed {
+		return tags, nil, capped, err
+	}
+	return tags, merged, capped, nil
+}
+
+// decodeStoredObject reads stored metadata back as an object. UseNumber, so
+// that a key a delivery does not name is written back as it was stored:
+// decoded as a float64, an integer past 2^53 would come back rounded. Stored
+// metadata that is not an object — a JSON null, which reads as a nil map —
+// has no keys to keep, and an empty object stands in for it.
+func decodeStoredObject(raw string) map[string]any {
+	stored := map[string]any{}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&stored); err != nil || stored == nil {
+		return map[string]any{}
+	}
+	return stored
+}
+
+// mergeMetadata writes added's keys over stored's, within the bounds (spec
+// 002 #32). A key stored already takes its new value unless that would carry
+// the whole past TraceMetadataMaxBytes — a value that shrinks or keeps its
+// size always does, so metadata stored over the bound can still be updated;
+// a new key is added only while there are fewer than TraceMetadataMaxKeys and
+// it fits in the bytes. Keys are taken in order, the stored ones first, so the
+// outcome does not depend on a map's. changed reports whether any value is new;
+// capped, whether a key was kept out.
+//
+// The size is counted per entry, as json.Marshal writes an object — sorted
+// keys, no spaces, a comma between entries — so no key costs an encoding of
+// the whole.
+func mergeMetadata(stored, added map[string]any) (merged map[string]any, changed, capped bool, err error) {
+	merged = make(map[string]any, len(stored)+len(added))
+	entries := map[string]int{}
+	size := 2 // the braces
+	for k, v := range stored {
+		n, err := entrySize(k, v)
+		if err != nil {
+			return nil, false, false, err
+		}
+		merged[k], entries[k] = v, n
+		size += n
+	}
+	size += max(len(stored)-1, 0) // the commas
+
+	keys := make([]string, 0, len(added))
+	for k := range added {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		_, iHeld := stored[keys[i]]
+		_, jHeld := stored[keys[j]]
+		if iHeld != jHeld {
+			return iHeld
+		}
+		return keys[i] < keys[j]
+	})
+	for _, k := range keys {
+		v := added[k]
+		n, err := entrySize(k, v)
+		if err != nil {
+			return nil, false, false, err
+		}
+		old, held := entries[k]
+		if held {
+			if n > old && size+n-old > TraceMetadataMaxBytes {
+				capped = true
+				continue
+			}
+			if !changed {
+				before, _ := json.Marshal(merged[k])
+				after, _ := json.Marshal(v)
+				changed = !sameJSON(before, after)
+			}
+			merged[k], entries[k] = v, n
+			size += n - old
+			continue
+		}
+		grown := size + n
+		if len(merged) > 0 {
+			grown++ // its comma
+		}
+		if len(merged) >= TraceMetadataMaxKeys || grown > TraceMetadataMaxBytes {
+			capped = true
+			continue
+		}
+		merged[k], entries[k] = v, n
+		size, changed = grown, true
+	}
+	return merged, changed, capped, nil
+}
+
+// entrySize is the bytes one key and its value take in an object as
+// json.Marshal writes it, its colon included.
+func entrySize(k string, v any) (int, error) {
+	key, err := json.Marshal(k)
+	if err != nil {
+		return 0, fmt.Errorf("encode trace metadata key: %w", err)
+	}
+	value, err := json.Marshal(v)
+	if err != nil {
+		return 0, fmt.Errorf("encode trace metadata %q: %w", k, err)
+	}
+	return len(key) + 1 + len(value), nil
 }
 
 // touchTrace stamps a stored trace's `updated_at` for a slice that carries it
