@@ -231,14 +231,20 @@
 		'border-border bg-canvas placeholder:text-subtle w-full rounded-md border px-2 py-1 text-sm';
 </script>
 
-<div class="flex min-w-0 items-center gap-1.5">
+<!-- Wrapping below `sm` only (spec 027 #23): the search box takes a row of its
+     own on a phone, and the window, *Filters* and the chips share the next. At
+     375 px the bar has 343 px, and the box beside the window and *Filters* was
+     left 80 — a placeholder cut to nothing and a field to type into that
+     showed two letters. From `sm` the bar is the one row it was. -->
+<div class="flex min-w-0 flex-wrap items-center gap-1.5 max-sm:w-full sm:flex-nowrap">
 	<SearchBox value={filters.q ?? ''} onchange={setSearch} />
 
 	<!-- `min-w-24`: the window may be narrower than its label, down to a floor
-	     that still says a date. Ninety-six pixels is what the row can afford —
-	     at 375 px this bar has 176 px for the search box and the window
-	     together, so two floors of 96 would push *Filters* back out of the box
-	     this decision is about. -->
+	     that still says a date. Ninety-six pixels is what the row can afford
+	     at `sm`, where the search box is back beside it: this bar has 176 px
+	     for the two together, so two floors of 96 would push *Filters* back out
+	     of the box spec 027 #22 is about. On a phone the box is on its own row
+	     and the window has all but *Filters*' 80 px of 343. -->
 	<RangePicker
 		range={{ from: filters.from, to: filters.to }}
 		onchange={setRange}
@@ -370,22 +376,24 @@
 		</Popover.Portal>
 	</Popover.Root>
 
-	<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
-		{#each chips(filters) as label (label.name)}
-				<li>
-					<button
-						type="button"
-						onclick={() => drop(label.name)}
-						aria-label="Remove filter {label.title}"
-						title={label.title}
-						class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
-							pointer-coarse:min-h-11 flex max-w-56 cursor-pointer items-center gap-1 rounded-md
-							border px-2 py-1 text-sm whitespace-nowrap transition-colors duration-100"
-					>
-						<span class="truncate">{label.text}</span>
-						<X class="size-3.5 shrink-0" />
-					</button>
-				</li>
-		{/each}
-	</ul>
+	{#if chips(filters).length > 0}
+		<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
+			{#each chips(filters) as label (label.name)}
+					<li>
+						<button
+							type="button"
+							onclick={() => drop(label.name)}
+							aria-label="Remove filter {label.title}"
+							title={label.title}
+							class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
+								pointer-coarse:min-h-11 flex max-w-56 cursor-pointer items-center gap-1 rounded-md
+								border px-2 py-1 text-sm whitespace-nowrap transition-colors duration-100"
+						>
+							<span class="truncate">{label.text}</span>
+							<X class="size-3.5 shrink-0" />
+						</button>
+					</li>
+			{/each}
+		</ul>
+	{/if}
 </div>

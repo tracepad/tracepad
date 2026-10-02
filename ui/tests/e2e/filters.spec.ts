@@ -307,30 +307,121 @@ function wideWindow(): string {
  * `elementFromPoint` rather than the click alone, because the click's failure
  * is a thirty-second timeout that reads like a slow page.
  */
-test('a long window label leaves the Filters button clickable at a phone width', async ({
-	page
-}, testInfo) => {
-	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
-	await signIn(page);
-	await page.goto(`/traces?${wideWindow()}`);
+for (const width of [320, 375]) {
+	test(`a long window label leaves the Filters button clickable at ${width} px`, async ({
+		page
+	}, testInfo) => {
+		test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+		await page.setViewportSize({ width, height: 812 });
+		await signIn(page);
+		await page.goto(`/traces?${wideWindow()}`);
 
-	const trigger = page.getByRole('button', { name: /^Filters/ });
-	const covered = await trigger.evaluate((button) => {
-		const box = button.getBoundingClientRect();
-		const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-		return { hit: !!at && button.contains(at), right: box.right, viewport: window.innerWidth };
+		const trigger = page.getByRole('button', { name: /^Filters/ });
+		const covered = await trigger.evaluate((button) => {
+			const box = button.getBoundingClientRect();
+			const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+			return { hit: !!at && button.contains(at), right: box.right, viewport: window.innerWidth };
+		});
+		expect(covered.hit).toBe(true);
+		expect(covered.right).toBeLessThanOrEqual(covered.viewport);
+
+		// Since Decision 23 the search box is on a row of its own, so the window
+		// is laid out on the bar's whole width: the longest label it wears, 271 px
+		// at 320, fits and is shown whole at both widths (measured), and *Filters*
+		// wraps beneath it when the two do not fit together rather than the window
+		// being cut. The shrink rule of #22 is what the Sessions bar's case below
+		// still pins.
+		const range = page.getByRole('button', { name: /^Time range: / });
+		await expect(range).toHaveAccessibleName(/→/);
+		expect(await range.locator('span').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+		await openPanel(page);
 	});
-	expect(covered.hit).toBe(true);
-	expect(covered.right).toBeLessThanOrEqual(covered.viewport);
+}
 
-	// The label gives up the room, and gives up only what it shows: the window
-	// it stands for is still the trigger's name.
-	const range = page.getByRole('button', { name: /^Time range: / });
-	await expect(range).toHaveAccessibleName(/→/);
-	expect(await range.locator('span').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+/**
+ * Decision 23: on a phone the search box has a row of its own. Beside the
+ * window and *Filters* it was left 80 px at 375 — a placeholder cut to nothing
+ * and a field that showed two letters of what was typed. Measured at the two
+ * widths the narrowest phones come in, at two larger phones, and one under
+ * `sm` — where the bar must fill its row rather than the width of what it
+ * holds: the field is as wide as the bar, nothing the bar holds crosses
+ * anything else, and nothing is outside the window — with the plain bar, with
+ * the longest label the window wears, and with a search and a chip on it.
+ */
+for (const width of [320, 375, 414, 600, 639]) {
+	for (const [name, query] of [
+		['the plain bar', ''],
+		['a window written out', wideWindow()],
+		['a search and a chip', 'q=password&environment=staging']
+	] as const) {
+		test(`the search box is a row of its own at ${width} px with ${name}`, async ({
+			page
+		}, testInfo) => {
+			test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+			await page.setViewportSize({ width, height: 812 });
+			await signIn(page);
+			await page.goto(`/traces${query && `?${query}`}`);
 
-	await openPanel(page);
-});
+			const search = page.getByRole('searchbox', { name: /^Search/ });
+			const parts = [
+				search,
+				page.getByRole('button', { name: /^Time range: / }),
+				page.getByRole('button', { name: /^Filters/ }),
+				page.getByRole('button', { name: /^Add to queue/ }),
+				page.getByRole('button', { name: /^Remove filter / })
+			];
+			const boxes: { who: number; x: number; y: number; w: number; h: number }[] = [];
+			for (const [who, part] of parts.entries()) {
+				for (const one of await part.all()) {
+					const b = await one.boundingBox();
+					if (b) boxes.push({ who, x: b.x, y: b.y, w: b.width, h: b.height });
+				}
+			}
+			expect(boxes.some((b) => b.who === 2)).toBe(true);
+
+			// A field you can type into: the bar's width, less its padding.
+			const field = boxes.find((b) => b.who === 0)!;
+			expect(field.w).toBeGreaterThanOrEqual(width - 40);
+
+			for (const b of boxes) {
+				expect(b.x).toBeGreaterThanOrEqual(0);
+				expect(b.x + b.w).toBeLessThanOrEqual(width);
+			}
+			for (const [i, a] of boxes.entries()) {
+				for (const b of boxes.slice(i + 1)) {
+					const apart =
+						a.x + a.w <= b.x + 0.5 ||
+						b.x + b.w <= a.x + 0.5 ||
+						a.y + a.h <= b.y + 0.5 ||
+						b.y + b.h <= a.y + 0.5;
+					expect(apart, `${a.who} and ${b.who} cross`).toBe(true);
+				}
+			}
+
+			// Its own row: everything else on the bar is below it.
+			for (const b of boxes.filter((b) => b.who !== 0 && b.who !== 3)) {
+				expect(b.y).toBeGreaterThanOrEqual(field.y + field.h - 0.5);
+			}
+
+			const overflow = await page.evaluate(
+				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+			);
+			expect(overflow).toBeLessThanOrEqual(0);
+
+			// Typed into, it holds what was typed and is still inside the window.
+			await search.fill('a long question about a refund');
+			await expect(search).toHaveValue('a long question about a refund');
+			const typed = (await search.boundingBox())!;
+			expect(typed.x + typed.width).toBeLessThanOrEqual(width);
+
+			await testInfo.attach(`bar-${width}-${name}`, {
+				body: await page.screenshot({ clip: { x: 0, y: 0, width, height: 260 } }),
+				contentType: 'image/png'
+			});
+		});
+	}
+}
 
 /** The same bar, one screen over (Decision 22): the same three answers. */
 test('the sessions bar keeps its controls inside it at a phone width', async ({

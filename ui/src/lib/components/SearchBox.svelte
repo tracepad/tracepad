@@ -32,7 +32,11 @@
 	}
 </script>
 
-<!-- `min-w-20` on the box rather than `min-w-0`: the field may be narrower than
+<!-- Below `sm` the box is a row of its own and the field fills it (spec 027
+     #23); from `sm` it is the width it asks for, beside the window. The rest of
+     this note is about that second case.
+
+     `min-w-20` on the box rather than `min-w-0`: the field may be narrower than
      the width it asks for, but not narrower than a field. Without a floor a
      375 px bar took it to 58 px, which is `pl-7 + pr-7` and the border — no
      placeholder, and a letter typed into it invisible. Eighty is what the row
@@ -42,13 +46,13 @@
      width while the box collapses out from under it, which is the overlap this
      decision is about. -->
 <form
-	class="flex min-w-20 items-center"
+	class="flex min-w-20 basis-full items-center sm:basis-auto"
 	onsubmit={(event) => {
 		event.preventDefault();
 		commit();
 	}}
 >
-	<div class="relative flex min-w-0 items-center">
+	<div class="relative flex w-full min-w-0 items-center sm:w-auto">
 		<SearchIcon class="text-subtle pointer-events-none absolute left-2 size-4" />
 		<!-- `min-w-0` beside the width: a form control's automatic minimum size
 		     is its intrinsic width, so without it the two boxes above collapse
@@ -66,8 +70,8 @@
 			onblur={commit}
 			autocomplete="off"
 			spellcheck="false"
-			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-40 min-w-0
-				rounded-md border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 focus:w-64 sm:w-56
+			class="border-border bg-canvas placeholder:text-subtle pointer-coarse:min-h-11 w-full min-w-0
+				rounded-md border py-1 pr-7 pl-7 text-sm transition-[width] duration-150 sm:w-56
 				sm:focus:w-80 [&::-webkit-search-cancel-button]:hidden"
 		/>
 		{#if draft}
