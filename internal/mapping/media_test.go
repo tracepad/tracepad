@@ -228,6 +228,26 @@ func TestExtractMediaMalformedStaysInline(t *testing.T) {
 	}
 }
 
+// A string is a document only when it is, whole, one JSON value. One that has
+// a stray closing bracket after the value is text that happens to start like
+// one — the walk must leave it as the client wrote it, as it does any other
+// string with something after the value (found by FuzzScalarReaders:
+// json.Decoder.More answers false at a `]` nobody opened).
+func TestExtractMediaDocumentWithTrailingBracketStaysText(t *testing.T) {
+	document := mustJSON(t, []any{
+		map[string]any{"type": "base64", "media_type": "image/png", "data": b64(picture(mapping.MediaMinSize, 1))}})
+	for _, tail := range []string{"]", "}", " ]", "]]"} {
+		text := document + tail
+		export := otlptest.SpanWith("gen_ai.input.messages", text)
+		if found := mapping.ExtractMedia(export, mapping.MediaOptions{}); found.Any() || len(found.Bodies) != 0 {
+			t.Errorf("tail %q: media was extracted from text that is not a JSON document", tail)
+		}
+		if got := inputOf(t, export); got != text {
+			t.Errorf("tail %q: the input was rewritten", tail)
+		}
+	}
+}
+
 // The Langfuse SDK's reference string is rewritten when its body is held, and
 // left as the client wrote it otherwise (#9) — whole-string and inside the
 // Anthropic object the SDK leaves it in.
