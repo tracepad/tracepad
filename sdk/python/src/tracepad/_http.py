@@ -60,8 +60,11 @@ def request(
         # A list is a repeated name (`tag=a&tag=b`), the listing's own grammar.
         url += "?" + urllib.parse.urlencode(params, doseq=True)
     # Raw UTF-8 like the other clients; a lone surrogate goes as its `\u` escape (spec 014 #32).
-    payload = None if body is None else json.dumps(body, ensure_ascii=False).encode(
-        "utf-8", "backslashreplace")
+    payload = (
+        None
+        if body is None
+        else json.dumps(body, ensure_ascii=False).encode("utf-8", "backslashreplace")
+    )
     call = urllib.request.Request(
         url,
         data=payload,
@@ -118,4 +121,3 @@ def max_age(headers: dict[str, str]) -> int:
             except ValueError:
                 return 0
     return 0
-

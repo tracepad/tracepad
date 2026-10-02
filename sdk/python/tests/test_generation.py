@@ -34,9 +34,12 @@ class Attribute:
 
 
 def test_a_dict_response(spans: Any) -> None:
-    with tracepad.generation("chat", model="gpt-4o-mini",
-                             model_parameters={"temperature": 0.3, "max_tokens": 128},
-                             input=[{"role": "user", "content": "ping"}]) as call:
+    with tracepad.generation(
+        "chat",
+        model="gpt-4o-mini",
+        model_parameters={"temperature": 0.3, "max_tokens": 128},
+        input=[{"role": "user", "content": "ping"}],
+    ) as call:
         call.end(response=ANSWER)
 
     attributes = spans.attributes("chat")
@@ -67,8 +70,13 @@ def test_an_object_response(spans: Any) -> None:
 
 def test_explicit_arguments_win(spans: Any) -> None:
     with tracepad.generation("chat") as call:
-        call.end(response=ANSWER, model="claude-sonnet-5",
-                 usage={"input_tokens": 1, "output_tokens": 2}, cost=9.5, output="rewritten")
+        call.end(
+            response=ANSWER,
+            model="claude-sonnet-5",
+            usage={"input_tokens": 1, "output_tokens": 2},
+            cost=9.5,
+            output="rewritten",
+        )
 
     attributes = spans.attributes("chat")
     assert attributes[attrs.RESPONSE_MODEL] == "claude-sonnet-5"

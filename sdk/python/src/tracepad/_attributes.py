@@ -129,11 +129,16 @@ def metadata(value: Any) -> dict[str, Any]:
     without a value writing nothing. Written whole under the one key instead
     when it is no mapping, has more than `MAX_METADATA_KEYS` keys, or a key
     the per-key form cannot name — an empty one."""
-    if isinstance(value, Mapping) and len(value) <= MAX_METADATA_KEYS and all(
-        str(key) for key in value
+    if (
+        isinstance(value, Mapping)
+        and len(value) <= MAX_METADATA_KEYS
+        and all(str(key) for key in value)
     ):
-        return {f"{OBSERVATION_METADATA}.{key}": scalar(entry)
-                for key, entry in value.items() if entry is not None}
+        return {
+            f"{OBSERVATION_METADATA}.{key}": scalar(entry)
+            for key, entry in value.items()
+            if entry is not None
+        }
     return {OBSERVATION_METADATA: dumps(value)}
 
 

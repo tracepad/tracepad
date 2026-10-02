@@ -68,8 +68,12 @@ def serve(data_dir: str) -> tuple[subprocess.Popen[bytes], Store]:
 def mint_key(store: Store, *scopes: str) -> str:
     """The secret of a new key of the project carrying only `scopes`."""
     (project,) = store.call("GET", "/api/v1/projects")["projects"]
-    minted = store.call("POST", f"/api/v1/projects/{project['id']}/keys",
-                        {"scopes": list(scopes)}, token=ADMIN_TOKEN)
+    minted = store.call(
+        "POST",
+        f"/api/v1/projects/{project['id']}/keys",
+        {"scopes": list(scopes)},
+        token=ADMIN_TOKEN,
+    )
     return str(minted["secret_key"])
 
 

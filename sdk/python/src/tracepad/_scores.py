@@ -62,8 +62,7 @@ class ScoreQueue:
                 # At interpreter exit the thread is gone. Saying so is the
                 # point: a score that went nowhere quietly is the failure
                 # this API is worst at surfacing.
-                logger.warning("tracepad: score %r dropped, the queue is closed",
-                               score.get("name"))
+                logger.warning("tracepad: score %r dropped, the queue is closed", score.get("name"))
                 return
             if self._thread is None:
                 self._thread = threading.Thread(
@@ -224,9 +223,7 @@ def score(
             return
         context = otel.get_current_span().get_span_context()
         if not context.is_valid:
-            raise ValueError(
-                "tracepad.score(): no active span and no trace_id; pass trace_id=…"
-            )
+            raise ValueError("tracepad.score(): no active span and no trace_id; pass trace_id=…")
         trace_id = format(context.trace_id, "032x")
         if observation and observation_id is None:
             observation_id = format(context.span_id, "016x")

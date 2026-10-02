@@ -51,16 +51,18 @@ def serialise_everything() -> None:
         tracepad.update(input=Counted())
         tracepad.update_trace(metadata={"t": Counted()}, tags=[Counted()])  # type: ignore[list-item]
         step(Counted())
-        with tracepad.generation("g", model="m", model_parameters={"p": Counted()},
-                                 input=Counted()) as call:
+        with tracepad.generation(
+            "g", model="m", model_parameters={"p": Counted()}, input=Counted()
+        ) as call:
             call.end(output=Counted())
 
 
 @contextmanager
 def sampled_out() -> Iterator[None]:
     """Under a caller that chose not to sample: the default sampler drops every span."""
-    parent = otel_api.SpanContext(0xA * 2**100, 0xB, is_remote=True,
-                                  trace_flags=otel_api.TraceFlags(0))
+    parent = otel_api.SpanContext(
+        0xA * 2**100, 0xB, is_remote=True, trace_flags=otel_api.TraceFlags(0)
+    )
     token = otel_context.attach(otel_api.set_span_in_context(otel_api.NonRecordingSpan(parent)))
     try:
         yield
@@ -201,8 +203,9 @@ def test_the_argument_wins_over_the_environment(
     assert cut_at(export_seconds(silent, export_timeout=0.3), 0.3)
 
 
-@pytest.mark.parametrize("variable", ["OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
-                                      "OTEL_EXPORTER_OTLP_TIMEOUT"])
+@pytest.mark.parametrize(
+    "variable", ["OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "OTEL_EXPORTER_OTLP_TIMEOUT"]
+)
 def test_opentelemetry_s_own_variable_works_when_neither_is_given(
     variable: str, silent: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -345,8 +348,11 @@ def test_metadata_that_is_no_mapping_is_written_whole(given: Any, spans: testing
     with tracepad.span("step", metadata=given):
         pass
 
-    metadata = {k: v for k, v in spans.attributes("step").items()
-                if k.startswith(attrs.OBSERVATION_METADATA)}
+    metadata = {
+        k: v
+        for k, v in spans.attributes("step").items()
+        if k.startswith(attrs.OBSERVATION_METADATA)
+    }
     assert metadata == {attrs.OBSERVATION_METADATA: attrs.dumps(given)}
 
 
@@ -394,8 +400,10 @@ def test_any_mapping_merges_by_key(spans: testing.Capture) -> None:
     with tracepad.span("step", metadata=MappingProxyType({"a": 1})):
         tracepad.update(metadata=ChainMap({"b": 2}))
     attributes = spans.attributes("step")
-    assert (attributes[f"{attrs.OBSERVATION_METADATA}.a"],
-            attributes[f"{attrs.OBSERVATION_METADATA}.b"]) == (1, 2)
+    assert (
+        attributes[f"{attrs.OBSERVATION_METADATA}.a"],
+        attributes[f"{attrs.OBSERVATION_METADATA}.b"],
+    ) == (1, 2)
 
 
 def test_a_stream_gathers_nothing_for_a_span_that_does_not_record() -> None:

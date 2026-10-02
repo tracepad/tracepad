@@ -62,10 +62,16 @@ def test_a_score_inside_a_span_targets_its_trace(spans: Any, sender: Sender) -> 
         expected = observation.trace_id
     made.flush(2.0)
 
-    assert sender.batches == [[{
-        "name": "helpful", "trace_id": expected, "value": 0.9,
-        "comment": "cited the source",
-    }]]
+    assert sender.batches == [
+        [
+            {
+                "name": "helpful",
+                "trace_id": expected,
+                "value": 0.9,
+                "comment": "cited the source",
+            }
+        ]
+    ]
 
 
 def test_observation_true_adds_the_span_id(spans: Any, sender: Sender) -> None:
@@ -82,13 +88,17 @@ def test_observation_true_adds_the_span_id(spans: Any, sender: Sender) -> None:
 
 def test_an_explicit_target_needs_no_span(sender: Sender) -> None:
     made = queue(sender)
-    tracepad.score("verdict", string_value="pass", data_type="categorical",
-                   trace_id="a" * 32, id="b" * 32)
+    tracepad.score(
+        "verdict", string_value="pass", data_type="categorical", trace_id="a" * 32, id="b" * 32
+    )
     made.flush(2.0)
 
     assert sender.batches[0][0] == {
-        "name": "verdict", "trace_id": "a" * 32, "id": "b" * 32,
-        "string_value": "pass", "data_type": "categorical",
+        "name": "verdict",
+        "trace_id": "a" * 32,
+        "id": "b" * 32,
+        "string_value": "pass",
+        "data_type": "categorical",
     }
 
 
@@ -184,9 +194,7 @@ def test_without_init_an_unregistered_provider_s_span_still_scores(sender: Sende
     assert sender.batches[0][0]["trace_id"] == format(request.get_span_context().trace_id, "032x")
 
 
-def test_otel_sdk_disabled_is_tracing_off(
-    sender: Sender, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_otel_sdk_disabled_is_tracing_off(sender: Sender, monkeypatch: pytest.MonkeyPatch) -> None:
     # The SDK's own provider hands out no-op tracers under OTEL_SDK_DISABLED.
     from opentelemetry.sdk.trace import TracerProvider
 

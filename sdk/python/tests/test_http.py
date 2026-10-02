@@ -93,8 +93,9 @@ class Seen(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        body = json.dumps({"name": "n", "version": 1, "type": "text", "prompt": "hi",
-                           "config": {}, "labels": []}).encode()
+        body = json.dumps(
+            {"name": "n", "version": 1, "type": "text", "prompt": "hi", "config": {}, "labels": []}
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -155,8 +156,10 @@ def test_the_key_does_not_come_back_when_the_chain_does(
     request(_config.Config(host=store.url, key=KEY), "GET", "/hop/hop/api/v1/prompts/n")
 
     assert elsewhere.seen == [("GET", "/hop/api/v1/prompts/n", None)]
-    assert store.seen == [("GET", "/hop/hop/api/v1/prompts/n", f"Bearer {KEY}"),
-                          ("GET", "/api/v1/prompts/n", None)]
+    assert store.seen == [
+        ("GET", "/hop/hop/api/v1/prompts/n", f"Bearer {KEY}"),
+        ("GET", "/api/v1/prompts/n", None),
+    ]
 
 
 def test_the_key_is_not_in_the_configs_repr() -> None:
@@ -167,16 +170,21 @@ def test_the_key_is_not_in_the_configs_repr() -> None:
     assert config.key == KEY
 
 
-@pytest.mark.parametrize(("name", "segment"), [
-    ("x?confirm=x#", "x%3Fconfirm%3Dx%23"),
-    ("a/b", "a%2Fb"),
-    ("50%", "50%25"),
-    ("with space", "with%20space"),
-    ("#", "%23"),
-    ("ünï", "%C3%BCn%C3%AF"),
-])
+@pytest.mark.parametrize(
+    ("name", "segment"),
+    [
+        ("x?confirm=x#", "x%3Fconfirm%3Dx%23"),
+        ("a/b", "a%2Fb"),
+        ("50%", "50%25"),
+        ("with space", "with%20space"),
+        ("#", "%23"),
+        ("ünï", "%C3%BCn%C3%AF"),
+    ],
+)
 def test_a_name_is_one_segment_whatever_it_holds(
-    servers: tuple[Store, Store], name: str, segment: str,
+    servers: tuple[Store, Store],
+    name: str,
+    segment: str,
 ) -> None:
     store, _ = servers
     _config.adopt(_config.Config(host=store.url, key=KEY))
@@ -203,12 +211,16 @@ def test_a_name_that_is_not_a_string_is_sent_as_its_text(servers: tuple[Store, S
     tracepad.compare(1, 2)  # type: ignore[arg-type]
 
     assert [path for _, path, _ in store.seen] == [
-        "/api/v1/datasets/2024?confirm=", "/api/v1/score-configs/5", "/api/v1/runs/1/compare/2"]
+        "/api/v1/datasets/2024?confirm=",
+        "/api/v1/score-configs/5",
+        "/api/v1/runs/1/compare/2",
+    ]
 
 
 @pytest.mark.parametrize("name", ["", ".", ".."])
 def test_a_name_that_is_no_segment_is_refused_before_the_wire(
-    servers: tuple[Store, Store], name: str,
+    servers: tuple[Store, Store],
+    name: str,
 ) -> None:
     store, _ = servers
     _config.adopt(_config.Config(host=store.url, key=KEY))

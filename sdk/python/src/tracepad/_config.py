@@ -58,8 +58,10 @@ def resolve(
             + "; pass them to tracepad.init() or set TRACEPAD_URL and TRACEPAD_API_KEY"
         )
     if deprecated and _first_host_warning():
-        logger.warning("tracepad: TRACEPAD_HOST is deprecated; "
-                       "set TRACEPAD_URL, which the CLI and the server read too")
+        logger.warning(
+            "tracepad: TRACEPAD_HOST is deprecated; "
+            "set TRACEPAD_URL, which the CLI and the server read too"
+        )
     return Config(
         host=host,
         key=key,
@@ -71,8 +73,10 @@ def resolve(
 def resolve_timeout(argument: float | None) -> float | None:
     """The argument, then TRACEPAD_EXPORT_TIMEOUT, then five seconds — or `None`,
     which leaves the exporter to OpenTelemetry's own variable when one is set."""
-    for name, given in (("export_timeout", argument),
-                        ("TRACEPAD_EXPORT_TIMEOUT", os.environ.get("TRACEPAD_EXPORT_TIMEOUT"))):
+    for name, given in (
+        ("export_timeout", argument),
+        ("TRACEPAD_EXPORT_TIMEOUT", os.environ.get("TRACEPAD_EXPORT_TIMEOUT")),
+    ):
         if given is None or (isinstance(given, str) and not given.strip()):
             continue
         try:
@@ -81,8 +85,9 @@ def resolve_timeout(argument: float | None) -> float | None:
             seconds = 0.0
         if 0 < seconds < float("inf"):
             return seconds
-        logger.warning("tracepad: %s=%r is not a positive number of seconds; it is ignored",
-                       name, given)
+        logger.warning(
+            "tracepad: %s=%r is not a positive number of seconds; it is ignored", name, given
+        )
     if any(os.environ.get(f"OTEL_EXPORTER_OTLP{kind}_TIMEOUT") for kind in ("_TRACES", "")):
         return None
     return EXPORT_TIMEOUT

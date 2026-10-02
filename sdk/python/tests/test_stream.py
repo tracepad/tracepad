@@ -24,8 +24,9 @@ USAGE = {
 }
 
 
-def chunk(content: str | None = None, *, role: str | None = None, usage: Any = None,
-          choices: bool = True) -> dict[str, Any]:
+def chunk(
+    content: str | None = None, *, role: str | None = None, usage: Any = None, choices: bool = True
+) -> dict[str, Any]:
     """One chunk the way OpenAI cuts them: `usage` is `null` until the last."""
     delta: dict[str, Any] = {}
     if role is not None:
@@ -200,8 +201,9 @@ def test_capture_output_off_keeps_the_usage_and_drops_the_text(spans: Any) -> No
     def answer() -> str:
         call = _tracing._current.get()
         assert isinstance(call, tracepad.Generation)
-        return "".join(c["choices"][0]["delta"].get("content", "")
-                       for c in call.stream(CHUNKS) if c["choices"])
+        return "".join(
+            c["choices"][0]["delta"].get("content", "") for c in call.stream(CHUNKS) if c["choices"]
+        )
 
     assert answer() == "pong"
     attributes = spans.attributes("answer")

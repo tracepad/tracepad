@@ -163,8 +163,7 @@ class Run:
         # every trace and score the run produced (spec 018 #5). A late span
         # still links, so a flush that timed out is a number read early.
         flush(timeout)
-        closed = request(_config.current(), "POST", f"{self._path}/finish",
-                         body=body).body or {}
+        closed = request(_config.current(), "POST", f"{self._path}/finish", body=body).body or {}
         # Only now: a `finish` the store refused has not closed anything, and
         # marking it closed would make `__exit__` step over the `fail` that
         # the raised error is about to ask for.
@@ -232,16 +231,24 @@ def score_configs(configs: Any) -> None:
     """
     for config in configs:
         name = config["name"] if isinstance(config, dict) else config.name
-        body = {k: v for k, v in config.items() if k != "name"} if isinstance(config, dict) \
+        body = (
+            {k: v for k, v in config.items() if k != "name"}
+            if isinstance(config, dict)
             else config.body()
+        )
         try:
-            request(_config.current(), "PUT", f"/api/v1/score-configs/{quote(str(name), safe='')}",
-                    body=body)
+            request(
+                _config.current(),
+                "PUT",
+                f"/api/v1/score-configs/{quote(str(name), safe='')}",
+                body=body,
+            )
         except TracepadHTTPError as refused:
             # The name in the message, and the status and the body kept: a
             # caller that catches this is entitled to what the store said.
             raise TracepadHTTPError(
-                refused.status, f"score config {name!r}: {refused.body}") from None
+                refused.status, f"score config {name!r}: {refused.body}"
+            ) from None
         except TracepadError as error:
             raise TracepadError(f"tracepad: score config {name!r}: {error}") from None
 

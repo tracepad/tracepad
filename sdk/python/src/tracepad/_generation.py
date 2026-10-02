@@ -33,10 +33,16 @@ def read_response(response: Any) -> dict[str, Any]:
         counts: dict[str, Any] = {}
         _count(counts, "input_tokens", _get(usage, "prompt_tokens"))
         _count(counts, "output_tokens", _get(usage, "completion_tokens"))
-        _count(counts, "cache_read_input_tokens",
-               _get(_get(usage, "prompt_tokens_details"), "cached_tokens"))
-        _count(counts, "reasoning_tokens",
-               _get(_get(usage, "completion_tokens_details"), "reasoning_tokens"))
+        _count(
+            counts,
+            "cache_read_input_tokens",
+            _get(_get(usage, "prompt_tokens_details"), "cached_tokens"),
+        )
+        _count(
+            counts,
+            "reasoning_tokens",
+            _get(_get(usage, "completion_tokens_details"), "reasoning_tokens"),
+        )
         if counts:
             fields["usage"] = counts
         cost = _get(usage, "cost")

@@ -61,8 +61,13 @@ def test_the_opt_outs_leave_the_attributes_unset(spans: Any) -> None:
 def test_update_inside_replaces(spans: Any) -> None:
     @tracepad.observe
     def step(question: str) -> str:
-        tracepad.update(input="redacted", output="also redacted", level="WARNING",
-                        status_message="degraded", metadata={"attempt": 2})
+        tracepad.update(
+            input="redacted",
+            output="also redacted",
+            level="WARNING",
+            status_message="degraded",
+            metadata={"attempt": 2},
+        )
         return "answer"
 
     step("why?")

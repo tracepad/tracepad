@@ -124,11 +124,15 @@ for label, id_file in (
     generations = [s for s in observations(row["id"]) if s["type"] == "generation"]
     check(len(generations) == 1, f"{tag} generations = {len(generations)}")
     if generations:
-        check(generations[0]["model"] == "gpt-4o-mini",
-              f"{tag} generation model = {generations[0]['model']!r}")
+        check(
+            generations[0]["model"] == "gpt-4o-mini",
+            f"{tag} generation model = {generations[0]['model']!r}",
+        )
         usage = json.loads(generations[0]["usage"] or "{}")
-        check(usage.get("input_tokens") == 11 and usage.get("output_tokens") == 3,
-              f"{tag} usage = {usage}")
+        check(
+            usage.get("input_tokens") == 11 and usage.get("output_tokens") == 3,
+            f"{tag} usage = {usage}",
+        )
 
 # --- Langfuse SDK, langfuse.* dialect -------------------------------------
 langfuse_id = read_id(langfuse_trace_id_file)
@@ -137,8 +141,10 @@ check(row["name"] == "smoke-trace", f"langfuse trace name = {row['name']!r}")
 check(row["user_id"] == "smoke-user", f"langfuse user_id = {row['user_id']!r}")
 check(row["session_id"] == "smoke-session", f"langfuse session_id = {row['session_id']!r}")
 check(row["environment"] == "smoke", f"langfuse environment = {row['environment']!r}")
-check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-002"],
-      f"langfuse tags = {row['tags']!r}")
+check(
+    sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-002"],
+    f"langfuse tags = {row['tags']!r}",
+)
 check(row["observation_count"] == 2, f"langfuse observation_count = {row['observation_count']}")
 check(
     row["total_cost"] is not None and abs(row["total_cost"] - 0.0003) < 1e-9,
@@ -172,15 +178,19 @@ check(row["user_id"] == "smoke-user", f"tracepad user_id = {row['user_id']!r}")
 check(row["session_id"] == "smoke-session", f"tracepad session_id = {row['session_id']!r}")
 check(row["environment"] == "smoke", f"tracepad environment = {row['environment']!r}")
 check(row["release"] == "smoke-1", f"tracepad release = {row['release']!r}")
-check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-017"],
-      f"tracepad tags = {row['tags']!r}")
+check(
+    sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-017"],
+    f"tracepad tags = {row['tags']!r}",
+)
 check(row["observation_count"] == 2, f"tracepad observation_count = {row['observation_count']}")
 check(
     row["total_cost"] is not None and abs(row["total_cost"] - 0.0003) < 1e-9,
     f"tracepad total_cost = {row['total_cost']}",
 )
-check((payload(row["metadata_id"]) or {}).get("suite") == "smoke",
-      "tracepad trace metadata lost its entry")
+check(
+    (payload(row["metadata_id"]) or {}).get("suite") == "smoke",
+    "tracepad trace metadata lost its entry",
+)
 
 spans = observations(tracepad_id)
 generations = [s for s in spans if s["type"] == "generation"]
@@ -197,8 +207,10 @@ if generations:
     params = json.loads(generation["model_parameters"] or "{}")
     check(params.get("max_tokens") == 64, f"tracepad model_parameters = {params}")
     check(generation["provided_cost"] == 1, "tracepad generation must carry provided_cost")
-    check(generation["completion_start_time"] is not None,
-          "tracepad generation has no completion start")
+    check(
+        generation["completion_start_time"] is not None,
+        "tracepad generation has no completion start",
+    )
     check(payload(generation["input_id"]) is not None, "tracepad generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad generation has no output")
 
@@ -210,15 +222,19 @@ check(row["user_id"] == "smoke-user", f"tracepad-go user_id = {row['user_id']!r}
 check(row["session_id"] == "smoke-session", f"tracepad-go session_id = {row['session_id']!r}")
 check(row["environment"] == "smoke", f"tracepad-go environment = {row['environment']!r}")
 check(row["release"] == "smoke-1", f"tracepad-go release = {row['release']!r}")
-check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-033"],
-      f"tracepad-go tags = {row['tags']!r}")
+check(
+    sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-033"],
+    f"tracepad-go tags = {row['tags']!r}",
+)
 check(row["observation_count"] == 2, f"tracepad-go observation_count = {row['observation_count']}")
 check(
     row["total_cost"] is not None and abs(row["total_cost"] - 0.0003) < 1e-9,
     f"tracepad-go total_cost = {row['total_cost']}",
 )
-check((payload(row["metadata_id"]) or {}).get("suite") == "smoke",
-      "tracepad-go trace metadata lost its entry")
+check(
+    (payload(row["metadata_id"]) or {}).get("suite") == "smoke",
+    "tracepad-go trace metadata lost its entry",
+)
 
 spans = observations(go_id)
 generations = [s for s in spans if s["type"] == "generation"]
@@ -235,8 +251,10 @@ if generations:
     params = json.loads(generation["model_parameters"] or "{}")
     check(params.get("max_tokens") == 64, f"tracepad-go model_parameters = {params}")
     check(generation["provided_cost"] == 1, "tracepad-go generation must carry provided_cost")
-    check(generation["completion_start_time"] is not None,
-          "tracepad-go generation has no completion start")
+    check(
+        generation["completion_start_time"] is not None,
+        "tracepad-go generation has no completion start",
+    )
     check(payload(generation["input_id"]) is not None, "tracepad-go generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad-go generation has no output")
 
@@ -248,16 +266,19 @@ check(row["user_id"] == "smoke-user", f"tracepad-js user_id = {row['user_id']!r}
 check(row["session_id"] == "smoke-session", f"tracepad-js session_id = {row['session_id']!r}")
 check(row["environment"] == "smoke", f"tracepad-js environment = {row['environment']!r}")
 check(row["release"] == "smoke-2", f"tracepad-js release = {row['release']!r}")
-check(sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-032"],
-      f"tracepad-js tags = {row['tags']!r}")
-check(row["observation_count"] == 2,
-      f"tracepad-js observation_count = {row['observation_count']}")
+check(
+    sorted(json.loads(row["tags"] or "[]")) == ["smoke", "spec-032"],
+    f"tracepad-js tags = {row['tags']!r}",
+)
+check(row["observation_count"] == 2, f"tracepad-js observation_count = {row['observation_count']}")
 check(
     row["total_cost"] is not None and abs(row["total_cost"] - 0.0004) < 1e-9,
     f"tracepad-js total_cost = {row['total_cost']}",
 )
-check((payload(row["metadata_id"]) or {}).get("suite") == "smoke",
-      "tracepad-js trace metadata lost its entry")
+check(
+    (payload(row["metadata_id"]) or {}).get("suite") == "smoke",
+    "tracepad-js trace metadata lost its entry",
+)
 
 spans = observations(tracepad_js_id)
 generations = [s for s in spans if s["type"] == "generation"]
@@ -274,10 +295,13 @@ if generations:
     params = json.loads(generation["model_parameters"] or "{}")
     check(params.get("max_tokens") == 96, f"tracepad-js model_parameters = {params}")
     check(generation["provided_cost"] == 1, "tracepad-js generation must carry provided_cost")
-    check(generation["completion_start_time"] is not None,
-          "tracepad-js generation has no completion start")
+    check(
+        generation["completion_start_time"] is not None,
+        "tracepad-js generation has no completion start",
+    )
     check(payload(generation["input_id"]) is not None, "tracepad-js generation has no input")
     check(payload(generation["output_id"]) is not None, "tracepad-js generation has no output")
+
 
 # --- the Langfuse media channel (spec 041 #9) ------------------------------
 # Payloads carrying a reference are past the compression threshold, so they are
@@ -285,7 +309,8 @@ if generations:
 def api(path):
     key = os.environ.get("SMOKE_READ_KEY", os.environ["SMOKE_SECRET_KEY"])
     request = urllib.request.Request(
-        os.environ["SMOKE_HOST"] + path, headers={"Authorization": "Bearer " + key})
+        os.environ["SMOKE_HOST"] + path, headers={"Authorization": "Bearer " + key}
+    )
     with urllib.request.urlopen(request) as response:
         return response.read()
 
@@ -300,23 +325,30 @@ patches = [a for a in media["answers"] if a["method"] == "PATCH"]
 check(len(posts) == 2, f"media POSTs = {posts}")
 if len(posts) == 2:
     check(posts[0]["body"]["uploadUrl"], f"first media POST = {posts[0]}")
-    check(posts[1]["body"]["uploadUrl"] is None,
-          f"second media POST = {posts[1]}, want uploadUrl null")
+    check(
+        posts[1]["body"]["uploadUrl"] is None,
+        f"second media POST = {posts[1]}, want uploadUrl null",
+    )
     check(posts[0]["body"]["mediaId"] == posts[1]["body"]["mediaId"], f"media ids differ: {posts}")
 check([p["status"] for p in puts] == [200], f"media PUTs = {puts}")
 check([p["status"] for p in patches] == [204], f"media PATCHes = {patches}")
 row = db.execute("SELECT mime_type, size FROM media WHERE sha256 = ?", (sha,)).fetchone()
-check(row is not None and row["size"] == media["size"] and row["mime_type"] == "image/png",
-      f"media row = {dict(row) if row else None}")
+check(
+    row is not None and row["size"] == media["size"] and row["mime_type"] == "image/png",
+    f"media row = {dict(row) if row else None}",
+)
 for trace_id in media["traces"]:
-    refs = db.execute("SELECT COUNT(*) FROM media_refs WHERE sha256 = ? AND trace_id = ?",
-                      (sha, trace_id)).fetchone()[0]
+    refs = db.execute(
+        "SELECT COUNT(*) FROM media_refs WHERE sha256 = ? AND trace_id = ?", (sha, trace_id)
+    ).fetchone()[0]
     check(refs == 1, f"media refs of trace {trace_id} = {refs}")
     for obs in observations(trace_id):
         io = json.loads(api(f"/api/v1/observations/{obs['id']}/io?trace_id={trace_id}"))
         text = json.dumps(io.get("input"))
-        check(sha in text and "@@@langfuseMedia" not in text,
-              f"trace {trace_id} input was not rewritten to the reference: {text[:300]}")
+        check(
+            sha in text and "@@@langfuseMedia" not in text,
+            f"trace {trace_id} input was not rewritten to the reference: {text[:300]}",
+        )
 check(api(f"/api/v1/media/{sha}") == picture, "the media endpoint does not answer the picture")
 
 # --- raw bodies (spec 002 #9) ---------------------------------------------

@@ -58,8 +58,11 @@ def connections(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
         attempts.append(args[1] if isinstance(args[0], socket.socket) else args[:2])
         raise ConnectionRefusedError("no network in this test")
 
-    for owner, name in ((socket.socket, "connect"), (socket.socket, "connect_ex"),
-                        (socket, "getaddrinfo")):
+    for owner, name in (
+        (socket.socket, "connect"),
+        (socket.socket, "connect_ex"),
+        (socket, "getaddrinfo"),
+    ):
         monkeypatch.setattr(owner, name, refuse)
     return attempts
 
