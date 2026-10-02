@@ -259,7 +259,7 @@ func TestErasureScrubsTheRawBatches(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			number := f.count(t, `SELECT number FROM raw_batches WHERE id = ?`, mixed)
+			number := f.count(t, `SELECT number FROM raw_batch_numbers WHERE batch_id = ?`, mixed)
 			for _, row := range rows {
 				if (row.ScrubbedAt != nil) != (row.Number == number) {
 					t.Errorf("batch %d scrubbed_at = %v; only the rewritten one is marked", row.Number, row.ScrubbedAt)

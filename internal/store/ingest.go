@@ -295,25 +295,31 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		if received == 0 {
 			received = arrived
 		}
-		// The batch's number is its project's next (spec 019 #17), from
-		// a counter in the same transaction: the writer is the one
-		// connection that inserts, so two batches cannot take one number,
-		// and a rolled-back window gives its numbers back.
+		// The batch's number is its project's next (spec 019 #17): one past
+		// the higher of the highest it holds and the highest it has seen
+		// deleted, both seeks, and no write but the batch's own rows. The
+		// writer is the one connection that inserts, so two batches cannot
+		// take one number, and a rolled-back window gives its numbers back.
 		var number int64
 		if err := tx.QueryRow(
-			`UPDATE projects SET raw_batches_numbered = raw_batches_numbered + 1
-			 WHERE id = ? RETURNING raw_batches_numbered`, b.ProjectID).Scan(&number); err != nil {
+			`SELECT MAX(COALESCE((SELECT MAX(number) FROM raw_batch_numbers WHERE project_id = ?1), 0),
+			            (SELECT raw_batches_numbered FROM projects WHERE id = ?1)) + 1`, b.ProjectID).Scan(&number); err != nil {
 			return fmt.Errorf("number raw batch: %w", err)
 		}
 		var rawID int64
 		if err := tx.QueryRow(
-			`INSERT INTO raw_batches (project_id, number, received_at, dialect, content_type, content_encoding, body)
-			 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-			b.ProjectID, number, received, b.Raw.Dialect,
+			`INSERT INTO raw_batches (project_id, received_at, dialect, content_type, content_encoding, body)
+			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+			b.ProjectID, received, b.Raw.Dialect,
 			nullString(b.Raw.ContentType), nullString(b.Raw.ContentEncoding),
 			zstdEncoder.EncodeAll(b.Raw.Body, nil),
 		).Scan(&rawID); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO raw_batch_numbers (batch_id, project_id, number, received_at) VALUES (?, ?, ?, ?)`,
+			rawID, b.ProjectID, number, received); err != nil {
+			return fmt.Errorf("number raw batch: %w", err)
 		}
 		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err

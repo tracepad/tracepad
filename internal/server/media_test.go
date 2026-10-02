@@ -21,6 +21,7 @@ import (
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/storetest"
 )
@@ -189,7 +190,7 @@ func TestMediaRawReplay(t *testing.T) {
 			first := h.observationInput(t)
 
 			batches := archived(t, h)
-			rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].Number))
+			rec := h.get(t, "/api/v1/raw/"+rawid.ID(batches[0].Number))
 			expectStatus(t, rec, 200)
 			whole := rec.Body.Bytes()
 			if !bytes.Contains(whole, []byte(base64.StdEncoding.EncodeToString(picture))) {
@@ -405,7 +406,7 @@ func TestLangfuseMediaSpanBeforeUpload(t *testing.T) {
 	}
 
 	batches := archived(t, h)
-	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].Number))
+	rec := h.get(t, "/api/v1/raw/"+rawid.ID(batches[0].Number))
 	expectStatus(t, rec, 200)
 	if !bytes.Contains(rec.Body.Bytes(), []byte(reference)) {
 		t.Error("the raw archive lost the SDK's string; it is kept as sent")

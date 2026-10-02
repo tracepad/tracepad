@@ -22,6 +22,7 @@ import (
 
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -148,7 +149,7 @@ func newTenant(tag, secret, projectID, publicKey string, n int) *tenant {
 		// What the ghost names and nothing holds; a seeded tenant's
 		// are overwritten by what the server gives it.
 		score: fmt.Sprintf("%032x", 0xf000+n), queueItem: fmt.Sprintf("%032x", 0xf100+n),
-		erasure: fmt.Sprintf("%032x", 0xf200+n), raw: strconv.Itoa(9999990 + n),
+		erasure: fmt.Sprintf("%032x", 0xf200+n), raw: "n" + strconv.Itoa(9999990+n),
 	}
 }
 
@@ -537,7 +538,7 @@ func (h *harness) seedTenant(t *testing.T, tn *tenant) {
 	if len(raw.Batches) == 0 {
 		t.Fatalf("%s: no raw batch after ingest", tn.tag)
 	}
-	tn.raw = strconv.FormatInt(raw.Batches[0].ID, 10)
+	tn.raw = raw.Batches[0].ID
 
 	rec = post("POST", "/api/v1/scores", map[string]any{"trace_id": tn.trace, "name": tn.content + "-score", "value": 1},
 		http.StatusCreated)
@@ -1188,7 +1189,15 @@ func TestIsolationMatrix(t *testing.T) {
 	}
 	export(a, testSecret)
 	newest := decodeJSON[rawListing](t, h.get(t, "/api/v1/raw?direction=prev&limit=2")).Batches
-	if len(newest) != 2 || newest[1].ID != newest[0].ID+1 {
+	numbers := make([]int64, 0, 2)
+	for _, row := range newest {
+		number, err := rawid.ParseID(row.ID)
+		if err != nil {
+			t.Fatalf("A's batch id %q: %v", row.ID, err)
+		}
+		numbers = append(numbers, number)
+	}
+	if len(numbers) != 2 || numbers[1] != numbers[0]+1 {
 		t.Errorf("A's two newest batches = %+v, want consecutive ids: B's three exports between them are no gap", newest)
 	}
 

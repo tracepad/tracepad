@@ -74,15 +74,18 @@ type RawFilter struct {
 // rawConditions builds everything the filter says about *which* batches match,
 // cursor excluded: the listing adds a keyset and a page, the count adds
 // neither (the shape of spec 009 #4).
+//
+// Every condition is on raw_batch_numbers, aliased `n`: the numbers and the
+// arrival times are there, in the index the listing pages on (spec 019 #17).
 func rawConditions(projectID string, filter RawFilter) ([]string, []any) {
-	where := []string{"project_id = ?"}
+	where := []string{"n.project_id = ?"}
 	args := []any{projectID}
 	if filter.Since != nil {
-		where = append(where, "received_at >= ?")
+		where = append(where, "n.received_at >= ?")
 		args = append(args, *filter.Since)
 	}
 	if filter.Until != nil {
-		where = append(where, "received_at < ?")
+		where = append(where, "n.received_at < ?")
 		args = append(args, *filter.Until)
 	}
 	return where, args
@@ -107,14 +110,15 @@ func rawQuery(projectID string, filter RawFilter) (string, []any) {
 		// A row-value comparison rather than the equivalent disjunction:
 		// SQLite seeks straight to the cursor with the former (spec 003
 		// #25).
-		where = append(where, "(received_at, number) "+comparison+" (?, ?)")
+		where = append(where, "(n.received_at, n.number) "+comparison+" (?, ?)")
 		args = append(args, filter.After.ReceivedAt, filter.After.Number)
 	}
 	args = append(args, filter.Limit)
-	return `SELECT number, received_at, dialect, content_type, content_encoding, scrubbed_at,
-	               substr(body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
-	 FROM raw_batches WHERE ` + strings.Join(where, " AND ") + `
-	 ORDER BY received_at ` + order + `, number ` + order + ` LIMIT ?`, args
+	return `SELECT n.number, n.received_at, b.dialect, b.content_type, b.content_encoding, b.scrubbed_at,
+	               substr(b.body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
+	 FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+	 WHERE ` + strings.Join(where, " AND ") + `
+	 ORDER BY n.received_at ` + order + `, n.number ` + order + ` LIMIT ?`, args
 }
 
 // RawBatches lists a project's raw batches, oldest first.
@@ -179,7 +183,7 @@ func (s *Store) CountRawBatches(ctx context.Context, projectID string, filter Ra
 	args = append(args, cap)
 	var count int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM (SELECT 1 FROM raw_batches WHERE `+
+		`SELECT COUNT(*) FROM (SELECT 1 FROM raw_batch_numbers n WHERE `+
 			strings.Join(where, " AND ")+` LIMIT ?)`, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count raw batches: %w", err)
 	}
@@ -213,8 +217,9 @@ func (s *Store) RawBatchBody(ctx context.Context, projectID string, number int64
 		stored               []byte
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT number, received_at, dialect, content_type, scrubbed_at, body
-		   FROM raw_batches WHERE project_id = ? AND number = ?`, projectID, number).
+		`SELECT n.number, n.received_at, b.dialect, b.content_type, b.scrubbed_at, b.body
+		   FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+		  WHERE n.project_id = ? AND n.number = ?`, projectID, number).
 		Scan(&out.Number, &out.ReceivedAt, &dialect, &contentType, &scrubbed, &stored)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -346,7 +351,8 @@ func decodedSize(prefix []byte) (int64, bool) {
 func (s *Store) rawBodySize(ctx context.Context, projectID string, number int64) (int64, error) {
 	var stored []byte
 	err := s.db.QueryRowContext(ctx,
-		`SELECT body FROM raw_batches WHERE project_id = ? AND number = ?`, projectID, number).Scan(&stored)
+		`SELECT b.body FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+		  WHERE n.project_id = ? AND n.number = ?`, projectID, number).Scan(&stored)
 	if err == sql.ErrNoRows {
 		// Swept between the page and this read: a size of zero is wrong
 		// by less than an error would be, and the body endpoint answers

@@ -16,6 +16,7 @@ import (
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -390,7 +391,7 @@ func TestRawBodyMediaAreReadInsideTheGate(t *testing.T) {
 	}
 	t.Cleanup(func() { mediaFor = previous })
 
-	rec := h.get(t, "/api/v1/raw/"+itoa(batches[0].Number))
+	rec := h.get(t, "/api/v1/raw/"+rawid.ID(batches[0].Number))
 	expectError(t, rec, 503, "the read took longer than 200ms and was stopped")
 }
 

@@ -27,7 +27,7 @@ func TestTheRawArchiveIsAnEditorRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	viewer, editor, owner := h.viewer(t), h.editor(t), h.owner(t)
-	for _, path := range []string{"/api/v1/raw", "/api/v1/raw/1"} {
+	for _, path := range []string{"/api/v1/raw", "/api/v1/raw/n1"} {
 		expectError(t, h.call(t, "GET", path, nil, asSession(viewer), inProject(h.project.ID)),
 			http.StatusForbidden, "")
 		expectStatus(t, h.call(t, "GET", path, nil), http.StatusOK) // the project key

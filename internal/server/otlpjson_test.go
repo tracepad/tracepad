@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -251,7 +251,7 @@ func rawPath(t *testing.T, h *harness) string {
 	if len(batches) != 1 {
 		t.Fatalf("raw batches = %d, want exactly one", len(batches))
 	}
-	return fmt.Sprintf("/api/v1/raw/%d", batches[0].Number)
+	return "/api/v1/raw/" + rawid.ID(batches[0].Number)
 }
 
 func readAll(t *testing.T, response *http.Response) ([]byte, error) {

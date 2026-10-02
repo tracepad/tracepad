@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -83,7 +83,7 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 	filter.Backward = backward
 	raw := values.Get("cursor")
 	if raw != "" {
-		cursor, err := decodeRawCursor(raw)
+		cursor, err := decodeRawCursor(raw, backward)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -109,7 +109,7 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	batches, prev, next := trimPage(batches, limit, backward, raw,
 		func(row *store.RawBatchRow) string {
-			return encodeRawCursor(row.ReceivedAt, row.Number)
+			return rawid.Cursor(row.ReceivedAt, row.Number)
 		})
 
 	rows := make([]object, 0, len(batches))
@@ -118,7 +118,7 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 			// The batch's number within the project, not the table's
 			// rowid: one sequence for every tenant told each how much
 			// the others sent, and when (spec 019 #17).
-			put("id", row.Number).
+			put("id", rawid.ID(row.Number)).
 			put("received_at", formatTime(row.ReceivedAt)).
 			put("dialect", row.Dialect).
 			put("content_type", row.ContentType).
@@ -158,22 +158,28 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw := r.PathValue("id")
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
+	// The id is the batch's number within this project, tagged (spec 019
+	// #17): there is no other project's batch it could name, and an id from
+	// before the numbering — a bare integer — is refused rather than read as
+	// whichever batch now has that number.
+	id, err := rawid.ParseID(raw)
+	var legacy *rawid.LegacyID
+	switch {
+	case errors.As(err, &legacy):
+		writeError(w, http.StatusBadRequest, legacy.Error())
+		return
+	case err != nil:
 		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("raw batch id must be a positive whole number, got %q", raw))
+			fmt.Sprintf("a raw batch id is n and its number, as the listing gives it; got %q", raw))
 		return
 	}
-
-	// The id is the batch's number within this project (spec 019 #17), so
-	// there is no other project's batch it could name.
 	batch, err := s.store.RawBatchBody(r.Context(), project.ID, id)
 	if err != nil {
 		readFailed(w, r, "failed to read the raw batch", err)
 		return
 	}
 	if batch == nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("raw batch %d not found", id))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("raw batch %s not found", rawid.ID(id)))
 		return
 	}
 
@@ -226,56 +232,35 @@ func rawFilter(values url.Values) (store.RawFilter, error) {
 	return filter, nil
 }
 
-// rawCursorTag opens every archive cursor since batches were numbered within
-// their project (spec 019 #17). A cursor without it is one from before, whose
-// second half is the table's rowid — a position this server can no longer
-// name — and it is told so rather than read as a number.
-const rawCursorTag = "n"
-
-// encodeRawCursor is the `(received_at, number)` keyset of one batch. The CLI
-// rebuilds it for a resume point, so its grammar is written down there too.
-func encodeRawCursor(receivedAt, number int64) string {
-	return encodeCursor(rawCursorTag, strconv.FormatInt(receivedAt, 10), strconv.FormatInt(number, 10))
-}
-
-// decodeRawCursor restores the `(received_at, number)` keyset.
-func decodeRawCursor(value string) (*store.RawCursor, error) {
-	parts, err := decodeCursor(value, 3)
-	if err != nil || parts[0] != rawCursorTag {
-		return nil, legacyRawCursor(value)
+// decodeRawCursor restores the `(received_at, number)` keyset (spec 019 #17).
+func decodeRawCursor(value string, backward bool) (*store.RawCursor, error) {
+	receivedAt, number, err := rawid.ParseCursor(value)
+	var legacy *rawid.LegacyCursor
+	if errors.As(err, &legacy) {
+		return nil, errors.New(legacy.Error() + "; " + resumeHint(legacy.ReceivedAt, backward))
 	}
-	receivedAt, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return nil, errors.New("invalid cursor")
-	}
-	number, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return nil, errors.New("invalid cursor")
+		return nil, err
 	}
 	return &store.RawCursor{ReceivedAt: receivedAt, Number: number}, nil
 }
 
-// legacyRawCursor answers a cursor that is not this grammar. One from before
-// spec 019 #17 — `received_at:rowid` — names its batch by an id that no longer
-// leaves the server, so it cannot be translated without taking the other
-// tenants' sequence back into the answer; it is told where to start again
-// instead, from the instant the cursor was at. `since` is inclusive, so the
-// batches of that instant are sent again, which a receiver that upserts by
-// span id takes as it took them the first time (#6). Anything else is just
-// not a cursor.
-func legacyRawCursor(value string) error {
-	parts, err := decodeCursor(value, 2)
-	if err != nil {
-		return errors.New("invalid cursor")
+// resumeHint is where a reader holding a cursor from before the numbering
+// starts again, from the instant the cursor was at, in the direction it was
+// walking. It is not translated: its second half is a rowid, and translating
+// it would take the other tenants' sequence back as input — and an older CLI
+// rebuilds its resume cursor in the old grammar from the new numbers, which a
+// translation would read as a rowid and resume somewhere else without a word.
+// Both windows include that instant, so the batches received at it are sent
+// again, which a receiver that upserts by span id takes as it took them the
+// first time (#6).
+func resumeHint(receivedAt int64, backward bool) string {
+	if backward {
+		return "list again with direction=prev&until=" + formatTime(receivedAt+1) +
+			", which repeats the batches received at " + formatTime(receivedAt)
 	}
-	receivedAt, errAt := strconv.ParseInt(parts[0], 10, 64)
-	_, errID := strconv.ParseInt(parts[1], 10, 64)
-	if errAt != nil || errID != nil {
-		return errors.New("invalid cursor")
-	}
-	return fmt.Errorf("this cursor is from before raw batches were numbered within their project, "+
-		"and no longer names a batch; list again with since=%s, which repeats the batches received at that instant",
-		formatTime(receivedAt))
+	return "list again with since=" + formatTime(receivedAt) +
+		", which repeats the batches received at that instant"
 }
 
 // rawBlock renders what `GET /api/v1/system` says about the archive

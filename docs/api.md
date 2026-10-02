@@ -675,10 +675,10 @@ curl … "http://localhost:4318/api/v1/raw?limit=2&count=1"
 ```json
 {
   "batches": [
-    {"id": 1, "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
+    {"id": "n1", "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
      "content_type": "application/x-protobuf", "content_encoding": "gzip",
      "size_bytes": 1274, "scrubbed_at": null},
-    {"id": 2, "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
+    {"id": "n2", "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
      "content_type": "application/json", "content_encoding": "",
      "size_bytes": 3810, "scrubbed_at": "2026-09-26T10:02:11Z"}
   ],
@@ -701,15 +701,21 @@ towards older ones, and rows come back oldest first either way.
 | `since`, `until` | RFC 3339, on `received_at`. Half-open: `since` inclusive, `until` exclusive. |
 | `limit` | 1–500, default 100. |
 | `cursor`, `direction` | Keyset over `(received_at, id)`. |
-
-`id` is the batch's **number within your project**: 1, 2, 3… in the order your
-batches were stored. It is never reused, and other projects' batches are no gaps
-in it. A gap is a batch of yours that retention or an erasure took. A cursor
-from before this numbering (servers before schema 0035) is refused with a `400`
-that names the `since` to list again from. Re-sending the batches of that one
-instant is safe, because receivers upsert by span id. An id written down before
-the upgrade, in a manifest say, now names your batch of that number.
 | `count` | Adds `total` and `total_capped`, counted up to 100000 — high, because this count answers "how much is this export about to send". |
+
+`id` is `n` and the batch's **number within your project**: `n1`, `n2`, `n3`…
+in the order your batches were stored. It is never reused, and other projects'
+batches are no gaps in it. A gap is a batch of yours that retention or an
+erasure took.
+
+Servers before schema 0035 named a batch by a bare integer shared by every
+project. Such an id is refused with a `400` rather than read as one of your
+batches, so an id written down before the upgrade — in a manifest, say — never
+quietly fetches a different body; list the archive again for the new ids. A
+cursor from then is refused too, and the `400` says where to list again from:
+`since=<the cursor's instant>` paging forward, or `direction=prev&until=<just
+after it>` paging back. Either one sends again the batches received at that
+instant, which is safe because receivers upsert by span id.
 
 `size_bytes` is the **decoded** length, which is what a fetch of the body
 returns; the row itself is compressed and smaller. `content_type` is what the
@@ -727,7 +733,7 @@ and guessing which was meant is worse than asking.
 ### One body
 
 ```sh
-curl … -o batch.pb "http://localhost:4318/api/v1/raw/1"
+curl … -o batch.pb "http://localhost:4318/api/v1/raw/n1"
 ```
 
 The bytes the client posted, with gzip already removed — the stored body is the

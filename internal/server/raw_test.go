@@ -13,6 +13,7 @@ import (
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -22,7 +23,7 @@ import (
 
 // rawRow is one row of the listing as a caller reads it.
 type rawRow struct {
-	ID              int64  `json:"id"`
+	ID              string `json:"id"`
 	ReceivedAt      string `json:"received_at"`
 	Dialect         string `json:"dialect"`
 	ContentType     string `json:"content_type"`
@@ -47,9 +48,9 @@ func (h *harness) listRaw(t *testing.T, query string) rawListing {
 
 // seedRaw writes n batches a millisecond apart, so the keyset has both columns
 // to work with and the window filters have boundaries to land on.
-func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType string) []int64 {
+func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType string) []string {
 	t.Helper()
-	ids := make([]int64, 0, n)
+	numbers := make([]int64, 0, n)
 	for i := range n {
 		body := []byte(strings.Repeat(fmt.Sprintf("batch-%03d;", i), 40))
 		err := h.writer.Submit(t.Context(), &store.IngestBatch{
@@ -70,13 +71,17 @@ func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType stri
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		ids = append(ids, row.Number)
+		numbers = append(numbers, row.Number)
 	}
 	// Sorted here rather than trusted from the listing: the numbers are the
 	// project's own count and the batches were written in arrival order, so
 	// ascending *is* arrival order — and reading it off the listing would
 	// make every order assertion below agree with whatever the listing did.
-	slices.Sort(ids)
+	slices.Sort(numbers)
+	ids := make([]string, 0, n)
+	for _, number := range numbers {
+		ids = append(ids, rawid.ID(number))
+	}
 	return ids
 }
 
@@ -95,7 +100,7 @@ func TestRawListingPagesForward(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	ids := seedRaw(t, h, h.project.ID, 7, "")
 
-	var walked []int64
+	var walked []string
 	var arrivals []string
 	cursor := ""
 	for page := range 4 {
@@ -229,23 +234,23 @@ func TestRawIsScopedToTheProject(t *testing.T) {
 	ingest(h.project.ID, "mine-2")
 
 	listing := h.listRaw(t, "")
-	var ids []int64
+	var ids []string
 	for _, row := range listing.Batches {
 		ids = append(ids, row.ID)
 	}
-	if !slices.Equal(ids, []int64{1, 2}) {
+	if !slices.Equal(ids, []string{"n1", "n2"}) {
 		t.Fatalf("ids = %v, want 1 2: only this project's two, and the other's three are no gap", ids)
 	}
-	for id, want := range map[int64]string{1: "mine-1", 2: "mine-2"} {
-		rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", id))
+	for id, want := range map[string]string{"n1": "mine-1", "n2": "mine-2"} {
+		rec := h.get(t, "/api/v1/raw/"+id)
 		expectStatus(t, rec, 200)
 		if got := rec.Body.String(); got != want {
-			t.Errorf("batch %d = %q, want this project's %q", id, got, want)
+			t.Errorf("batch %s = %q, want this project's %q", id, got, want)
 		}
 	}
 	// The other project's third batch has a number this one has not
 	// reached: not found, as a number never issued is.
-	expectError(t, h.get(t, "/api/v1/raw/3"), 404, "raw batch 3 not found")
+	expectError(t, h.get(t, "/api/v1/raw/n3"), 404, "raw batch n3 not found")
 }
 
 // The body comes back as the client sent it, under the type it was sent in,
@@ -272,7 +277,7 @@ func TestRawBodyIsWhatArrived(t *testing.T) {
 		t.Errorf("dialect = %q", row.Dialect)
 	}
 
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", row.ID))
+	rec := h.get(t, "/api/v1/raw/"+row.ID)
 	expectStatus(t, rec, 200)
 	if !bytes.Equal(rec.Body.Bytes(), sent) {
 		t.Error("the body endpoint did not answer the bytes the client sent")
@@ -309,7 +314,7 @@ func TestRawBodyIsExemptFromTheBudget(t *testing.T) {
 	}
 
 	listing := h.listRaw(t, "")
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	rec := h.get(t, "/api/v1/raw/"+listing.Batches[0].ID)
 	expectStatus(t, rec, 200)
 	if rec.Body.Len() != len(body) {
 		t.Errorf("body = %d bytes, want the whole %d", rec.Body.Len(), len(body))
@@ -328,7 +333,7 @@ func TestRawContentTypeDefaultsToProtobuf(t *testing.T) {
 	if got := listing.Batches[0].ContentType; got != "application/x-protobuf" {
 		t.Errorf("content_type of a pre-0012 row = %q, want the protobuf encoding", got)
 	}
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	rec := h.get(t, "/api/v1/raw/"+listing.Batches[0].ID)
 	expectStatus(t, rec, 200)
 	if got := rec.Header().Get("Content-Type"); got != "application/x-protobuf" {
 		t.Errorf("Content-Type = %q", got)
@@ -343,10 +348,14 @@ func TestRawBodyRefusals(t *testing.T) {
 		path   string
 		status int
 	}{
-		{"/api/v1/raw/999999", 404},
+		{"/api/v1/raw/n999999", 404},
 		{"/api/v1/raw/nope", 400},
-		{"/api/v1/raw/0", 400},
-		{"/api/v1/raw/-1", 400},
+		{"/api/v1/raw/n0", 400},
+		{"/api/v1/raw/n-1", 400},
+		{"/api/v1/raw/n01", 400},
+		// A bare integer is an id from before the numbering (spec 019
+		// #17): refused, never read as this project's batch of that number.
+		{"/api/v1/raw/1", 400},
 	} {
 		if rec := h.get(t, c.path); rec.Code != c.status {
 			t.Errorf("GET %s = %d, want %d (%s)", c.path, rec.Code, c.status, rec.Body)
@@ -445,18 +454,32 @@ func TestRawRefusesACursorFromBeforeTheNumbers(t *testing.T) {
 	at := seedBase + ms
 
 	old := encodeCursor(strconv.FormatInt(at, 10), "2")
-	for _, direction := range []string{"", "&direction=prev"} {
-		rec := h.get(t, "/api/v1/raw?cursor="+old+direction)
+	instant := func(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339Nano) }
+	// Each direction is told the window that walks the same way from the
+	// cursor's instant, and doing what it says lands on the cursor's batch.
+	for _, c := range []struct {
+		direction, hint, follow string
+		want                    []string
+	}{
+		{"", "since=" + instant(at), "?since=" + instant(at), []string{"n2", "n3"}},
+		{"&direction=prev", "direction=prev&until=" + instant(at+1),
+			"?direction=prev&until=" + instant(at+1), []string{"n1", "n2"}},
+	} {
+		rec := h.get(t, "/api/v1/raw?cursor="+old+c.direction)
 		expectError(t, rec, http.StatusBadRequest, "from before raw batches were numbered within their project")
-		since := time.Unix(0, at).UTC().Format(time.RFC3339Nano)
-		if !strings.Contains(rec.Body.String(), "since="+since) {
-			t.Errorf("the refusal does not say where to start again (since=%s): %s", since, rec.Body)
+		refusal := decodeJSON[struct {
+			Error string `json:"error"`
+		}](t, rec).Error
+		if !strings.Contains(refusal, c.hint) {
+			t.Errorf("direction %q: the refusal does not say %s: %s", c.direction, c.hint, refusal)
 		}
-	}
-	// What it says to do works, and starts at the cursor's batch.
-	listing := h.listRaw(t, "?since="+time.Unix(0, at).UTC().Format(time.RFC3339Nano))
-	if len(listing.Batches) != 2 || listing.Batches[0].ID != 2 {
-		t.Errorf("since the old cursor's instant = %+v, want batches 2 and 3", listing.Batches)
+		var got []string
+		for _, row := range h.listRaw(t, c.follow).Batches {
+			got = append(got, row.ID)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("direction %q: following the hint = %v, want %v", c.direction, got, c.want)
+		}
 	}
 	// Anything else that is not this grammar is just not a cursor.
 	for _, cursor := range []string{"nonsense", encodeCursor("n", "1"), encodeCursor("x", "1", "2"), encodeCursor("a", "b")} {

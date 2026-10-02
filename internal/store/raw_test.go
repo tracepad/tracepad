@@ -30,8 +30,12 @@ func TestRawContentTypeOfAPreMigrationRow(t *testing.T) {
 	s, project := readStore(t)
 	body := zstdEncoder.EncodeAll([]byte(strings.Repeat("pre-0012;", 100)), nil)
 	if _, err := s.db.Exec(
-		`INSERT INTO raw_batches (project_id, number, received_at, dialect, content_encoding, body)
-		 VALUES (?, 1, ?, ?, ?, ?)`, project.ID, int64(1), "langfuse", nil, body); err != nil {
+		`INSERT INTO raw_batches (id, project_id, received_at, dialect, content_encoding, body)
+		 VALUES (1, ?, ?, ?, ?, ?)`, project.ID, int64(1), "langfuse", nil, body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO raw_batch_numbers (batch_id, project_id, number, received_at)
+		VALUES (1, ?, 1, 1)`, project.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,7 +130,7 @@ func TestRawListingSeeksOnItsIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		joined := strings.Join(plan, "\n")
-		if !strings.Contains(joined, "idx_raw_batches_received") {
+		if !strings.Contains(joined, "idx_raw_batch_numbers_received") {
 			t.Errorf("backward=%v: the plan does not use the arrival index:\n%s", backward, joined)
 		}
 		if strings.Contains(joined, "SCAN raw_batches") {
@@ -179,8 +183,16 @@ func TestRawBatchesAreNumberedWithinTheirProject(t *testing.T) {
 
 	// The newest batch goes, as the sweep or an erasure would take it; the
 	// next one does not reuse its number.
-	if _, err := s.db.Exec(`DELETE FROM raw_batches WHERE project_id = ? AND number = 3`, mine.ID); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM raw_batches WHERE id =
+		(SELECT batch_id FROM raw_batch_numbers WHERE project_id = ? AND number = 3)`, mine.ID); err != nil {
 		t.Fatal(err)
+	}
+	// Its number goes with it: the numbers are a table of their own, and
+	// a batch deleted by any path takes its row there by cascade.
+	var orphans int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM raw_batch_numbers n
+		WHERE NOT EXISTS (SELECT 1 FROM raw_batches b WHERE b.id = n.batch_id)`).Scan(&orphans); err != nil || orphans != 0 {
+		t.Errorf("numbers outliving their batch = %d (%v)", orphans, err)
 	}
 	seedRawBatch(t, s, mine.ID, &RawBatch{ReceivedAt: 10, Body: []byte("x")})
 	if got := numbers(mine.ID); !slices.Equal(got, []int64{1, 2, 4}) {
@@ -210,11 +222,7 @@ func TestMigration0035NumbersTheArchiveWithinEachProject(t *testing.T) {
 	// The table as the previous release left it: one rowid sequence for
 	// everyone, a gap where the sweep took a batch, and a batch that arrived
 	// late — its received_at before the one stored ahead of it.
-	exec(`DROP TRIGGER raw_batches_need_a_number`)
-	exec(`DROP INDEX idx_raw_batches_number`)
-	exec(`DROP INDEX idx_raw_batches_received`)
-	exec(`CREATE INDEX idx_raw_batches_received ON raw_batches(project_id, received_at)`)
-	exec(`ALTER TABLE raw_batches DROP COLUMN number`)
+	exec(`DROP TABLE raw_batch_numbers`)
 	exec(`ALTER TABLE projects DROP COLUMN raw_batches_numbered`)
 	exec(`DELETE FROM schema_migrations WHERE filename = '0035_raw_batch_numbers.sql'`)
 	for _, row := range []struct {
@@ -237,7 +245,8 @@ func TestMigration0035NumbersTheArchiveWithinEachProject(t *testing.T) {
 	type numbered struct{ id, number int64 }
 	read := func(projectID string) []numbered {
 		t.Helper()
-		rows, err := upgraded.db.Query(`SELECT id, number FROM raw_batches WHERE project_id = ? ORDER BY id`, projectID)
+		rows, err := upgraded.db.Query(`SELECT batch_id, number FROM raw_batch_numbers
+			WHERE project_id = ? ORDER BY batch_id`, projectID)
 		if err != nil {
 			t.Fatal(err)
 		}

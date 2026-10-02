@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
@@ -113,6 +114,22 @@ func (r *run) export(ctx context.Context, args []string) error {
 	if after == "" && wasGiven(fs, "after") {
 		return usageErrorf("--after needs the cursor the previous run printed; it was passed empty")
 	}
+	// Read here, so a dry run that never sends it refuses it as the run
+	// would (spec 019 #17): a cursor from before batches were numbered within
+	// their project names no batch, and the window to use instead is the
+	// instant it was at.
+	if after != "" {
+		_, _, err := rawid.ParseCursor(after)
+		var legacy *rawid.LegacyCursor
+		switch {
+		case errors.As(err, &legacy):
+			return usageErrorf("%s; start again with --since %s, which sends the batches received at that instant again "+
+				"(with --dir, into a new directory)",
+				legacy.Error(), time.Unix(0, legacy.ReceivedAt).UTC().Format(time.RFC3339Nano))
+		case err != nil:
+			return usageErrorf("--after %q is not a cursor an export printed", after)
+		}
+	}
 
 	window, err := r.exportWindow(since, until)
 	if err != nil {
@@ -180,7 +197,8 @@ func (r *run) exportWindow(since, until string) (exportWindow, error) {
 // rawBatchRow is one row of `GET /api/v1/raw`, and one line of a `--dir`
 // manifest: the same shape, because the manifest is the listing.
 type rawBatchRow struct {
-	ID              int64  `json:"id"`
+	// ID is `n` and the batch's number within its project (spec 019 #17).
+	ID              string `json:"id"`
 	ReceivedAt      string `json:"received_at"`
 	Dialect         string `json:"dialect"`
 	ContentType     string `json:"content_type"`
@@ -291,7 +309,7 @@ func (r *run) replay(ctx context.Context, sink destination, window exportWindow,
 // replayOne fetches one body and sends it.
 func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 	summary *exportSummary) error {
-	body, _, err := r.api.Fetch(ctx, fmt.Sprintf("/api/v1/raw/%d", row.ID))
+	body, _, err := r.api.Fetch(ctx, "/api/v1/raw/"+url.PathEscape(row.ID))
 	if err != nil {
 		var refusal *client.Error
 		if errors.As(err, &refusal) && refusal.Status == 404 {
@@ -301,7 +319,7 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 			// is named in the summary (spec 019, edge cases).
 			summary.Swept++
 			fmt.Fprintf(r.opt.Stderr,
-				"tracepad: batch %d was swept while this export was running; skipping it\n", row.ID)
+				"tracepad: batch %s was swept while this export was running; skipping it\n", termsafe.String(row.ID))
 			return nil
 		}
 		return err
@@ -320,7 +338,7 @@ func (r *run) replayOne(ctx context.Context, sink destination, row rawBatchRow,
 		// its own mapping, not a failure of this transfer: it has the
 		// bytes. Counted and passed on, never retried (spec 019 #6).
 		summary.PartialSuccess++
-		fmt.Fprintf(r.opt.Stderr, "tracepad: batch %d: the receiver reported %s\n", row.ID, termsafe.String(partial))
+		fmt.Fprintf(r.opt.Stderr, "tracepad: batch %s: the receiver reported %s\n", termsafe.String(row.ID), termsafe.String(partial))
 	}
 
 	summary.Sent++
@@ -349,7 +367,11 @@ func cursorOf(row rawBatchRow) string {
 	if err != nil {
 		return ""
 	}
-	return encodeRawCursor(at.UnixNano(), row.ID)
+	number, err := rawid.ParseID(row.ID)
+	if err != nil {
+		return ""
+	}
+	return rawid.Cursor(at.UnixNano(), number)
 }
 
 // exportSummary is what the command answers with (spec 019, CLI contract).
@@ -385,7 +407,7 @@ type exportSummary struct {
 }
 
 type stoppedAt struct {
-	ID      int64  `json:"id"`
+	ID      string `json:"id"`
 	Status  int    `json:"status"`
 	Message string `json:"message"`
 }
@@ -452,10 +474,10 @@ func (r *run) reportExport(summary exportSummary, dryRun bool) {
 		// transport error, or a directory that could not be written —
 		// and printing "0" for it would read as a status code.
 		if stop.Status == 0 {
-			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %s\n", stop.ID, termsafe.String(stop.Message))
+			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %s: %s\n", termsafe.String(stop.ID), termsafe.String(stop.Message))
 		} else {
-			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %d: %d %s\n",
-				stop.ID, stop.Status, termsafe.String(stop.Message))
+			fmt.Fprintf(r.opt.Stdout, "  stopped at batch %s: %d %s\n",
+				termsafe.String(stop.ID), stop.Status, termsafe.String(stop.Message))
 		}
 	}
 	if summary.LastCursor != "" {

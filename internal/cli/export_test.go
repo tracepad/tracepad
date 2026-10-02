@@ -21,6 +21,7 @@ import (
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -802,10 +803,10 @@ func TestExportToADirectoryResumes(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("manifest rows = %d, want all four exactly once", len(rows))
 	}
-	seen := map[int64]bool{}
+	seen := map[string]bool{}
 	for _, row := range rows {
 		if seen[row.ID] {
-			t.Errorf("batch %d appears in the manifest twice", row.ID)
+			t.Errorf("batch %s appears in the manifest twice", row.ID)
 		}
 		seen[row.ID] = true
 	}
@@ -970,7 +971,7 @@ func TestExportToADirectoryLeavesNothingWhenItSendsNothing(t *testing.T) {
 func TestExportCursorBeforeSinceIsAUsageError(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 3)
-	cursor := encodeRawCursor(seedBase-day, 1)
+	cursor := rawid.Cursor(seedBase-day, 1)
 
 	got := h.run(t.Context(), false, "export", "--otlp", "--dir", t.TempDir(),
 		"--after", cursor, "--since", instantAfter(1))
@@ -1240,4 +1241,54 @@ func ungzip(t *testing.T, body []byte) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// A cursor from before batches were numbered within their project is refused
+// before anything is asked of the server, by a dry run as by a run, with the
+// instant to start again from (spec 019 #17).
+func TestExportRefusesACursorFromBeforeTheNumbers(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	old := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d:7", seedBase)))
+	since := time.Unix(0, seedBase).UTC().Format(time.RFC3339Nano)
+	for _, args := range [][]string{
+		{"export", "--otlp", "--dir", t.TempDir(), "--after", old, "--dry-run"},
+		{"export", "--otlp", "--dir", t.TempDir(), "--after", old},
+	} {
+		got := h.run(t.Context(), false, args...)
+		if got.code != ExitUsage || !strings.Contains(got.stderr, "--since "+since) {
+			t.Errorf("%v: exit %d, stderr %q; want a usage refusal naming --since %s", args, got.code, got.stderr, since)
+		}
+	}
+}
+
+// A directory an export filled before the numbering keeps its files: a batch
+// of this release is named `…-n1.pb`, which no file named by an id from
+// before — `…-1.pb` — can be, so a resume into it never replaces one
+// (spec 019 #17).
+func TestExportIntoAPreNumberingDirectoryReplacesNothing(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	dir := t.TempDir()
+	at := time.Unix(0, seedBase).UTC()
+	old := filepath.Join(dir, fmt.Sprintf("%013d-1.pb", at.UnixMilli()))
+	if err := os.WriteFile(old, []byte("a batch of the old export"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.jsonl"), []byte(`{"id":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--after", rawid.Cursor(seedBase-1, 0))
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if content, err := os.ReadFile(old); err != nil || string(content) != "a batch of the old export" {
+		t.Errorf("the old export's file = %q, %v; want it untouched", content, err)
+	}
+	for _, number := range []int{1, 2} {
+		name := fmt.Sprintf("%013d-n%d.pb", at.Add(time.Duration(number-1)*time.Millisecond).UnixMilli(), number)
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("batch n%d was not written as %s: %v", number, name, err)
+		}
+	}
 }
