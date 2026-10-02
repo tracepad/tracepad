@@ -6,6 +6,12 @@
 # Our own package is not here: `run.sh` installs it from `sdk/python` in this
 # checkout (`pip install -e`), because the drift it detects is between the
 # package and the mapper of the same commit (spec 017 #12).
-opentelemetry-sdk==1.44.0
-opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-http==1.45.0
 langfuse==4.14.5
+# The launcher the docs recommend for "nothing but environment" (README,
+# quickstart). Its version is tied to the API's: the distro of a release pins
+# `opentelemetry-api` to that release, so the three opentelemetry lines move in
+# one edit (1.45.0 beside 0.66b0 today). Dependabot does not read this file, so
+# nothing proposes a half-move: a bump here is by hand, deliberate, and whole.
+opentelemetry-distro==0.66b0

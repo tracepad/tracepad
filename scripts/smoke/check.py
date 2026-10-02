@@ -25,7 +25,9 @@ import urllib.request
     tracepad_go_trace_id_file,
     tracepad_js_trace_id_file,
     langfuse_media_file,
-) = sys.argv[1:8]
+    env_only_readme_trace_id_file,
+    env_only_quickstart_trace_id_file,
+) = sys.argv[1:10]
 
 failures = []
 
@@ -101,6 +103,32 @@ if generations:
     check(generation["provided_cost"] == 0, "otel generation must not claim a cost")
     check(payload(generation["input_id"]) is not None, "otel generation has no input")
     check(payload(generation["output_id"]) is not None, "otel generation has no output")
+
+# --- an application that configures nothing: the docs' environment recipe ---
+# No SDK code in the script and no attribute that is not GenAI semconv, so a
+# trace of the right shape here means the three variables the README and the
+# quickstart print were, by themselves, enough to get a span into the store.
+for label, id_file in (
+    ("README", env_only_readme_trace_id_file),
+    ("quickstart", env_only_quickstart_trace_id_file),
+):
+    row = db.execute("SELECT * FROM traces WHERE id = ?", (read_id(id_file),)).fetchone()
+    if row is None:
+        failures.append(f"env-only ({label}): no trace arrived; the recipe no longer works")
+        continue
+    tag = f"env-only ({label})"
+    check(row["name"] == "env-only-request", f"{tag} trace name = {row['name']!r}")
+    check(row["user_id"] == "smoke-user", f"{tag} user_id = {row['user_id']!r}")
+    check(row["session_id"] == "smoke-session", f"{tag} session_id = {row['session_id']!r}")
+    check(row["observation_count"] == 2, f"{tag} observation_count = {row['observation_count']}")
+    generations = [s for s in observations(row["id"]) if s["type"] == "generation"]
+    check(len(generations) == 1, f"{tag} generations = {len(generations)}")
+    if generations:
+        check(generations[0]["model"] == "gpt-4o-mini",
+              f"{tag} generation model = {generations[0]['model']!r}")
+        usage = json.loads(generations[0]["usage"] or "{}")
+        check(usage.get("input_tokens") == 11 and usage.get("output_tokens") == 3,
+              f"{tag} usage = {usage}")
 
 # --- Langfuse SDK, langfuse.* dialect -------------------------------------
 langfuse_id = read_id(langfuse_trace_id_file)
@@ -309,4 +337,4 @@ if failures:
         print(f"  - {failure}")
     raise SystemExit(1)
 
-print(f"smoke OK: 6 exports, {len(raw)} raw batches stored, one picture through the media channel")
+print(f"smoke OK: 8 exports, {len(raw)} raw batches stored, one picture through the media channel")

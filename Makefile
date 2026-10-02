@@ -16,10 +16,10 @@ help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
 build: ui ## Build the binary, web interface included, into ./bin
-	go build -tags ui -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
+	go build -trimpath -tags ui -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
 
 build-server: ## Build without the web interface (no Node required; serves the stub page)
-	go build -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
+	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/$(BINARY) ./cmd/tracepad
 
 dev: ## Run the server locally, mirroring output to .dev.log
 	go run ./cmd/tracepad serve 2>&1 | tee .dev.log

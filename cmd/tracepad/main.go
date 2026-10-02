@@ -26,7 +26,9 @@ import (
 )
 
 // version is stamped by the release build (-ldflags "-X main.version=...").
-var version = "dev"
+// Left empty, currentVersion decides: `dev`, or the module's own version when
+// `go install` built it at a release tag.
+var version = ""
 
 // splitCommand separates the subcommand from its arguments. A leading flag
 // belongs to the default command, so `tracepad --listen :9999` serves
@@ -81,7 +83,7 @@ func main() {
 		// server (spec 037 #6), so it sits with the binary's own words.
 		os.Exit(skills.Run(skills.Options{
 			Args:    args,
-			Version: version,
+			Version: currentVersion(),
 			Stdout:  os.Stdout,
 			Stderr:  os.Stderr,
 			Env:     os.Getenv,
@@ -92,7 +94,7 @@ func main() {
 		defer stop()
 		os.Exit(cli.Run(ctx, cli.Options{
 			Args:    os.Args[1:],
-			Version: version,
+			Version: currentVersion(),
 			Stdout:  os.Stdout,
 			Stderr:  os.Stderr,
 			Stdin:   os.Stdin,
@@ -101,7 +103,7 @@ func main() {
 			Now:     time.Now,
 		}))
 	case cmd == "version":
-		fmt.Println(version)
+		fmt.Println(currentVersion())
 	case cmd == "help", cmd == "-h", cmd == "--help":
 		usage()
 	default:
@@ -211,7 +213,7 @@ func serve(args []string) error {
 	eraser.Start()
 	defer eraser.Close()
 
-	srv := server.New(cfg, version, st, writer, sweeper)
+	srv := server.New(cfg, currentVersion(), st, writer, sweeper)
 	// Sized for the read slots the server took, which is where the
 	// setting's default is settled (spec 043 #16).
 	st.BoundPool(srv.ReadConcurrency())
@@ -286,7 +288,7 @@ func serveMCP(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	return mcpserver.ServeStdio(ctx, version, &mcpserver.Remote{Client: api})
+	return mcpserver.ServeStdio(ctx, currentVersion(), &mcpserver.Remote{Client: api})
 }
 
 func envOr(key, fallback string) string {

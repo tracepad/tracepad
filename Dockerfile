@@ -64,7 +64,7 @@ ARG VERSION
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -tags ui -ldflags "-s -w -X main.version=$VERSION" \
+    go build -trimpath -tags ui -ldflags "-s -w -X main.version=$VERSION" \
     -o /out/tracepad ./cmd/tracepad
 
 # /data is created here because the runtime stage has no shell to create it

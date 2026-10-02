@@ -22,6 +22,11 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     tags: [ui]
+    # No build host's directory in the binary's panics and symbol tables
+    # (spec 020 #31). That is all it claims: archives are not byte-for-byte
+    # reproducible (no `mod_timestamp`, and the Go toolchain and the VCS state
+    # stamp themselves into the binary).
+    flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{.Version}}
 

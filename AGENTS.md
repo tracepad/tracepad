@@ -321,8 +321,9 @@ API. This file routes; it does not duplicate what specs and docs say.
   `*PromptVersion` (#14); the floor is Go 1.25, where the OTel SDK puts it
   (#15). Fixture `014-tracepad-sdk-go.pb` is the package's own export,
   deterministic byte for byte (#13); the `sdk-go` CI job runs the module on
-  the two newest Go lines, and `make gate` includes its unit suite because
-  the root `go test ./...` cannot see a nested module (#11).
+  the two newest Go lines and on its floor (spec 020 #31), and `make gate`
+  includes its unit suite because the root `go test ./...` cannot see a nested
+  module (#11).
 - ✅ Spec 031 (tokens in the statistics, streams in the SDK, where a price
   comes from) shipped: `stats_hourly` carries three token sums per cell —
   input, output, cache read — each read off an observation's `usage` under
@@ -722,6 +723,13 @@ reason in a comment; adding a dialect should be a table edit.
   are the `docker` CI job, so a local run and CI prove the same thing.
 - `make smoke` — export from pinned real SDKs and from our own package into a
   real binary and assert the rows. Needs network on first run (installs them).
+  Two of its exports are no SDK code at all: an application that imports only
+  the OpenTelemetry API, started under `opentelemetry-instrument` with the
+  `OTEL_EXPORTER_OTLP_*` lines **read out of `README.md` and
+  `docs/quickstart.md`**, so the "nothing but environment" recipe those files
+  print cannot drift from the server without the smoke failing (spec 020 #31).
+  Change a recipe line in either file and the smoke follows; add a second
+  recipe to one of them and `run.sh` stops, asking which to use.
 - `make sdk-test` — the Python package's unit suite, then its end-to-end suite
   against a binary it builds, on the OpenTelemetry floor `pyproject.toml`
   names and on the newest release. `uv` if present, `venv` otherwise;

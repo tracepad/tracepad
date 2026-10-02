@@ -3,7 +3,11 @@
 #
 # Builds the binary, runs it, points a pinned opentelemetry-sdk script, a
 # pinned Langfuse SDK script and our own packages — Python, Go and Node — at
-# it, and asserts the rows they produced. This is the drift detector for SDK conventions: when an SDK
+# it, and asserts the rows they produced. A seventh and eighth export carry no
+# SDK code at all: an application that configures nothing, started under
+# `opentelemetry-instrument` with the environment lines the README and the
+# quickstart print, read out of those files (so the docs cannot drift from the
+# server without this failing). This is the drift detector for SDK conventions: when an SDK
 # changes what it emits, this fails before a user notices. Our own package is
 # installed from this checkout rather than pinned, because the drift it detects
 # is between the package and the mapper of the same commit (spec 017 #12).
@@ -117,10 +121,45 @@ echo "==> exporting with the tracepad Node package"
 (cd "$repo_root/sdk/js" && { [ -d node_modules ] || npm ci; } && npm run --silent build)
 node "$smoke_dir/export_tracepad.mjs" "$work/tracepad-js-trace-id"
 
+# The recipe as a document prints it: its three OTEL_EXPORTER_OTLP_* export
+# lines, aimed at this run's server and key instead of the placeholders.
+# Exactly three, or the doc grew a second recipe and this needs to choose.
+recipe_lines() {
+    local lines
+    lines="$(grep -E '^export OTEL_EXPORTER_OTLP_(PROTOCOL|TRACES_ENDPOINT|HEADERS)=' "$1" |
+        sed -e "s#http://localhost:4318#$SMOKE_HOST#" -e "s#tp-sk-…#$SMOKE_SECRET_KEY#")"
+    if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 3 ] || printf '%s' "$lines" | grep -q -e 'localhost:4318' -e 'tp-sk-…'; then
+        echo "$1: expected the three OTEL_EXPORTER_OTLP_* lines of the recipe, got:" >&2
+        printf '%s\n' "$lines" >&2
+        return 1
+    fi
+    printf '%s\n' "$lines"
+}
+
+env_only_python="$(dirname "$python_bin")"
+if ! PATH="$env_only_python:$PATH" command -v opentelemetry-instrument >/dev/null 2>&1; then
+    echo "opentelemetry-instrument is not next to $python_bin: SMOKE_PYTHON's environment predates" \
+        "scripts/smoke/requirements.txt (opentelemetry-distro); install it again" >&2
+    exit 1
+fi
+for doc in README.md docs/quickstart.md; do
+    echo "==> exporting with nothing but the environment of $doc"
+    recipe="$(recipe_lines "$repo_root/$doc")"
+    (
+        eval "$recipe"
+        # The launcher also wires metrics and logs, and the recipe's headers
+        # would send them, with this run's key, to the traces endpoint's host.
+        export OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none
+        PATH="$env_only_python:$PATH" opentelemetry-instrument "$python_bin" \
+            "$smoke_dir/export_env_only.py" "$work/env-only-$(basename "$doc")-trace-id"
+    )
+done
+
 echo "==> checking the database"
 python3 "$smoke_dir/check.py" "$TRACEPAD_DATA_DIR/tracepad.db" \
     "$work/otel-trace-id" "$work/langfuse-trace-id" "$work/tracepad-trace-id" \
-    "$work/tracepad-go-trace-id" "$work/tracepad-js-trace-id" "$work/langfuse-media.json"
+    "$work/tracepad-go-trace-id" "$work/tracepad-js-trace-id" "$work/langfuse-media.json" \
+    "$work/env-only-README.md-trace-id" "$work/env-only-quickstart.md-trace-id"
 
 echo "==> server log"
 cat "$work/server.log"
