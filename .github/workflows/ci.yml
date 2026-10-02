@@ -202,6 +202,33 @@ jobs:
           go-version-file: go.mod
       - run: make race
 
+  # The server killed in the middle of its writes (spec 043 #46), by the
+  # button only: a round starts a real server, drives it and sends it SIGKILL,
+  # and ten of them are minutes. Run it before a release, or after a change to
+  # the writer, the sweeper, the aggregator, the erasure or a migration. A
+  # failure's seed is in its log; `make crash-test CRASH_SEED=<n>` repeats the
+  # choices, and the failed run's files are uploaded.
+  crash:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make crash-test CRASH_ROUNDS=30
+        env:
+          TRACEPAD_CRASH_KEEP: ${{ runner.temp }}/crash-evidence
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: crash-evidence
+          path: ${{ runner.temp }}/crash-evidence/
+          retention-days: 7
+
   # The release, rehearsed (spec 020 #27). Nothing else exercises
   # `.goreleaser.yaml` before a tag does, and `goreleaser check` cannot: it
   # exits 1 on the deprecated `brews` key the Homebrew formula is written with.

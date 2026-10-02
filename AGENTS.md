@@ -738,6 +738,11 @@ reason in a comment; adding a dialect should be a table edit.
   its budget.
 - `make race` — the store and the server under the race detector: about eleven
   minutes. Not in the gate; CI runs it once per merge to `main`, and on demand.
+- `make crash-test` — kill the real server with `SIGKILL` in the middle of its
+  writes (`CRASH_ROUNDS`, default 10; `CRASH_SEED` repeats a failed run), then
+  check the file, start the server again on it and hold it to every answer it
+  gave before (spec 043 #46). About ten seconds a round. Not in the gate; CI
+  runs it on demand, as the `crash` job.
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
   deliberate mapping change. Review the golden diff; it *is* the change. The
   three bodies that are not synthetic are rewritten from the packages first:
