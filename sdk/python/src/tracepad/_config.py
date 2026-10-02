@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from ._errors import TracepadConfigError
 from ._log import logger
 
-VERSION = "0.1.0"
+VERSION = "0.1.0rc1"
 
 #: The exporter's per-export timeout in seconds when nothing names one (spec
 #: 042 #3): OpenTelemetry's ten, its retries inside them, is long for a thread
