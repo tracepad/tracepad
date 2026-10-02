@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -83,7 +82,7 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 	filter.Backward = backward
 	raw := values.Get("cursor")
 	if raw != "" {
-		cursor, err := decodeRawCursor(raw, backward)
+		cursor, err := decodeRawCursor(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -159,18 +158,11 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	raw := r.PathValue("id")
 	// The id is the batch's number within this project, tagged (spec 019
-	// #17): there is no other project's batch it could name, and an id from
-	// before the numbering — a bare integer — is refused rather than read as
-	// whichever batch now has that number.
+	// #17): there is no other project's batch it could name, and a bare
+	// integer is not an id at all.
 	id, err := rawid.ParseID(raw)
-	var legacy *rawid.LegacyID
-	switch {
-	case errors.As(err, &legacy):
-		writeError(w, http.StatusBadRequest, legacy.Error())
-		return
-	case err != nil:
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("a raw batch id is n and its number, as the listing gives it; got %q", raw))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is %s", raw, err.Error()))
 		return
 	}
 	batch, err := s.store.RawBatchBody(r.Context(), project.ID, id)
@@ -233,34 +225,12 @@ func rawFilter(values url.Values) (store.RawFilter, error) {
 }
 
 // decodeRawCursor restores the `(received_at, number)` keyset (spec 019 #17).
-func decodeRawCursor(value string, backward bool) (*store.RawCursor, error) {
+func decodeRawCursor(value string) (*store.RawCursor, error) {
 	receivedAt, number, err := rawid.ParseCursor(value)
-	var legacy *rawid.LegacyCursor
-	if errors.As(err, &legacy) {
-		return nil, errors.New(legacy.Error() + "; " + resumeHint(legacy.ReceivedAt, backward))
-	}
 	if err != nil {
 		return nil, err
 	}
 	return &store.RawCursor{ReceivedAt: receivedAt, Number: number}, nil
-}
-
-// resumeHint is where a reader holding a cursor from before the numbering
-// starts again, from the instant the cursor was at, in the direction it was
-// walking. It is not translated: its second half is a rowid, and translating
-// it would take the other tenants' sequence back as input — and an older CLI
-// rebuilds its resume cursor in the old grammar from the new numbers, which a
-// translation would read as a rowid and resume somewhere else without a word.
-// Both windows include that instant, so the batches received at it are sent
-// again, which a receiver that upserts by span id takes as it took them the
-// first time (#6).
-func resumeHint(receivedAt int64, backward bool) string {
-	if backward {
-		return "list again with direction=prev&until=" + formatTime(receivedAt+1) +
-			", which repeats the batches received at " + formatTime(receivedAt)
-	}
-	return "list again with since=" + formatTime(receivedAt) +
-		", which repeats the batches received at that instant"
 }
 
 // rawBlock renders what `GET /api/v1/system` says about the archive

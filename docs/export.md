@@ -201,11 +201,6 @@ tracepad export --otlp --to http://collector:4318/v1/traces \
   --after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 ```
 
-A cursor printed by a server from before batches were numbered within their
-project is refused — by `--dry-run` too — with the `--since` to start again
-from; with `--dir`, into a new directory, since a directory already holding an
-export only takes a resume. See [api.md](api.md#the-raw-archive).
-
 The cursor resumes **at** the batch that failed, not after it. Re-sending a
 batch a receiver already took is safe — OTLP receivers upsert by span id, this
 one included — so the resume point errs towards sending twice rather than

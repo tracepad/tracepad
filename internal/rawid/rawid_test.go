@@ -13,12 +13,8 @@ func TestIDs(t *testing.T) {
 			t.Errorf("ParseID(ID(%d)) = %d, %v", number, got, err)
 		}
 	}
-	// A bare integer is an id from before the numbering, refused as such.
-	var legacy *LegacyID
-	if _, err := ParseID("42"); !errors.As(err, &legacy) || legacy.Value != "42" {
-		t.Errorf("ParseID(42) = %v, want a legacy id", err)
-	}
-	for _, bad := range []string{"", "n", "n0", "n-1", "n01", "n+1", "x42", "n4.2", "N42", "42n"} {
+	// A bare integer is not an id, whatever it once was.
+	for _, bad := range []string{"42", "", "n", "n0", "n-1", "n01", "n+1", "x42", "n4.2", "N42", "42n", " n4"} {
 		if _, err := ParseID(bad); !errors.Is(err, ErrNotAnID) {
 			t.Errorf("ParseID(%q) = %v, want not an id", bad, err)
 		}
@@ -30,13 +26,12 @@ func TestCursors(t *testing.T) {
 	if err != nil || at != 1_788_220_800_001_000_000 || number != 7 {
 		t.Errorf("round trip = %d %d %v", at, number, err)
 	}
-	old := base64.RawURLEncoding.EncodeToString([]byte("1788220800001000000:4812"))
-	var legacy *LegacyCursor
-	if _, _, err := ParseCursor(old); !errors.As(err, &legacy) || legacy.ReceivedAt != 1_788_220_800_001_000_000 {
-		t.Errorf("an old cursor = %v, want a legacy cursor at its instant", err)
-	}
-	for _, bad := range []string{"nonsense!", base64.RawURLEncoding.EncodeToString([]byte("x:1:2")),
-		base64.RawURLEncoding.EncodeToString([]byte("n:1")), base64.RawURLEncoding.EncodeToString([]byte("a:b"))} {
+	encode := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+	// One spelling for one position: a sign, a leading zero, a zero number
+	// or another shape is not a cursor this archive gave out.
+	for _, bad := range []string{"nonsense!", encode("1788220800001000000:4812"), encode("x:1:2"), encode("n:1"),
+		encode("n:-5:1"), encode("n:+5:1"), encode("n:5:007"), encode("n:5:0"), encode("n:05:1"), encode("n:5:1:2"),
+		encode("a:b")} {
 		if _, _, err := ParseCursor(bad); !errors.Is(err, ErrNotACursor) {
 			t.Errorf("ParseCursor(%q) = %v, want not a cursor", bad, err)
 		}

@@ -328,6 +328,9 @@ func (j *RawScrub) apply(tx *sql.Tx) error {
 		if drop, err = dropRawMedia(tx, j.ProjectID, []any{j.BatchID}); err != nil {
 			return err
 		}
+		if err := spendRawNumbers(tx, j.ProjectID, []any{j.BatchID}); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`DELETE FROM raw_batches WHERE id = ?`, j.BatchID); err != nil {
 			return fmt.Errorf("delete raw batch %d: %w", j.BatchID, err)
 		}

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1245,19 +1246,20 @@ func ungzip(t *testing.T, body []byte) []byte {
 
 // A cursor from before batches were numbered within their project is refused
 // before anything is asked of the server, by a dry run as by a run, with the
-// instant to start again from (spec 019 #17).
-func TestExportRefusesACursorFromBeforeTheNumbers(t *testing.T) {
+// A cursor that is not one an export printed — a server's from before the
+// numbering among them — is refused before anything is asked of the server,
+// by a dry run as by a run (spec 019 #17).
+func TestExportRefusesACursorItDidNotPrint(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 2)
 	old := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d:7", seedBase)))
-	since := time.Unix(0, seedBase).UTC().Format(time.RFC3339Nano)
 	for _, args := range [][]string{
 		{"export", "--otlp", "--dir", t.TempDir(), "--after", old, "--dry-run"},
 		{"export", "--otlp", "--dir", t.TempDir(), "--after", old},
 	} {
 		got := h.run(t.Context(), false, args...)
-		if got.code != ExitUsage || !strings.Contains(got.stderr, "--since "+since) {
-			t.Errorf("%v: exit %d, stderr %q; want a usage refusal naming --since %s", args, got.code, got.stderr, since)
+		if got.code != ExitUsage || !strings.Contains(got.stderr, "not a cursor an export printed") {
+			t.Errorf("%v: exit %d, stderr %q; want a usage refusal", args, got.code, got.stderr)
 		}
 	}
 }
@@ -1278,7 +1280,7 @@ func TestExportIntoAPreNumberingDirectoryReplacesNothing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.jsonl"), []byte(`{"id":1}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--after", rawid.Cursor(seedBase-1, 0))
+	got := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--after", rawid.Cursor(seedBase-1, 1))
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
@@ -1290,5 +1292,24 @@ func TestExportIntoAPreNumberingDirectoryReplacesNothing(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("batch n%d was not written as %s: %v", number, name, err)
 		}
+	}
+}
+
+// A page whose ids are not this release's — numbers from a server before the
+// numbering, or anything else — is refused before an id is used anywhere, and
+// the refusal says the two sides are different versions (spec 019 #17).
+func TestARawListingFromAnotherVersionIsNamedAsSuch(t *testing.T) {
+	for _, page := range []string{
+		`{"batches":[{"id":5,"received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`,
+		`{"batches":[{"id":"../../etc","received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`,
+	} {
+		_, err := decodeRawListing([]byte(page))
+		if !errors.Is(err, errRawIDVersion) || !strings.Contains(err.Error(), "different versions") {
+			t.Errorf("%s: %v, want the version mismatch named", page, err)
+		}
+	}
+	listing, err := decodeRawListing([]byte(`{"batches":[{"id":"n5","received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`))
+	if err != nil || len(listing.Batches) != 1 {
+		t.Errorf("this release's page = %+v, %v", listing, err)
 	}
 }

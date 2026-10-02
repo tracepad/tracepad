@@ -725,7 +725,7 @@ func fingerprint(t *testing.T, h *harness, projectID string) map[string][]string
 	return out
 }
 
-// pushRawNumbers moves a project's next raw batch number to seven digits, so
+// pushRawNumbers moves a project's spent mark, and so its next raw batch number, to seven digits, so
 // that its batch's id is a token no count or size in an answer can be
 // mistaken for, and the ghost's id has the same shape. A batch's number is its
 // project's own (spec 019 #17), so this is B's counter alone; A's batches keep

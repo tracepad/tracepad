@@ -290,8 +290,9 @@ func (r *run) tightenResumed(path string, entries []os.DirEntry) {
 	}
 }
 
-// exportFileName is the name batchFileName gives a batch.
-var exportFileName = regexp.MustCompile(`^[0-9]{13}-[0-9]+\.(pb|json)$`)
+// exportFileName is the name batchFileName gives a batch: the arrival's
+// milliseconds and the batch's id, `n` and its number (spec 019 #17).
+var exportFileName = regexp.MustCompile(`^[0-9]{13}-n[1-9][0-9]*\.(pb|json)$`)
 
 func (d *directory) close() error {
 	if d.manifest == nil {

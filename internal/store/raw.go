@@ -238,6 +238,53 @@ func (s *Store) RawBatchBody(ctx context.Context, projectID string, number int64
 	return &out, nil
 }
 
+// numberRawBatch gives a raw batch its project's next number (spec 019 #17):
+// one past the higher of the highest number the project holds and its spent
+// mark, both seeks, with no write but the number's own row. The writer is the
+// one connection that inserts, so two batches cannot take one number, and a
+// rolled-back window gives its numbers back. The row's arrival time is read
+// from the batch's row in the same statement, so the copy the listing pages
+// on cannot disagree with it; the migration forbids changing the original.
+func numberRawBatch(tx *sql.Tx, projectID string, batchID int64) error {
+	result, err := tx.Exec(`INSERT INTO raw_batch_numbers (batch_id, project_id, number, received_at)
+		SELECT b.id, b.project_id, `+nextRawNumber+`, b.received_at
+		  FROM raw_batches b WHERE b.id = ?2 AND b.project_id = ?1`, projectID, batchID)
+	if err != nil {
+		return fmt.Errorf("number raw batch: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("number raw batch %d: the batch is not the project's", batchID)
+	}
+	return nil
+}
+
+// nextRawNumber is the project ?1's next raw batch number. Each half is
+// COALESCEd on its own: a project with no batch has no highest number, and a
+// MAX with a NULL operand is NULL, which would leave the batch unnumbered.
+const nextRawNumber = `MAX(COALESCE((SELECT MAX(number) FROM raw_batch_numbers WHERE project_id = ?1), 0),
+	COALESCE((SELECT raw_batches_numbered FROM projects WHERE id = ?1), 0)) + 1`
+
+// spendRawNumbers moves a project's spent mark past the numbers of the raw
+// batches about to be deleted (spec 019 #17), once for the chunk: the next
+// number is one past the higher of this mark and the highest number held, so
+// a number the sweep or an erasure took is never issued again. Every path
+// that deletes raw batches of a living project calls it first, in the same
+// transaction; a purge takes the project row with them and needs no mark.
+func spendRawNumbers(tx *sql.Tx, projectID string, batchIDs []any) error {
+	return eachIn(batchIDs, func(batch []any) error {
+		// Positional throughout, in the order they appear: a bare `?`
+		// after a numbered one would not count from where it stands.
+		args := append(append([]any{}, batch...), projectID)
+		_, err := tx.Exec(`UPDATE projects SET raw_batches_numbered = MAX(raw_batches_numbered,
+			COALESCE((SELECT MAX(number) FROM raw_batch_numbers WHERE batch_id IN (`+placeholders(len(batch))+`)), 0))
+			WHERE id = ?`, args...)
+		if err != nil {
+			return fmt.Errorf("spend raw batch numbers: %w", err)
+		}
+		return nil
+	})
+}
+
 // RawSummary is what `GET /api/v1/system` reports about the archive
 // (spec 019 #4): its size, its window, and the honest edge of the promise —
 // how many traces are older than the window and so cannot be replayed.

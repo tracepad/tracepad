@@ -115,19 +115,10 @@ func (r *run) export(ctx context.Context, args []string) error {
 		return usageErrorf("--after needs the cursor the previous run printed; it was passed empty")
 	}
 	// Read here, so a dry run that never sends it refuses it as the run
-	// would (spec 019 #17): a cursor from before batches were numbered within
-	// their project names no batch, and the window to use instead is the
-	// instant it was at.
+	// would (spec 019 #17).
 	if after != "" {
-		_, _, err := rawid.ParseCursor(after)
-		var legacy *rawid.LegacyCursor
-		switch {
-		case errors.As(err, &legacy):
-			return usageErrorf("%s; start again with --since %s, which sends the batches received at that instant again "+
-				"(with --dir, into a new directory)",
-				legacy.Error(), time.Unix(0, legacy.ReceivedAt).UTC().Format(time.RFC3339Nano))
-		case err != nil:
-			return usageErrorf("--after %q is not a cursor an export printed", after)
+		if _, _, err := rawid.ParseCursor(after); err != nil {
+			return usageErrorf("--after %q is not a cursor an export printed; pass the one its summary ended with", after)
 		}
 	}
 
@@ -258,12 +249,39 @@ func (r *run) countBatches(ctx context.Context, window exportWindow) (int64, boo
 	if err != nil {
 		return 0, false, listingError(err)
 	}
-	listing, err := decode[rawListing](body)
+	listing, err := decodeRawListing(body)
 	if err != nil {
 		return 0, false, err
 	}
 	return listing.Total, listing.TotalCapped, nil
 }
+
+// decodeRawListing reads a page of the archive and checks every id on it
+// before any is used in a request, a file name or a line of output. A server
+// whose ids are bare numbers is one from before batches were numbered within
+// their project (spec 019 #17); the CLI says the two versions differ rather
+// than handing a person the decoder's complaint.
+func decodeRawListing(body []byte) (rawListing, error) {
+	listing, err := decode[rawListing](body)
+	var mistyped *json.UnmarshalTypeError
+	if errors.As(err, &mistyped) && strings.HasSuffix(mistyped.Field, "id") {
+		return listing, errRawIDVersion
+	}
+	if err != nil {
+		return listing, err
+	}
+	for _, row := range listing.Batches {
+		if _, err := rawid.ParseID(row.ID); err != nil {
+			return listing, fmt.Errorf("the server listed a raw batch id %q, which is not one: %w",
+				termsafe.String(row.ID), errRawIDVersion)
+		}
+	}
+	return listing, nil
+}
+
+// errRawIDVersion is the archive's ids in a form this CLI does not read.
+var errRawIDVersion = errors.New("the server and this CLI name raw batches differently; " +
+	"they are different versions — use the CLI of the server's version")
 
 // replay walks the archive and hands each body to the destination. It is the
 // whole of Decision 6: nothing is skipped except a batch the sweeper took, and
@@ -280,7 +298,7 @@ func (r *run) replay(ctx context.Context, sink destination, window exportWindow,
 		if err != nil {
 			return listingError(err)
 		}
-		listing, err := decode[rawListing](body)
+		listing, err := decodeRawListing(body)
 		if err != nil {
 			return err
 		}

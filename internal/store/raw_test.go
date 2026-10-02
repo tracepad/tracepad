@@ -1,9 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // seedRawBatch writes one archived body through the same path ingest uses.
@@ -183,8 +185,22 @@ func TestRawBatchesAreNumberedWithinTheirProject(t *testing.T) {
 
 	// The newest batch goes, as the sweep or an erasure would take it; the
 	// next one does not reuse its number.
-	if _, err := s.db.Exec(`DELETE FROM raw_batches WHERE id =
-		(SELECT batch_id FROM raw_batch_numbers WHERE project_id = ? AND number = 3)`, mine.ID); err != nil {
+	// As the sweep and an erasure do: spend the number, then delete.
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newest, err := queryColumn[int64](tx, `SELECT batch_id FROM raw_batch_numbers WHERE project_id = ? AND number = 3`, mine.ID)
+	if err != nil || len(newest) != 1 {
+		t.Fatalf("batch 3 = %v, %v", newest, err)
+	}
+	if err := spendRawNumbers(tx, mine.ID, []any{newest[0]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`DELETE FROM raw_batches WHERE id = ?`, newest[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	// Its number goes with it: the numbers are a table of their own, and
@@ -222,6 +238,7 @@ func TestMigration0035NumbersTheArchiveWithinEachProject(t *testing.T) {
 	// The table as the previous release left it: one rowid sequence for
 	// everyone, a gap where the sweep took a batch, and a batch that arrived
 	// late — its received_at before the one stored ahead of it.
+	exec(`DROP TRIGGER raw_batches_received_at_is_fixed`)
 	exec(`DROP TABLE raw_batch_numbers`)
 	exec(`ALTER TABLE projects DROP COLUMN raw_batches_numbered`)
 	exec(`DELETE FROM schema_migrations WHERE filename = '0035_raw_batch_numbers.sql'`)
@@ -282,5 +299,88 @@ func TestMigration0035NumbersTheArchiveWithinEachProject(t *testing.T) {
 	seedRawBatch(t, upgraded, mine.ID, &RawBatch{ReceivedAt: 70, Body: []byte("x")})
 	if got := read(mine.ID); got[len(got)-1].number != 4 {
 		t.Errorf("the first batch after the upgrade = %v, want number 4", got[len(got)-1])
+	}
+}
+
+// The sweep spends the numbers of what it deletes once for each chunk, not
+// once for each batch, and a project whose whole archive the window took
+// goes on from past it (spec 019 #17).
+func TestASweptArchiveLeavesItsNumbersSpent(t *testing.T) {
+	s, project := readStore(t)
+	const batches = 3000
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= batches; i++ {
+		var id int64
+		if err := tx.QueryRow(`INSERT INTO raw_batches (project_id, received_at, body) VALUES (?, ?, X'00') RETURNING id`,
+			project.ID, int64(i)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if err := numberRawBatch(tx, project.ID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE projects SET raw_retention_days = 1 WHERE id = ?`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := s.NewWriter(quickWrites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	sweep := &rawSweep{ProjectID: project.ID, Now: 10 * 24 * int64(time.Hour), Limit: batches}
+	if err := writer.Submit(t.Context(), sweep); err != nil {
+		t.Fatal(err)
+	}
+	if sweep.Deleted != batches {
+		t.Fatalf("swept %d, want all %d", sweep.Deleted, batches)
+	}
+	var left, mark int64
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM raw_batch_numbers WHERE project_id = ?1),
+		(SELECT raw_batches_numbered FROM projects WHERE id = ?1)`, project.ID).Scan(&left, &mark); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 || mark != batches {
+		t.Errorf("after the sweep: %d numbers left, mark %d; want none and %d", left, mark, batches)
+	}
+	seedRawBatch(t, s, project.ID, &RawBatch{ReceivedAt: 20 * 24 * int64(time.Hour), Body: []byte("x")})
+	var next int64
+	if err := s.db.QueryRow(`SELECT MAX(number) FROM raw_batch_numbers WHERE project_id = ?`, project.ID).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next != batches+1 {
+		t.Errorf("the first batch after the sweep = %d, want %d", next, batches+1)
+	}
+}
+
+// The next number is never NULL: a project with no batch has no highest
+// number, and one with no row has no mark (spec 019 #17).
+func TestTheNextRawNumberOfANewProjectIsOne(t *testing.T) {
+	s, project := readStore(t)
+	for _, id := range []string{project.ID, "no-such-project"} {
+		var next sql.NullInt64
+		if err := s.db.QueryRow(`SELECT `+nextRawNumber, id).Scan(&next); err != nil || next.Int64 != 1 {
+			t.Errorf("%s: next = %v, %v; want 1", id, next, err)
+		}
+	}
+}
+
+// When a batch arrived is fixed: the copy the listing pages on is taken from
+// it once, and nothing may make the two disagree (spec 019 #17).
+func TestARawBatchsArrivalDoesNotChange(t *testing.T) {
+	s, project := readStore(t)
+	seedRawBatch(t, s, project.ID, &RawBatch{ReceivedAt: 5, Body: []byte("x")})
+	if _, err := s.db.Exec(`UPDATE raw_batches SET received_at = 6`); err == nil ||
+		!strings.Contains(err.Error(), "received_at does not change") {
+		t.Errorf("moving a batch's arrival = %v, want it refused", err)
+	}
+	var copied int64
+	if err := s.db.QueryRow(`SELECT received_at FROM raw_batch_numbers`).Scan(&copied); err != nil || copied != 5 {
+		t.Errorf("the listing's copy = %d, %v; want the batch's 5", copied, err)
 	}
 }

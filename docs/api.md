@@ -708,14 +708,8 @@ in the order your batches were stored. It is never reused, and other projects'
 batches are no gaps in it. A gap is a batch of yours that retention or an
 erasure took.
 
-Servers before schema 0035 named a batch by a bare integer shared by every
-project. Such an id is refused with a `400` rather than read as one of your
-batches, so an id written down before the upgrade — in a manifest, say — never
-quietly fetches a different body; list the archive again for the new ids. A
-cursor from then is refused too, and the `400` says where to list again from:
-`since=<the cursor's instant>` paging forward, or `direction=prev&until=<just
-after it>` paging back. Either one sends again the batches received at that
-instant, which is safe because receivers upsert by span id.
+Anything else in the place of an id — a bare integer among them — is a `400`,
+never read as one of your batches; so is a cursor the listing did not give.
 
 `size_bytes` is the **decoded** length, which is what a fetch of the body
 returns; the row itself is compressed and smaller. `content_type` is what the

@@ -1739,7 +1739,7 @@ export interface components {
         };
         /** @description One archived export body, described. The bytes themselves are at `GET /api/v1/raw/{id}`. */
         RawBatch: {
-            /** @description `n` and the batch's number within its project — 1, 2, 3… in the order the project's batches were stored, never reused — and the path segment of the body endpoint. Another project's batches are no gaps in it. The `n` is what tells it from an id issued before the numbering, a bare integer, which the body endpoint refuses */
+            /** @description `n` and the batch's number within its project — 1, 2, 3… in the order the project's batches were stored, never reused — and the path segment of the body endpoint. Another project's batches are no gaps in it. Anything else — a bare integer among them — is not an id, and the body endpoint refuses it */
             id: string;
             /**
              * Format: date-time
@@ -3928,7 +3928,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The batch's id as the listing gives it: `n` and its number within the project. A bare integer — an id from before the numbering — is `400` */
+                /** @description The batch's id as the listing gives it: `n` and its number within the project. Anything else, a bare integer among them, is `400` */
                 id: string;
             };
             cookie?: never;

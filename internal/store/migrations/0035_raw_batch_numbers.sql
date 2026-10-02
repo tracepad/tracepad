@@ -22,6 +22,16 @@ INSERT INTO raw_batch_numbers (batch_id, project_id, number, received_at)
 SELECT id, project_id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY id), received_at
   FROM raw_batches;
 
+-- `received_at` is copied from the batch's row when the number is written, in
+-- one statement, so the listing can page on this table's index. The original
+-- never changes — an erasure rewrites a body, not when it arrived — and this
+-- says so, so the copy cannot come to disagree with it.
+CREATE TRIGGER raw_batches_received_at_is_fixed BEFORE UPDATE OF received_at ON raw_batches
+  WHEN NEW.received_at IS NOT OLD.received_at
+BEGIN
+  SELECT RAISE(ABORT, 'raw_batches.received_at does not change');
+END;
+
 -- One project's batch by its number, and its listing in arrival order with the
 -- number as the tiebreak.
 CREATE UNIQUE INDEX idx_raw_batch_numbers_number ON raw_batch_numbers(project_id, number);
@@ -30,14 +40,9 @@ CREATE INDEX idx_raw_batch_numbers_received ON raw_batch_numbers(project_id, rec
 -- The highest number a project has seen go. The next number is one past the
 -- higher of this and the highest number held, so a batch the sweep or an
 -- erasure took leaves its number spent and a number never names two batches.
--- The mark moves when a batch is deleted — by any path, the cascade included —
--- and never on ingest, which writes no projects row for it.
+-- The code that deletes raw batches moves the mark once for each chunk it
+-- deletes; ingest never writes it.
 ALTER TABLE projects ADD COLUMN raw_batches_numbered INTEGER NOT NULL DEFAULT 0;
 UPDATE projects
    SET raw_batches_numbered = (SELECT COALESCE(MAX(number), 0) FROM raw_batch_numbers
                                 WHERE raw_batch_numbers.project_id = projects.id);
-CREATE TRIGGER raw_batch_numbers_spent AFTER DELETE ON raw_batch_numbers
-  WHEN OLD.number > (SELECT raw_batches_numbered FROM projects WHERE id = OLD.project_id)
-BEGIN
-  UPDATE projects SET raw_batches_numbered = OLD.number WHERE id = OLD.project_id;
-END;

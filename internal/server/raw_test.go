@@ -353,8 +353,8 @@ func TestRawBodyRefusals(t *testing.T) {
 		{"/api/v1/raw/n0", 400},
 		{"/api/v1/raw/n-1", 400},
 		{"/api/v1/raw/n01", 400},
-		// A bare integer is an id from before the numbering (spec 019
-		// #17): refused, never read as this project's batch of that number.
+		// A bare integer is not an id (spec 019 #17): refused, never read
+		// as this project's batch of that number.
 		{"/api/v1/raw/1", 400},
 	} {
 		if rec := h.get(t, c.path); rec.Code != c.status {
@@ -444,45 +444,23 @@ func (h *harness) systemRaw(t *testing.T) systemRawBlock {
 	return block
 }
 
-// A cursor from before batches were numbered within their project names its
-// batch by the table's rowid, which no longer leaves the server (spec 019
-// #17). It is refused with where to start again, not read as a number — which
-// would land the export at whatever batch of this project has that number.
-func TestRawRefusesACursorFromBeforeTheNumbers(t *testing.T) {
+// A cursor is the archive's own grammar and nothing else (spec 019 #17): one
+// in another form — a server's from before the numbering, a number with a
+// sign or a leading zero — is refused, never read as some other position.
+func TestRawRefusesACursorItDidNotGive(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	seedRaw(t, h, h.project.ID, 3, "")
-	at := seedBase + ms
-
-	old := encodeCursor(strconv.FormatInt(at, 10), "2")
-	instant := func(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339Nano) }
-	// Each direction is told the window that walks the same way from the
-	// cursor's instant, and doing what it says lands on the cursor's batch.
-	for _, c := range []struct {
-		direction, hint, follow string
-		want                    []string
-	}{
-		{"", "since=" + instant(at), "?since=" + instant(at), []string{"n2", "n3"}},
-		{"&direction=prev", "direction=prev&until=" + instant(at+1),
-			"?direction=prev&until=" + instant(at+1), []string{"n1", "n2"}},
-	} {
-		rec := h.get(t, "/api/v1/raw?cursor="+old+c.direction)
-		expectError(t, rec, http.StatusBadRequest, "from before raw batches were numbered within their project")
-		refusal := decodeJSON[struct {
-			Error string `json:"error"`
-		}](t, rec).Error
-		if !strings.Contains(refusal, c.hint) {
-			t.Errorf("direction %q: the refusal does not say %s: %s", c.direction, c.hint, refusal)
-		}
-		var got []string
-		for _, row := range h.listRaw(t, c.follow).Batches {
-			got = append(got, row.ID)
-		}
-		if !slices.Equal(got, c.want) {
-			t.Errorf("direction %q: following the hint = %v, want %v", c.direction, got, c.want)
+	for _, cursor := range []string{"nonsense", encodeCursor(strconv.FormatInt(seedBase+ms, 10), "2"),
+		encodeCursor("n", "1"), encodeCursor("x", "1", "2"), encodeCursor("n", "-5", "1"), encodeCursor("n", "5", "01")} {
+		for _, direction := range []string{"", "&direction=prev"} {
+			expectError(t, h.get(t, "/api/v1/raw?cursor="+cursor+direction), http.StatusBadRequest,
+				"not a raw archive cursor")
 		}
 	}
-	// Anything else that is not this grammar is just not a cursor.
-	for _, cursor := range []string{"nonsense", encodeCursor("n", "1"), encodeCursor("x", "1", "2"), encodeCursor("a", "b")} {
-		expectError(t, h.get(t, "/api/v1/raw?cursor="+cursor), http.StatusBadRequest, "invalid cursor")
+	// And the one it gave goes on from where it was.
+	first := h.listRaw(t, "?limit=1")
+	next := h.listRaw(t, "?limit=1&cursor="+*first.NextCursor)
+	if len(next.Batches) != 1 || next.Batches[0].ID != "n2" {
+		t.Errorf("after the first page = %+v, want n2", next.Batches)
 	}
 }
