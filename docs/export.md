@@ -217,7 +217,11 @@ tracepad export --otlp --dir ./tracepad-export
 One file per batch, named `<received_at_ms>-<id>.pb` — or `.json` for a batch
 that arrived in the OTLP/JSON encoding — so that a plain `ls` is in replay
 order. Beside them, `manifest.jsonl`: one line per batch, the listing row as the
-API returns it, appended as each file lands.
+API returns it, appended as each file lands. The files are your traces, prompts
+and completions included, so they are readable by you alone (`0600`), and so is
+the directory when the export creates it (`0700`). One that already exists keeps
+its mode, and the export says so on stderr when it is open to others. A resume
+brings the files an earlier export left to `0600` too.
 
 ```
 $ ls tracepad-export | head -3

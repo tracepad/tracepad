@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -367,6 +369,113 @@ func TestIngestMergesAcrossBatches(t *testing.T) {
 	}
 	if trace.TotalCost != nil {
 		t.Errorf("total_cost = %v, want no data when nobody provided cost", trace.TotalCost)
+	}
+}
+
+// Tags and metadata are merged, not overwritten (spec 002 #32): a trace's
+// tags are the union of every delivery's and its metadata every delivery's
+// keys, a later value winning per key — in whichever order the spans arrive,
+// and whether the late one carries labels of its own or none at all.
+func TestIngestMergesTagsAndMetadataAcrossBatches(t *testing.T) {
+	const traceID = "aabbccddeeff00112233445566778899"
+	early := []string{"langfuse.trace.tags", `["alpha","shared"]`,
+		"langfuse.trace.metadata.kept", "early", "langfuse.trace.metadata.both", "early"}
+	late := []string{"langfuse.trace.tags", `["shared","omega"]`,
+		"langfuse.trace.metadata.both", "late", "langfuse.trace.metadata.added", "late"}
+	// export is one span of the trace: the root, or its first child.
+	export := func(child bool, attrs []string) []byte {
+		spans := [][]string{attrs}
+		if child {
+			spans = [][]string{nil, attrs}
+		}
+		rs := otlptest.ExportLevels(otlptest.Levels{ScopeName: "langfuse-sdk", ScopeVersion: "4.7.0", Spans: spans})
+		if child {
+			ss := rs[0].ScopeSpans[0]
+			ss.Spans = ss.Spans[1:]
+		}
+		body, err := mapping.EncodeExportRequest(rs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	cases := []struct {
+		name     string
+		bodies   [][]byte
+		wantTags []string
+		wantMeta map[string]any
+	}{
+		{
+			name:     "the late span adds to the early one's",
+			bodies:   [][]byte{export(false, early), export(true, late)},
+			wantTags: []string{"alpha", "shared", "omega"},
+			wantMeta: map[string]any{"kept": "early", "both": "late", "added": "late"},
+		},
+		{
+			name:     "the order reversed",
+			bodies:   [][]byte{export(true, late), export(false, early)},
+			wantTags: []string{"shared", "omega", "alpha"},
+			wantMeta: map[string]any{"kept": "early", "both": "early", "added": "late"},
+		},
+		{
+			name:     "a late span with no labels erases none",
+			bodies:   [][]byte{export(false, early), export(true, nil)},
+			wantTags: []string{"alpha", "shared"},
+			wantMeta: map[string]any{"kept": "early", "both": "early"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, nil, store.WriterOptions{})
+			for _, body := range c.bodies {
+				if rec := h.post(t, "/v1/traces", body); rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+				}
+			}
+			trace, err := h.store.Trace(t.Context(), h.project.ID, traceID)
+			if err != nil || trace == nil {
+				t.Fatalf("trace = %v, err = %v", trace, err)
+			}
+			if !reflect.DeepEqual(trace.Tags, c.wantTags) {
+				t.Errorf("tags = %q, want %q", trace.Tags, c.wantTags)
+			}
+			if !reflect.DeepEqual(trace.Metadata, c.wantMeta) {
+				t.Errorf("metadata = %v, want %v", trace.Metadata, c.wantMeta)
+			}
+		})
+	}
+}
+
+// The union of a trace's tags stops at mapping.MaxTags across deliveries as
+// within one: the first tags it was given stay, and the rest are dropped.
+func TestIngestTagUnionKeepsTheCap(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	tags := func(from, n int) string {
+		list := make([]string, n)
+		for i := range list {
+			list[i] = fmt.Sprintf("tag-%02d", from+i)
+		}
+		encoded, _ := json.Marshal(list)
+		return string(encoded)
+	}
+	for _, list := range []string{tags(0, 40), tags(30, 40)} {
+		body, err := mapping.EncodeExportRequest(otlptest.ExportLevels(otlptest.Levels{
+			Spans: [][]string{{"langfuse.trace.tags", list}},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec := h.post(t, "/v1/traces", body); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+		}
+	}
+	trace, err := h.store.Trace(t.Context(), h.project.ID, "aabbccddeeff00112233445566778899")
+	if err != nil || trace == nil {
+		t.Fatalf("trace = %v, err = %v", trace, err)
+	}
+	if len(trace.Tags) != mapping.MaxTags || trace.Tags[0] != "tag-00" || trace.Tags[mapping.MaxTags-1] != "tag-49" {
+		t.Errorf("tags = %q, want tag-00 … tag-49", trace.Tags)
 	}
 }
 

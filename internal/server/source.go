@@ -286,6 +286,25 @@ func (s *Server) noteUntrustedProxy(proxy netip.Addr) {
 	}
 }
 
+// noteIgnoredForwarding warns about a proxy nobody named whose
+// `X-Forwarded-Proto` or `X-Forwarded-Host` was ignored (spec 028 #36), on the
+// terms of noteUntrustedProxy: only an address a proxy of this deployment
+// would have, never under `none`, once an hour per address and for at most
+// eight addresses an hour.
+func (s *Server) noteIgnoredForwarding(proxy netip.Addr) {
+	if len(s.trusted) == 0 || !proxy.IsValid() || !proxyLike(proxy) {
+		return
+	}
+	text := proxy.String()
+	if held, ok := s.forwardingLog.Allow(text, time.Now()); ok {
+		slog.Warn("X-Forwarded-Proto and X-Forwarded-Host from a proxy this server does not trust are ignored, "+
+			"so its session cookies are not marked Secure and only Host names the address; "+
+			"add the proxy's address to TRACEPAD_TRUSTED_PROXIES",
+			"proxy", text, "trusted_proxies", s.TrustedProxies(),
+			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
+	}
+}
+
 // sharedAddressSpace is 100.64.0.0/10 (RFC 6598), which carrier and cloud
 // networks use between their proxies and the hosts behind them.
 var sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")

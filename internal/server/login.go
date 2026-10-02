@@ -801,7 +801,7 @@ func (s *Server) originFor(r *http.Request) string {
 		return base
 	}
 	scheme := "http"
-	if overTLS(r) {
+	if s.overTLS(r) {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host

@@ -901,10 +901,10 @@ func statedOrigin(r *http.Request) string {
 // their scheme implies, as a browser writes them.
 //
 // The scheme rule refuses a downgrade and nothing else. Where the server knows
-// it is served over TLS — the connection itself, `X-Forwarded-Proto: https`, or
-// an `https` TRACEPAD_URL for that URL's host name, on any port — an `http://`
-// origin on the same host is a page an on-path attacker can write, and is
-// refused. Where it knows nothing, either scheme is accepted: a TLS proxy that
+// it is served over TLS — the connection itself, `X-Forwarded-Proto: https`
+// from a trusted proxy, or an `https` TRACEPAD_URL for that URL's host name, on
+// any port — an `http://` origin on the same host is a page an on-path attacker
+// can write, and is refused. Where it knows nothing, either scheme is accepted: a TLS proxy that
 // says nothing about itself sends an `https` origin to a plain-HTTP request,
 // and refusing it would break every cookie write from the interface behind
 // it.
@@ -921,7 +921,7 @@ func (s *Server) ownOrigin(r *http.Request, stated string) bool {
 		return false
 	}
 	named := withoutDefaultPort(scheme, parsed.Host)
-	secure := overTLS(r)
+	secure := s.overTLS(r)
 	if own := s.configured; own != nil {
 		if strings.EqualFold(named, own.host) {
 			// The operator said what the address is, scheme and all; http
@@ -979,7 +979,8 @@ func withoutDefaultPort(scheme, host string) string {
 // the address the browser used nor anything the server was told to expect
 // (Decision 23), and the sign-in form is where that shows first.
 const originRefused = "cross-origin request refused: the request's origin is not an address " +
-	"this server knows; set TRACEPAD_URL to the public address, or forward Host / X-Forwarded-Host"
+	"this server knows; set TRACEPAD_URL to the public address, or forward Host / X-Forwarded-Host " +
+	"from a proxy in TRACEPAD_TRUSTED_PROXIES"
 
 // refuseOrigin answers originRefused, and logs what was compared — once a
 // minute per origin and for at most 64 origins, since a page elsewhere can
@@ -994,6 +995,7 @@ func (s *Server) refuseOrigin(w http.ResponseWriter, r *http.Request) {
 			"path", loggable(r.URL.Path), "origin", origin, "host", loggable(r.Host),
 			"x_forwarded_host", loggable(r.Header.Get("X-Forwarded-Host")),
 			"x_forwarded_proto", loggable(r.Header.Get("X-Forwarded-Proto")),
+			"forwarded_headers_read", s.fromTrustedProxy(r), "trusted_proxies", s.TrustedProxies(),
 			"tracepad_url", s.configuredOrigin(),
 			"not_logged_since_last", held.SameKey, "not_logged_over_cap", held.OverCap)
 	}
@@ -1029,14 +1031,40 @@ func loggableOrigin(stated string) string {
 }
 
 // ownHosts is the two hosts a request itself says it was addressed to
-// (Decision 23): its `Host`, and the first value of `X-Forwarded-Host`. The
-// third, TRACEPAD_URL's, is read by ownOrigin with its scheme.
+// (Decision 23): its `Host`, and the first value of `X-Forwarded-Host` when a
+// trusted proxy sent it (Decision 36). The third, TRACEPAD_URL's, is read by
+// ownOrigin with its scheme.
 func (s *Server) ownHosts(r *http.Request) [2]string {
+	if !s.fromTrustedProxy(r) {
+		return [2]string{r.Host, ""}
+	}
 	// Only the first value: the header is a list when requests cross more
 	// than one proxy, and the first entry is the one the browser was
 	// talking to.
 	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
 	return [2]string{r.Host, strings.TrimSpace(forwarded)}
+}
+
+// fromTrustedProxy reports whether the request's peer is one of
+// TRACEPAD_TRUSTED_PROXIES, the only senders whose `X-Forwarded-Host` and
+// `X-Forwarded-Proto` are read (Decision 36), as with `X-Forwarded-For` (spec
+// 046 #1). Anybody else's are the client's own words about its request.
+//
+// A peer that looks like a proxy of this deployment — loopback, private,
+// link-local — and sends either header without being trusted is almost always
+// one nobody named: a container's proxy reaching the server through the
+// bridge's gateway. Its headers are ignored all the same, and the log says so,
+// since what it costs is quiet: a session cookie without `Secure`, and a
+// rewritten `Host` the origin check no longer recognises.
+func (s *Server) fromTrustedProxy(r *http.Request) bool {
+	peer := peerAddress(r.RemoteAddr)
+	if s.trusted.trusts(peer) {
+		return true
+	}
+	if r.Header.Get("X-Forwarded-Proto") != "" || r.Header.Get("X-Forwarded-Host") != "" {
+		s.noteIgnoredForwarding(peer)
+	}
+	return false
 }
 
 // --- The cookie -------------------------------------------------------------
@@ -1059,7 +1087,7 @@ func (s *Server) sessionCookieFor(r *http.Request, value string, expires time.Ti
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   overTLS(r),
+		Secure:   s.overTLS(r),
 		MaxAge:   int(time.Until(expires).Seconds()),
 	}
 	if value == cookieValueUnchanged {
@@ -1081,18 +1109,22 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   overTLS(r),
+		Secure:   s.overTLS(r),
 		MaxAge:   -1,
 	})
 }
 
-// overTLS reports whether the person is on https, directly or through a proxy
-// that says so. Only the first value of `X-Forwarded-Proto` counts, as with
-// `X-Forwarded-Host` (ownHosts): behind more than one proxy the header is a
-// list, and its first entry is the scheme the browser used.
-func overTLS(r *http.Request) bool {
+// overTLS reports whether the person is on https, directly or through a
+// trusted proxy that says so (Decision 36). Only the first value of
+// `X-Forwarded-Proto` counts, as with `X-Forwarded-Host` (ownHosts): behind
+// more than one proxy the header is a list, and its first entry is the scheme
+// the browser used.
+func (s *Server) overTLS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if !s.fromTrustedProxy(r) {
+		return false
 	}
 	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
 	return strings.EqualFold(strings.TrimSpace(proto), "https")

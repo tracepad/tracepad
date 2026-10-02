@@ -61,6 +61,13 @@ type Config struct {
 	// ReadConcurrency is how many reads are served at once (spec 043 #16);
 	// a read that gets no slot before its deadline is `503` "busy".
 	ReadConcurrency int
+	// MaxConnections is how many client connections the listener holds at
+	// once (spec 043 #45): past it, a new connection waits in the kernel's
+	// backlog, and an idle keep-alive is closed to make room for it.
+	MaxConnections int
+	// MaxConnectionsPerSource bounds one source's share of them, a trusted
+	// proxy exempt (spec 043 #45).
+	MaxConnectionsPerSource int
 	// MCP serves the MCP endpoint at /mcp on the main listener
 	// (spec 004 #14). On by default: it is the reason the read API exists
 	// in this shape.
@@ -195,6 +202,23 @@ const (
 	minDefaultConcurrency = 4
 )
 
+// DefaultMaxConnections and MinMaxConnections bound the connections the
+// listener holds (spec 043 #45). A browser tab holds six, an exporter one or
+// two; a thousand is a team's worth of both, and its goroutines and buffers
+// are a few tens of megabytes. Fewer than sixteen would let one open interface
+// and a busy exporter starve each other.
+const (
+	DefaultMaxConnections = 1024
+	MinMaxConnections     = 16
+)
+
+// DefaultMaxConnectionsPerSource is one source's share of max connections: a
+// quarter, so that one address cannot hold the rest in the backlog, and still
+// a few hundred by default for an office or a fleet behind one NAT.
+func DefaultMaxConnectionsPerSource(maxConnections int) int {
+	return max(1, maxConnections/4)
+}
+
 // DefaultReadConcurrency is the read slots of a machine with this many
 // processors: twice as many, at least four.
 func DefaultReadConcurrency(procs int) int {
@@ -285,6 +309,22 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("TRACEPAD_READ_CONCURRENCY: want at least %d, got %d",
 			MinReadConcurrency, readConcurrency)
 	}
+	maxConnections, err := parseCount("TRACEPAD_MAX_CONNECTIONS", DefaultMaxConnections)
+	if err != nil {
+		return nil, err
+	}
+	if maxConnections < MinMaxConnections {
+		return nil, fmt.Errorf("TRACEPAD_MAX_CONNECTIONS: want at least %d, got %d",
+			MinMaxConnections, maxConnections)
+	}
+	perSource, err := parseCount("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE", DefaultMaxConnectionsPerSource(maxConnections))
+	if err != nil {
+		return nil, err
+	}
+	if perSource < 1 || perSource > maxConnections {
+		return nil, fmt.Errorf("TRACEPAD_MAX_CONNECTIONS_PER_SOURCE: want between 1 and TRACEPAD_MAX_CONNECTIONS (%d), got %d",
+			maxConnections, perSource)
+	}
 	mcp, err := parseOnOff("TRACEPAD_MCP", true)
 	if err != nil {
 		return nil, err
@@ -329,25 +369,27 @@ func Load(args []string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{
-		Listen:              envOr("TRACEPAD_LISTEN", DefaultListen),
-		DataDir:             envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
-		Projects:            os.Getenv("TRACEPAD_PROJECTS"),
-		StoreRaw:            storeRaw,
-		MaxBodyBytes:        maxBody,
-		MaxSpansPerRequest:  maxSpans,
-		BodyBudgetBytes:     bodyBudget,
-		ResponseBudgetBytes: budget,
-		ReadTimeout:         readTimeout,
-		ReadConcurrency:     readConcurrency,
-		MCP:                 mcp,
-		SweepInterval:       sweep,
-		RollupInterval:      rollup,
-		AdminToken:          adminToken,
-		SetupDisabled:       !setup,
-		SessionLife:         time.Duration(sessionDays) * 24 * time.Hour,
-		URL:                 strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
-		InContainer:         inContainer,
-		TrustedProxies:      trusted,
+		Listen:                  envOr("TRACEPAD_LISTEN", DefaultListen),
+		DataDir:                 envOr("TRACEPAD_DATA_DIR", defaultDataDir()),
+		Projects:                os.Getenv("TRACEPAD_PROJECTS"),
+		StoreRaw:                storeRaw,
+		MaxBodyBytes:            maxBody,
+		MaxSpansPerRequest:      maxSpans,
+		BodyBudgetBytes:         bodyBudget,
+		ResponseBudgetBytes:     budget,
+		ReadTimeout:             readTimeout,
+		ReadConcurrency:         readConcurrency,
+		MaxConnections:          maxConnections,
+		MaxConnectionsPerSource: perSource,
+		MCP:                     mcp,
+		SweepInterval:           sweep,
+		RollupInterval:          rollup,
+		AdminToken:              adminToken,
+		SetupDisabled:           !setup,
+		SessionLife:             time.Duration(sessionDays) * 24 * time.Hour,
+		URL:                     strings.TrimSpace(os.Getenv("TRACEPAD_URL")),
+		InContainer:             inContainer,
+		TrustedProxies:          trusted,
 	}
 
 	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)

@@ -381,7 +381,7 @@ location / {
 ```
 
 - **`X-Forwarded-Proto: https`** is how the server knows the browser is on
-  https, and it then marks the session cookie `Secure`
+  https, when a trusted proxy (below) sends it, and it then marks the session cookie `Secure`
   ([accounts.md](accounts.md#signing-in)) and refuses writes from an
   `http://` page on the same name. Configure the proxy to set
   `X-Forwarded-Proto`, not append to it, as nginx's `proxy_set_header` does:
@@ -389,8 +389,8 @@ location / {
   one a client sent.
 - **`Host` or `X-Forwarded-Host`** carries the name the browser typed. Writes
   from the interface are refused unless their `Origin` is one of this server's
-  hosts, and behind a proxy that rewrites `Host` the forwarded one is how it
-  recognises its own.
+  hosts, and behind a proxy that rewrites `Host` the forwarded one, from a
+  trusted proxy, is how it recognises its own.
 - **`X-Forwarded-For`, appended to** (`$proxy_add_x_forwarded_for` in nginx;
   Caddy writes it on its own). The server reads it from the right, and only
   when the connection comes from a proxy it trusts, to learn the client's
@@ -399,10 +399,10 @@ location / {
   trusted by default. A container's proxy is not: to the container, the host
   is the bridge's gateway (`172.17.0.1` on Docker's default network), so name
   it with `TRACEPAD_TRUSTED_PROXIES`. Otherwise every client counts as one, and
-  the log says so once an hour. Only this header waits for a trusted proxy:
-  `X-Forwarded-Proto` and `X-Forwarded-Host` describe the sender's own request
-  (its cookie, its origin), and a page elsewhere cannot make a browser send
-  them, while `X-Forwarded-For` picks a limit that other people share.
+  the log says so once an hour. The same list governs `X-Forwarded-Proto` and
+  `X-Forwarded-Host`: from any other peer they are ignored, so behind an
+  untrusted proxy the cookie is not marked `Secure`, and only `Host` and
+  `TRACEPAD_URL` name the server's address.
 - **A body limit at least `TRACEPAD_MAX_BODY_BYTES`** (20 MiB by default).
   nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
   large batch is then lost at the proxy with a `413` the server never sees.
@@ -499,6 +499,8 @@ services:
       - tracepad:/data
     environment:
       TRACEPAD_ADMIN_TOKEN_FILE: /run/secrets/tracepad_admin_token
+      # Behind a TLS proxy, its address as this container sees it (below).
+      # TRACEPAD_TRUSTED_PROXIES: 172.18.0.1
     secrets: [tracepad_admin_token]
 
 secrets:
@@ -508,6 +510,15 @@ secrets:
 volumes:
   tracepad:
 ```
+
+Behind a [TLS proxy](#serving-over-tls), name it in `TRACEPAD_TRUSTED_PROXIES`,
+or the server ignores its `X-Forwarded-*` headers: session cookies lose
+`Secure`, and the log says so once an hour. Compose puts the stack on a network
+of its own, so a proxy on the host reaches the container from that network's
+gateway rather than `172.17.0.1`: `docker network inspect <project>_default`
+shows it. A proxy in another service of the same stack has an address Compose
+picks at each start; give the network a fixed `subnet` and the proxy a fixed
+`ipv4_address`, and name that address.
 
 Compose mounts the file as it is on the host, owner and mode included, so make
 it the way the `docker run` example above does — readable by the image's user

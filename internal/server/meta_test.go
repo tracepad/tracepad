@@ -227,6 +227,25 @@ func TestAPIIndexListsEveryRoute(t *testing.T) {
 	}
 }
 
+// TestIngestionVersionIsLoggedOncePerValue: the SDK sends the header on every
+// export, so the log names a value when a project first sends it and the
+// counter carries the rest (spec 002 #33).
+func TestIngestionVersionIsLoggedOncePerValue(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	logs := recordLogs(t)
+	for _, version := range []string{"3.6.1", "3.6.1", "3.6.1", "3.7.0", "3.6.1"} {
+		rec := h.post(t, "/v1/traces", fixtureBody(t, "001-langfuse-sdk-generation"),
+			func(r *http.Request) { r.Header.Set("x-langfuse-ingestion-version", version) })
+		expectStatus(t, rec, 200)
+	}
+	logged := logs()
+	for version, want := range map[string]int{"3.6.1": 1, "3.7.0": 1} {
+		if got := strings.Count(logged, "version="+version); got != want {
+			t.Errorf("version %s logged %d times, want %d:\n%s", version, got, want, logged)
+		}
+	}
+}
+
 // TestSystemReportsIngest checks the counter half of spec 002 #17: what the
 // server saw, per dialect, since it started.
 func TestSystemReportsIngest(t *testing.T) {

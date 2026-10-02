@@ -110,7 +110,9 @@ func TestPublicRoutesRefuseOtherOriginsAndOtherBodies(t *testing.T) {
 		try("JSON with a charset", http.StatusOK,
 			func(r *http.Request) { r.Header.Set("Content-Type", "application/json; charset=utf-8") })
 		try("this origin", http.StatusOK, with(json, origin("http://tracepad.local:4318")))
-		try("forwarded host", http.StatusOK, with(json, origin("https://tracepad.example"),
+		try("forwarded host", http.StatusOK, with(json, origin("https://tracepad.example"), viaLocalProxy,
+			func(r *http.Request) { r.Header.Set("X-Forwarded-Host", "tracepad.example") }))
+		try("forwarded host from a peer nobody trusts", http.StatusForbidden, with(json, origin("https://tracepad.example"),
 			func(r *http.Request) { r.Header.Set("X-Forwarded-Host", "tracepad.example") }))
 
 		referer := func(v string) func(*http.Request) {
@@ -469,6 +471,7 @@ func TestAnOriginMayNotDowngrade(t *testing.T) {
 			if c.proto != "" {
 				r.Header.Set("X-Forwarded-Proto", c.proto)
 			}
+			viaLocalProxy(r)
 			return r
 		}
 		if got := h.server.ownOrigin(request("POST", "/"), c.origin); got != c.ours {
@@ -611,6 +614,7 @@ func TestEveryOriginAgainstEveryArrival(t *testing.T) {
 								if overTLSConn {
 									r.TLS = &tls.ConnectionState{}
 								}
+								viaLocalProxy(r)
 								r.Header.Set("Origin", origin)
 								asJSON(r)
 								return r
@@ -702,7 +706,7 @@ func TestARefusedOriginSaysWhatToSet(t *testing.T) {
 			r.Header.Set("Origin", "null")
 			r.Header.Set("Referer", "http://"+r.Host+"/invite?token=invitation-secret-in-a-referer")
 			r.Header.Set("X-Forwarded-Proto", "https")
-		})
+		}, viaLocalProxy)
 	expectStatus(t, rec, http.StatusForbidden)
 
 	// A value the sender chose is cut short in the log, however long.
@@ -712,7 +716,7 @@ func TestARefusedOriginSaysWhatToSet(t *testing.T) {
 		anonymous, asJSON, func(r *http.Request) {
 			r.Header.Set("Origin", "https://"+long+".example")
 			r.Header.Set("X-Forwarded-Host", long)
-		})
+		}, viaLocalProxy)
 	mu.Lock()
 	defer mu.Unlock()
 	if strings.Contains(logged.String(), "invitation-secret-in-a-referer") || strings.Contains(logged.String(), "/invite?") {

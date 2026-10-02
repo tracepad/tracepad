@@ -61,10 +61,14 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	// Early drift signal, never enforcement: refusing an unknown SDK
 	// version would break users on newer SDKs for nothing, and the raw
 	// body means we can always catch up retroactively (spec 002 #17). The
-	// counter half of #17 is `GET /api/v1/system` (spec 004 #10).
+	// counter half of #17 is `GET /api/v1/system` (spec 004 #10). The log
+	// line is the first sighting of a value in a project, not every
+	// request: an SDK sends the header on each export, and a line per
+	// export said nothing the counter does not (spec 002 #33).
 	if v := r.Header.Get("x-langfuse-ingestion-version"); v != "" {
-		s.counters.observeSDKVersion(project.ID, v)
-		slog.Info("langfuse ingestion version", "version", v, "project", project.Name)
+		if s.counters.observeSDKVersion(project.ID, v) {
+			slog.Info("langfuse ingestion version first seen", "version", loggable(v), "project", project.Name)
+		}
 	}
 
 	encoding := r.Header.Get("Content-Encoding")
@@ -213,6 +217,15 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 				"project", project.Name, "run_id", id)
 		}
 	}
+	// A trace whose metadata the bounds kept a key out of (spec 002 #32) is
+	// stored with the rest; the first in each project says so, once per
+	// process, since a trace sent piecemeal would say it on every export.
+	if len(batch.MetadataCapped) > 0 && s.counters.observeMetadataCapped(project.ID) {
+		slog.Warn("a trace's metadata reached its bound, so keys a delivery sent were not stored; "+
+			"this is said once per project",
+			"project", project.Name, "trace_id", batch.MetadataCapped[0],
+			"max_keys", store.TraceMetadataMaxKeys, "max_bytes", store.TraceMetadataMaxBytes)
+	}
 	writeExportResponse(w, result, jsonEncoding)
 }
 
@@ -240,6 +253,7 @@ func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch, adm
 	commit := context.WithoutCancel(ctx)
 	slices := batch.Slices()
 	batch.UnknownRuns = batch.UnknownRuns[:0]
+	batch.MetadataCapped = batch.MetadataCapped[:0]
 	for i, slice := range slices {
 		submit := s.writer.Submit
 		if admitted || i > 0 {
@@ -250,6 +264,7 @@ func (s *Server) submitExport(ctx context.Context, batch *store.IngestBatch, adm
 		}
 		if slice != batch {
 			batch.UnknownRuns = append(batch.UnknownRuns, slice.UnknownRuns...)
+			batch.MetadataCapped = append(batch.MetadataCapped, slice.MetadataCapped...)
 		}
 	}
 	return nil

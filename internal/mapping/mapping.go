@@ -152,31 +152,40 @@ const (
 )
 
 // boundLabels applies the label bounds to a merged trace: its name, user,
-// session, environment, release and version, and each of its tags. The tags
-// are cut first and deduplicated after, so two that differ only past the cut
-// are one tag, as they would be stored.
+// session, environment, release and version. Its tags were bounded as the
+// spans gave them (UnionTags).
 func boundLabels(t *model.Trace) *model.Trace {
 	for _, field := range []*string{&t.Name, &t.UserID, &t.SessionID, &t.Environment, &t.Release, &t.Version} {
 		*field = CutLabel(*field)
 	}
-	if len(t.Tags) == 0 {
-		return t
-	}
-	seen := make(map[string]bool, len(t.Tags))
-	tags := make([]string, 0, min(len(t.Tags), MaxTags))
-	for _, tag := range t.Tags {
-		tag = CutLabel(tag)
-		if seen[tag] {
-			continue
+	return t
+}
+
+// UnionTags is the one bound on a trace's tags (spec 043 #14, spec 002 #32),
+// for the spans of one export and for a delivery onto the stored trace alike:
+// tags followed by each of added it does not already hold, every tag cut at
+// MaxLabelLength before it is compared — so two that differ only past the cut
+// are one tag, as they would be stored — and none past MaxTags, so the first
+// tags a trace was given stay. seen is what tags holds, kept up to date for a
+// caller that adds again; nil builds it from tags.
+func UnionTags(tags []string, seen map[string]bool, added []string) ([]string, map[string]bool) {
+	if seen == nil {
+		seen = make(map[string]bool, len(tags)+len(added))
+		for _, tag := range tags {
+			seen[tag] = true
 		}
-		seen[tag] = true
-		tags = append(tags, tag)
-		if len(tags) == MaxTags {
+	}
+	for _, tag := range added {
+		if len(tags) >= MaxTags {
 			break
 		}
+		tag = CutLabel(tag)
+		if !seen[tag] {
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
 	}
-	t.Tags = tags
-	return t
+	return tags, seen
 }
 
 // CutLabel cuts a label to MaxLabelLength characters, at a character
@@ -286,6 +295,9 @@ type traceAccumulator struct {
 	version     rankedField
 	runID       rankedField
 	itemID      rankedField
+	// tagSeen is the tags kept so far, as cut: a tag is kept once, and
+	// none after the first MaxTags.
+	tagSeen map[string]bool
 }
 
 func (a *traceAccumulator) apply(tf *traceFields) {
@@ -298,11 +310,22 @@ func (a *traceAccumulator) apply(tf *traceFields) {
 	a.version.merge(tf.version)
 	a.runID.merge(tf.runID)
 	a.itemID.merge(tf.itemID)
+	// Tags and metadata are sets rather than single values, so a span adds
+	// to them instead of replacing them (spec 002 #32): the tags as a union
+	// in the order they were first seen — cut and deduplicated as they come,
+	// and no more once MaxTags are kept, so a thousand spans repeating their
+	// tags hold fifty — the metadata key by key with the later span's value
+	// winning.
 	if len(tf.tags) > 0 {
-		a.trace.Tags = tf.tags
+		a.trace.Tags, a.tagSeen = UnionTags(a.trace.Tags, a.tagSeen, tf.tags)
 	}
 	if len(tf.metadata) > 0 {
-		a.trace.Metadata = tf.metadata
+		if a.trace.Metadata == nil {
+			a.trace.Metadata = make(map[string]any, len(tf.metadata))
+		}
+		for k, v := range tf.metadata {
+			a.trace.Metadata[k] = v
+		}
 	}
 }
 
