@@ -1639,7 +1639,7 @@ replays what it has and tells you what it could not:</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>12400 batches, 3.1 GiB
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  covering   2026-08-06 04:12:19 .. 2026-09-05 09:44:02
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  not covered 214 traces started before the archive begins
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>--after MTc4NzczODQwMDAwMDAwMDAwMDoxMjQwMA
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjEyNDAw
 </code></pre></div>
 <p><code>not covered</code> is a lower bound, and deliberately so: it counts the traces whose
 earliest span started before the oldest batch arrived. A trace exported late —
@@ -1659,7 +1659,7 @@ it; <code>--after</code> does not, because the API counts what the filters match
 what is left after a cursor — one meaning for <code>count</code> across the whole read API.
 A dry run resumed with <code>--after</code> says so rather than letting the number be read
 as what it is about to send:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$ tracepad export --otlp --to … --after MTc4… --dry-run
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$ tracepad export --otlp --to … --after bjox… --dry-run
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>12400 batches in the window; the resume starts inside it, so fewer will be sent
 </code></pre></div>
 <p>With <code>--json</code> the field is <code>matching_window</code> for the same reason, beside
@@ -1775,16 +1775,16 @@ you would not find until you went looking for a trace.</p>
 <p>So it stops, with the batch id, the receiver's status and body, and the cursor
 to continue from:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>$ tracepad export --otlp --to http://collector:4318/v1/traces
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>tracepad: batch 8814 was refused: 413 payload too large
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>tracepad: batch n8814 was refused: 413 payload too large
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>1204 batches, 512.4 MiB
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  covering   2026-08-06 04:12:19 .. 2026-08-09 22:03:55
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>  not covered 214 traces started before the archive begins
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  stopped at batch 8814: 413 payload too large
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>--after MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  stopped at batch n8814: 413 payload too large
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 </code></pre></div>
 <p>Fix what the receiver complained about, then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--to<span class="w"> </span>http://collector:4318/v1/traces<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--after<span class="w"> </span>MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--after<span class="w"> </span>bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 </code></pre></div>
 <p>The cursor resumes <strong>at</strong> the batch that failed, not after it. Re-sending a
 batch a receiver already took is safe — OTLP receivers upsert by span id, this
@@ -1794,21 +1794,23 @@ towards a gap.</p>
 <h2 id="onto-disk">Onto disk</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--dir<span class="w"> </span>./tracepad-export
 </code></pre></div>
-<p>One file per batch, named <code>&lt;received_at_ms&gt;-&lt;id&gt;.pb</code> — or <code>.json</code> for a batch
-that arrived in the OTLP/JSON encoding — so that a plain <code>ls</code> is in replay
-order. Beside them, <code>manifest.jsonl</code>: one line per batch, the listing row as the
-API returns it, appended as each file lands. The files are your traces, prompts
-and completions included, so they are readable by you alone (<code>0600</code>), and so is
-the directory when the export creates it (<code>0700</code>). One that already exists keeps
-its mode, and the export says so on stderr when it is open to others. A resume
-brings the files an earlier export left to <code>0600</code> too.</p>
+<p>One file per batch, named <code>&lt;received_at_ms&gt;-&lt;id&gt;.pb</code> — <code>id</code> being <code>n</code> and the
+batch's number within the project (<a href="../api/#the-raw-archive">api.md</a>) — or
+<code>.json</code> for a batch that arrived in the OTLP/JSON encoding — so that a plain
+<code>ls</code> is in replay order. Beside them, <code>manifest.jsonl</code>: one line per batch, the
+listing row as the API returns it, appended as each file lands. The files are
+your traces, prompts and completions included, so they are readable by you
+alone (<code>0600</code>), and so is the directory when the export creates it (<code>0700</code>).
+One that already exists keeps its mode, and the export says so on stderr when
+it is open to others. A resume brings the files an earlier export left to
+<code>0600</code> too.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>$ ls tracepad-export | head -3
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>1788220800000-1.pb
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>1788220800001-2.pb
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>1788220800002-3.json
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>1788220800000-n1.pb
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>1788220800001-n2.pb
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>1788220800002-n3.json
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>$ head -1 tracepad-export/manifest.jsonl
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>{"id":1,"received_at":"2026-09-01T00:00:00Z","dialect":"langfuse",
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>{"id":"n1","received_at":"2026-09-01T00:00:00Z","dialect":"langfuse",
 <a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a> "content_type":"application/x-protobuf","content_encoding":"","size_bytes":1274}
 </code></pre></div>
 <p>The names carry the order and the extension carries the encoding, so replaying
