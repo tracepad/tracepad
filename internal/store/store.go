@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -73,7 +74,7 @@ func Open(path string) (*Store, error) {
 	// read the file (spec 044 #10). FAST would leave the freed overflow
 	// pages intact. There is no setting to turn it off: a guarantee that
 	// depends on configuration is not one (spec 005 #9).
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
+	dsn := fileURI(path) + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_pragma=secure_delete(ON)"
 	if fresh {
 		if err := createFile(path); err != nil {
 			return nil, fmt.Errorf("create %s: %w", path, err)
@@ -128,12 +129,24 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// fileURI is the SQLite URI of a database file: `file:` and the path, with the
+// three characters a URI gives a meaning of their own written as escapes. A
+// `#` ends the path, a `?` starts the query and `%` begins an escape, so a data
+// directory called `notes#1` was opened as `notes` — a different file, made
+// beside it, with the data of one server in it and the name of another's
+// (found by making a store per fuzz input, whose test names carry a `#`).
+// Nothing else in a path needs one, and a Windows drive letter must stay as it
+// is.
+func fileURI(path string) string {
+	return "file:" + strings.NewReplacer("%", "%25", "#", "%23", "?", "%3f").Replace(path)
+}
+
 // createFile makes a fresh database file in incremental auto-vacuum mode and
 // WAL, in that order: once WAL has written the file's header the mode can no
 // longer change without a VACUUM, which is what every fresh file used to go
 // through on its first open, when the DSN named the two the other way round.
 func createFile(path string) error {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", fileURI(path)+"?_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return err
 	}

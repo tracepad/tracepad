@@ -51,7 +51,12 @@ var ErrNotACursor = errors.New("not a raw archive cursor: pass one a listing gav
 // ParseCursor reads a cursor into its arrival and number.
 func ParseCursor(value string) (receivedAt, number int64, err error) {
 	raw, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil {
+	// One spelling: the decoder is lenient twice over — the last character
+	// of an unpadded string may carry bits no byte uses, so `bjoxOjE`,
+	// `bjoxOjF`, `bjoxOjG` and `bjoxOjH` read as one position, and it skips
+	// a carriage return or a line feed wherever it finds one — so what it
+	// read is written back and must be what was given (found by FuzzRawIDs).
+	if err != nil || base64.RawURLEncoding.EncodeToString(raw) != value {
 		return 0, 0, ErrNotACursor
 	}
 	parts := strings.Split(string(raw), ":")

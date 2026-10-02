@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/model"
 )
 
 // The per-user rollup (spec 023): spec 013's hourly table one dimension over,
@@ -152,8 +154,13 @@ func ParseUserCursorKey(sortBy, key string) (any, error) {
 		return nil, nil
 	}
 	if sortBy == UsersByCost {
+		// Finite: ParseFloat takes `NaN` and `Inf`, SQLite binds a NaN as
+		// NULL, and a forged cursor would then page by "no cost" and answer
+		// a plausible wrong page rather than a refusal (found by
+		// FuzzUserCursorKey). No cursor we issue holds one — a cost the
+		// mapper recorded is finite.
 		value, err := strconv.ParseFloat(key, 64)
-		if err != nil {
+		if err != nil || !model.Finite(value) {
 			return nil, fmt.Errorf("invalid cursor")
 		}
 		return value, nil

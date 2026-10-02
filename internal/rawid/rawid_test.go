@@ -26,6 +26,18 @@ func TestCursors(t *testing.T) {
 	if err != nil || at != 1_788_220_800_001_000_000 || number != 7 {
 		t.Errorf("round trip = %d %d %v", at, number, err)
 	}
+	// The last character of unpadded base64 carries bits no byte uses: the
+	// cursor for (1, 1) ends in `E`, and `F`, `G` and `H` are the same bytes
+	// spelled differently, which is a second cursor for one position.
+	if _, _, err := ParseCursor("bjoxOjE"); err != nil {
+		t.Errorf("the cursor the formatter writes is refused: %v", err)
+	}
+	// And the decoder skips a line break wherever it finds one.
+	for _, bad := range []string{"bjoxOjF", "bjoxOjG", "bjoxOjH", "bjox\nOjE", "bjoxOj\rE", "\nbjoxOjE", "bjoxOjE\r\n"} {
+		if _, _, err := ParseCursor(bad); !errors.Is(err, ErrNotACursor) {
+			t.Errorf("ParseCursor(%q) = %v, want not a cursor: it spells the position a second way", bad, err)
+		}
+	}
 	encode := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
 	// One spelling for one position: a sign, a leading zero, a zero number
 	// or another shape is not a cursor this archive gave out.

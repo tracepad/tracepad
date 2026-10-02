@@ -46,7 +46,7 @@ type harness struct {
 	arrival int64
 }
 
-func newHarness(t *testing.T, cfg *config.Config, writerOpts store.WriterOptions) *harness {
+func newHarness(t testing.TB, cfg *config.Config, writerOpts store.WriterOptions) *harness {
 	t.Helper()
 	captureLogs(t)
 

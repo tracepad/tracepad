@@ -24,7 +24,7 @@ import (
 // write failed lives only in the log, which is exactly what a rare failure
 // needs to leave behind. Tests within a package run sequentially, so swapping
 // the default logger is safe here.
-func captureLogs(t *testing.T) {
+func captureLogs(t testing.TB) {
 	t.Helper()
 	var (
 		mu       sync.Mutex

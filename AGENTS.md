@@ -751,6 +751,15 @@ reason in a comment; adding a dialect should be a table edit.
   check the file, start the server again on it and hold it to every answer it
   gave before (spec 043 #46). About ten seconds a round. Not in the gate; CI
   runs it on demand, as the `crash` job.
+- `make fuzz` — every Go fuzz target (`func FuzzXxx` under `internal/`) for
+  `FUZZTIME` each, ten seconds by default: the OTLP decoders in both
+  encodings, the attribute mapping and the media walk, the search parser,
+  the cursors and the HTTP handlers' bodies and queries (spec 052). One
+  target: `scripts/fuzz.sh FuzzSearch`; a real run is minutes
+  (`make fuzz FUZZTIME=3m`) and belongs outside the heavy-job lock under
+  `nice`. A crash leaves its input in `testdata/fuzz/<Target>/`, which
+  `go test` replays from then on: commit it with the fix. Not in the gate;
+  CI runs it on demand (the `fuzz` workflow).
 - `make fixtures` — regenerate `testdata/otlp/*.pb` and their goldens after a
   deliberate mapping change. Review the golden diff; it *is* the change. The
   three bodies that are not synthetic are rewritten from the packages first:

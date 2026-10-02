@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -810,7 +812,15 @@ func decodeDocument(s string) (any, bool) {
 	decoder := json.NewDecoder(strings.NewReader(s))
 	decoder.UseNumber()
 	var v any
-	if err := decoder.Decode(&v); err != nil || decoder.More() {
+	if err := decoder.Decode(&v); err != nil {
+		return nil, false
+	}
+	// Anything after the value is more than one value. Not decoder.More(),
+	// which answers whether an array or object being read has another
+	// element, and takes a stray `]` or `}` for the end of one nobody
+	// opened: `{"a":1}]` passed (the same trap decodeStrict in the server
+	// package documents).
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
 	return v, true

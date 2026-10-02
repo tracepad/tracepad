@@ -52,6 +52,12 @@ crash-test: ## SIGKILL the server in the middle of its writes CRASH_ROUNDS times
 		$(if $(CRASH_SEED),TRACEPAD_CRASH_SEED=$(CRASH_SEED)) \
 		go test -v -count=1 -timeout $(CRASH_TIMEOUT) -run TestKillMidWrite ./internal/crashtest
 
+# Every Go fuzz target for FUZZTIME each (spec 052 #4). Not in the gate: ten
+# seconds a target is a smoke test, and a finding takes minutes. `make fuzz
+# FUZZTIME=3m`, or one target by name: `scripts/fuzz.sh FuzzSearch`.
+fuzz: ## Run every Go fuzz target for FUZZTIME (default 10s) each (not in the gate)
+	scripts/fuzz.sh
+
 vet: ## Static checks
 	go vet ./...
 
@@ -365,6 +371,6 @@ install-hooks: ## (Re)install both hooks
 .PHONY: help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
-	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race \
+	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \
 	doc-anchors doc-anchors-self-test release-tag-test release-notes-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks

@@ -1,0 +1,77 @@
+name: Fuzz
+
+# Every Go fuzz target for a while each (spec 052 #4): by hand, from the Actions
+# tab, and not on a schedule. The ingest decoders are the surface that takes
+# strangers' bytes, and a few minutes a target finds what ten seconds in
+# `make fuzz` does not — but a nightly run of every target costs most of an
+# hour a night for a result that changes only when the decoders do, so it
+# waits for the repository to be public and for someone to want the nights.
+# One line turns it on: a `schedule:` trigger here.
+on:
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Time for each target, as `go test -fuzztime` reads it (3m, 10s, 5000x)
+        default: 3m
+        required: true
+      target:
+        description: Only the targets whose name matches this regular expression
+        default: .
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The targets run one after another, so the time asked for each has to fit
+      # the job's limit with them all: refused here, at the start, rather than by
+      # the runner at the end with nothing to show. Each target costs its time
+      # and half a minute more to build and to minimize a crasher; an iteration
+      # count (`5000x`) has no length to add up and is refused too. The inputs
+      # reach the scripts as environment, not as text pasted into the command:
+      # they are typed by whoever presses the button.
+      - name: The time fits the job
+        run: |
+          targets=$(grep -rEho --include='*_test.go' '^func Fuzz[A-Za-z0-9_]*' internal | sed 's/^func //' | grep -cE "$TARGET" || true)
+          if [[ ! "$FUZZTIME" =~ ^[0-9]+[smh]$ ]]; then
+            echo "fuzztime must be a whole number of seconds, minutes or hours (30s, 3m, 1h), got '$FUZZTIME'" >&2
+            exit 1
+          fi
+          case "$FUZZTIME" in
+            *s) unit=1 ;;
+            *m) unit=60 ;;
+            *h) unit=3600 ;;
+          esac
+          seconds=$(( ${FUZZTIME%[smh]} * unit ))
+          total=$(( targets * (seconds + 30) ))
+          if [ "$total" -gt $(( 340 * 60 )) ]; then
+            echo "$targets targets at $FUZZTIME each is $(( total / 60 )) minutes; the job has 350 (340 for the targets). Ask for less, or name fewer targets." >&2
+            exit 1
+          fi
+        env:
+          FUZZTIME: ${{ inputs.fuzztime }}
+          TARGET: ${{ inputs.target }}
+      - run: scripts/fuzz.sh "$TARGET"
+        env:
+          FUZZTIME: ${{ inputs.fuzztime }}
+          TARGET: ${{ inputs.target }}
+          FUZZ_PARALLEL: 4
+      # A crash leaves its input beside the package; this is the way to get it
+      # off the runner and into a commit with its fix — also from a run that was
+      # cancelled or timed out after the target that found it.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() || cancelled()
+        with:
+          name: fuzz-crashers
+          path: internal/**/testdata/fuzz/
+          retention-days: 14

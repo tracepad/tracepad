@@ -230,6 +230,11 @@ func TestUserListingRefusesWhatItDoesNotKnow(t *testing.T) {
 		"/api/v1/users?prefix=",
 		"/api/v1/users?name=alice",
 		"/api/v1/users?cursor=not-a-cursor",
+		// A cost key ParseFloat reads and no cursor of ours holds: SQLite
+		// binds a NaN as NULL, which would page by "no cost" and answer a
+		// plausible wrong page (found by FuzzUserCursorKey).
+		"/api/v1/users?sort=cost&cursor=" + encodeCursor("NaN", "alice"),
+		"/api/v1/users?sort=cost&cursor=" + encodeCursor("Inf", "alice"),
 		"/api/v1/users/alice?window=7d",
 	} {
 		rec := h.get(t, path)
