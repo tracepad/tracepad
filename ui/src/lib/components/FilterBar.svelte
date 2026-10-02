@@ -236,7 +236,7 @@
      375 px the bar has 343 px, and the box beside the window and *Filters* was
      left 80 — a placeholder cut to nothing and a field to type into that
      showed two letters. From `sm` the bar is the one row it was. -->
-<div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
+<div class="flex min-w-0 flex-wrap items-center gap-1.5 max-sm:w-full sm:flex-nowrap">
 	<SearchBox value={filters.q ?? ''} onchange={setSearch} />
 
 	<!-- `min-w-24`: the window may be narrower than its label, down to a floor
@@ -251,7 +251,7 @@
 		class="min-w-24"
 	/>
 
-<Popover.Root bind:open onOpenChange={edit}>
+	<Popover.Root bind:open onOpenChange={edit}>
 		<Popover.Trigger>
 			{#snippet child({ props })}
 				<!-- `shrink-0`, alone on this bar: the search box and the window
@@ -376,22 +376,24 @@
 		</Popover.Portal>
 	</Popover.Root>
 
-	<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
-		{#each chips(filters) as label (label.name)}
-				<li>
-					<button
-						type="button"
-						onclick={() => drop(label.name)}
-						aria-label="Remove filter {label.title}"
-						title={label.title}
-						class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
-							pointer-coarse:min-h-11 flex max-w-56 cursor-pointer items-center gap-1 rounded-md
-							border px-2 py-1 text-sm whitespace-nowrap transition-colors duration-100"
-					>
-						<span class="truncate">{label.text}</span>
-						<X class="size-3.5 shrink-0" />
-					</button>
-				</li>
-		{/each}
-	</ul>
+	{#if chips(filters).length > 0}
+		<ul class="flex min-w-0 items-center gap-1 overflow-x-auto">
+			{#each chips(filters) as label (label.name)}
+					<li>
+						<button
+							type="button"
+							onclick={() => drop(label.name)}
+							aria-label="Remove filter {label.title}"
+							title={label.title}
+							class="border-border bg-surface text-muted hover:bg-raised hover:text-fg
+								pointer-coarse:min-h-11 flex max-w-56 cursor-pointer items-center gap-1 rounded-md
+								border px-2 py-1 text-sm whitespace-nowrap transition-colors duration-100"
+						>
+							<span class="truncate">{label.text}</span>
+							<X class="size-3.5 shrink-0" />
+						</button>
+					</li>
+			{/each}
+		</ul>
+	{/if}
 </div>

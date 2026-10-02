@@ -307,44 +307,49 @@ function wideWindow(): string {
  * `elementFromPoint` rather than the click alone, because the click's failure
  * is a thirty-second timeout that reads like a slow page.
  */
-test('a long window label leaves the Filters button clickable at a phone width', async ({
-	page
-}, testInfo) => {
-	test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
-	await signIn(page);
-	await page.goto(`/traces?${wideWindow()}`);
+for (const width of [320, 375]) {
+	test(`a long window label leaves the Filters button clickable at ${width} px`, async ({
+		page
+	}, testInfo) => {
+		test.skip(testInfo.project.name !== 'mobile', 'the narrow width is the test');
+		await page.setViewportSize({ width, height: 812 });
+		await signIn(page);
+		await page.goto(`/traces?${wideWindow()}`);
 
-	const trigger = page.getByRole('button', { name: /^Filters/ });
-	const covered = await trigger.evaluate((button) => {
-		const box = button.getBoundingClientRect();
-		const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-		return { hit: !!at && button.contains(at), right: box.right, viewport: window.innerWidth };
+		const trigger = page.getByRole('button', { name: /^Filters/ });
+		const covered = await trigger.evaluate((button) => {
+			const box = button.getBoundingClientRect();
+			const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+			return { hit: !!at && button.contains(at), right: box.right, viewport: window.innerWidth };
+		});
+		expect(covered.hit).toBe(true);
+		expect(covered.right).toBeLessThanOrEqual(covered.viewport);
+
+		// Since Decision 23 the search box is on a row of its own, so the window
+		// is laid out on the bar's whole width: the longest label it wears, 271 px
+		// at 320, fits and is shown whole at both widths (measured), and *Filters*
+		// wraps beneath it when the two do not fit together rather than the window
+		// being cut. The shrink rule of #22 is what the Sessions bar's case below
+		// still pins.
+		const range = page.getByRole('button', { name: /^Time range: / });
+		await expect(range).toHaveAccessibleName(/→/);
+		expect(await range.locator('span').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+		await openPanel(page);
 	});
-	expect(covered.hit).toBe(true);
-	expect(covered.right).toBeLessThanOrEqual(covered.viewport);
+}
 
-	// Since Decision 23 the search box is on a row of its own, and the window
-	// has the row's width less *Filters*: the longest label it wears is shown
-	// whole at 375 px. The shrink rule of #22 is still what the Sessions bar's
-	// case below pins, and what the bar falls back on at 320.
-	const range = page.getByRole('button', { name: /^Time range: / });
-	await expect(range).toHaveAccessibleName(/→/);
-	expect(await range.locator('span').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-
-	await openPanel(page);
-});
-
-/** The same bar, one screen over (Decision 22): the same three answers. */
 /**
  * Decision 23: on a phone the search box has a row of its own. Beside the
  * window and *Filters* it was left 80 px at 375 — a placeholder cut to nothing
  * and a field that showed two letters of what was typed. Measured at the two
- * widths a phone comes in (spec 006 #15, spec 027 #22): the field is as wide as
- * the bar, nothing the bar holds crosses anything else, and nothing is outside
- * the window — with the plain bar, with the longest label the window wears,
- * and with a search and a chip on it.
+ * widths the narrowest phones come in, at two larger phones, and one under
+ * `sm` — where the bar must fill its row rather than the width of what it
+ * holds: the field is as wide as the bar, nothing the bar holds crosses
+ * anything else, and nothing is outside the window — with the plain bar, with
+ * the longest label the window wears, and with a search and a chip on it.
  */
-for (const width of [320, 375]) {
+for (const width of [320, 375, 414, 600, 639]) {
 	for (const [name, query] of [
 		['the plain bar', ''],
 		['a window written out', wideWindow()],
@@ -404,9 +409,11 @@ for (const width of [320, 375]) {
 			);
 			expect(overflow).toBeLessThanOrEqual(0);
 
-			// Typed into, it shows what was typed.
+			// Typed into, it holds what was typed and is still inside the window.
 			await search.fill('a long question about a refund');
-			expect(await search.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+			await expect(search).toHaveValue('a long question about a refund');
+			const typed = (await search.boundingBox())!;
+			expect(typed.x + typed.width).toBeLessThanOrEqual(width);
 
 			await testInfo.attach(`bar-${width}-${name}`, {
 				body: await page.screenshot({ clip: { x: 0, y: 0, width, height: 260 } }),
@@ -416,6 +423,7 @@ for (const width of [320, 375]) {
 	}
 }
 
+/** The same bar, one screen over (Decision 22): the same three answers. */
 test('the sessions bar keeps its controls inside it at a phone width', async ({
 	page
 }, testInfo) => {
