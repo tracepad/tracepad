@@ -4,6 +4,12 @@
 
 .git
 .github/
+# The agent's own instructions and settings: no part of the build. They never
+# reached the final image, which copies only what the builder put in /out; this
+# keeps them out of the builder's context and its `COPY . .` layer, and so out
+# of anything that caches or exports those (spec 020 #31).
+.claude/
+AGENTS.md
 bin/
 dist/
 

@@ -395,17 +395,26 @@ jobs:
       - run: make sdk-lines
 
   # The Go package (spec 033 #11): vet and unit tests inside the nested
-  # module on the two newest Go lines — two Gos like two Pythons — then its
-  # end-to-end package against a real binary. The binary is built with the
-  # server's own Go first, because the root module asks for a newer one than
-  # the package's floor; the package is then tested with the matrix's.
+  # module on the two newest Go lines — two Gos like two Pythons — and on its
+  # floor, the `go` line of sdk/go/go.mod, which the release workflow also runs
+  # but a pull request never did until now (spec 020 #31); then its end-to-end
+  # package against a real binary. The binary is built with the server's own
+  # Go first, because the root module asks for a newer one than the package's
+  # floor; the package is then tested with the matrix's.
   sdk-go:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    name: sdk-go (${{ matrix.label }})
     strategy:
       fail-fast: false
       matrix:
-        go-version: ["1.26.x", "1.27.x"]
+        include:
+          - label: floor
+            go-version-file: sdk/go/go.mod
+          - label: 1.26.x
+            go-version: 1.26.x
+          - label: 1.27.x
+            go-version: 1.27.x
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -414,9 +423,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build -o /tmp/tracepad ./cmd/tracepad
+      # One of the two inputs is empty in each leg: the floor names a file, the
+      # others a version.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
+          go-version-file: ${{ matrix.go-version-file }}
           cache-dependency-path: sdk/go/go.sum
       - run: TRACEPAD_BINARY=/tmp/tracepad scripts/sdk-go-test.sh
       # A signal, not a rule (design §8), the same instrument the others have.
