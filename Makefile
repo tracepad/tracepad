@@ -35,6 +35,23 @@ test: ## Run all tests
 race: ## Run the store and server tests under the race detector (slow; CI runs it, the gate does not)
 	go test -race -count=1 -timeout 45m ./internal/store ./internal/server
 
+# The server killed in the middle of its writes (spec 043 #46). A real binary
+# on a temporary data directory is driven with ingest on both OTLP doors,
+# scores, deletions, an erasure and readers, with the sweeper and the
+# aggregator at their shortest cadence, and sent SIGKILL at a random moment;
+# then the file is checked (integrity, no transaction half of itself), the
+# server is started on it again, and every answer it gave before the kill is
+# held to. CRASH_ROUNDS is the number of kills, CRASH_SEED repeats the random
+# choices of a run that failed. Not in the gate: a round costs ten seconds or
+# so, and CI runs it on demand.
+CRASH_ROUNDS ?= 10
+CRASH_TIMEOUT ?= 60m
+crash-test: ## SIGKILL the server in the middle of its writes CRASH_ROUNDS times and check the file and its promises (not in the gate)
+	go build -o bin/$(BINARY)-crash ./cmd/tracepad
+	TRACEPAD_BINARY=$(CURDIR)/bin/$(BINARY)-crash TRACEPAD_CRASH_ROUNDS=$(CRASH_ROUNDS) \
+		$(if $(CRASH_SEED),TRACEPAD_CRASH_SEED=$(CRASH_SEED)) \
+		go test -v -count=1 -timeout $(CRASH_TIMEOUT) -run TestKillMidWrite ./internal/crashtest
+
 vet: ## Static checks
 	go vet ./...
 
