@@ -57,7 +57,9 @@ def store(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def opened(store: Store, version: int = 12) -> tracepad.Run:
     store.answers["/api/v1/datasets/golden/runs"] = {
-        "id": RUN, "name": "a run", "dataset_version": version
+        "id": RUN,
+        "name": "a run",
+        "dataset_version": version,
     }
     return tracepad.dataset("golden").run("a run")
 
@@ -71,13 +73,18 @@ def test_a_dataset_makes_no_request(store: Store) -> None:
 
 
 def test_put_items_sends_dicts_and_items_as_one_body(store: Store) -> None:
-    store.answers["/api/v1/datasets/golden/items"] = {"ids": [CASE, OTHER],
-                                                      "version": 4, "changed": 2}
+    store.answers["/api/v1/datasets/golden/items"] = {
+        "ids": [CASE, OTHER],
+        "version": 4,
+        "changed": 2,
+    }
 
-    version, changed = tracepad.dataset("golden").put_items([
-        tracepad.Item(id=CASE, input={"q": 1}, dataset_version=99),
-        {"id": OTHER, "input": {"q": 2}},
-    ])
+    version, changed = tracepad.dataset("golden").put_items(
+        [
+            tracepad.Item(id=CASE, input={"q": 1}, dataset_version=99),
+            {"id": OTHER, "input": {"q": 2}},
+        ]
+    )
 
     assert (version, changed) == (4, 2)
     _, _, body, _ = store.calls[0]
@@ -149,7 +156,8 @@ def test_put_items_compares_only_string_ids(store: Store) -> None:
 
 def test_put_items_sends_an_empty_list_for_the_server_to_refuse(store: Store) -> None:
     store.answers["/api/v1/datasets/golden/items"] = TracepadHTTPError(
-        400, '{"error": "no items in the request"}')
+        400, '{"error": "no items in the request"}'
+    )
 
     with pytest.raises(TracepadHTTPError, match="no items"):
         tracepad.dataset("golden").put_items([])
@@ -161,8 +169,18 @@ def test_items_follow_the_cursor_to_the_end(store: Store) -> None:
     # The rows are the store's own shape: it calls the version `version`, and
     # sends fields an `Item` has no room for.
     store.answers["/api/v1/datasets/golden/items"] = [
-        {"items": [{"id": CASE, "input": 1, "version": 3, "seq": 1,
-                    "created_at": "2026-09-04T10:00:00Z"}], "next_cursor": "c1"},
+        {
+            "items": [
+                {
+                    "id": CASE,
+                    "input": 1,
+                    "version": 3,
+                    "seq": 1,
+                    "created_at": "2026-09-04T10:00:00Z",
+                }
+            ],
+            "next_cursor": "c1",
+        },
         {"items": [{"id": OTHER, "input": 2, "version": 2}], "next_cursor": "c2"},
         {"items": [], "next_cursor": None},
     ]
@@ -255,9 +273,7 @@ def test_the_read_side_is_the_server_s_json(store: Store) -> None:
 # --- the stamping ---------------------------------------------------------
 
 
-def test_a_span_inside_the_block_carries_the_run_and_the_item(
-    spans: Any, store: Store
-) -> None:
+def test_a_span_inside_the_block_carries_the_run_and_the_item(spans: Any, store: Store) -> None:
     run = opened(store)
 
     with tracepad.span("before"):
@@ -430,7 +446,8 @@ def test_a_case_may_be_a_dict_an_item_or_a_bare_id(spans: Any, store: Store) -> 
 def test_a_run_the_store_refused_to_close_is_still_open(store: Store) -> None:
     run = opened(store)
     store.answers[f"/api/v1/runs/{RUN}/finish"] = [
-        TracepadHTTPError(503, "the write queue is saturated"), {"status": "failed"},
+        TracepadHTTPError(503, "the write queue is saturated"),
+        {"status": "failed"},
     ]
 
     with pytest.raises(TracepadHTTPError), run:
@@ -443,18 +460,20 @@ def test_a_run_the_store_refused_to_close_is_still_open(store: Store) -> None:
 
 
 def test_score_configs_are_put_in_order(store: Store) -> None:
-    tracepad.score_configs([
-        {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
-        tracepad.ScoreConfig(name="verdict", data_type="categorical",
-                             categories=["pass", "fail"]),
-    ])
+    tracepad.score_configs(
+        [
+            {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
+            tracepad.ScoreConfig(
+                name="verdict", data_type="categorical", categories=["pass", "fail"]
+            ),
+        ]
+    )
 
     assert store.paths() == [
         "PUT /api/v1/score-configs/accuracy",
         "PUT /api/v1/score-configs/verdict",
     ]
-    assert store.calls[0][2] == {"data_type": "numeric", "direction": "higher",
-                                 "min": 0, "max": 1}
+    assert store.calls[0][2] == {"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}
     assert store.calls[1][2] == {"data_type": "categorical", "categories": ["pass", "fail"]}
 
 
@@ -464,8 +483,12 @@ def test_score_configs_raise_on_the_first_refusal_with_the_name(store: Store) ->
     )
 
     with pytest.raises(TracepadHTTPError, match="'accuracy'") as refused:
-        tracepad.score_configs([{"name": "accuracy", "data_type": "numeric"},
-                                {"name": "verdict", "data_type": "categorical"}])
+        tracepad.score_configs(
+            [
+                {"name": "accuracy", "data_type": "numeric"},
+                {"name": "verdict", "data_type": "categorical"},
+            ]
+        )
 
     # The name, and what the store said, and the status it said it with.
     assert refused.value.status == 400
@@ -476,9 +499,10 @@ def test_score_configs_raise_on_the_first_refusal_with_the_name(store: Store) ->
 
 
 def test_item_id_is_the_documented_derivation() -> None:
-    assert tracepad.item_id("cases/refund.json") == hashlib.sha256(
-        b"cases/refund.json"
-    ).hexdigest()[:32]
+    assert (
+        tracepad.item_id("cases/refund.json")
+        == hashlib.sha256(b"cases/refund.json").hexdigest()[:32]
+    )
 
 
 def test_the_processor_ignores_a_span_started_outside_any_block(

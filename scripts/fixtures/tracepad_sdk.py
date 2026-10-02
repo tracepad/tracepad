@@ -172,9 +172,7 @@ def fix_clocks(export: ExportTraceServiceRequest) -> None:
         for attribute in span.attributes:
             if attribute.key == attrs.COMPLETION_START_TIME:
                 # Half a step into the call: the fixture's time to first token.
-                attribute.value.string_value = attrs.rfc3339(
-                    span.start_time_unix_nano + STEP // 2
-                )
+                attribute.value.string_value = attrs.rfc3339(span.start_time_unix_nano + STEP // 2)
 
 
 def main() -> int:

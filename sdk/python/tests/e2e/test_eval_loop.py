@@ -20,10 +20,16 @@ from harness import BINARY, KEY, Store, trace_of
 pytestmark = pytest.mark.skipif(not BINARY, reason="TRACEPAD_BINARY is not set")
 
 CASES = [
-    {"id": tracepad.item_id("reset"), "input": {"question": "where does a span land?"},
-     "expected_output": {"answer": "In the trace you are reading."}},
-    {"id": tracepad.item_id("refund"), "input": {"question": "what does a run pin?"},
-     "expected_output": {"answer": "A dataset version."}},
+    {
+        "id": tracepad.item_id("reset"),
+        "input": {"question": "where does a span land?"},
+        "expected_output": {"answer": "In the trace you are reading."},
+    },
+    {
+        "id": tracepad.item_id("refund"),
+        "input": {"question": "what does a run pin?"},
+        "expected_output": {"answer": "A dataset version."},
+    },
 ]
 
 ANSWER = {
@@ -43,12 +49,14 @@ def answer(question: str) -> str:
 
 def a_run(name: str) -> tuple[dict[str, Any], list[str]]:
     """One pass of the whole loop, returning the run and the trace ids it made."""
-    tracepad.score_configs([
-        {"name": "accuracy", "data_type": "numeric", "direction": "higher",
-         "min": 0, "max": 1},
-        tracepad.ScoreConfig(name="verdict", data_type="categorical",
-                             categories=["pass", "fail"]),
-    ])
+    tracepad.score_configs(
+        [
+            {"name": "accuracy", "data_type": "numeric", "direction": "higher", "min": 0, "max": 1},
+            tracepad.ScoreConfig(
+                name="verdict", data_type="categorical", categories=["pass", "fail"]
+            ),
+        ]
+    )
 
     golden = tracepad.dataset("support-golden")
     golden.put_items(CASES)
@@ -124,7 +132,8 @@ def test_more_items_than_a_request_takes_are_written_in_two(store: Store) -> Non
     tracepad.init(store.host, KEY)
 
     version, changed = tracepad.dataset("over-the-cap").put_items(
-        [{"input": n} for n in range(10_001)])
+        [{"input": n} for n in range(10_001)]
+    )
 
     assert (version, changed) == (2, 10_001)
 
@@ -174,6 +183,7 @@ def exporting_processor(store: Store) -> Any:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     return SimpleSpanProcessor(
-        OTLPSpanExporter(endpoint=f"{store.host}/v1/traces",
-                         headers={"Authorization": f"Bearer {KEY}"})
+        OTLPSpanExporter(
+            endpoint=f"{store.host}/v1/traces", headers={"Authorization": f"Bearer {KEY}"}
+        )
     )

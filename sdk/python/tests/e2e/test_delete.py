@@ -42,8 +42,11 @@ def test_two_traces_go_one_by_id_and_one_by_filter(store: Store) -> None:
 
 def test_an_ingest_key_covers_the_production_path_and_not_deletion(store: Store) -> None:
     """Spec 045 #16: span, score and prompt fetch are `ingest`; deleting is `write`."""
-    store.call("POST", "/api/v1/prompts/ingest-answer/versions",
-               {"type": "text", "prompt": "Answer {topic}.", "labels": ["production"]})
+    store.call(
+        "POST",
+        "/api/v1/prompts/ingest-answer/versions",
+        {"type": "text", "prompt": "Answer {topic}.", "labels": ["production"]},
+    )
     tracepad.init(store.host, mint_key(store, "ingest"))
 
     assert tracepad.prompt("ingest-answer", label="production").version == 1

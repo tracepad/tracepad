@@ -688,7 +688,9 @@ reason in a comment; adding a dialect should be a table edit.
   hooks directory, so installing once covers every checkout.
 - `make py-lint` — ruff over `sdk/python` and `scripts/` with the rule set
   and the version `sdk/python/pyproject.toml` pins, through `uvx` (part of
-  the gate). Without `uv` it stops and says so.
+  the gate): `ruff check`, then `ruff format --check`. Without `uv` it stops
+  and says so. A layout it refuses is fixed by `uvx ruff@<pin> format
+  --config sdk/python/pyproject.toml sdk/python scripts`.
 - `make doc-anchors` — check every anchor in `docs/`, `README.md` and
   `AGENTS.md` against the heading it names (part of the gate);
   `make doc-anchors-self-test` runs the checker over its fixture.

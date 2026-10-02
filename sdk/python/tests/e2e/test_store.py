@@ -31,8 +31,11 @@ ANSWER = {
 
 
 def test_a_traced_call_arrives_whole(store: Store) -> None:
-    store.call("POST", "/api/v1/prompts/support-answer/versions",
-               {"type": "text", "prompt": "Answer {topic}.", "labels": ["production"]})
+    store.call(
+        "POST",
+        "/api/v1/prompts/support-answer/versions",
+        {"type": "text", "prompt": "Answer {topic}.", "labels": ["production"]},
+    )
     tracepad.init(store.host, KEY, environment="e2e", release="2026.9.4")
 
     support = tracepad.prompt("support-answer", label="production")
@@ -41,13 +44,21 @@ def test_a_traced_call_arrives_whole(store: Store) -> None:
 
     @tracepad.observe(name="answer-question")
     def answer(question: str) -> str:
-        tracepad.update_trace(name="support-chat", user_id="user-4821",
-                              session_id="session-77", tags=["support", "beta"],
-                              version="retrieval-v2")
-        with tracepad.generation("chat-completion", model="claude-sonnet-5", prompt=support,
-                                 model_parameters={"temperature": 0.2},
-                                 input=[{"role": "user", "content": question}],
-                                 metadata={"attempt": 1}) as call:
+        tracepad.update_trace(
+            name="support-chat",
+            user_id="user-4821",
+            session_id="session-77",
+            tags=["support", "beta"],
+            version="retrieval-v2",
+        )
+        with tracepad.generation(
+            "chat-completion",
+            model="claude-sonnet-5",
+            prompt=support,
+            model_parameters={"temperature": 0.2},
+            input=[{"role": "user", "content": question}],
+            metadata={"attempt": 1},
+        ) as call:
             call.first_token()
             call.end(response=ANSWER)
             trace_id.append(call.trace_id)

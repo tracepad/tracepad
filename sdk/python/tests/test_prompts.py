@@ -25,8 +25,14 @@ CHAT = {
     "config": {"model": "claude-sonnet-5"},
     "labels": ["production"],
 }
-TEXT = {"name": "summarize", "version": 2, "type": "text",
-        "prompt": "Summarise {document} in one sentence.", "config": {}, "labels": []}
+TEXT = {
+    "name": "summarize",
+    "version": 2,
+    "type": "text",
+    "prompt": "Summarise {document} in one sentence.",
+    "config": {},
+    "labels": [],
+}
 
 
 class Store:
@@ -148,8 +154,13 @@ CASES = json.loads(TABLE.read_text())["cases"] if TABLE.is_file() else []
 @pytest.mark.skipif(not TABLE.is_file(), reason="no testdata/: not a checkout of the repository")
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_compile_reads_what_the_node_package_reads(case: dict[str, Any]) -> None:
-    prompt = Prompt(name="p", version=1, type="chat" if "messages" in case else "text",
-                    text=case.get("text"), messages=case.get("messages"))
+    prompt = Prompt(
+        name="p",
+        version=1,
+        type="chat" if "messages" in case else "text",
+        text=case.get("text"),
+        messages=case.get("messages"),
+    )
     if "error" in case:
         with pytest.raises(TracepadError, match=re.escape(case["error"])):
             prompt.compile(**case["variables"])
@@ -173,12 +184,15 @@ class User:
         self.api_key = "sk-not-for-the-prompt"
 
 
-@pytest.mark.parametrize("text", [
-    "{user.api_key}",
-    "{user.__class__.__init__.__globals__[os].environ}",
-    "{user.email:>40}",
-    "{user!r}",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{user.api_key}",
+        "{user.__class__.__init__.__globals__[os].environ}",
+        "{user.email:>40}",
+        "{user!r}",
+    ],
+)
 def test_compile_evaluates_nothing_in_the_stored_text(text: str) -> None:
     with pytest.raises(TracepadError) as raised:
         Prompt(name="p", version=1, type="text", text=text).compile(user=User())
@@ -209,10 +223,15 @@ def test_a_value_renders_as_str_format_rendered_it(value: Any) -> None:
 
 def test_a_message_whose_content_is_not_a_string_is_passed_on_as_it_is() -> None:
     parts = [{"type": "text", "text": "Hi {q}"}, {"type": "image_url", "image_url": {"url": "x"}}]
-    prompt = Prompt(name="p", version=1, type="chat", messages=[
-        {"role": "system", "content": "About {q}."},
-        {"role": "user", "content": parts},
-    ])
+    prompt = Prompt(
+        name="p",
+        version=1,
+        type="chat",
+        messages=[
+            {"role": "system", "content": "About {q}."},
+            {"role": "user", "content": parts},
+        ],
+    )
     assert prompt.compile(q="refunds") == [
         {"role": "system", "content": "About refunds."},
         {"role": "user", "content": parts},

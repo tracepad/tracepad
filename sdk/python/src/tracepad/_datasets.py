@@ -45,8 +45,9 @@ class Item:
         # Reading it under its own name is what filled `dataset_version` with
         # `None` on every item (found in review of PR #36).
         known = {f.name for f in fields(cls)} - {"dataset_version"}
-        return cls(dataset_version=row.get("version"),
-                   **{k: v for k, v in row.items() if k in known})
+        return cls(
+            dataset_version=row.get("version"), **{k: v for k, v in row.items() if k in known}
+        )
 
 
 class Dataset:
@@ -56,8 +57,7 @@ class Dataset:
         self.name = name
         self._path = f"/api/v1/datasets/{quote(str(name), safe='')}"
 
-    def create(self, description: str | None = None,
-               metadata: Any = None) -> dict[str, Any]:
+    def create(self, description: str | None = None, metadata: Any = None) -> dict[str, Any]:
         """Create it, or replace its description and metadata."""
         body: dict[str, Any] = {}
         if description is not None:
@@ -82,7 +82,7 @@ class Dataset:
         version = changed = 0
         # An empty list is sent all the same: the server says what is wrong.
         for start in range(0, max(len(body), 1), MAX_ITEMS_PER_WRITE):
-            answer = self._call("POST", "/items", body=body[start:start + MAX_ITEMS_PER_WRITE])
+            answer = self._call("POST", "/items", body=body[start : start + MAX_ITEMS_PER_WRITE])
             version = int(answer["version"])
             changed += int(answer["changed"])
         return version, changed
@@ -95,12 +95,21 @@ class Dataset:
         for row in pages(f"{self._path}/items", params, "items"):
             yield Item.read(row)
 
-    def run(self, name: str, *, metadata: Any = None, id: str | None = None,
-            dataset_version: int | None = None) -> Run:
+    def run(
+        self,
+        name: str,
+        *,
+        metadata: Any = None,
+        id: str | None = None,
+        dataset_version: int | None = None,
+    ) -> Run:
         """Open a run, pinned to a version it hands back (spec 018 #2)."""
         body: dict[str, Any] = {"name": name}
-        for key, value in (("metadata", metadata), ("id", id),
-                           ("dataset_version", dataset_version)):
+        for key, value in (
+            ("metadata", metadata),
+            ("id", id),
+            ("dataset_version", dataset_version),
+        ):
             if value is not None:
                 body[key] = value
         return Run(self, self._call("POST", "/runs", body=body))
@@ -138,8 +147,10 @@ def _refuse_repeated_ids(body: list[dict[str, Any]]) -> None:
         if not isinstance(id, str) or id == "":
             continue
         if id in seen:
-            raise TracepadError(f"tracepad: put_items: the item at index {index} "
-                                f"repeats id {id} of the item at index {seen[id]}")
+            raise TracepadError(
+                f"tracepad: put_items: the item at index {index} "
+                f"repeats id {id} of the item at index {seen[id]}"
+            )
         seen[id] = index
 
 

@@ -38,8 +38,8 @@ class HookTest(unittest.TestCase):
 
     def test_a_reference_definition(self):
         self.assertEqual(
-            rewrite("[readme]: ../README.md#getting-it \"the README\"\n"),
-            f"[readme]: {GITHUB}/blob/main/README.md#getting-it \"the README\"\n",
+            rewrite('[readme]: ../README.md#getting-it "the README"\n'),
+            f'[readme]: {GITHUB}/blob/main/README.md#getting-it "the README"\n',
         )
 
     def test_fenced_code_is_left_alone(self):

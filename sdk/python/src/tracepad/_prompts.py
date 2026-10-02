@@ -48,7 +48,8 @@ class Prompt:
         if self.messages is not None:
             return [
                 {**message, "content": _fill(content, variables)}
-                if isinstance(content := message.get("content", ""), str) else dict(message)
+                if isinstance(content := message.get("content", ""), str)
+                else dict(message)
                 for message in self.messages
             ]
         return _fill(self.text or "", variables)
@@ -104,8 +105,9 @@ def prompt(name: str, *, label: str | None = None, version: int | None = None) -
     if version is not None:
         params["version"] = version
     try:
-        answer = request(_config.current(), "GET", f"/api/v1/prompts/{quote(str(name), safe='')}",
-                         params=params)
+        answer = request(
+            _config.current(), "GET", f"/api/v1/prompts/{quote(str(name), safe='')}", params=params
+        )
     except TracepadError as error:
         if cached is None or _is_client_error(error):
             raise

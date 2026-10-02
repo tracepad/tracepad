@@ -21,9 +21,7 @@ secret = os.environ["SMOKE_SECRET_KEY"]
 trace_id_file = sys.argv[1]
 
 provider = TracerProvider(
-    resource=Resource.create(
-        {"service.name": "smoke-otel", "deployment.environment.name": "smoke"}
-    )
+    resource=Resource.create({"service.name": "smoke-otel", "deployment.environment.name": "smoke"})
 )
 provider.add_span_processor(
     BatchSpanProcessor(

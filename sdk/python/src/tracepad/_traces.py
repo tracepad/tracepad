@@ -33,8 +33,9 @@ def delete_trace(id: str, *, confirm: bool = False) -> dict[str, Any]:
     return _call(f"/api/v1/traces/{quote(id, safe='')}", {"confirm": id} if confirm else {})
 
 
-def delete_traces(*, to: datetime | str, confirm: str = "", limit: int = ROUND,
-                  **filters: Any) -> dict[str, Any]:
+def delete_traces(
+    *, to: datetime | str, confirm: str = "", limit: int = ROUND, **filters: Any
+) -> dict[str, Any]:
     """Delete every trace the listing's filters match that started before `to`.
 
     The filters are the listing's, by their API names (`docs/api.md`): `from_`
@@ -51,8 +52,7 @@ def delete_traces(*, to: datetime | str, confirm: str = "", limit: int = ROUND,
     "annotation_items"}, "rounds": N}`. A round that fails raises as it is —
     the rounds before it are done and consistent, and a repeat continues.
     """
-    params = {"from" if name == "from_" else name: _stamp(value)
-              for name, value in filters.items()}
+    params = {"from" if name == "from_" else name: _stamp(value) for name, value in filters.items()}
     params["to"] = _stamp(to)
     if not confirm:
         return _call("/api/v1/traces", params)

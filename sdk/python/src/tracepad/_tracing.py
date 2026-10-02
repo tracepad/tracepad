@@ -79,8 +79,10 @@ def init(
         return
     config = resolve(host, key, environment, release)
     if not export and export_timeout is not None:
-        logger.warning("tracepad.init(): export_timeout is ignored with export=False, "
-                       "which adds no exporter to bound")
+        logger.warning(
+            "tracepad.init(): export_timeout is ignored with export=False, "
+            "which adds no exporter to bound"
+        )
 
     from opentelemetry.sdk.trace import TracerProvider
 
@@ -184,7 +186,8 @@ def flush(timeout: float = 10.0) -> None:
     if left <= 0:
         logger.warning(
             "tracepad.flush(): the score queue used the whole %ss budget; the spans were "
-            "not flushed and are left to their exporter's own schedule", timeout
+            "not flushed and are left to their exporter's own schedule",
+            timeout,
         )
         return
     global _flushing
@@ -196,15 +199,18 @@ def flush(timeout: float = 10.0) -> None:
             ours = _flushing is None or _flushing[0] != force or not _flushing[1].is_alive()
             if ours:
                 millis = int(max(0.0, deadline - monotonic()) * 1000)
-                _flushing = (force, threading.Thread(target=_force, args=(force, millis),
-                                                     daemon=True))
+                _flushing = (
+                    force,
+                    threading.Thread(target=_force, args=(force, millis), daemon=True),
+                )
                 _flushing[1].start()
             exporting = _flushing[1]
         exporting.join(max(0.0, deadline - monotonic()))
         if exporting.is_alive():
             logger.warning(
                 "tracepad.flush(): the spans were not exported within the %ss budget; the "
-                "export goes on in the background", timeout
+                "export goes on in the background",
+                timeout,
             )
             return
         if ours:
@@ -396,8 +402,13 @@ def update(
         _unwritten("update")
         return
     _observation_of(span).update(
-        name=name, input=input, output=output, metadata=metadata,
-        level=level, status_message=status_message, type=type,
+        name=name,
+        input=input,
+        output=output,
+        metadata=metadata,
+        level=level,
+        status_message=status_message,
+        type=type,
     )
 
 
@@ -505,7 +516,8 @@ def _kind(type: str | None) -> str | None:
             _warned_kinds.add(type)
         logger.warning(
             "tracepad: %r is not one of the observation types the store "
-            "classifies by; it will be kept in the observation's metadata", type
+            "classifies by; it will be kept in the observation's metadata",
+            type,
         )
     return type
 
@@ -542,8 +554,9 @@ def _open(
     try:
         # `use_span` makes it the current span, records an exception as the
         # OTel event the mapper reads as an error, and re-raises unchanged.
-        with otel.use_span(span, end_on_exit=False, record_exception=True,
-                           set_status_on_exception=True):
+        with otel.use_span(
+            span, end_on_exit=False, record_exception=True, set_status_on_exception=True
+        ):
             yield handle
     finally:
         _current.reset(token)
@@ -601,8 +614,14 @@ def span(
 def event(name: str, *, input: Any = None, metadata: dict[str, Any] | None = None) -> Any:
     """A zero-duration observation: something that happened, not something that took time."""
     at = time_ns()
-    return _open(name, {attrs.OBSERVATION_TYPE: "event"}, start_time=at, end_time=at,
-                 input=input, metadata=metadata)
+    return _open(
+        name,
+        {attrs.OBSERVATION_TYPE: "event"},
+        start_time=at,
+        end_time=at,
+        input=input,
+        metadata=metadata,
+    )
 
 
 def generation(
@@ -615,8 +634,14 @@ def generation(
     metadata: dict[str, Any] | None = None,
 ) -> Any:
     """A call to a model, as a context manager over a `Generation`."""
-    return _open(name, _generation_attributes(model, prompt), Generation,
-                 input=input, metadata=metadata, parameters=model_parameters)
+    return _open(
+        name,
+        _generation_attributes(model, prompt),
+        Generation,
+        input=input,
+        metadata=metadata,
+        parameters=model_parameters,
+    )
 
 
 def observe(
@@ -666,8 +691,9 @@ def observe(
 
         def enter(observation: Observation, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
             if signature is not None and observation.span.is_recording():
-                _set(observation.span, attrs.INPUT,
-                     attrs.dumps(_arguments(signature, args, kwargs)))
+                _set(
+                    observation.span, attrs.INPUT, attrs.dumps(_arguments(signature, args, kwargs))
+                )
 
         def leave(observation: Any, result: Any, *, as_response: bool = True) -> None:
             # What the function said about itself wins over what was captured
@@ -677,8 +703,11 @@ def observe(
             # Decision 5 is only asked about a value returned whole.
             if is_generation and as_response:
                 observation.end(response=result)
-            elif (capture_output and "output" not in observation._explicit
-                  and observation.span.is_recording()):
+            elif (
+                capture_output
+                and "output" not in observation._explicit
+                and observation.span.is_recording()
+            ):
                 _set(observation.span, attrs.OUTPUT, attrs.dumps(result))
 
         if inspect.isasyncgenfunction(fn):
