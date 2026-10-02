@@ -177,3 +177,46 @@ func TestBackupBeforeMigration(t *testing.T) {
 		t.Fatalf("backup file missing: %v", err)
 	}
 }
+
+// A data directory is whatever the operator named it, and the path goes into
+// a URI: a `#` ended it, a `?` began a query and a `%` an escape, so `notes#1`
+// was opened as `notes`. Each of the three must open the file at the path it
+// was given, and nothing beside it.
+func TestOpenInADirectoryWhoseNameIsURISyntax(t *testing.T) {
+	for _, name := range []string{"notes#1", "what?", "100%25", "a#b?c%d"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, name)
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "tracepad.db")
+			s, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.CreateProject("kept", KeyPair{PublicKey: "tp-pk-uri", Secret: "tp-sk-uri"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("the database is not at the path it was opened at: %v", err)
+			}
+			entries, _ := os.ReadDir(root)
+			if len(entries) != 1 || entries[0].Name() != name {
+				t.Fatalf("something was made beside the directory: %v", entries)
+			}
+			// Opened again, it is the same database, not a second empty one.
+			again, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer again.Close()
+			if _, err := again.CreateProject("kept", KeyPair{PublicKey: "tp-pk-uri2", Secret: "tp-sk-uri2"}); err == nil {
+				t.Fatal("the reopened database does not hold the project the first one made")
+			}
+		})
+	}
+}

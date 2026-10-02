@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -294,7 +296,11 @@ func decodeJSONNumbers(data []byte, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	if decoder.More() {
+	// Not decoder.More(): it asks whether the array or object being read has
+	// another element, and takes a stray `]` or `}` for the end of one nobody
+	// opened, so `{"resourceSpans":[]}]` was an export (found by
+	// FuzzDecodeExportRequestJSON).
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return fmt.Errorf("the body must carry exactly one JSON value")
 	}
 	return nil

@@ -2,6 +2,7 @@ package mapping_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -75,6 +76,7 @@ func seedBodies(f *testing.F, asJSON bool) {
 		f.Add([]byte(`{}`))
 		f.Add([]byte(`{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"00112233445566778899aabbccddeeff","spanId":"0011223344556677","name":"x"}]}]}]}`))
 		f.Add([]byte(`{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"zz"}]}]}]}`))
+		f.Add([]byte(`{"resourceSpans":[]}]`))
 	} else {
 		f.Add([]byte{0x0a, 0x00})
 		f.Add([]byte{0x0a, 0x03, 0xff, 0xff, 0xff})
@@ -178,34 +180,32 @@ func FuzzDecodeExportRequest(f *testing.F) {
 }
 
 func checkProtoBody(t *testing.T, body []byte) {
-	{
-		if len(body) > maxFuzzBody {
-			t.Skip()
+	if len(body) > maxFuzzBody {
+		t.Skip()
+	}
+	decoded, err := mapping.DecodeExportBody(body, false)
+	if err != nil {
+		if !errors.Is(err, mapping.ErrMalformedBody) || err.Error() == "" {
+			t.Fatalf("a refusal must be ErrMalformedBody with a message, got %v", err)
 		}
-		decoded, err := mapping.DecodeExportBody(body, false)
-		if err != nil {
-			if !errors.Is(err, mapping.ErrMalformedBody) || err.Error() == "" {
-				t.Fatalf("a refusal must be ErrMalformedBody with a message, got %v", err)
-			}
-			return
-		}
-		checkExport(t, decoded)
-		checkMedia(t, body, false)
-		checkErasure(t, body, false)
+		return
+	}
+	checkExport(t, decoded)
+	checkMedia(t, body, false)
+	checkErasure(t, body, false)
 
-		// Round trip: what decoded encodes to a body that decodes to the
-		// same mapping.
-		encoded, err := mapping.EncodeExportRequest(decoded.ResourceSpans)
-		if err != nil {
-			t.Fatalf("encode: %v", err)
-		}
-		again, _, err := mapping.DecodeExportRequest(encoded)
-		if err != nil {
-			t.Fatalf("a re-encoded export does not decode: %v", err)
-		}
-		if got, want := marshalMapping(t, again), marshalMapping(t, decoded.ResourceSpans); got != want {
-			t.Fatalf("the mapping changed across a round trip:\n got %s\nwant %s", got, want)
-		}
+	// Round trip: what decoded encodes to a body that decodes to the
+	// same mapping.
+	encoded, err := mapping.EncodeExportRequest(decoded.ResourceSpans)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	again, _, err := mapping.DecodeExportRequest(encoded)
+	if err != nil {
+		t.Fatalf("a re-encoded export does not decode: %v", err)
+	}
+	if got, want := marshalMapping(t, again), marshalMapping(t, decoded.ResourceSpans); got != want {
+		t.Fatalf("the mapping changed across a round trip:\n got %s\nwant %s", got, want)
 	}
 }
 
@@ -215,32 +215,34 @@ func FuzzDecodeExportRequestJSON(f *testing.F) {
 }
 
 func checkJSONBody(t *testing.T, body []byte) {
-	{
-		if len(body) > maxFuzzBody {
-			t.Skip()
+	if len(body) > maxFuzzBody {
+		t.Skip()
+	}
+	decoded, err := mapping.DecodeExportBody(body, true)
+	if err != nil {
+		if !errors.Is(err, mapping.ErrMalformedBody) || err.Error() == "" {
+			t.Fatalf("a refusal must be ErrMalformedBody with a message, got %v", err)
 		}
-		decoded, err := mapping.DecodeExportBody(body, true)
-		if err != nil {
-			if !errors.Is(err, mapping.ErrMalformedBody) || err.Error() == "" {
-				t.Fatalf("a refusal must be ErrMalformedBody with a message, got %v", err)
-			}
-			return
-		}
-		checkExport(t, decoded)
-		checkMedia(t, body, true)
-		checkErasure(t, body, true)
+		return
+	}
+	// What is accepted is one JSON value, or nothing at all.
+	if len(bytes.TrimSpace(body)) > 0 && !json.Valid(body) {
+		t.Fatalf("%q was accepted as an export and is not one JSON value", body)
+	}
+	checkExport(t, decoded)
+	checkMedia(t, body, true)
+	checkErasure(t, body, true)
 
-		encoded, err := mapping.EncodeExportRequestJSON(decoded.ResourceSpans)
-		if err != nil {
-			t.Fatalf("encode: %v", err)
-		}
-		again, _, err := mapping.DecodeExportRequestJSON(encoded)
-		if err != nil {
-			t.Fatalf("a re-encoded export does not decode: %v\n%s", err, encoded)
-		}
-		if got, want := marshalMapping(t, again), marshalMapping(t, decoded.ResourceSpans); got != want {
-			t.Fatalf("the mapping changed across a round trip:\n got %s\nwant %s", got, want)
-		}
+	encoded, err := mapping.EncodeExportRequestJSON(decoded.ResourceSpans)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	again, _, err := mapping.DecodeExportRequestJSON(encoded)
+	if err != nil {
+		t.Fatalf("a re-encoded export does not decode: %v\n%s", err, encoded)
+	}
+	if got, want := marshalMapping(t, again), marshalMapping(t, decoded.ResourceSpans); got != want {
+		t.Fatalf("the mapping changed across a round trip:\n got %s\nwant %s", got, want)
 	}
 }
 
@@ -442,11 +444,17 @@ func FuzzMediaDocument(f *testing.F) {
 				if len(extracted.Body) < mapping.MediaMinSize {
 					t.Fatalf("extracted a %d-byte body, under the %d floor", len(extracted.Body), mapping.MediaMinSize)
 				}
-				if bytes.Contains(body, extracted.Body) && len(extracted.Body) > 0 {
-					// The body came out of the attribute, so it
-					// is no longer in the export.
-					encoded, err := decoded.Encode(media.Rewrites)
-					if err == nil && bytes.Contains(encoded, extracted.Body) {
+				// The body came out of the attribute, so no spelling of it
+				// is left in the re-encoded export. It is the base64 of the
+				// bytes that was in the export, not the bytes.
+				encoded, err := decoded.Encode(media.Rewrites)
+				if err != nil {
+					t.Fatalf("encode after extracting media: %v", err)
+				}
+				for _, spelling := range []*base64.Encoding{
+					base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+				} {
+					if text := spelling.EncodeToString(extracted.Body); bytes.Contains(encoded, []byte(text)) {
 						t.Fatalf("a body extracted as media is still inline in the re-encoded export")
 					}
 				}

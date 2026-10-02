@@ -34,19 +34,14 @@ import (
 
 const maxFuzzInput = 64 << 10
 
-// fuzzHarness is one server for the whole fuzzing process: building a store
-// per input would be the whole budget. It is seeded with the synthetic OTLP
-// corpus, so a listing has rows to filter and a trace to open.
-func fuzzHarness(f *testing.F) *harness {
-	f.Helper()
-	h := newHarness(f, nil, store.WriterOptions{})
-	// newHarness captures the log to replay on failure; across a fuzzing
-	// run that is a buffer that never stops growing.
-	slog.SetDefault(slog.New(slog.DiscardHandler))
-	for _, fixture := range otlptest.Fixtures() {
+// seedFuzzCorpus posts the first n bodies of the synthetic OTLP corpus, so that a
+// listing has rows to filter and a trace to open.
+func seedFuzzCorpus(t testing.TB, h *harness, n int) {
+	t.Helper()
+	for _, fixture := range otlptest.Fixtures()[:n] {
 		body, err := mapping.EncodeExportRequest(fixture.ResourceSpans)
 		if err != nil {
-			f.Fatal(err)
+			t.Fatal(err)
 		}
 		req := httptest.NewRequest("POST", "/v1/traces", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-protobuf")
@@ -54,9 +49,36 @@ func fuzzHarness(f *testing.F) *harness {
 		rec := httptest.NewRecorder()
 		h.server.Handler().ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
-			f.Fatalf("seeding %s: %d %s", fixture.Name, rec.Code, rec.Body)
+			t.Fatalf("seeding %s: %d %s", fixture.Name, rec.Code, rec.Body)
 		}
 	}
+}
+
+// fuzzHarness is one server for the whole fuzzing process, for the targets
+// that only read or keep nothing between inputs: building a store per input
+// for those would be the budget for no gain. It is seeded with the whole
+// corpus.
+func fuzzHarness(f *testing.F) *harness {
+	f.Helper()
+	h := newHarness(f, nil, store.WriterOptions{})
+	// newHarness captures the log to replay on failure; across a fuzzing
+	// run that is a buffer that never stops growing.
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+	seedFuzzCorpus(f, h, len(otlptest.Fixtures()))
+	return h
+}
+
+// freshHarness is a server on a store of its own for one input, the first n
+// bodies of the corpus in it: seven milliseconds, against the dozens an input
+// costs under a write. The targets that write use it, because what a write
+// does depends on what an earlier one left — a dataset's version, a trace's
+// merge — and a crasher that needs the inputs before it is not one `go test`
+// can replay from the file the engine writes. The harness replays the server's
+// log if the input fails.
+func freshHarness(t *testing.T, n int) *harness {
+	t.Helper()
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedFuzzCorpus(t, h, n)
 	return h
 }
 
@@ -75,19 +97,34 @@ func answered(t *testing.T, what string, rec *httptest.ResponseRecorder) {
 // FuzzIngest posts bytes to the ingest routes in every encoding the endpoint
 // names and a few it does not, compressed or claiming to be.
 func FuzzIngest(f *testing.F) {
-	h := fuzzHarness(f)
+	// The mode is the route in bit 0, gzip in bit 2, bytes that are not gzip
+	// in bit 3, and the Content-Type in the high nibble: protobuf 0x00,
+	// the alternate protobuf 0x10, JSON 0x20, plain text 0x30, none 0x40,
+	// JSON with a charset 0x50.
 	for _, fixture := range otlptest.Fixtures()[:6] {
 		body, _ := mapping.EncodeExportRequest(fixture.ResourceSpans)
-		f.Add(body, uint8(0))
-		f.Add(body, uint8(1))
+		f.Add(body, uint8(0x00))
+		f.Add(body, uint8(0x01))
+		f.Add(body, uint8(0x14))
 		jsonBody, _ := mapping.EncodeExportRequestJSON(fixture.ResourceSpans)
-		f.Add(jsonBody, uint8(2))
-		f.Add(jsonBody, uint8(3))
+		f.Add(jsonBody, uint8(0x20))
+		f.Add(jsonBody, uint8(0x21))
+		f.Add(jsonBody, uint8(0x24))
+		f.Add(jsonBody, uint8(0x50))
+		// A protobuf body under the JSON type and a JSON one under the
+		// protobuf type: each decoder is handed what is not its own.
+		f.Add(body, uint8(0x20))
+		f.Add(jsonBody, uint8(0x00))
 	}
-	f.Add([]byte(nil), uint8(0))
-	f.Add([]byte(`{"resourceSpans":[]}`), uint8(2))
-	f.Add([]byte("not gzip"), uint8(4))
-	f.Add([]byte{0x0a, 0x03, 0xff, 0xff, 0xff}, uint8(0))
+	f.Add([]byte(nil), uint8(0x00))
+	f.Add([]byte(nil), uint8(0x20))
+	f.Add([]byte(`{"resourceSpans":[]}`), uint8(0x20))
+	f.Add([]byte(`{"resourceSpans":[]}]`), uint8(0x20))
+	f.Add([]byte("not gzip"), uint8(0x0c))
+	f.Add([]byte("not gzip"), uint8(0x2c))
+	f.Add([]byte("x"), uint8(0x30))
+	f.Add([]byte("x"), uint8(0x40))
+	f.Add([]byte{0x0a, 0x03, 0xff, 0xff, 0xff}, uint8(0x00))
 
 	paths := []string{"/v1/traces", "/api/public/otel/v1/traces"}
 	types := []string{"application/x-protobuf", "application/protobuf", "application/json", "text/plain", "", "application/json; charset=utf-8", "application/json;;"}
@@ -95,6 +132,7 @@ func FuzzIngest(f *testing.F) {
 		if len(body) > maxFuzzInput {
 			t.Skip()
 		}
+		h := freshHarness(t, 0)
 		sent := body
 		gzipped := mode&4 != 0
 		if gzipped && mode&8 == 0 {
@@ -134,25 +172,6 @@ func FuzzIngest(f *testing.F) {
 // FuzzWrite sends a body to each JSON write route of the API: the strict
 // decoder, the validators behind it, and the store under them.
 func FuzzWrite(f *testing.F) {
-	h := fuzzHarness(f)
-	// What a path parameter names has to exist for the body behind it to be
-	// reached.
-	for _, setup := range []struct{ method, path, body string }{
-		{"PUT", "/api/v1/datasets/d", `{}`},
-		{"POST", "/api/v1/datasets/d/items", `{"input":{"q":1}}`},
-		{"PUT", "/api/v1/score-configs/quality", `{"data_type":"numeric","min":0,"max":1,"direction":"higher"}`},
-		{"PUT", "/api/v1/queues/q", `{"score_configs":["quality"]}`},
-		{"POST", "/api/v1/prompts/p/versions", `{"type":"text","prompt":"hello {{name}}"}`},
-	} {
-		req := httptest.NewRequest(setup.method, setup.path, strings.NewReader(setup.body))
-		req.Header.Set("Authorization", "Bearer "+testSecret)
-		rec := httptest.NewRecorder()
-		h.server.Handler().ServeHTTP(rec, req)
-		if rec.Code >= 300 {
-			f.Fatalf("setup %s %s: %d %s", setup.method, setup.path, rec.Code, rec.Body)
-		}
-	}
-
 	routes := []struct{ method, path string }{
 		{"POST", "/api/v1/scores"},
 		{"POST", "/api/v1/prompts/p/versions"},
@@ -188,6 +207,24 @@ func FuzzWrite(f *testing.F) {
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		if len(body) > maxFuzzInput {
 			t.Skip()
+		}
+		h := freshHarness(t, 1)
+		// What a path parameter names has to exist for the body behind it
+		// to be reached.
+		for _, setup := range []struct{ method, path, body string }{
+			{"PUT", "/api/v1/datasets/d", `{}`},
+			{"POST", "/api/v1/datasets/d/items", `{"input":{"q":1}}`},
+			{"PUT", "/api/v1/score-configs/quality", `{"data_type":"numeric","min":0,"max":1,"direction":"higher"}`},
+			{"PUT", "/api/v1/queues/q", `{"score_configs":["quality"]}`},
+			{"POST", "/api/v1/prompts/p/versions", `{"type":"text","prompt":"hello {{name}}"}`},
+		} {
+			req := httptest.NewRequest(setup.method, setup.path, strings.NewReader(setup.body))
+			req.Header.Set("Authorization", "Bearer "+testSecret)
+			rec := httptest.NewRecorder()
+			h.server.Handler().ServeHTTP(rec, req)
+			if rec.Code >= 300 {
+				t.Fatalf("setup %s %s: %d %s", setup.method, setup.path, rec.Code, rec.Body)
+			}
 		}
 		route := routes[int(which)%len(routes)]
 		req := httptest.NewRequest(route.method, route.path, bytes.NewReader(body))
@@ -235,6 +272,7 @@ func FuzzRead(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, which uint8, rawQuery string) {
 		if len(rawQuery) > 8192 {
+			// A long one is TestReadsWithALongQueryAreAnsweredNotFailed's.
 			t.Skip()
 		}
 		path := routes[int(which)%len(routes)]
@@ -398,16 +436,7 @@ func FuzzBatchDecoders(f *testing.F) {
 // refusal; none is a 5xx, and a token that is not ours is a 403 having read
 // nothing.
 func FuzzMediaUpload(f *testing.F) {
-	h := fuzzHarness(f)
 	trace := mapping.Map(otlptest.Fixtures()[0].ResourceSpans).Traces[0].ID
-	sign := func(t *testing.T, grant uploadGrant) string {
-		t.Helper()
-		token, err := h.server.signUpload(grant)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
 
 	f.Add([]byte("a picture"), uint8(0), "image/png", "")
 	f.Add([]byte("a picture"), uint8(1), "image/png", "")
@@ -420,6 +449,7 @@ func FuzzMediaUpload(f *testing.F) {
 		if len(body) > maxFuzzInput || len(token) > 4096 {
 			t.Skip()
 		}
+		h := freshHarness(t, 1)
 		sum := sha256.Sum256(body)
 		sha := hex.EncodeToString(sum[:])
 		grant := uploadGrant{
@@ -439,7 +469,11 @@ func FuzzMediaUpload(f *testing.F) {
 			grant.Trace = "nope"
 		}
 		if token == "" {
-			token = sign(t, grant)
+			signed, err := h.server.signUpload(grant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token = signed
 		}
 		req := httptest.NewRequest("PUT", "/api/public/media/"+store.MediaIDFor(grant.SHA256)+"/upload", bytes.NewReader(body))
 		req.URL.RawQuery = "token=" + url.QueryEscape(token)
@@ -499,4 +533,36 @@ func FuzzClientAddress(f *testing.F) {
 			t.Fatalf("sourceOf(%v) is no prefix", got)
 		}
 	})
+}
+
+// FuzzRead skips a query string over 8 KiB, because the engine's mutations
+// never get that far and a long one costs the run its speed. What a long one
+// does is this test's: a megabyte in a filter or a cursor is refused or
+// answered, never a 5xx and never slow, on every route that takes a query.
+func TestReadsWithALongQueryAreAnsweredNotFailed(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedFuzzCorpus(t, h, 2)
+	long := strings.Repeat("a", 1<<20)
+	for _, path := range []string{
+		"/api/v1/traces", "/api/v1/traces/last", "/api/v1/sessions", "/api/v1/users", "/api/v1/scores",
+		"/api/v1/stats", "/api/v1/facets", "/api/v1/runs", "/api/v1/raw", "/api/v1/prompts", "/api/v1/datasets",
+	} {
+		for _, query := range []string{
+			"q=" + long, "tag=" + long, "cursor=" + long, "limit=" + long, "environment=" + long,
+			"user_id=" + long, "from=" + long, strings.Repeat("a=1&", 1<<16), long + "=1",
+		} {
+			start := time.Now()
+			req := httptest.NewRequest("GET", path, nil)
+			req.URL.RawQuery = query
+			req.Header.Set("Authorization", "Bearer "+testSecret)
+			rec := httptest.NewRecorder()
+			h.server.Handler().ServeHTTP(rec, req)
+			if rec.Code >= 500 {
+				t.Errorf("GET %s with a %d-byte query: %d %s", path, len(query), rec.Code, rec.Body)
+			}
+			if took := time.Since(start); took > 2*time.Second {
+				t.Errorf("GET %s with a %d-byte query took %v", path, len(query), took)
+			}
+		}
+	}
 }

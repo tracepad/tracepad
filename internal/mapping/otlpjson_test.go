@@ -133,6 +133,26 @@ func TestJSONKeepsNanosecondPrecision(t *testing.T) {
 
 // An empty body and an empty envelope are both valid, empty exports, as they
 // are on the protobuf path: an idle exporter must not look broken.
+// A body is one JSON value. json.Decoder.More answers false at a `]` or `}`
+// nobody opened, so a body with one after the object was an export, and the
+// strict decoders of the API refuse the same shape (found by
+// FuzzDecodeExportRequestJSON).
+func TestJSONRefusesMoreThanOneValue(t *testing.T) {
+	for _, body := range []string{
+		`{"resourceSpans":[]}]`, `{"resourceSpans":[]}}`, `{"resourceSpans":[]} {}`, `{"resourceSpans":[]} x`,
+		`{"resourceSpans":[]}]]`, `{"resourceSpans":[]} ]`,
+	} {
+		if _, _, err := mapping.DecodeExportRequestJSON([]byte(body)); err == nil {
+			t.Errorf("%s was accepted as an export", body)
+		}
+	}
+	for _, body := range []string{`{"resourceSpans":[]}`, ` {"resourceSpans":[]} `, "{}\n"} {
+		if _, _, err := mapping.DecodeExportRequestJSON([]byte(body)); err != nil {
+			t.Errorf("%q was refused: %v", body, err)
+		}
+	}
+}
+
 func TestJSONEmptyExports(t *testing.T) {
 	for _, body := range []string{"", "{}", `{"resourceSpans":[]}`, `{"resourceSpans":null}`} {
 		spans, unreadable, err := mapping.DecodeExportRequestJSON([]byte(body))
