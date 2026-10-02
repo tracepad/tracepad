@@ -188,13 +188,15 @@ sdk-py-unit: ## The Python package's unit suite alone (part of the gate)
 # is the one the package's dev group pins, run through `uvx`, so the gate and a
 # developer's venv lint alike. It is in the gate (spec 020 #23), which makes
 # `uv` a prerequisite of the gate: without it this stops and says so, the way
-# the interface's checks do without the Node they need.
+# the interface's checks do without the Node they need. The layout is ruff's
+# formatter's, checked beside the rules (spec 020 #32).
 RUFF_VERSION := $(shell sed -n 's/.*"ruff==\([^"]*\)".*/\1/p' sdk/python/pyproject.toml)
 
-py-lint: ## Lint the Python package and scripts/ with the ruff sdk/python pins (needs uv)
+py-lint: ## Lint and format-check the Python package and scripts/ with the ruff sdk/python pins (needs uv)
 	@command -v uv >/dev/null || { echo "uv is required here: it runs ruff $(RUFF_VERSION), the version sdk/python/pyproject.toml pins (https://docs.astral.sh/uv/)"; exit 1; }
 	@[ -n "$(RUFF_VERSION)" ] || { echo "py-lint: no \"ruff==<version>\" in sdk/python/pyproject.toml"; exit 1; }
 	uvx ruff@$(RUFF_VERSION) check --config sdk/python/pyproject.toml sdk/python scripts
+	uvx ruff@$(RUFF_VERSION) format --check --config sdk/python/pyproject.toml sdk/python scripts
 
 # The budget spec 017 #1 set, shared with the harness of spec 018; raised for
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
