@@ -43,7 +43,6 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       latest: ${{ steps.meta.outputs.latest }}
-      previous: ${{ steps.meta.outputs.previous }}
       line: ${{ steps.meta.outputs.line }}
     steps:
       # Tags and all of them: which image tags this release may move is a
@@ -112,11 +111,11 @@ jobs:
               ;;
           esac
 
-          # The release notes run from the server tag before this one in its
-          # own history — not from GitHub's newest release, which for a
-          # back-patch is a later line. A stable release counts from the
-          # stable one before it, so its notes cover the release candidates
-          # too; the first tag has nothing to count from.
+          # The notes' link to the commits runs from the server tag before
+          # this one in its own history — not from GitHub's newest release,
+          # which for a back-patch is a later line. A stable release counts
+          # from the stable one before it, so the link covers the release
+          # candidates too; the first tag has nothing to count from.
           exclude=()
           [ "$prerelease" = true ] || exclude=(--exclude 'v*-*')
           previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' \
@@ -132,6 +131,26 @@ jobs:
             echo "previous=$previous"
             echo "line=v${version%.*}"
           } >> "$GITHUB_OUTPUT"
+
+      # The notes are the changelog's, not a list of pull requests (#29): the
+      # first release would otherwise list every one ever merged, Dependabot's
+      # included. A stable tag whose version has no section is refused here,
+      # before anything is public; a pre-release takes its own section or
+      # `[Unreleased]`. `release` publishes the file and has no checkout.
+      - name: The release notes, from CHANGELOG.md
+        env:
+          PREVIOUS: ${{ steps.meta.outputs.previous }}
+        run: |
+          since=()
+          [ -z "$PREVIOUS" ] || since=(--previous "$PREVIOUS")
+          scripts/release-notes.sh "$GITHUB_REF_NAME" "${since[@]}" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+          retention-days: 1
 
   # The six archives and their checksums, with no way to publish them: GoReleaser
   # builds with `--skip=publish`, and `release` below puts them on GitHub.
@@ -234,6 +253,10 @@ jobs:
         with:
           name: archives
           path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: notes
+          path: notes
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -247,12 +270,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.check.outputs.prerelease }}
           LATEST: ${{ needs.check.outputs.latest }}
-          PREVIOUS: ${{ needs.check.outputs.previous }}
         run: |
-          since=()
-          [ -z "$PREVIOUS" ] || since=(--notes-start-tag "$PREVIOUS")
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --generate-notes "${since[@]}" \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes/notes.md \
             --prerelease="$PRERELEASE" --latest="$LATEST" dist/*
 
   image:

@@ -53,8 +53,9 @@ archives:
 checksum:
   name_template: checksums.txt
 
-# GoReleaser builds and no longer publishes (spec 020 #19): the release and its
-# notes are `gh release create --generate-notes` in release-server.yml.
+# GoReleaser builds and no longer publishes (spec 020 #19): the release is
+# `gh release create` in release-server.yml, with notes cut from CHANGELOG.md by
+# scripts/release-notes.sh (#29).
 changelog:
   disable: true
 

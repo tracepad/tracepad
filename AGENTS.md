@@ -693,6 +693,9 @@ reason in a comment; adding a dialect should be a table edit.
   `make doc-anchors-self-test` runs the checker over its fixture.
 - `make release-tag-test` — which tags the release workflow accepts (`vX.Y.Z`,
   `vX.Y.Z-(alpha|beta|rc).N`) and which it refuses; part of the gate.
+- `make release-notes-test` — how a release's notes are cut from
+  `CHANGELOG.md` (`scripts/release-notes.sh <tag>` prints them); part of the
+  gate.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
@@ -813,6 +816,13 @@ Before tagging:
   yours to place, and it runs on whatever commit it names. What a release
   publishes should be what passed, so look at the commit's checks first —
   `gate`, `e2e`, `smoke`, `sdk`, `sdk-js`, `sdk-go` and `docker`.
+- **Describe the release in `CHANGELOG.md` first.** The release's notes are
+  the changelog's section for its version, cut by `scripts/release-notes.sh`
+  (spec 020 #29): a stable tag `vX.Y.Z` needs a `## [X.Y.Z] - <date>` heading
+  over what moved out of `[Unreleased]`, and `check` refuses the tag without
+  one, before anything is published. A candidate takes `## [X.Y.Z-rc.N]` when
+  there is one and `[Unreleased]` otherwise. Run the script with the tag
+  before pushing it to read what the release page will say.
 - The Python package has its own tag and its own workflow
   (`sdk-py/v*`, `release-sdk-py.yml`), and so does the Node package
   (`sdk-js/v*`, `release-sdk-js.yml`, npm trusted publishing); the server's

@@ -220,6 +220,38 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # The notes' hand-over, on every pull request, because it costs nothing
+      # and a tag is the first thing that would otherwise run it (spec 020
+      # #29): cut as `check` cuts them, for the newest stable section of
+      # CHANGELOG.md or, before there is one, a candidate's `[Unreleased]`;
+      # through an artifact named as `check` names it, to the path `release`
+      # hands `--notes-file`. Keep the names in step with release-server.yml.
+      - name: The release notes, cut as a tag would cut them
+        run: |
+          stable="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '#[] ' || true)"
+          tag="v${stable:-0.0.0-rc.1}"
+          echo "rehearsing the notes of $tag"
+          scripts/release-notes.sh "$tag" > "$RUNNER_TEMP/notes.md"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: notes
+          path: notes
+      # What a release page would open and close with: the section's first
+      # line, not a heading of the changelog's own, and the link to the
+      # commits.
+      - name: The notes `release` would publish
+        run: |
+          cat notes/notes.md
+          test -s notes/notes.md
+          head -1 notes/notes.md | grep -q '[^[:space:]]' || { echo "the notes open with a blank line" >&2; exit 1; }
+          if grep -qE '^## ' notes/notes.md; then echo "the notes carry a heading of the changelog's own" >&2; exit 1; fi
+          tail -1 notes/notes.md | grep -q '^\*\*Every commit' || { echo "the notes do not end with the link to the commits" >&2; exit 1; }
       - name: What this run is for
         id: scope
         env:
