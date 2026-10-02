@@ -675,14 +675,14 @@ curl … "http://localhost:4318/api/v1/raw?limit=2&count=1"
 ```json
 {
   "batches": [
-    {"id": 1, "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
+    {"id": "n1", "received_at": "2026-09-01T00:00:00Z", "dialect": "langfuse",
      "content_type": "application/x-protobuf", "content_encoding": "gzip",
      "size_bytes": 1274, "scrubbed_at": null},
-    {"id": 2, "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
+    {"id": "n2", "received_at": "2026-09-01T00:00:00.001Z", "dialect": "genai",
      "content_type": "application/json", "content_encoding": "",
      "size_bytes": 3810, "scrubbed_at": "2026-09-26T10:02:11Z"}
   ],
-  "next_cursor": "MTc4ODIyMDgwMDAwMTAwMDAwMDoy",
+  "next_cursor": "bjoxNzg4MjIwODAwMDAxMDAwMDAwOjI",
   "prev_cursor": null,
   "total": 12400,
   "total_capped": false
@@ -703,6 +703,14 @@ towards older ones, and rows come back oldest first either way.
 | `cursor`, `direction` | Keyset over `(received_at, id)`. |
 | `count` | Adds `total` and `total_capped`, counted up to 100000 — high, because this count answers "how much is this export about to send". |
 
+`id` is `n` and the batch's **number within your project**: `n1`, `n2`, `n3`…
+in the order your batches were stored. It is never reused, and other projects'
+batches are no gaps in it. A gap is a batch of yours that retention or an
+erasure took.
+
+Anything else in the place of an id — a bare integer among them — is a `400`,
+never read as one of your batches; so is a cursor the listing did not give.
+
 `size_bytes` is the **decoded** length, which is what a fetch of the body
 returns; the row itself is compressed and smaller. `content_type` is what the
 body is in, and a batch stored before schema 0012 reads as
@@ -719,7 +727,7 @@ and guessing which was meant is worse than asking.
 ### One body
 
 ```sh
-curl … -o batch.pb "http://localhost:4318/api/v1/raw/1"
+curl … -o batch.pb "http://localhost:4318/api/v1/raw/n1"
 ```
 
 The bytes the client posted, with gzip already removed — the stored body is the

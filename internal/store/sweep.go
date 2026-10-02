@@ -789,6 +789,9 @@ func (r *rawSweep) apply(tx *sql.Tx) error {
 		return err
 	}
 	r.Media = drop.Collected
+	if err := spendRawNumbers(tx, r.ProjectID, ids); err != nil {
+		return err
+	}
 	r.Deleted, err = deleteIn(tx, `DELETE FROM raw_batches WHERE id IN`, nil, ids)
 	if err != nil {
 		return fmt.Errorf("sweep raw batches: %w", err)

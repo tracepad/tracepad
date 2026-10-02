@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/tracepad/tracepad/internal/mapping"
 	"github.com/tracepad/tracepad/internal/model"
 	"github.com/tracepad/tracepad/internal/otlptest"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -802,10 +804,10 @@ func TestExportToADirectoryResumes(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("manifest rows = %d, want all four exactly once", len(rows))
 	}
-	seen := map[int64]bool{}
+	seen := map[string]bool{}
 	for _, row := range rows {
 		if seen[row.ID] {
-			t.Errorf("batch %d appears in the manifest twice", row.ID)
+			t.Errorf("batch %s appears in the manifest twice", row.ID)
 		}
 		seen[row.ID] = true
 	}
@@ -970,7 +972,7 @@ func TestExportToADirectoryLeavesNothingWhenItSendsNothing(t *testing.T) {
 func TestExportCursorBeforeSinceIsAUsageError(t *testing.T) {
 	h := newHarness(t)
 	seedArchive(t, h, 3)
-	cursor := encodeRawCursor(seedBase-day, 1)
+	cursor := rawid.Cursor(seedBase-day, 1)
 
 	got := h.run(t.Context(), false, "export", "--otlp", "--dir", t.TempDir(),
 		"--after", cursor, "--since", instantAfter(1))
@@ -1240,4 +1242,74 @@ func ungzip(t *testing.T, body []byte) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// A cursor from before batches were numbered within their project is refused
+// before anything is asked of the server, by a dry run as by a run, with the
+// A cursor that is not one an export printed — a server's from before the
+// numbering among them — is refused before anything is asked of the server,
+// by a dry run as by a run (spec 019 #17).
+func TestExportRefusesACursorItDidNotPrint(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	old := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d:7", seedBase)))
+	for _, args := range [][]string{
+		{"export", "--otlp", "--dir", t.TempDir(), "--after", old, "--dry-run"},
+		{"export", "--otlp", "--dir", t.TempDir(), "--after", old},
+	} {
+		got := h.run(t.Context(), false, args...)
+		if got.code != ExitUsage || !strings.Contains(got.stderr, "not a cursor an export printed") {
+			t.Errorf("%v: exit %d, stderr %q; want a usage refusal", args, got.code, got.stderr)
+		}
+	}
+}
+
+// A directory an export filled before the numbering keeps its files: a batch
+// of this release is named `…-n1.pb`, which no file named by an id from
+// before — `…-1.pb` — can be, so a resume into it never replaces one
+// (spec 019 #17).
+func TestExportIntoAPreNumberingDirectoryReplacesNothing(t *testing.T) {
+	h := newHarness(t)
+	seedArchive(t, h, 2)
+	dir := t.TempDir()
+	at := time.Unix(0, seedBase).UTC()
+	old := filepath.Join(dir, fmt.Sprintf("%013d-1.pb", at.UnixMilli()))
+	if err := os.WriteFile(old, []byte("a batch of the old export"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.jsonl"), []byte(`{"id":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := h.run(t.Context(), false, "export", "--otlp", "--dir", dir, "--after", rawid.Cursor(seedBase-1, 1))
+	if got.code != ExitOK {
+		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
+	}
+	if content, err := os.ReadFile(old); err != nil || string(content) != "a batch of the old export" {
+		t.Errorf("the old export's file = %q, %v; want it untouched", content, err)
+	}
+	for _, number := range []int{1, 2} {
+		name := fmt.Sprintf("%013d-n%d.pb", at.Add(time.Duration(number-1)*time.Millisecond).UnixMilli(), number)
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("batch n%d was not written as %s: %v", number, name, err)
+		}
+	}
+}
+
+// A page whose ids are not this release's — numbers from a server before the
+// numbering, or anything else — is refused before an id is used anywhere, and
+// the refusal says the two sides are different versions (spec 019 #17).
+func TestARawListingFromAnotherVersionIsNamedAsSuch(t *testing.T) {
+	for _, page := range []string{
+		`{"batches":[{"id":5,"received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`,
+		`{"batches":[{"id":"../../etc","received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`,
+	} {
+		_, err := decodeRawListing([]byte(page))
+		if !errors.Is(err, errRawIDVersion) || !strings.Contains(err.Error(), "different versions") {
+			t.Errorf("%s: %v, want the version mismatch named", page, err)
+		}
+	}
+	listing, err := decodeRawListing([]byte(`{"batches":[{"id":"n5","received_at":"2026-09-01T00:00:00Z"}],"next_cursor":null}`))
+	if err != nil || len(listing.Batches) != 1 {
+		t.Errorf("this release's page = %+v, %v", listing, err)
+	}
 }

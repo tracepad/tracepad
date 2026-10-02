@@ -401,7 +401,7 @@ func TestARetryNamesItsBatchFirst(t *testing.T) {
 	if got.code != ExitOK {
 		t.Fatalf("exit = %d, stderr = %s", got.code, got.stderr)
 	}
-	retry := regexp.MustCompile(`(?m)^tracepad: batch \d+: retrying in \S+ \(attempt 2 of \d+\): .*come back later`)
+	retry := regexp.MustCompile(`(?m)^tracepad: batch n\d+: retrying in \S+ \(attempt 2 of \d+\): .*come back later`)
 	if !retry.MatchString(got.stderr) {
 		t.Errorf("stderr = %q", got.stderr)
 	}

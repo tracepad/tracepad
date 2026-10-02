@@ -23,7 +23,11 @@ const RawContentTypeProtobuf = "application/x-protobuf"
 // RawBatchRow is one row of the archive's listing: what the row already holds,
 // plus the size a client wants to know before it fetches (spec 019 #3).
 type RawBatchRow struct {
-	ID              int64
+	// Number is the batch's number within its project, 1, 2, 3… in the
+	// order its batches were stored — the `id` the API shows. The table's
+	// own rowid is one sequence for every tenant and never leaves the store
+	// (spec 019 #17).
+	Number          int64
 	ReceivedAt      int64
 	Dialect         string
 	ContentType     string
@@ -36,12 +40,13 @@ type RawBatchRow struct {
 	ScrubbedAt *int64
 }
 
-// RawCursor is the keyset of the last row of a page. `id` is the tiebreak, and
-// the primary key supplies it: two batches of one millisecond are still two
-// batches, and a page that could not tell them apart would repeat or skip one.
+// RawCursor is the keyset of the last row of a page. The batch's number is the
+// tiebreak, unique within the project: two batches of one millisecond are
+// still two batches, and a page that could not tell them apart would repeat or
+// skip one.
 type RawCursor struct {
 	ReceivedAt int64
-	ID         int64
+	Number     int64
 }
 
 // RawFilter is one page of the archive.
@@ -69,15 +74,18 @@ type RawFilter struct {
 // rawConditions builds everything the filter says about *which* batches match,
 // cursor excluded: the listing adds a keyset and a page, the count adds
 // neither (the shape of spec 009 #4).
+//
+// Every condition is on raw_batch_numbers, aliased `n`: the numbers and the
+// arrival times are there, in the index the listing pages on (spec 019 #17).
 func rawConditions(projectID string, filter RawFilter) ([]string, []any) {
-	where := []string{"project_id = ?"}
+	where := []string{"n.project_id = ?"}
 	args := []any{projectID}
 	if filter.Since != nil {
-		where = append(where, "received_at >= ?")
+		where = append(where, "n.received_at >= ?")
 		args = append(args, *filter.Since)
 	}
 	if filter.Until != nil {
-		where = append(where, "received_at < ?")
+		where = append(where, "n.received_at < ?")
 		args = append(args, *filter.Until)
 	}
 	return where, args
@@ -102,14 +110,15 @@ func rawQuery(projectID string, filter RawFilter) (string, []any) {
 		// A row-value comparison rather than the equivalent disjunction:
 		// SQLite seeks straight to the cursor with the former (spec 003
 		// #25).
-		where = append(where, "(received_at, id) "+comparison+" (?, ?)")
-		args = append(args, filter.After.ReceivedAt, filter.After.ID)
+		where = append(where, "(n.received_at, n.number) "+comparison+" (?, ?)")
+		args = append(args, filter.After.ReceivedAt, filter.After.Number)
 	}
 	args = append(args, filter.Limit)
-	return `SELECT id, received_at, dialect, content_type, content_encoding, scrubbed_at,
-	               substr(body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
-	 FROM raw_batches WHERE ` + strings.Join(where, " AND ") + `
-	 ORDER BY received_at ` + order + `, id ` + order + ` LIMIT ?`, args
+	return `SELECT n.number, n.received_at, b.dialect, b.content_type, b.content_encoding, b.scrubbed_at,
+	               substr(b.body, 1, ` + fmt.Sprint(zstdHeaderPrefix) + `)
+	 FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+	 WHERE ` + strings.Join(where, " AND ") + `
+	 ORDER BY n.received_at ` + order + `, n.number ` + order + ` LIMIT ?`, args
 }
 
 // RawBatches lists a project's raw batches, oldest first.
@@ -130,7 +139,7 @@ func (s *Store) RawBatches(ctx context.Context, projectID string, filter RawFilt
 			scrubbed                     sql.NullInt64
 			prefix                       []byte
 		)
-		if err := rows.Scan(&row.ID, &row.ReceivedAt, &dialect, &contentType, &coding,
+		if err := rows.Scan(&row.Number, &row.ReceivedAt, &dialect, &contentType, &coding,
 			&scrubbed, &prefix); err != nil {
 			return nil, err
 		}
@@ -153,7 +162,7 @@ func (s *Store) RawBatches(ctx context.Context, projectID string, filter RawFilt
 	// is a second read of the rows that cost the least to decompress, and
 	// never of the ones that would have cost the most.
 	for _, row := range unsized {
-		size, err := s.rawBodySize(ctx, projectID, row.ID)
+		size, err := s.rawBodySize(ctx, projectID, row.Number)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +183,7 @@ func (s *Store) CountRawBatches(ctx context.Context, projectID string, filter Ra
 	args = append(args, cap)
 	var count int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM (SELECT 1 FROM raw_batches WHERE `+
+		`SELECT COUNT(*) FROM (SELECT 1 FROM raw_batch_numbers n WHERE `+
 			strings.Join(where, " AND ")+` LIMIT ?)`, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count raw batches: %w", err)
 	}
@@ -183,7 +192,8 @@ func (s *Store) CountRawBatches(ctx context.Context, projectID string, filter Ra
 
 // RawBody is one archived body with what a replay needs to send it again.
 type RawBody struct {
-	ID          int64
+	// Number is the batch's number within its project (spec 019 #17).
+	Number      int64
 	ReceivedAt  int64
 	Dialect     string
 	ContentType string
@@ -195,10 +205,11 @@ type RawBody struct {
 	Body []byte
 }
 
-// RawBatchBody reads one batch. It returns nil when the id belongs to another
-// project or the sweeper has already taken it — the same answer either way,
-// because a batch that is not this project's does not exist to it.
-func (s *Store) RawBatchBody(ctx context.Context, projectID string, id int64) (*RawBody, error) {
+// RawBatchBody reads one batch by its number. It returns nil when the project
+// has no batch of that number — never issued, or taken by the sweeper or an
+// erasure. Another project's batch of the same number is that project's, and
+// not reachable from here at all.
+func (s *Store) RawBatchBody(ctx context.Context, projectID string, number int64) (*RawBody, error) {
 	var (
 		out                  RawBody
 		dialect, contentType sql.NullString
@@ -206,24 +217,72 @@ func (s *Store) RawBatchBody(ctx context.Context, projectID string, id int64) (*
 		stored               []byte
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, received_at, dialect, content_type, scrubbed_at, body
-		   FROM raw_batches WHERE project_id = ? AND id = ?`, projectID, id).
-		Scan(&out.ID, &out.ReceivedAt, &dialect, &contentType, &scrubbed, &stored)
+		`SELECT n.number, n.received_at, b.dialect, b.content_type, b.scrubbed_at, b.body
+		   FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+		  WHERE n.project_id = ? AND n.number = ?`, projectID, number).
+		Scan(&out.Number, &out.ReceivedAt, &dialect, &contentType, &scrubbed, &stored)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read raw batch %d: %w", id, err)
+		return nil, fmt.Errorf("read raw batch %d: %w", number, err)
 	}
 	out.Dialect = dialect.String
 	out.ContentType = rawContentType(contentType)
 	out.ScrubbedAt = nullableTime(scrubbed)
 	body, err := Decompress(CompressionZstd, stored)
 	if err != nil {
-		return nil, fmt.Errorf("read raw batch %d: %w", id, err)
+		return nil, fmt.Errorf("read raw batch %d: %w", number, err)
 	}
 	out.Body = body
 	return &out, nil
+}
+
+// numberRawBatch gives a raw batch its project's next number (spec 019 #17):
+// one past the higher of the highest number the project holds and its spent
+// mark, both seeks, with no write but the number's own row. The writer is the
+// one connection that inserts, so two batches cannot take one number, and a
+// rolled-back window gives its numbers back. The row's arrival time is read
+// from the batch's row in the same statement, so the copy the listing pages
+// on cannot disagree with it; the migration forbids changing the original.
+func numberRawBatch(tx *sql.Tx, projectID string, batchID int64) error {
+	result, err := tx.Exec(`INSERT INTO raw_batch_numbers (batch_id, project_id, number, received_at)
+		SELECT b.id, b.project_id, `+nextRawNumber+`, b.received_at
+		  FROM raw_batches b WHERE b.id = ?2 AND b.project_id = ?1`, projectID, batchID)
+	if err != nil {
+		return fmt.Errorf("number raw batch: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("number raw batch %d: the batch is not the project's", batchID)
+	}
+	return nil
+}
+
+// nextRawNumber is the project ?1's next raw batch number. Each half is
+// COALESCEd on its own: a project with no batch has no highest number, and a
+// MAX with a NULL operand is NULL, which would leave the batch unnumbered.
+const nextRawNumber = `MAX(COALESCE((SELECT MAX(number) FROM raw_batch_numbers WHERE project_id = ?1), 0),
+	COALESCE((SELECT raw_batches_numbered FROM projects WHERE id = ?1), 0)) + 1`
+
+// spendRawNumbers moves a project's spent mark past the numbers of the raw
+// batches about to be deleted (spec 019 #17), once for the chunk: the next
+// number is one past the higher of this mark and the highest number held, so
+// a number the sweep or an erasure took is never issued again. Every path
+// that deletes raw batches of a living project calls it first, in the same
+// transaction; a purge takes the project row with them and needs no mark.
+func spendRawNumbers(tx *sql.Tx, projectID string, batchIDs []any) error {
+	return eachIn(batchIDs, func(batch []any) error {
+		// Positional throughout, in the order they appear: a bare `?`
+		// after a numbered one would not count from where it stands.
+		args := append(append([]any{}, batch...), projectID)
+		_, err := tx.Exec(`UPDATE projects SET raw_batches_numbered = MAX(raw_batches_numbered,
+			COALESCE((SELECT MAX(number) FROM raw_batch_numbers WHERE batch_id IN (`+placeholders(len(batch))+`)), 0))
+			WHERE id = ?`, args...)
+		if err != nil {
+			return fmt.Errorf("spend raw batch numbers: %w", err)
+		}
+		return nil
+	})
 }
 
 // RawSummary is what `GET /api/v1/system` reports about the archive
@@ -336,10 +395,11 @@ func decodedSize(prefix []byte) (int64, bool) {
 
 // rawBodySize decompresses one body to measure it, for the frames whose header
 // did not say.
-func (s *Store) rawBodySize(ctx context.Context, projectID string, id int64) (int64, error) {
+func (s *Store) rawBodySize(ctx context.Context, projectID string, number int64) (int64, error) {
 	var stored []byte
 	err := s.db.QueryRowContext(ctx,
-		`SELECT body FROM raw_batches WHERE project_id = ? AND id = ?`, projectID, id).Scan(&stored)
+		`SELECT b.body FROM raw_batch_numbers n JOIN raw_batches b ON b.id = n.batch_id
+		  WHERE n.project_id = ? AND n.number = ?`, projectID, number).Scan(&stored)
 	if err == sql.ErrNoRows {
 		// Swept between the page and this read: a size of zero is wrong
 		// by less than an error would be, and the body endpoint answers
@@ -347,11 +407,11 @@ func (s *Store) rawBodySize(ctx context.Context, projectID string, id int64) (in
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("measure raw batch %d: %w", id, err)
+		return 0, fmt.Errorf("measure raw batch %d: %w", number, err)
 	}
 	body, err := Decompress(CompressionZstd, stored)
 	if err != nil {
-		return 0, fmt.Errorf("measure raw batch %d: %w", id, err)
+		return 0, fmt.Errorf("measure raw batch %d: %w", number, err)
 	}
 	return int64(len(body)), nil
 }

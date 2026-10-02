@@ -167,7 +167,7 @@ func (s *Server) inlineRawMedia(ctx context.Context, projectID string, batch *st
 		// Unreachable for a body ingest decoded and factored; were it to
 		// happen, the reader gets the references, and the log says so.
 		slog.Warn("could not decode a raw body to inline its media; serving it as stored",
-			"raw_batch", batch.ID, "err", err)
+			"project", projectID, "raw_batch", batch.Number, "err", err)
 		return batch.Body
 	}
 	changed := mapping.InlineMedia(decoded.ResourceSpans, func(sha string) (string, []byte, bool) {

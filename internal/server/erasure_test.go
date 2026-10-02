@@ -177,7 +177,7 @@ func TestTheByteScan(t *testing.T) {
 	listing := h.listRaw(t, "")
 	readable := false
 	for _, batch := range listing.Batches {
-		body := h.get(t, fmt.Sprintf("/api/v1/raw/%d", batch.ID))
+		body := h.get(t, "/api/v1/raw/"+batch.ID)
 		expectStatus(t, body, http.StatusOK)
 		readable = readable || bytes.Contains(body.Body.Bytes(), []byte(n))
 	}
@@ -262,7 +262,7 @@ func TestARewrittenBatchIsMarked(t *testing.T) {
 	expectStatus(t, rec, http.StatusOK)
 	listing := decodeJSON[struct {
 		Batches []struct {
-			ID         int64      `json:"id"`
+			ID         string     `json:"id"`
 			ScrubbedAt *time.Time `json:"scrubbed_at"`
 		} `json:"batches"`
 	}](t, rec)
@@ -272,13 +272,13 @@ func TestARewrittenBatchIsMarked(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"scrubbed_at":null`) {
 		t.Errorf("a batch as received does not say null: %s", rec.Body.String())
 	}
-	first := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	first := h.get(t, "/api/v1/raw/"+listing.Batches[0].ID)
 	at, err := time.Parse(time.RFC3339Nano, first.Header().Get(headerScrubbedAt))
 	if err != nil || !at.Equal(*listing.Batches[0].ScrubbedAt) {
 		t.Errorf("%s = %q, want the listing's %v", headerScrubbedAt, first.Header().Get(headerScrubbedAt),
 			listing.Batches[0].ScrubbedAt)
 	}
-	second := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[1].ID))
+	second := h.get(t, "/api/v1/raw/"+listing.Batches[1].ID)
 	if got := second.Header().Get(headerScrubbedAt); got != "" {
 		t.Errorf("a batch as received sends %s: %q", headerScrubbedAt, got)
 	}

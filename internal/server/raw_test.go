@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/model"
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -21,7 +23,7 @@ import (
 
 // rawRow is one row of the listing as a caller reads it.
 type rawRow struct {
-	ID              int64  `json:"id"`
+	ID              string `json:"id"`
 	ReceivedAt      string `json:"received_at"`
 	Dialect         string `json:"dialect"`
 	ContentType     string `json:"content_type"`
@@ -46,9 +48,9 @@ func (h *harness) listRaw(t *testing.T, query string) rawListing {
 
 // seedRaw writes n batches a millisecond apart, so the keyset has both columns
 // to work with and the window filters have boundaries to land on.
-func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType string) []int64 {
+func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType string) []string {
 	t.Helper()
-	ids := make([]int64, 0, n)
+	numbers := make([]int64, 0, n)
 	for i := range n {
 		body := []byte(strings.Repeat(fmt.Sprintf("batch-%03d;", i), 40))
 		err := h.writer.Submit(t.Context(), &store.IngestBatch{
@@ -69,13 +71,17 @@ func seedRaw(t *testing.T, h *harness, projectID string, n int, contentType stri
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		ids = append(ids, row.ID)
+		numbers = append(numbers, row.Number)
 	}
-	// Sorted here rather than trusted from the listing: the ids are an
-	// autoincrement and the batches were written in arrival order, so
+	// Sorted here rather than trusted from the listing: the numbers are the
+	// project's own count and the batches were written in arrival order, so
 	// ascending *is* arrival order — and reading it off the listing would
 	// make every order assertion below agree with whatever the listing did.
-	slices.Sort(ids)
+	slices.Sort(numbers)
+	ids := make([]string, 0, n)
+	for _, number := range numbers {
+		ids = append(ids, rawid.ID(number))
+	}
 	return ids
 }
 
@@ -94,7 +100,7 @@ func TestRawListingPagesForward(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	ids := seedRaw(t, h, h.project.ID, 7, "")
 
-	var walked []int64
+	var walked []string
 	var arrivals []string
 	cursor := ""
 	for page := range 4 {
@@ -204,29 +210,47 @@ func TestRawListingCounts(t *testing.T) {
 }
 
 // A project key reaches its own archive and nothing else: the batches are the
-// project's data exactly as its traces are (spec 019 #9).
+// project's data exactly as its traces are (spec 019 #9). And a batch's id is
+// the project's own count (#17): another tenant's exports between two of mine
+// leave no gap, and the id another tenant's batch has names my batch of that
+// number, or nothing.
 func TestRawIsScopedToTheProject(t *testing.T) {
 	h := newHarness(t, nil, store.WriterOptions{})
 	other, err := h.store.CreateProject("other", store.KeyPair{PublicKey: "tp-pk-other", Secret: "tp-sk-other"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedRaw(t, h, h.project.ID, 2, "")
-	strangers := seedRaw(t, h, other.ID, 2, "")
-
-	listing := h.listRaw(t, "")
-	if len(listing.Batches) != 2 {
-		t.Fatalf("batches = %d, want only this project's two", len(listing.Batches))
-	}
-	for _, row := range listing.Batches {
-		for _, id := range strangers {
-			if row.ID == id {
-				t.Fatalf("the listing carries another project's batch %d", id)
-			}
+	ingest := func(projectID, marker string) {
+		t.Helper()
+		if err := h.writer.Submit(t.Context(), &store.IngestBatch{ProjectID: projectID,
+			Raw: &store.RawBatch{ReceivedAt: seedBase, Body: []byte(marker)}}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", strangers[0]))
-	expectStatus(t, rec, 404)
+	ingest(h.project.ID, "mine-1")
+	for i := range 3 {
+		ingest(other.ID, fmt.Sprintf("theirs-%d", i+1))
+	}
+	ingest(h.project.ID, "mine-2")
+
+	listing := h.listRaw(t, "")
+	var ids []string
+	for _, row := range listing.Batches {
+		ids = append(ids, row.ID)
+	}
+	if !slices.Equal(ids, []string{"n1", "n2"}) {
+		t.Fatalf("ids = %v, want 1 2: only this project's two, and the other's three are no gap", ids)
+	}
+	for id, want := range map[string]string{"n1": "mine-1", "n2": "mine-2"} {
+		rec := h.get(t, "/api/v1/raw/"+id)
+		expectStatus(t, rec, 200)
+		if got := rec.Body.String(); got != want {
+			t.Errorf("batch %s = %q, want this project's %q", id, got, want)
+		}
+	}
+	// The other project's third batch has a number this one has not
+	// reached: not found, as a number never issued is.
+	expectError(t, h.get(t, "/api/v1/raw/n3"), 404, "raw batch n3 not found")
 }
 
 // The body comes back as the client sent it, under the type it was sent in,
@@ -253,7 +277,7 @@ func TestRawBodyIsWhatArrived(t *testing.T) {
 		t.Errorf("dialect = %q", row.Dialect)
 	}
 
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", row.ID))
+	rec := h.get(t, "/api/v1/raw/"+row.ID)
 	expectStatus(t, rec, 200)
 	if !bytes.Equal(rec.Body.Bytes(), sent) {
 		t.Error("the body endpoint did not answer the bytes the client sent")
@@ -290,7 +314,7 @@ func TestRawBodyIsExemptFromTheBudget(t *testing.T) {
 	}
 
 	listing := h.listRaw(t, "")
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	rec := h.get(t, "/api/v1/raw/"+listing.Batches[0].ID)
 	expectStatus(t, rec, 200)
 	if rec.Body.Len() != len(body) {
 		t.Errorf("body = %d bytes, want the whole %d", rec.Body.Len(), len(body))
@@ -309,7 +333,7 @@ func TestRawContentTypeDefaultsToProtobuf(t *testing.T) {
 	if got := listing.Batches[0].ContentType; got != "application/x-protobuf" {
 		t.Errorf("content_type of a pre-0012 row = %q, want the protobuf encoding", got)
 	}
-	rec := h.get(t, fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID))
+	rec := h.get(t, "/api/v1/raw/"+listing.Batches[0].ID)
 	expectStatus(t, rec, 200)
 	if got := rec.Header().Get("Content-Type"); got != "application/x-protobuf" {
 		t.Errorf("Content-Type = %q", got)
@@ -324,10 +348,14 @@ func TestRawBodyRefusals(t *testing.T) {
 		path   string
 		status int
 	}{
-		{"/api/v1/raw/999999", 404},
+		{"/api/v1/raw/n999999", 404},
 		{"/api/v1/raw/nope", 400},
-		{"/api/v1/raw/0", 400},
-		{"/api/v1/raw/-1", 400},
+		{"/api/v1/raw/n0", 400},
+		{"/api/v1/raw/n-1", 400},
+		{"/api/v1/raw/n01", 400},
+		// A bare integer is not an id (spec 019 #17): refused, never read
+		// as this project's batch of that number.
+		{"/api/v1/raw/1", 400},
 	} {
 		if rec := h.get(t, c.path); rec.Code != c.status {
 			t.Errorf("GET %s = %d, want %d (%s)", c.path, rec.Code, c.status, rec.Body)
@@ -414,4 +442,25 @@ func (h *harness) systemRaw(t *testing.T) systemRawBlock {
 		t.Fatalf("the raw block is not the documented shape: %v (%s)", err, body.Raw)
 	}
 	return block
+}
+
+// A cursor is the archive's own grammar and nothing else (spec 019 #17): one
+// in another form — a server's from before the numbering, a number with a
+// sign or a leading zero — is refused, never read as some other position.
+func TestRawRefusesACursorItDidNotGive(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	seedRaw(t, h, h.project.ID, 3, "")
+	for _, cursor := range []string{"nonsense", encodeCursor(strconv.FormatInt(seedBase+ms, 10), "2"),
+		encodeCursor("n", "1"), encodeCursor("x", "1", "2"), encodeCursor("n", "-5", "1"), encodeCursor("n", "5", "01")} {
+		for _, direction := range []string{"", "&direction=prev"} {
+			expectError(t, h.get(t, "/api/v1/raw?cursor="+cursor+direction), http.StatusBadRequest,
+				"not a raw archive cursor")
+		}
+	}
+	// And the one it gave goes on from where it was.
+	first := h.listRaw(t, "?limit=1")
+	next := h.listRaw(t, "?limit=1&cursor="+*first.NextCursor)
+	if len(next.Batches) != 1 || next.Batches[0].ID != "n2" {
+		t.Errorf("after the first page = %+v, want n2", next.Batches)
+	}
 }

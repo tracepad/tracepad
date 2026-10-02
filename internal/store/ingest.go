@@ -305,6 +305,9 @@ func (b *IngestBatch) apply(tx *sql.Tx) error {
 		).Scan(&rawID); err != nil {
 			return fmt.Errorf("store raw batch: %w", err)
 		}
+		if err := numberRawBatch(tx, b.ProjectID, rawID); err != nil {
+			return err
+		}
 		if err := writeRawMediaRefs(tx, b.ProjectID, rawID, b.RawMedia, types, held, arrived); err != nil {
 			return err
 		}

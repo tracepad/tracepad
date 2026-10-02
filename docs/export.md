@@ -34,7 +34,7 @@ $ tracepad export --otlp --to http://collector:4318/v1/traces
 12400 batches, 3.1 GiB
   covering   2026-08-06 04:12:19 .. 2026-09-05 09:44:02
   not covered 214 traces started before the archive begins
---after MTc4NzczODQwMDAwMDAwMDAwMDoxMjQwMA
+--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjEyNDAw
 ```
 
 `not covered` is a lower bound, and deliberately so: it counts the traces whose
@@ -62,7 +62,7 @@ A dry run resumed with `--after` says so rather than letting the number be read
 as what it is about to send:
 
 ```
-$ tracepad export --otlp --to … --after MTc4… --dry-run
+$ tracepad export --otlp --to … --after bjox… --dry-run
 12400 batches in the window; the resume starts inside it, so fewer will be sent
 ```
 
@@ -186,19 +186,19 @@ to continue from:
 
 ```
 $ tracepad export --otlp --to http://collector:4318/v1/traces
-tracepad: batch 8814 was refused: 413 payload too large
+tracepad: batch n8814 was refused: 413 payload too large
 1204 batches, 512.4 MiB
   covering   2026-08-06 04:12:19 .. 2026-08-09 22:03:55
   not covered 214 traces started before the archive begins
-  stopped at batch 8814: 413 payload too large
---after MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+  stopped at batch n8814: 413 payload too large
+--after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 ```
 
 Fix what the receiver complained about, then:
 
 ```sh
 tracepad export --otlp --to http://collector:4318/v1/traces \
-  --after MTc4NzczODQwMDAwMDAwMDAwMDo4ODEz
+  --after bjoxNzg3NzM4NDAwMDAwMDAwMDAwOjg4MTM
 ```
 
 The cursor resumes **at** the batch that failed, not after it. Re-sending a
@@ -214,23 +214,25 @@ Exit codes: `0` finished, `1` stopped, `2` you typed something wrong.
 tracepad export --otlp --dir ./tracepad-export
 ```
 
-One file per batch, named `<received_at_ms>-<id>.pb` — or `.json` for a batch
-that arrived in the OTLP/JSON encoding — so that a plain `ls` is in replay
-order. Beside them, `manifest.jsonl`: one line per batch, the listing row as the
-API returns it, appended as each file lands. The files are your traces, prompts
-and completions included, so they are readable by you alone (`0600`), and so is
-the directory when the export creates it (`0700`). One that already exists keeps
-its mode, and the export says so on stderr when it is open to others. A resume
-brings the files an earlier export left to `0600` too.
+One file per batch, named `<received_at_ms>-<id>.pb` — `id` being `n` and the
+batch's number within the project ([api.md](api.md#the-raw-archive)) — or
+`.json` for a batch that arrived in the OTLP/JSON encoding — so that a plain
+`ls` is in replay order. Beside them, `manifest.jsonl`: one line per batch, the
+listing row as the API returns it, appended as each file lands. The files are
+your traces, prompts and completions included, so they are readable by you
+alone (`0600`), and so is the directory when the export creates it (`0700`).
+One that already exists keeps its mode, and the export says so on stderr when
+it is open to others. A resume brings the files an earlier export left to
+`0600` too.
 
 ```
 $ ls tracepad-export | head -3
-1788220800000-1.pb
-1788220800001-2.pb
-1788220800002-3.json
+1788220800000-n1.pb
+1788220800001-n2.pb
+1788220800002-n3.json
 
 $ head -1 tracepad-export/manifest.jsonl
-{"id":1,"received_at":"2026-09-01T00:00:00Z","dialect":"langfuse",
+{"id":"n1","received_at":"2026-09-01T00:00:00Z","dialect":"langfuse",
  "content_type":"application/x-protobuf","content_encoding":"","size_bytes":1274}
 ```
 

@@ -2,12 +2,11 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 
+	"github.com/tracepad/tracepad/internal/rawid"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -109,14 +108,16 @@ func (s *Server) handleListRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	batches, prev, next := trimPage(batches, limit, backward, raw,
 		func(row *store.RawBatchRow) string {
-			return encodeCursor(strconv.FormatInt(row.ReceivedAt, 10),
-				strconv.FormatInt(row.ID, 10))
+			return rawid.Cursor(row.ReceivedAt, row.Number)
 		})
 
 	rows := make([]object, 0, len(batches))
 	for _, row := range batches {
 		rows = append(rows, object{}.
-			put("id", row.ID).
+			// The batch's number within the project, not the table's
+			// rowid: one sequence for every tenant told each how much
+			// the others sent, and when (spec 019 #17).
+			put("id", rawid.ID(row.Number)).
 			put("received_at", formatTime(row.ReceivedAt)).
 			put("dialect", row.Dialect).
 			put("content_type", row.ContentType).
@@ -156,23 +157,21 @@ func (s *Server) handleGetRawBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw := r.PathValue("id")
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("raw batch id must be a positive whole number, got %q", raw))
+	// The id is the batch's number within this project, tagged (spec 019
+	// #17): there is no other project's batch it could name, and a bare
+	// integer is not an id at all.
+	id, err := rawid.ParseID(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is %s", raw, err.Error()))
 		return
 	}
-
 	batch, err := s.store.RawBatchBody(r.Context(), project.ID, id)
 	if err != nil {
 		readFailed(w, r, "failed to read the raw batch", err)
 		return
 	}
-	// Another project's id and one the sweeper has taken answer the same
-	// way: neither exists to this key, and saying which would leak the
-	// existence of the other project's archive.
 	if batch == nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("raw batch %d not found", id))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("raw batch %s not found", rawid.ID(id)))
 		return
 	}
 
@@ -225,21 +224,13 @@ func rawFilter(values url.Values) (store.RawFilter, error) {
 	return filter, nil
 }
 
-// decodeRawCursor restores the `(received_at, id)` keyset.
+// decodeRawCursor restores the `(received_at, number)` keyset (spec 019 #17).
 func decodeRawCursor(value string) (*store.RawCursor, error) {
-	parts, err := decodeCursor(value, 2)
+	receivedAt, number, err := rawid.ParseCursor(value)
 	if err != nil {
 		return nil, err
 	}
-	receivedAt, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return nil, errors.New("invalid cursor")
-	}
-	id, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return nil, errors.New("invalid cursor")
-	}
-	return &store.RawCursor{ReceivedAt: receivedAt, ID: id}, nil
+	return &store.RawCursor{ReceivedAt: receivedAt, Number: number}, nil
 }
 
 // rawBlock renders what `GET /api/v1/system` says about the archive

@@ -22,6 +22,8 @@ import (
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/mapping"
+	"github.com/tracepad/tracepad/internal/rawid"
+	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
 // Where an export goes (spec 019 #5): an OTLP receiver, which is the promise's
@@ -41,16 +43,16 @@ type destination interface {
 // which batch, what the receiver said, and — through the summary — the cursor
 // that starts again at this batch rather than after it (spec 019 #6).
 type stopError struct {
-	id      int64
+	id      string
 	status  int
 	message string
 }
 
 func (e *stopError) Error() string {
 	if e.status == 0 {
-		return fmt.Sprintf("batch %d could not be delivered: %s", e.id, e.message)
+		return fmt.Sprintf("batch %s could not be delivered: %s", termsafe.String(e.id), e.message)
 	}
-	return fmt.Sprintf("batch %d was refused: %d %s", e.id, e.status, e.message)
+	return fmt.Sprintf("batch %s was refused: %d %s", termsafe.String(e.id), e.status, e.message)
 }
 
 // destination builds the one the flags name.
@@ -129,8 +131,8 @@ func (s *receiver) send(ctx context.Context, row rawBatchRow, body []byte) (stri
 		// of its own: a reason that runs to several lines cannot carry the
 		// retry away from the batch it is about (#35).
 		fmt.Fprintf(s.run.opt.Stderr,
-			"tracepad: batch %d: retrying in %s (attempt %d of %d): %s\n",
-			row.ID, wait, attempt+1, s.attempts, block(err.Error(), "          "))
+			"tracepad: batch %s: retrying in %s (attempt %d of %d): %s\n",
+			termsafe.String(row.ID), wait, attempt+1, s.attempts, block(err.Error(), "          "))
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -288,8 +290,9 @@ func (r *run) tightenResumed(path string, entries []os.DirEntry) {
 	}
 }
 
-// exportFileName is the name batchFileName gives a batch.
-var exportFileName = regexp.MustCompile(`^[0-9]{13}-[0-9]+\.(pb|json)$`)
+// exportFileName is the name batchFileName gives a batch: the arrival's
+// milliseconds and the batch's id, `n` and its number (spec 019 #17).
+var exportFileName = regexp.MustCompile(`^[0-9]{13}-n[1-9][0-9]*\.(pb|json)$`)
 
 func (d *directory) close() error {
 	if d.manifest == nil {
@@ -348,7 +351,14 @@ func batchFileName(row rawBatchRow) (string, error) {
 	if strings.HasPrefix(row.ContentType, "application/json") {
 		extension = ".json"
 	}
-	return fmt.Sprintf("%013d-%d%s", at.UnixMilli(), row.ID, extension), nil
+	// The id is `n` and the batch's number within the project (spec 019
+	// #17), so a file of this release is never named like one an export
+	// before it wrote: `…-n42.pb` and `…-42.pb` cannot replace each other in
+	// one directory. It is checked before it becomes a file name.
+	if _, err := rawid.ParseID(row.ID); err != nil {
+		return "", fmt.Errorf("the server listed a batch whose id is %q, which names no file", row.ID)
+	}
+	return fmt.Sprintf("%013d-%s%s", at.UnixMilli(), row.ID, extension), nil
 }
 
 // exportHeaders resolves what rides on every POST: the `--header` flags and
@@ -728,12 +738,4 @@ func asStop(err error, target **stopError) bool {
 		*target = stop
 	}
 	return ok
-}
-
-// encodeRawCursor rebuilds the archive listing's cursor. The grammar is the
-// server's, and it is stated once here so that a resume point and a page's
-// cursor cannot mean different things.
-func encodeRawCursor(receivedAt, id int64) string {
-	return base64.RawURLEncoding.EncodeToString(
-		[]byte(strconv.FormatInt(receivedAt, 10) + ":" + strconv.FormatInt(id, 10)))
 }

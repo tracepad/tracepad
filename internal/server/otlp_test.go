@@ -130,12 +130,12 @@ func archived(t *testing.T, h *harness) []archivedBatch {
 	}
 	out := make([]archivedBatch, 0, len(rows))
 	for _, row := range rows {
-		body, err := h.store.RawBatchBody(t.Context(), h.project.ID, row.ID)
+		body, err := h.store.RawBatchBody(t.Context(), h.project.ID, row.Number)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if body == nil {
-			t.Fatalf("raw batch %d vanished between the listing and the body", row.ID)
+			t.Fatalf("raw batch %d vanished between the listing and the body", row.Number)
 		}
 		out = append(out, archivedBatch{RawBatchRow: row, Body: body.Body})
 	}

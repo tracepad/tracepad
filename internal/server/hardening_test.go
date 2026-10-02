@@ -785,7 +785,7 @@ func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
 	}
 	listing := decodeJSON[struct {
 		Batches []struct {
-			ID int64 `json:"id"`
+			ID string `json:"id"`
 		} `json:"batches"`
 	}](t, h.get(t, "/api/v1/raw"))
 	if len(listing.Batches) != 1 {
@@ -821,7 +821,7 @@ func TestAResponseTheWriteDeadlineCutIsLogged(t *testing.T) {
 	}
 
 	api := serve(h.server.Handler())
-	path := fmt.Sprintf("/api/v1/raw/%d", listing.Batches[0].ID)
+	path := "/api/v1/raw/" + listing.Batches[0].ID
 	slowGet(api, path)
 	cut := lines("a response was cut off")
 	if len(cut) != 1 {
