@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/google/jsonschema-go v0.4.3
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	go.opentelemetry.io/proto/otlp v1.11.0
 	golang.org/x/crypto v0.57.0
