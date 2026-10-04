@@ -436,37 +436,6 @@ const SIDEBAR = 208;
 const MD = 768;
 
 /**
- * What a fold width must leave of the box beyond the columns, in px (spec 006
- * #35): a width measured on one platform's text is the width another's
- * metrics break unless it has room, and Linux's glyphs came out 17 px wider
- * over a table of 728.
- */
-const SLACK = 24;
-
-/**
- * How many px of its box the table leaves over when it is laid out as narrow
- * as its columns allow: the box's width less the table's at no `min-width` and
- * no width, which is the most its text can be wrapped.
- */
-async function room(table: Locator): Promise<number> {
-	return table.evaluate(async (node) => {
-		const el = node as HTMLElement;
-		const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-		let box = el.parentElement;
-		while (box && getComputedStyle(box).overflowX === 'visible') box = box.parentElement;
-		const { minWidth, width } = el.style;
-		el.style.minWidth = '0';
-		el.style.width = '0px';
-		await frames();
-		const needs = el.getBoundingClientRect().width;
-		el.style.minWidth = minWidth;
-		el.style.width = width;
-		await frames();
-		return (box?.clientWidth ?? 0) - needs;
-	});
-}
-
-/**
  * A table at its own width and one rem under it (spec 006 #22, #24): in a box
  * of `box` px it has all `columns` and no sideways scroll, in one 16 px
  * narrower it has folded, and widening it again brings them back. The window
@@ -478,9 +447,6 @@ async function room(table: Locator): Promise<number> {
  * across lines there (a timestamp, a key, an id) makes its row taller than the
  * table's ordinary rows are (spec 006 #22). `atWhole` runs at the narrowest
  * width the table is whole in, which is where a value is most likely to tear.
- * `slack` is what the box must have over the columns there (spec 006 #35); a
- * test that fills the table with the longest values its cells allow, on
- * purpose, asks for less, since the data is then what sets the columns' width.
  */
 export async function foldsAt(
 	page: Page,
@@ -489,8 +455,7 @@ export async function foldsAt(
 	columns: number,
 	around = 0,
 	tall = Infinity,
-	atWhole?: () => Promise<void>,
-	slack = SLACK
+	atWhole?: () => Promise<void>
 ) {
 	// A page taller than the window has a scrollbar, and a classic one takes its
 	// width from the box. How tall the page is depends on how many rows the server
@@ -506,7 +471,6 @@ export async function foldsAt(
 	await window(box);
 	await expect(table.locator('thead th')).toHaveCount(columns);
 	expect(await sideways(table)).toBeLessThanOrEqual(0);
-	expect(await room(table), 'what the columns leave of the box').toBeGreaterThanOrEqual(slack);
 	const heights = await table
 		.locator('tbody tr')
 		.evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));

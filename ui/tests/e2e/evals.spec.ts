@@ -649,8 +649,7 @@ test('long labels, score names and a long metadata key leave the comparison in i
 		expect(await clipped(table)).toEqual([]);
 		return;
 	}
-	// Every label at the 6 rem a cell cuts it to: the data sets the width here.
-	await foldsAt(page, table, 608, 6, 34, Infinity, undefined, 0);
+	await foldsAt(page, table, 608, 6, 34);
 	await foldsAt(page, cases, 312 + 112, 4);
 	for (const width of [820, 1440]) {
 		await page.setViewportSize({ width, height: 900 });

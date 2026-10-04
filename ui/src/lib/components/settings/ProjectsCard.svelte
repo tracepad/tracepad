@@ -15,6 +15,7 @@
 	import Button from '../Button.svelte';
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import Card from './Card.svelte';
+	import { inset } from './inset';
 	import NewProjectDialog from './NewProjectDialog.svelte';
 
 	// Project lifecycle (spec 007 #4), which used to be the Administration
@@ -118,8 +119,6 @@
 			? 'Keep forever'
 			: `${row.retention_days} ${row.retention_days === 1 ? 'day' : 'days'}`;
 
-	const cell = 'px-2 py-1.5';
-
 	// In a box narrower than the table the row is the project's name and its
 	// verbs, stacked; its id, retention and status fold under the name (spec
 	// 006 #24), in a plain cell for the reason the Accounts card gives (#18),
@@ -153,20 +152,20 @@
 			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
-						<th scope="col" class={[cell, 'font-medium', narrow && 'w-full']}>Name</th>
+						<th scope="col" class={[inset, 'font-medium', narrow && 'w-full']}>Name</th>
 						{#if !narrow}
-							<th scope="col" class="{cell} font-medium">Id</th>
-							<th scope="col" class="{cell} font-medium">Retention</th>
-							<th scope="col" class="{cell} font-medium">Status</th>
+							<th scope="col" class="{inset} font-medium">Id</th>
+							<th scope="col" class="{inset} font-medium">Retention</th>
+							<th scope="col" class="{inset} font-medium">Status</th>
 						{/if}
-						<th scope="col" class={[cell, 'font-medium', !narrow && 'w-48']}>Actions</th>
+						<th scope="col" class={[inset, 'font-medium', !narrow && 'w-48']}>Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each projects as row (row.id)}
 						<tr class={['border-border border-b last:border-b-0', narrow && 'align-top']}>
 							{#if narrow}
-								<td class="max-w-0 {cell} wrap-anywhere">
+								<td class="max-w-0 {inset} wrap-anywhere">
 									{@render name(row)}
 									<div class="text-muted font-mono text-xs break-all">{row.id}</div>
 									<!-- Wraps at its spaces; the dot and the time stay whole (#24, #29). -->
@@ -176,14 +175,14 @@
 									</div>
 								</td>
 							{:else}
-								<th scope="row" class="min-w-36 {cell} text-left font-normal wrap-anywhere">
+								<th scope="row" class="min-w-36 {inset} text-left font-normal wrap-anywhere">
 									{@render name(row)}
 								</th>
-								<td class="text-muted {cell} font-mono text-xs whitespace-nowrap">{row.id}</td>
-								<td class="text-muted {cell} text-sm">{retention(row)}</td>
-								<td class="{cell} text-sm">{@render status(row)}</td>
+								<td class="text-muted {inset} font-mono text-xs whitespace-nowrap">{row.id}</td>
+								<td class="text-muted {inset} text-sm">{retention(row)}</td>
+								<td class="{inset} text-sm">{@render status(row)}</td>
 							{/if}
-							<td class={cell}>
+							<td class={inset}>
 								{#if row.deleted_at}
 									<Button
 										aria-label={narrow ? `Restore ${row.name}` : undefined}
