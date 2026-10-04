@@ -308,6 +308,9 @@ type truncationMarker struct {
 	Size      int    `json:"size"`
 	Preview   string `json:"preview"`
 	Full      string `json:"full"`
+	// MediaCount is how many media references lie beyond the preview
+	// (spec 004 #39).
+	MediaCount int `json:"media_count"`
 }
 
 // truncationOf reads a marker out of a payload slot, and reports false for a
@@ -326,8 +329,15 @@ func truncationOf(raw json.RawMessage) (truncationMarker, bool) {
 // that says the rest is one command away.
 func payloadText(raw json.RawMessage) string {
 	if marker, cut := truncationOf(raw); cut {
-		return fmt.Sprintf("%s… (%s truncated; whole payload at %s)",
-			marker.Preview, byteSize(marker.Size), marker.Full)
+		// The media is named because a reference past the cut is not on
+		// the screen, and an image the application sent reads as lost
+		// (spec 004 #39).
+		media := ""
+		if marker.MediaCount > 0 {
+			media = fmt.Sprintf("; %d media file(s) beyond the preview", marker.MediaCount)
+		}
+		return fmt.Sprintf("%s… (%s truncated%s; whole payload at %s)",
+			marker.Preview, byteSize(marker.Size), media, marker.Full)
 	}
 	return string(raw)
 }

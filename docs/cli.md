@@ -862,7 +862,15 @@ id as a positional, which is the same argument under a second spelling — so
 passing both is a usage error rather than one of them quietly winning, and that
 holds when the two agree as well. The commands marked as needing
 the admin token in [admin.md](admin.md) take it as `--key` or
-`TRACEPAD_API_KEY`, since it rides in the same header as a project key.
+`TRACEPAD_API_KEY`, since it rides in the same header as a project key — and,
+with neither set, from `TRACEPAD_ADMIN_TOKEN` or the file
+`TRACEPAD_ADMIN_TOKEN_FILE` names, which is what the server's own container has
+in its environment. Those are `projects` (`ls`, `create`, `rename`, `rm`,
+`restore`), `keys` and `accounts`; no other command reads the admin token this way.
+
+`tracepad <command> --help`, and the error a mistyped command ends in, print the
+help of that command (`keys --help` of the group), not the whole text; `tracepad
+--help` lists every command.
 
 ### `accounts`
 

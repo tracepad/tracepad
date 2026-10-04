@@ -240,6 +240,11 @@ The `trace_id`/`observation_id` pair is exactly what `get_observation_io`
 takes. That is why the tool exists: without it the markers would be dead ends
 for a consumer that has tools but no URL fetcher.
 
+A payload that holds images or files and was cut before them carries
+`media_count` (and the first references in `media`) in the same marker, so a
+missing picture is a reference past the preview and not a lost one
+([api.md](api.md#the-response-budget)). The tools never fetch the bytes.
+
 ## A worked example
 
 "Why did the last production run fail?"

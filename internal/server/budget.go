@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/mapping"
 )
 
 // The response budget (spec 004 #2). The consumer's context window is a scarce
@@ -24,14 +26,29 @@ import (
 // truncation is the marker that replaces a payload too large to inline. It
 // carries the ready-made URL for an HTTP consumer and the raw id pair for an
 // MCP one, whose `get_observation_io` tool takes exactly that pair (#2, #17).
+//
+// A payload that holds media (spec 041 #4) says so when the cut leaves a
+// reference out: `media_count` is how many references lie beyond the preview,
+// `media` the first of them, each exactly as it is stored. Without that, an
+// image the application sent looked lost when its reference sat after the cut
+// (spec 004 #39).
 type truncation struct {
-	Truncated     bool   `json:"truncated"`
-	Size          int    `json:"size"`
-	Preview       string `json:"preview,omitempty"`
-	TraceID       string `json:"trace_id"`
-	ObservationID string `json:"observation_id"`
-	Full          string `json:"full"`
+	Truncated     bool             `json:"truncated"`
+	Size          int              `json:"size"`
+	Preview       string           `json:"preview,omitempty"`
+	TraceID       string           `json:"trace_id"`
+	ObservationID string           `json:"observation_id"`
+	Full          string           `json:"full"`
+	MediaCount    int              `json:"media_count,omitempty"`
+	Media         []map[string]any `json:"media,omitempty"`
 }
+
+// maxListedMedia bounds the references a marker spells out; `media_count` says
+// how many there are. The marker lives inside a budget of its own share.
+const maxListedMedia = 16
+
+// mediaKeyOverhead is what the `media` array costs before its first entry.
+const mediaKeyOverhead = len(`,"media":[]`)
 
 // ioPath is where the whole payload lives: the one budget-exempt endpoint
 // (#3), which is why a marker can always name a working follow-up.
@@ -95,6 +112,9 @@ var bareMarkerSize = markerSize(truncation{
 	TraceID:       strings.Repeat("f", 32),
 	ObservationID: strings.Repeat("f", 16),
 	Full:          ioPath(strings.Repeat("f", 32), strings.Repeat("f", 16)),
+	// A count is worth its few bytes in every marker: whether the cut hid
+	// media is the one thing a consumer cannot find out from a preview.
+	MediaCount: 1 << 20,
 })
 
 // budgetNeeded is what `?budget=` would have to be for this response to carry
@@ -140,11 +160,108 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		ObservationID: observationID,
 		Full:          ioPath(traceID, observationID),
 	}
+	// Spent before the preview: a reference the cut leaves out is what the
+	// marker is least able to do without, and a preview is a prefix of text
+	// that a reader can ask for the rest of. The room is reserved for every
+	// reference, and what the preview turns out to hold is taken off after.
+	refs := mediaReferences(value)
+	if len(refs) > 0 {
+		marker.MediaCount = len(refs)
+		marker.Media = fitReferences(refs, b.share-markerSize(marker)-mediaKeyOverhead)
+	}
 	room := b.share - markerSize(marker) - previewKeyOverhead
 	if room >= minPreview {
 		marker.Preview = fitString(string(encoded), room)
 	}
+	if len(refs) > 0 {
+		marker.Media = slices.DeleteFunc(marker.Media, func(ref map[string]any) bool {
+			return strings.Contains(marker.Preview, ref[mapping.MediaRefKey].(string))
+		})
+		if len(marker.Media) == 0 {
+			marker.Media = nil
+		}
+		marker.MediaCount = 0
+		for _, ref := range refs {
+			if !strings.Contains(marker.Preview, ref[mapping.MediaRefKey].(string)) {
+				marker.MediaCount++
+			}
+		}
+	}
 	return marker
+}
+
+// mediaReferences are the media references in a payload (spec 041 #4), once
+// each, in document order: an object whose `tracepad_media` is a SHA-256 in
+// hex and that carries a `mime_type`, which is what the interface recognises
+// as one too. A body sent twice is one reference; a placeholder, which holds no
+// bytes, is another from the same body.
+func mediaReferences(value any) []map[string]any {
+	var found []map[string]any
+	seen := map[string]bool{}
+	var walk func(node any)
+	walk = func(node any) {
+		switch node := node.(type) {
+		case map[string]any:
+			if sha, ok := node[mapping.MediaRefKey].(string); ok && isSHA256Hex(sha) {
+				if _, ok := node["mime_type"].(string); ok {
+					key := sha
+					if stored, ok := node["stored"].(bool); ok && !stored {
+						key += ":placeholder"
+					}
+					if !seen[key] {
+						seen[key] = true
+						found = append(found, node)
+					}
+					return
+				}
+			}
+			keys := make([]string, 0, len(node))
+			for key := range node {
+				keys = append(keys, key)
+			}
+			slices.Sort(keys) // the order json.Marshal writes them in
+			for _, key := range keys {
+				walk(node[key])
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return found
+}
+
+// isSHA256Hex says whether text is a lowercase hex SHA-256, 64 characters.
+func isSHA256Hex(text string) bool {
+	if len(text) != 64 {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		if c := text[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// fitReferences takes as many references, first to last, as fit in room bytes
+// and in maxListedMedia, commas included.
+func fitReferences(refs []map[string]any, room int) []map[string]any {
+	var fit []map[string]any
+	for _, ref := range refs {
+		if len(fit) == maxListedMedia {
+			break
+		}
+		encoded, err := json.Marshal(ref)
+		if err != nil || len(encoded)+1 > room {
+			break
+		}
+		room -= len(encoded) + 1
+		fit = append(fit, ref)
+	}
+	return fit
 }
 
 // encodedPayload is a payload encoding/json has already written, placed in an

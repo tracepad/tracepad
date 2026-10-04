@@ -660,6 +660,52 @@ func TestAnUpgradeRemovesTheBackupsItSupersedes(t *testing.T) {
 	}
 }
 
+// A copy the operator took by hand is not the server's to delete, whatever it
+// is called — `tracepad.db.pre-upgrade-<sha>.bak` begins and ends the way a
+// pre-migration backup does, and a start, the sweeper and the erasure's answer
+// all leave it alone (#23).
+func TestAnOperatorsOwnBackupSurvivesAStartAndTheSweeper(t *testing.T) {
+	s, path := openTemp(t)
+	ours := path + ".pre-0001_init.bak"
+	manual := []string{
+		path + ".pre-upgrade-3f9c2ab.bak",
+		path + ".pre-0035.bak",
+		path + ".pre-0035_.bak",
+		path + ".pre-0035_Raw.bak",
+		path + ".pre-35_raw.bak",
+		path + ".pre-.bak",
+	}
+	old := time.Now().Add(-2 * BackupLifetime)
+	for _, file := range append([]string{ours}, manual...) {
+		if err := os.WriteFile(file, []byte("a copy"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(file, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pendingAgain(t, s, false)
+	s.Close()
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.expireBackups(time.Now())
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Errorf("the server's own superseded backup survived: %v", err)
+	}
+	for _, file := range manual {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("a backup the operator took was removed: %s: %v", filepath.Base(file), err)
+		}
+	}
+	if got := s2.PreMigrationBackup(); got == nil || got.Path != path+".pre-0024_compaction.bak" {
+		t.Errorf("PreMigrationBackup = %+v, want the upgrade's own", got)
+	}
+}
+
 // A migration that fails deletes nothing: every backup is still the way back.
 func TestAFailedUpgradeKeepsEveryBackup(t *testing.T) {
 	s, path := openTemp(t)

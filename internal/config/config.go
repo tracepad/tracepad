@@ -536,6 +536,24 @@ func readAdminToken() (string, error) {
 	return token, nil
 }
 
+// AdminToken is the admin token as the environment getenv reads holds it:
+// TRACEPAD_ADMIN_TOKEN, or the contents of the file TRACEPAD_ADMIN_TOKEN_FILE
+// names, trimmed; "" when neither is set. Both set is the server's refusal
+// here too, since a client that preferred one would be guessing which the
+// operator meant. It checks no length — that is the server's rule for a token
+// it will accept, not a client's for one it presents — and never quotes the
+// value.
+func AdminToken(getenv func(string) string) (string, error) {
+	inline := strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN"))
+	if strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN_FILE")) == "" {
+		return inline, nil
+	}
+	if inline != "" {
+		return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
+	}
+	return AdminTokenFile(getenv)
+}
+
 // maxAdminTokenFile is the most TRACEPAD_ADMIN_TOKEN_FILE may hold. A token is
 // sixty-four characters and a newline; a file far past that is a mount that
 // went to the wrong place, and reading it whole could be reading forever.

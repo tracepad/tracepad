@@ -239,6 +239,9 @@ stopped. The backups of earlier upgrades are removed once the new migrations hav
 committed, and the newest goes seven days after it was written; that week is the
 window for a rollback, and the copy holds everything erased or swept since (see
 [docker.md](docker.md#upgrading-and-backing-up-first) for removing it sooner).
+The server deletes only files named exactly `pre-<NNNN>_<name>.bak` — a
+migration's number and name — so a backup you take yourself is safe from it
+under any other name, and best kept outside the data directory.
 
 ## Backing up
 
@@ -262,7 +265,9 @@ sudo sqlite3 /var/lib/tracepad/tracepad.db ".backup '/backups/tracepad-$(date +%
 sudo chmod 600 /backups/tracepad-*.db
 ```
 
-Either file is the whole database — every prompt and completion your
+Put either one outside the data directory, or name it anything but
+`tracepad.db.pre-<NNNN>_<name>.bak`, the shape the server's own take and
+delete. Either file is the whole database — every prompt and completion your
 applications sent, and the password hashes of your accounts — so keep it as
 private as the directory it came from.
 

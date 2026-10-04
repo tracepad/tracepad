@@ -59,6 +59,13 @@
 	const pending = $derived(Boolean(refused) && !present && !loaded);
 	/** The images and files the payload points at (spec 041 #10). */
 	const media = $derived(present && !marker ? mediaRefs(value) : []);
+	/**
+	 * What the cut left out (spec 004 #39): references past the preview, which
+	 * the server names in the marker because the preview cannot show them. An
+	 * image that is in the payload but not on the screen reads as lost.
+	 */
+	const hidden = $derived(marker?.media ?? []);
+	const hiddenCount = $derived(marker?.media_count ?? 0);
 
 	/**
 	 * How much of the payload the preview actually is. The marker reports the
@@ -124,6 +131,17 @@
 		     exactly why the surface is a document and not a tree (#3). It is
 		     `whole={false}` for the same reason: the banner is how the rest of
 		     it is got, and a Copy here would put a prefix on the clipboard. -->
+		{#if hiddenCount > 0}
+			{#if hidden.length > 0}
+				<MediaStrip refs={hidden} />
+			{/if}
+			<p class="text-muted mb-2 text-xs" data-testid="hidden-media">
+				{hiddenCount === 1 ? '1 image or file is' : `${hiddenCount} images or files are`} referenced
+				past this preview{hidden.length < hiddenCount
+					? ` — ${hidden.length === 0 ? 'none' : 'the first ' + hidden.length} shown here`
+					: ''}; the whole payload has {hiddenCount === 1 ? 'it' : 'them'}.
+			</p>
+		{/if}
 		{#if marker.preview}
 			<JsonView
 				value={marker.preview}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tracepad/tracepad/internal/client"
+	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/termsafe"
 )
 
@@ -75,6 +76,9 @@ type run struct {
 	forceJSON  bool
 	api        *client.Client
 	warnedSkew bool
+	// command is the first word of the command line, which is the group a
+	// usage error with no topic of its own is about.
+	command string
 }
 
 // Run executes one command and returns the process exit code.
@@ -92,10 +96,18 @@ func Run(ctx context.Context, opt Options) int {
 	if !known {
 		return r.fail(usageErrorf("unknown command %q", command))
 	}
+	r.command = command
+	// `tracepad keys --help`: the group's own help, not a complaint that
+	// `--help` is not one of its subcommands.
+	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+		fmt.Fprint(opt.Stdout, usageFor(command))
+		return ExitOK
+	}
 	err := handler(ctx, rest)
+	var help *helpError
 	switch {
-	case errors.Is(err, errHelp):
-		fmt.Fprint(opt.Stdout, Usage)
+	case errors.As(err, &help):
+		fmt.Fprint(opt.Stdout, usageFor(help.topic))
 	case err != nil:
 		return r.fail(err)
 	}
@@ -353,8 +365,9 @@ systemd unit or a load balancer reads:
 
 Connection:
   --url URL    server to talk to   (env TRACEPAD_URL, default http://localhost:4318)
-  --key KEY    project secret key, or TRACEPAD_ADMIN_TOKEN for the commands
-               marked (admin token)   (env TRACEPAD_API_KEY)
+  --key KEY    project secret key, or the admin token for the commands
+               marked (admin token)   (env TRACEPAD_API_KEY; those commands
+               also read TRACEPAD_ADMIN_TOKEN, or its _FILE, when no key is set)
 
 What the wire carried: --type keeps traces containing one kind of
 step — span, generation, event, agent, tool, chain, retriever, guardrail,
@@ -377,12 +390,21 @@ Exit codes: 0 ok, 1 request or server error, 2 usage error.
 
 // usageError is a mistake in how the command was typed, which exits 2 rather
 // than 1: a script has to tell a typo from a server saying no.
-type usageError struct{ message string }
+//
+// topic names the command it is about (`keys create`), so that the help
+// printed under the message is that command's and not the whole text (spec 004
+// #38). Without one it is the command line's first word, or everything.
+type usageError struct{ message, topic string }
 
 func (e *usageError) Error() string { return e.message }
 
 func usageErrorf(format string, args ...any) error {
 	return &usageError{message: fmt.Sprintf(format, args...)}
+}
+
+// usageErrorIn is a usage error that belongs to one command.
+func usageErrorIn(topic, format string, args ...any) error {
+	return &usageError{message: fmt.Sprintf(format, args...), topic: topic}
 }
 
 // fail renders an error and returns the exit code it maps to.
@@ -393,7 +415,11 @@ func (r *run) fail(err error) int {
 	fmt.Fprintf(r.opt.Stderr, "tracepad: %s\n", block(err.Error(), "          "))
 	var usage *usageError
 	if errors.As(err, &usage) {
-		fmt.Fprint(r.opt.Stderr, "\n", Usage)
+		topic := usage.topic
+		if topic == "" {
+			topic = r.command
+		}
+		fmt.Fprint(r.opt.Stderr, "\n", usageFor(topic))
 		return ExitUsage
 	}
 	return ExitFailure
@@ -414,8 +440,11 @@ func (r *run) flags(name string) *flag.FlagSet {
 	return fs
 }
 
-// errHelp is `--help` on a subcommand: not a mistake, so not an error exit.
-var errHelp = errors.New("help requested")
+// helpError is `--help` on a subcommand: not a mistake, so not an error exit.
+// It carries the command, whose help is what gets printed.
+type helpError struct{ topic string }
+
+func (e *helpError) Error() string { return "help requested for " + e.topic }
 
 // wasGiven reports whether a flag was passed at all, as opposed to sitting at
 // its zero value. The two are different questions and an empty string cannot
@@ -440,14 +469,40 @@ const anyArgs = -1
 // parse reads a command's flags and then builds the connection, which cannot
 // happen earlier: `--url` is one of the flags.
 func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
-	rest, err := r.parseUnauthenticated(fs, args, wantArgs)
+	rest, err := r.parseFlags(fs, args, wantArgs)
 	if err != nil {
 		return nil, err
 	}
 	if r.key == "" {
-		return nil, usageErrorf("no API key: set TRACEPAD_API_KEY or pass --key")
+		return nil, usageErrorIn(fs.Name(), "no API key: set TRACEPAD_API_KEY or pass --key")
 	}
-	return rest, nil
+	return rest, r.connect()
+}
+
+// parseAdmin is parse for the commands the usage text marks `(admin token)`:
+// with no key from --key or TRACEPAD_API_KEY it reads the admin token from the
+// environment the way the server does, TRACEPAD_ADMIN_TOKEN or the file
+// TRACEPAD_ADMIN_TOKEN_FILE names. Inside the container the server runs in, that
+// is the only credential the shell holds. It does not widen what any command
+// can do — the admin token already carries these rights, and the server alone
+// decides what a bearer may do — and no command that is not marked takes it
+// this way (spec 004 #38).
+func (r *run) parseAdmin(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
+	rest, err := r.parseFlags(fs, args, wantArgs)
+	if err != nil {
+		return nil, err
+	}
+	if r.key == "" {
+		token, err := config.AdminToken(r.opt.Env)
+		if err != nil {
+			return nil, usageErrorIn(fs.Name(), "%s", err)
+		}
+		if r.key = token; r.key == "" {
+			return nil, usageErrorIn(fs.Name(), "no admin token: set TRACEPAD_ADMIN_TOKEN, "+
+				"TRACEPAD_ADMIN_TOKEN_FILE or TRACEPAD_API_KEY, or pass --key")
+		}
+	}
+	return rest, r.connect()
 }
 
 // parseUnauthenticated is the same without the key requirement, for the one
@@ -456,25 +511,40 @@ func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, er
 // project secret to learn whether the process is up would be a key pasted into
 // three more places for nothing (spec 020 #4).
 func (r *run) parseUnauthenticated(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
+	rest, err := r.parseFlags(fs, args, wantArgs)
+	if err != nil {
+		return nil, err
+	}
+	return rest, r.connect()
+}
+
+// parseFlags is what every parse shares: the flags, and the count of the
+// arguments left over.
+func (r *run) parseFlags(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
 	if err := fs.Parse(permute(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return nil, errHelp
+			return nil, &helpError{topic: fs.Name()}
 		}
-		return nil, usageErrorf("%s: %s", fs.Name(), err)
+		return nil, usageErrorIn(fs.Name(), "%s: %s", fs.Name(), err)
 	}
 	if wantArgs >= 0 && fs.NArg() != wantArgs {
 		if wantArgs == 0 {
-			return nil, usageErrorf("%s takes no arguments, got %q", fs.Name(), fs.Arg(0))
+			return nil, usageErrorIn(fs.Name(), "%s takes no arguments, got %q", fs.Name(), fs.Arg(0))
 		}
-		return nil, usageErrorf("%s needs %d argument(s), got %d", fs.Name(), wantArgs, fs.NArg())
+		return nil, usageErrorIn(fs.Name(), "%s needs %d argument(s), got %d", fs.Name(), wantArgs, fs.NArg())
 	}
+	return fs.Args(), nil
+}
+
+// connect builds the client from the url and key the flags settled.
+func (r *run) connect() error {
 	api, err := client.New(r.url, r.key)
 	if err != nil {
-		return nil, usageErrorf("%s", err)
+		return usageErrorf("%s", err)
 	}
 	api.OnVersion = r.noteServerVersion
 	r.api = api
-	return fs.Args(), nil
+	return nil
 }
 
 // noteServerVersion warns once when the binary and the server are different

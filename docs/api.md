@@ -622,6 +622,30 @@ does not fit is cut on a UTF-8 boundary and replaced by a marker:
 the same target for a consumer that speaks tools rather than URLs — they are
 exactly what the MCP `get_observation_io` tool takes.
 
+**Media past the cut.** A payload that holds images or files holds
+[references](media.md) to them, and a reference after the cut is not in the
+preview. The marker says so rather than leave it looking lost: `media_count` is
+how many references the preview does not show whole, and `media` lists the first
+of them (at most 16, fewer when the marker's share of the budget runs out), each
+exactly as it is stored in the payload:
+
+```json
+{
+  "truncated": true,
+  "size": 3200000,
+  "preview": "[{\"text\":\"here is the whole log file…",
+  "trace_id": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",
+  "observation_id": "2b3c4d5e6f7a8b9c",
+  "full": "/api/v1/observations/2b3c4d5e6f7a8b9c/io?trace_id=4f8c…",
+  "media_count": 1,
+  "media": [{"mime_type": "image/png", "size": 48210, "tracepad_media": "9f86d081…"}]
+}
+```
+
+Both fields are absent when the cut left no reference out. The bytes of a
+reference are at `GET /api/v1/media/{sha256}`, and `full` returns the payload
+with every reference in place.
+
 Markers cost bytes too. A trace with more payloads than the budget can carry
 markers for gets none of them and one line saying so:
 
