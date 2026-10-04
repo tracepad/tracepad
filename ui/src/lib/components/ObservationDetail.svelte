@@ -10,7 +10,7 @@
 		type Score,
 		type ScoreConfig
 	} from '$lib/api/client.svelte';
-	import { ABSENT, duration, elapsed, timestampPrecise, wait } from '$lib/format';
+	import { ABSENT, elapsed, timestampPrecise, wait } from '$lib/format';
 	import CopyButton from './CopyButton.svelte';
 	import { href, project } from '$lib/project.svelte';
 	import AddToQueue from './queues/AddToQueue.svelte';
@@ -85,7 +85,7 @@
 		['Type', observation.type],
 		['Started', timestampPrecise(observation.start_time)],
 		['Ended', timestampPrecise(observation.end_time)],
-		['Duration', duration(ms)],
+		['Duration', wait(ms)],
 		// Only when the client reported a completion start: a row saying
 		// "TTFT —" on every span that is not a generation is noise in the one
 		// block somebody reads line by line (spec 012, Application contract).

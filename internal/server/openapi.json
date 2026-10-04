@@ -3324,7 +3324,8 @@
           "preview": {"type": "string", "description": "A prefix of the payload, cut on a UTF-8 boundary"},
           "trace_id": {"type": "string"},
           "observation_id": {"type": "string"},
-          "full": {"type": "string"}
+          "full": {"type": "string"},
+          "media_count": {"type": "integer", "minimum": 1, "description": "Present only when the payload holds media references (spec 041 #4): how many distinct bodies. The preview is text and may not reach them; an image the application sent is not lost because its reference sits after the cut. `full` returns the payload with every reference in place."}
         },
         "required": ["truncated", "trace_id", "observation_id", "full"]
       },

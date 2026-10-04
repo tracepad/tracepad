@@ -1,4 +1,4 @@
-import { ABSENT, cost, count, duration } from '$lib/format';
+import { ABSENT, cost, count, duration, fineDuration } from '$lib/format';
 import { billedTokens, tokenClasses, type Tokens } from '$lib/tokens';
 import type { Bucket } from './range';
 
@@ -307,10 +307,15 @@ function points(value: number, previous: number): string {
 	return signed(value - previous, ' pt');
 }
 
-/** A latency change, kept in the units `duration` would give the size. */
+/**
+ * A latency change, in the units a duration of that size has. The difference of
+ * two percentiles is a real number, so one under a millisecond keeps what it
+ * has (`+0.4 ms`) rather than the `+<1 ms` that `duration` would say of a whole
+ * number of milliseconds (spec 006 #34).
+ */
 function delta(value: number, previous: number): string {
 	if (value === previous) return '±0 ms';
-	const size = duration(Math.abs(value - previous));
+	const size = fineDuration(Math.abs(value - previous));
 	return value > previous ? `+${size}` : `−${size}`;
 }
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -657,6 +658,99 @@ func TestAnUpgradeRemovesTheBackupsItSupersedes(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".pre-0024_compaction.bak"); err != nil {
 		t.Errorf("the upgrade's own backup is missing: %v", err)
+	}
+}
+
+// A copy the operator took by hand is not the server's to delete, whatever it
+// is called — `tracepad.db.pre-upgrade-<sha>.bak` begins and ends the way a
+// pre-migration backup does, and a start, the sweeper and the erasure's answer
+// all leave it alone (#23).
+func TestAnOperatorsOwnBackupSurvivesAStartAndTheSweeper(t *testing.T) {
+	s, path := openTemp(t)
+	ours := path + ".pre-0001_init.bak"
+	manual := []string{
+		path + ".pre-upgrade-3f9c2ab.bak",
+		path + ".pre-0035.bak",
+		path + ".pre-0035_.bak",
+		path + ".pre-0035_Raw.bak",
+		path + ".pre-35_raw.bak",
+		path + ".pre-.bak",
+	}
+	old := time.Now().Add(-2 * BackupLifetime)
+	for _, file := range append([]string{ours}, manual...) {
+		if err := os.WriteFile(file, []byte("a copy"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(file, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pendingAgain(t, s, false)
+	s.Close()
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.expireBackups(time.Now())
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Errorf("the server's own superseded backup survived: %v", err)
+	}
+	for _, file := range manual {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("a backup the operator took was removed: %s: %v", filepath.Base(file), err)
+		}
+	}
+	if got := s2.PreMigrationBackup(); got == nil || got.Path != path+".pre-0024_compaction.bak" {
+		t.Errorf("PreMigrationBackup = %+v, want the upgrade's own", got)
+	}
+}
+
+// Every migration the binary embeds names a backup that isBackup recognises:
+// the grammar of the file name is the one the server writes, so a migration
+// named otherwise would leave a backup nothing ever expires (spec 044 #23).
+func TestEveryMigrationsBackupIsRecognised(t *testing.T) {
+	all, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil || len(all) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+	dir := t.TempDir()
+	db := "tracepad.db"
+	for _, path := range all {
+		tag := strings.TrimSuffix(strings.TrimPrefix(path, "migrations/"), ".sql")
+		name := db + ".pre-" + tag + ".bak"
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !isBackup(db, entry) {
+			t.Errorf("%s is not recognised as a backup: the migration's name does not fit the grammar", entry.Name())
+		}
+	}
+	if got := len(backupFiles(filepath.Join(dir, db))); got != len(all) {
+		t.Errorf("backupFiles found %d of %d", got, len(all))
+	}
+}
+
+// A pending migration whose name is not NNNN_name is refused before it is
+// applied: its backup would be one nothing recognises (spec 044 #23).
+func TestAMigrationNamedOutOfShapeIsRefusedBeforeItsBackup(t *testing.T) {
+	s, path := openTemp(t)
+	defer s.Close()
+	s.fresh = false // a fresh database is never backed up, and so never refused
+	for _, name := range []string{"migrations/weird.sql", "migrations/36_late.sql", "migrations/0036_Late.sql"} {
+		if _, err := s.backupBefore(name); err == nil || !strings.Contains(err.Error(), "NNNN_name") {
+			t.Errorf("backupBefore(%s) = %v, want a refusal naming the shape", name, err)
+		}
+	}
+	if matches, _ := filepath.Glob(path + ".pre-*"); len(matches) != 0 {
+		t.Errorf("a refused backup left %v", matches)
 	}
 }
 

@@ -94,7 +94,7 @@ func (r *run) accounts(ctx context.Context, args []string) error {
 // projects are on the row rather than behind a `show`.
 func (r *run) accountsList(ctx context.Context, args []string) error {
 	fs := r.flags("accounts ls")
-	if _, err := r.parse(fs, args, 0); err != nil {
+	if _, err := r.parseAdmin(fs, args, 0); err != nil {
 		return err
 	}
 
@@ -125,7 +125,7 @@ func (r *run) accountsList(ctx context.Context, args []string) error {
 
 func (r *run) accountsShow(ctx context.Context, args []string) error {
 	fs := r.flags("accounts show")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (r *run) accountsCreate(ctx context.Context, args []string) error {
 	fs.StringVar(&name, "name", "", "")
 	fs.BoolVar(&owner, "owner", false, "")
 	fs.Var(&projects, "project", "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (r *run) accountsCreate(ctx context.Context, args []string) error {
 // before the link is pasted into a chat.
 func (r *run) accountsInvite(ctx context.Context, args []string) error {
 	fs := r.flags("accounts invite")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -273,7 +273,7 @@ func (r *run) accountsSet(ctx context.Context, args []string) error {
 	fs.BoolVar(&noOwner, "no-owner", false, "")
 	fs.BoolVar(&disable, "disable", false, "")
 	fs.BoolVar(&enable, "enable", false, "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -334,7 +334,7 @@ func (r *run) accountsSet(ctx context.Context, args []string) error {
 // has. It is a PUT because saying it twice is the same as saying it once.
 func (r *run) accountsGrant(ctx context.Context, args []string) error {
 	fs := r.flags("accounts grant")
-	rest, err := r.parse(fs, args, 3)
+	rest, err := r.parseAdmin(fs, args, 3)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func (r *run) accountsGrant(ctx context.Context, args []string) error {
 // request, and it turns a claim into the answer.
 func (r *run) accountsRevoke(ctx context.Context, args []string) error {
 	fs := r.flags("accounts revoke")
-	rest, err := r.parse(fs, args, 2)
+	rest, err := r.parseAdmin(fs, args, 2)
 	if err != nil {
 		return err
 	}
@@ -426,7 +426,7 @@ func (r *run) accountsRemove(ctx context.Context, args []string) error {
 	var confirm string
 	fs := r.flags("accounts rm")
 	fs.StringVar(&confirm, "confirm", "", "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}

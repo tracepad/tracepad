@@ -759,6 +759,14 @@ a parent whose descendant failed is marked too, so collapsing a subtree never
 hides a failure. Arrow keys walk the tree — up and down move, right opens,
 left closes and then leaves.
 
+**Durations** are written the same way everywhere — a list row, the header's
+latency, a node of the tree, a percentile — and the finest unit is the
+millisecond, which is what the server keeps: a trace's latency is a whole number
+of milliseconds, so one shorter than that reads `<1 ms` and never a count of
+microseconds nobody measured. A span's duration in the tree is the difference of
+its two timestamps at full precision, cut to whole milliseconds as the server
+cuts it, so a one-span trace shows the same figure in all three places.
+
 The kind is an icon — a wrench for a tool call, a shield for a guardrail, a
 box for a plain span — each carrying its name for a tooltip and for a screen
 reader. There are ten kinds, which is more than a three-letter label can keep
@@ -829,6 +837,10 @@ rather than working around them:
   the button: it fetches `GET /api/v1/observations/{id}/io` — the one endpoint
   no budget applies to — and swaps the whole document in. The preview is a
   prefix cut on a byte boundary, so it is shown as text rather than parsed;
+- when the payload holds media — an image sent after a long prompt — the panel
+  says how many references there are (*This payload holds 2 images or files,
+  which the preview may not show*), above the banner that loads the whole
+  payload, so a picture that is in the payload never reads as dropped;
 - a marker the budget left no room for a preview in is the banner alone;
 - a trace with more payloads than the budget can carry markers for gets none
   of them, and each payload offers a load button of its own.

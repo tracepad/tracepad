@@ -121,14 +121,43 @@ func systemEntry(name string) bool {
 }
 
 // isBackup says whether a directory entry is a pre-migration backup of the
-// database named db: a regular file named `<db>.pre-<migration>.bak`. Matched
-// by name rather than by a glob over the path, so that a data directory whose
+// database named db: a regular file named `<db>.pre-<NNNN>_<name>.bak`, the
+// one grammar the server writes (a migration's file name without `.sql`).
+// Anything else — an operator's own `<db>.pre-upgrade-<sha>.bak` among it — is
+// not the server's to expire, tighten or delete (spec 044 #23). Matched by
+// name rather than by a glob over the path, so that a data directory whose
 // name holds `[` or `*` names only its own backups — and a link, which a chmod
 // or a remove would follow elsewhere or leave behind, is not one.
 func isBackup(db string, entry fs.DirEntry) bool {
 	name, prefix, suffix := entry.Name(), db+".pre-", ".bak"
-	return entry.Type().IsRegular() && len(name) > len(prefix)+len(suffix) &&
-		strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
+	if !entry.Type().IsRegular() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) ||
+		len(name) <= len(prefix)+len(suffix) {
+		return false
+	}
+	return migrationTag(name[len(prefix) : len(name)-len(suffix)])
+}
+
+// migrationTag says whether tag has the shape of a migration's name without its
+// extension: four digits, an underscore, then lowercase letters, digits and
+// underscores — `0024_compaction`.
+func migrationTag(tag string) bool {
+	if len(tag) < len("0000_x") || tag[4] != '_' {
+		return false
+	}
+	for i, c := range []byte(tag) {
+		digit := c >= '0' && c <= '9'
+		switch {
+		case i < 4:
+			if !digit {
+				return false
+			}
+		case i > 4:
+			if !digit && c != '_' && (c < 'a' || c > 'z') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // backupFiles lists the pre-migration backups beside the database, oldest name

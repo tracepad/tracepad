@@ -517,6 +517,33 @@ func refOf(f fields) (sha, mime string, stored, ok bool) {
 	return sha, mime, !isFlag || flag, true
 }
 
+// CountMediaReferences is how many distinct bodies the reference objects in a
+// decoded JSON payload name — the objects extraction leaves behind (refOf), a
+// placeholder's included, a body sent twice counted once. The read API says
+// this of a payload it cuts (spec 004 #39), by the one rule that wrote them.
+func CountMediaReferences(value any) int {
+	seen := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if sha, _, _, ok := refOf(mapFields(v, nil, nil)); ok && sha != "" {
+				seen[sha] = true
+				return
+			}
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return len(seen)
+}
+
 type mediaWalk struct {
 	opts   MediaOptions
 	res    *MediaResult

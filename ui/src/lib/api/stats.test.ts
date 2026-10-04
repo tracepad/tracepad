@@ -205,6 +205,16 @@ describe('summarize', () => {
 		expect(summarize(now, now)[3].change).toBe('±0 ms');
 	});
 
+	// A percentile over a histogram is a real number, so a change under a
+	// millisecond has a size: `+<1 ms` for 0.2 -> 0.6 would hide it (review of
+	// PR #202).
+	it('shows a latency change under a millisecond at its size', () => {
+		const slow = bucket('', { count: 10, latency_ms: { p50: 0.6, p95: 0.6 } });
+		const fast = bucket('', { count: 10, latency_ms: { p50: 0.2, p95: 0.2 } });
+		expect(summarize(slow, fast)[3].change).toBe('+0.4 ms');
+		expect(summarize(fast, slow)[3].change).toBe('−0.4 ms');
+	});
+
 	it('reads new against a zero or absent previous', () => {
 		const [traces, cost, errors, latency] = summarize(now, null);
 		for (const figure of [traces, cost, errors, latency]) {

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tracepad/tracepad/internal/config"
+	"github.com/tracepad/tracepad/internal/mapping"
 )
 
 // The response budget (spec 004 #2). The consumer's context window is a scarce
@@ -24,6 +25,10 @@ import (
 // truncation is the marker that replaces a payload too large to inline. It
 // carries the ready-made URL for an HTTP consumer and the raw id pair for an
 // MCP one, whose `get_observation_io` tool takes exactly that pair (#2, #17).
+//
+// A payload that holds media (spec 041 #4) says how many references it holds:
+// `media_count`. Without that, an image the application sent looked lost when
+// its reference sat after the cut (spec 004 #39).
 type truncation struct {
 	Truncated     bool   `json:"truncated"`
 	Size          int    `json:"size"`
@@ -31,6 +36,7 @@ type truncation struct {
 	TraceID       string `json:"trace_id"`
 	ObservationID string `json:"observation_id"`
 	Full          string `json:"full"`
+	MediaCount    int    `json:"media_count,omitempty"`
 }
 
 // ioPath is where the whole payload lives: the one budget-exempt endpoint
@@ -140,8 +146,17 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		ObservationID: observationID,
 		Full:          ioPath(traceID, observationID),
 	}
-	room := b.share - markerSize(marker) - previewKeyOverhead
-	if room >= minPreview {
+	// A payload that holds media says how many references it holds, and a
+	// preview of text cannot be trusted to show them (spec 004 #39). The count
+	// is a few bytes, taken off the preview's room; a share too small to carry
+	// it carries none.
+	if count := mapping.CountMediaReferences(value); count > 0 {
+		marker.MediaCount = count
+		if markerSize(marker) > b.share {
+			marker.MediaCount = 0
+		}
+	}
+	if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
 		marker.Preview = fitString(string(encoded), room)
 	}
 	return marker

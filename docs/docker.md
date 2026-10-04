@@ -81,6 +81,13 @@ docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys create --project $ID --s
 docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --project $ID --url http://localhost:4318
 ```
 
+Inside the container the admin token is already in the environment, or in the
+file `TRACEPAD_ADMIN_TOKEN_FILE` names, and the commands the CLI's help marks
+`(admin token)` read it from there when no key is set (the server being on this
+machine, which inside the container it is) — so
+`docker exec tracepad /tracepad keys ls --url http://localhost:4318` needs no
+`-e` and no paste. No other command takes it that way; they ask for a key.
+
 A key minted this way is shown in your browser or printed to your terminal,
 never to the container's log. A deployment that declares its keys in `TRACEPAD_PROJECTS`
 from the start never has one printed: the server names the variable where the
@@ -578,7 +585,7 @@ to delete or to include in a backup. On a file system that cannot lock at all
 says in a `WARN` that nothing guards the directory: do not run two.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
-migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
+migration it writes `tracepad.db.pre-<NNNN>_<name>.bak` beside the database — a
 full copy as it stood before the upgrade, readable by its owner only, for
 rolling that upgrade back by swapping the file in. Once the upgrade's
 migrations have committed, the server removes the backups of earlier upgrades,
@@ -586,13 +593,20 @@ naming each in its log; the sweeper removes the newest seven days after it was
 written. That week is the window for a rollback — and the copy holds
 everything erased or swept since, as does any tar of the volume taken in it.
 Once the upgrade has proved itself you can remove it sooner. This removes
-every backup there is, names each one, and does nothing on a volume that has
-none:
+every backup the server wrote, names each one, and does nothing on a volume
+that has none:
 
 ```sh
 docker run --rm -v tracepad:/data busybox \
-  find /data -maxdepth 1 -name 'tracepad.db.pre-*.bak' -print -exec rm {} \;
+  find /data -maxdepth 1 -name 'tracepad.db.pre-[0-9][0-9][0-9][0-9]_*.bak' -print -exec rm {} \;
 ```
+
+The server deletes only files named exactly that way — `pre-`, the four-digit
+number of a migration, an underscore and its name — so a copy you take yourself
+is safe from it under any other name. Better still, keep it outside the data
+directory (the tar above does); if it must sit beside the database, call it
+anything but `pre-<NNNN>_<name>.bak`: `tracepad.db.pre-upgrade-<sha>.bak` is
+fine, `tracepad.db.pre-0035_mine.bak` would be taken for the server's own.
 
 A data-subject erasure does not rewrite this file; while it exists, the
 erasure's answer names it and the day it goes — see

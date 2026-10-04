@@ -55,6 +55,15 @@ func New(baseURL, key string) (*Client, error) {
 	}, nil
 }
 
+// WithoutProxy stops the client from using a proxy named in the environment
+// (HTTP_PROXY and its kin). Used when the key is the deployment's admin token,
+// which goes to the server it was found beside and to nothing in between.
+func (c *Client) WithoutProxy() {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	c.HTTP.Transport = transport
+}
+
 // Error is a response the server refused. Status is what a caller maps onto
 // its own exit code, and Message is what the server said.
 type Error struct {

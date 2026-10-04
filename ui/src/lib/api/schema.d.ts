@@ -1835,6 +1835,8 @@ export interface components {
             trace_id: string;
             observation_id: string;
             full: string;
+            /** @description Present only when the payload holds media references (spec 041 #4): how many distinct bodies. The preview is text and may not reach them; an image the application sent is not lost because its reference sits after the cut. `full` returns the payload with every reference in place. */
+            media_count?: number;
         };
         /** @description One judgement. A score needs a trace or a session, and either a `value` or a `string_value`. */
         ScoreInput: {

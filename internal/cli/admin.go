@@ -148,7 +148,9 @@ func (r *run) projectsList(ctx context.Context, args []string) error {
 	var deleted bool
 	fs := r.flags("projects ls")
 	fs.BoolVar(&deleted, "deleted", false, "")
-	if _, err := r.parse(fs, args, 0); err != nil {
+	// The admin token is for the deleted projects; the listing of the
+	// project a key reaches is that key's (spec 004 #38).
+	if _, err := r.parseAdminWhen(fs, args, 0, func() bool { return deleted }); err != nil {
 		return err
 	}
 	query := url.Values{}
@@ -244,7 +246,7 @@ func (r *run) projectsShow(ctx context.Context, args []string) error {
 
 func (r *run) projectsCreate(ctx context.Context, args []string) error {
 	fs := r.flags("projects create")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -275,7 +277,7 @@ func (r *run) projectsCreate(ctx context.Context, args []string) error {
 
 func (r *run) projectsRename(ctx context.Context, args []string) error {
 	fs := r.flags("projects rename")
-	rest, err := r.parse(fs, args, 2)
+	rest, err := r.parseAdmin(fs, args, 2)
 	if err != nil {
 		return err
 	}
@@ -303,7 +305,7 @@ func (r *run) projectsRemove(ctx context.Context, args []string) error {
 	var yes bool
 	fs := r.flags("projects rm")
 	fs.BoolVar(&yes, "yes", false, "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -329,7 +331,7 @@ func (r *run) projectsRemove(ctx context.Context, args []string) error {
 
 func (r *run) projectsRestore(ctx context.Context, args []string) error {
 	fs := r.flags("projects restore")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}
@@ -366,7 +368,7 @@ func (r *run) keys(ctx context.Context, args []string) error {
 func (r *run) keysList(ctx context.Context, args []string) error {
 	fs := r.flags("keys ls")
 	project := fs.String("project", "", "")
-	if _, err := r.parse(fs, args, 0); err != nil {
+	if _, err := r.parseAdmin(fs, args, 0); err != nil {
 		return err
 	}
 	id, err := r.projectID(ctx, fs, *project)
@@ -461,7 +463,7 @@ func (r *run) keysCreate(ctx context.Context, args []string) error {
 		}
 		return nil
 	})
-	if _, err := r.parse(fs, args, 0); err != nil {
+	if _, err := r.parseAdmin(fs, args, 0); err != nil {
 		return err
 	}
 	// Asked before the project, so that a mint that says nothing about
@@ -520,7 +522,7 @@ func (r *run) keysRemove(ctx context.Context, args []string) error {
 	fs := r.flags("keys rm")
 	project := fs.String("project", "", "")
 	fs.BoolVar(&yes, "yes", false, "")
-	rest, err := r.parse(fs, args, 1)
+	rest, err := r.parseAdmin(fs, args, 1)
 	if err != nil {
 		return err
 	}

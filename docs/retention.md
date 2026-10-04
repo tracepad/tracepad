@@ -486,7 +486,7 @@ where something is deleted every hour rewrites its index once an hour.
    filesystem snapshots, replicas, an export taken before the erasure, the
    logs of your application or proxy. Expire those with your own process.
 2. **The backup the server writes before an upgrade.** Before every start that
-   applies a migration the server writes `tracepad.db.pre-<migration>.bak`
+   applies a migration the server writes `tracepad.db.pre-<NNNN>_<name>.bak`
    beside the database — a complete copy, readable by its owner only. Once
    that upgrade's migrations have committed it removes the older ones, and the
    sweeper removes the newest at its first pass seven days or more after it

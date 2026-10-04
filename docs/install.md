@@ -148,7 +148,7 @@ companions: traces, scores, prompts, the raw OTLP archive, images, accounts and
 keys (hashed). There is no second store to keep in step with it. Beside it is
 `tracepad.db.lock`, which a running server holds so that a second one on the same
 directory refuses to start, and an
-upgrade that applies a migration leaves `tracepad.db.pre-<migration>.bak`
+upgrade that applies a migration leaves `tracepad.db.pre-<NNNN>_<name>.bak`
 ([below](#upgrading)).
 
 ## As a service
@@ -232,13 +232,16 @@ upgrade is only as safe as the copy you took before it.
    large database takes a while and logs its progress.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
-migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
+migration it writes `tracepad.db.pre-<NNNN>_<name>.bak` beside the database — a
 full copy as it stood before, readable by its owner only, for rolling that
 upgrade back by putting the file in place of `tracepad.db` with the server
 stopped. The backups of earlier upgrades are removed once the new migrations have
 committed, and the newest goes seven days after it was written; that week is the
 window for a rollback, and the copy holds everything erased or swept since (see
 [docker.md](docker.md#upgrading-and-backing-up-first) for removing it sooner).
+The server deletes only files named exactly `pre-<NNNN>_<name>.bak` — a
+migration's number and name — so a backup you take yourself is safe from it
+under any other name, and best kept outside the data directory.
 
 ## Backing up
 
@@ -262,7 +265,9 @@ sudo sqlite3 /var/lib/tracepad/tracepad.db ".backup '/backups/tracepad-$(date +%
 sudo chmod 600 /backups/tracepad-*.db
 ```
 
-Either file is the whole database — every prompt and completion your
+Put either one outside the data directory, or name it anything but
+`tracepad.db.pre-<NNNN>_<name>.bak`, the shape the server's own take and
+delete. Either file is the whole database — every prompt and completion your
 applications sent, and the password hashes of your accounts — so keep it as
 private as the directory it came from.
 

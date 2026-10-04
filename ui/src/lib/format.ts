@@ -15,15 +15,42 @@ export const ABSENT = '—';
  * magnitude and the precision shrinks as the number grows: three significant
  * figures are plenty to compare two spans, and more of them only make the
  * column jitter.
+ *
+ * The finest unit is the millisecond, because that is what the server keeps:
+ * a trace's `latency_ms` is a whole number, so a span a few hundred
+ * microseconds long arrives as `0`, and `0 µs` claimed a precision nobody has
+ * and read as a measured zero beside the same trace's `1 ms` in its tree. What
+ * is under a millisecond is said to be (`<1 ms`).
  */
 export function duration(ms: number | null | undefined): string {
 	if (ms == null || !Number.isFinite(ms) || ms < 0) return ABSENT;
-	if (ms < 1) return `${Math.round(ms * 1000)} µs`;
+	if (ms < 1) return '<1 ms';
 	if (ms < 1000) return `${round(ms, ms < 100 ? 1 : 0)} ms`;
 	if (ms < 60_000) return `${round(ms / 1000, ms < 10_000 ? 2 : 1)} s`;
 	const minutes = Math.floor(ms / 60_000);
 	const seconds = Math.floor((ms % 60_000) / 1000);
 	return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+/**
+ * A duration that may be a real number of milliseconds under one — a percentile
+ * over a rolled-up histogram, or the difference of two. `duration` calls
+ * everything under a millisecond `<1 ms`, right for the whole milliseconds a
+ * trace stores; `0.2 → 0.6` is a change of `0.4 ms` and not of `<1 ms`. Zero and
+ * what rounds to it stay `<1 ms`, as `duration` says them (spec 006 #34).
+ */
+export function fineDuration(ms: number | null | undefined): string {
+	if (ms == null || !Number.isFinite(ms) || ms <= 0 || ms >= 1) return duration(ms);
+	const rounded = round(ms, 2);
+	return rounded === '0' || rounded === '1' ? duration(ms) : `${rounded} ms`;
+}
+
+/**
+ * The same for a chart's axis and tooltip, where the ticks of an axis that spans
+ * 0 to 0.4 ms (0, 0.2, 0.4) must not all read `<1 ms`: zero is `0 ms` there.
+ */
+export function axisDuration(ms: number | null | undefined): string {
+	return ms === 0 ? '0 ms' : fineDuration(ms);
 }
 
 /**
@@ -167,12 +194,33 @@ export function instant(iso: string | null | undefined): Date | null {
 	return Number.isNaN(at.getTime()) ? null : at;
 }
 
-/** Milliseconds between two API timestamps, or null if either is missing. */
+/**
+ * Whole milliseconds between two API timestamps, or null if either is missing.
+ *
+ * The API's timestamps carry nanoseconds and a `Date` keeps milliseconds, so a
+ * span of 0.2 ms that straddles a millisecond boundary came out as 1 ms here
+ * while the server, which subtracts the nanoseconds and truncates, said 0 for
+ * the same trace's latency. The difference is taken at full precision and
+ * truncated the way the server does, so a one-span trace reads the same in its
+ * header, its list row and its tree. A span that ends before it starts — two
+ * clocks that disagree — comes out negative, rounded down so that even a
+ * fraction of a millisecond is at least -1: it is for `wait` to draw, which keeps
+ * the sign, and never for `duration`, which would call it `<1 ms` or absent.
+ */
 export function elapsed(from: string | null | undefined, to: string | null | undefined): number | null {
-	const start = instant(from);
-	const end = instant(to);
-	if (!start || !end) return null;
-	return end.getTime() - start.getTime();
+	const start = epochNs(from);
+	const end = epochNs(to);
+	if (start == null || end == null) return null;
+	return Math.floor(Number(end - start) / 1e6);
+}
+
+/** An API timestamp as nanoseconds since the epoch, or null if it is not one. */
+function epochNs(iso: string | null | undefined): bigint | null {
+	const at = instant(iso);
+	if (!at || !iso) return null;
+	// Digits past the third of the fractional second, which a Date drops.
+	const finer = /\.\d{3}(\d{1,6})/.exec(iso)?.[1] ?? '';
+	return BigInt(at.getTime()) * 1_000_000n + BigInt(finer.padEnd(6, '0'));
 }
 
 // `toFixed` keeps trailing zeros, which make a column look noisier than the

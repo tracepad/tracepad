@@ -59,7 +59,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { cost, duration, elapsed } from '$lib/format';
+	import { cost, elapsed, wait } from '$lib/format';
 	import { typeIcon, typeLabel } from '$lib/observations';
 
 	// The observation tree (design §8, hand-written). Keyboard behaviour
@@ -255,7 +255,7 @@
 				</span>
 			{/if}
 			<span class="text-muted w-14 shrink-0 text-right font-mono text-xs tabular-nums">
-				{duration(elapsed(row.observation.start_time, row.observation.end_time))}
+				{wait(elapsed(row.observation.start_time, row.observation.end_time))}
 			</span>
 		</div>
 	{/each}
