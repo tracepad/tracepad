@@ -96,6 +96,15 @@ def dumps(value: Any) -> str:
         return repr(value)
 
 
+def json_text(value: Any) -> str:
+    """A value as JSON, a `str` too: a part of a larger document, which `dumps`
+    is not. Never raises, as `dumps` does not (`repr` is the floor)."""
+    try:
+        return json.dumps(value, default=repr, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return json.dumps(repr(value), ensure_ascii=False)
+
+
 def scalar(value: Any) -> Any:
     """Render a model parameter or a metadata entry, keeping the types OTLP has
     of its own.

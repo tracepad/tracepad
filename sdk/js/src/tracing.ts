@@ -40,6 +40,7 @@ import { stamp } from './harness.js';
 import { VERSION, describe } from './http.js';
 import { type Logger, setLogger, warn } from './log.js';
 import { flushScores } from './scores.js';
+import { merge, reset as resetTraceState } from './tracestate.js';
 
 let initialized = false;
 let handedOut = false;
@@ -544,7 +545,9 @@ export interface TraceFields {
  *
  * A request handler rarely holds the root span — the framework does — and
  * the one thing it knows is who the user is. These land where the handler
- * stands, and the mapper resolves them for the trace.
+ * stands, and the mapper resolves them for the trace. Calls on one span add up
+ * (spec 032 #24): `tags` join the ones the package wrote there, in the order
+ * first seen, and `metadata` adds its keys, the later value winning.
  */
 export function updateTrace(fields: TraceFields): void {
   const span = trace.getActiveSpan();
@@ -552,8 +555,9 @@ export function updateTrace(fields: TraceFields): void {
   set(span, attrs.TRACE_NAME, fields.name);
   set(span, attrs.USER_ID, fields.userId);
   set(span, attrs.SESSION_ID, fields.sessionId);
-  if (fields.tags !== undefined) span.setAttribute(attrs.TRACE_TAGS, attrs.dumps([...fields.tags]));
-  if (fields.metadata !== undefined) span.setAttribute(attrs.TRACE_METADATA, attrs.dumps(fields.metadata));
+  if (fields.tags !== undefined || fields.metadata !== undefined) {
+    span.setAttributes(merge(span, fields.tags, fields.metadata));
+  }
   set(span, attrs.TRACE_VERSION, fields.version || undefined);
 }
 
@@ -967,6 +971,7 @@ export function reset(): void {
   initialized = false;
   rearmHostWarning();
   warnedKinds.clear();
+  resetTraceState();
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);

@@ -355,3 +355,159 @@ def test_a_generator_that_raises_ends_its_span_as_an_error(spans: Any) -> None:
     assert span.status.status_code is StatusCode.ERROR
     assert [event.name for event in span.events] == ["exception"]
     assert json.loads(span.attributes[attrs.OUTPUT]) == ["a"]
+
+
+def test_update_trace_calls_on_one_span_add_up(spans: Any) -> None:
+    """Spec 017 #24: tags are the union in the order first seen, metadata merges by
+    top-level key with the later value winning, and both are written whole — the
+    wire is one JSON array and one JSON object."""
+    with tracepad.span("handler", input="in"):
+        tracepad.update_trace(tags=["a", "b"], metadata={"channel": "web", "tier": 1})
+        tracepad.update_trace(tags=["b", "c"], metadata={"tier": 2, "region": "eu"})
+        tracepad.update_trace(tags=[])
+        tracepad.update_trace(user_id="u-1")
+
+    attributes = spans.attributes("handler")
+    assert json.loads(attributes[attrs.TRACE_TAGS]) == ["a", "b", "c"]
+    assert json.loads(attributes[attrs.TRACE_METADATA]) == {
+        "channel": "web",
+        "tier": 2,
+        "region": "eu",
+    }
+    assert not [key for key in attributes if key.startswith(f"{attrs.TRACE_METADATA}.")]
+
+
+def test_update_trace_metadata_strings_that_look_like_json_stay_strings(spans: Any) -> None:
+    with tracepad.span("handler"):
+        tracepad.update_trace(metadata={"raw": '{"not": "parsed"}', "n": "1"})
+    assert json.loads(spans.attributes("handler")[attrs.TRACE_METADATA]) == {
+        "raw": '{"not": "parsed"}',
+        "n": "1",
+    }
+
+
+def test_two_hundred_trace_metadata_keys_are_one_attribute(spans: Any) -> None:
+    with tracepad.span("handler") as step:
+        step.update(output="the answer")
+        tracepad.update_trace(metadata={f"k{n}": n for n in range(200)})
+
+    attributes = spans.attributes("handler")
+    assert len(json.loads(attributes[attrs.TRACE_METADATA])) == 200
+    assert attributes[attrs.OUTPUT] == "the answer"
+    assert len(attributes) < 20
+
+
+def test_concurrent_update_trace_calls_lose_nothing(spans: Any) -> None:
+    """The merge and the write of the attributes are one critical section: with a
+    pause between the two inside it, a call that merged first cannot write last."""
+    import threading
+    import time
+
+    with tracepad.span("handler") as step:
+        carried = step.span
+        write = carried.set_attributes
+
+        def slow(attributes: Any) -> None:
+            time.sleep(0.05)  # where an unlocked write would let the other call in
+            write(attributes)
+
+        carried.set_attributes = slow  # type: ignore[method-assign]
+
+        def call(n: int) -> None:
+            with otel_api.use_span(carried):
+                tracepad.update_trace(tags=[f"t{n}"], metadata={f"k{n}": n})
+
+        threads = [threading.Thread(target=call, args=(n,)) for n in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        carried.set_attributes = write  # type: ignore[method-assign]
+
+    attributes = spans.attributes("handler")
+    assert sorted(json.loads(attributes[attrs.TRACE_TAGS])) == sorted(f"t{n}" for n in range(6))
+    assert len(json.loads(attributes[attrs.TRACE_METADATA])) == 6
+
+
+def test_trace_metadata_is_bounded_as_the_server_bounds_it(
+    spans: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("handler"):
+            tracepad.update_trace(metadata={f"k{n}": n for n in range(600)})
+            tracepad.update_trace(metadata={"k0": "replaced", "late": 1})
+        with tracepad.span("heavy"):
+            tracepad.update_trace(metadata={"small": 1})
+            tracepad.update_trace(metadata={"big": "x" * (1 << 20), "small": 2})
+
+    metadata = json.loads(spans.attributes("handler")[attrs.TRACE_METADATA])
+    assert len(metadata) == 512 and metadata["k0"] == "replaced" and "late" not in metadata
+    assert json.loads(spans.attributes("heavy")[attrs.TRACE_METADATA]) == {"small": 2}
+    assert caplog.text.count("bounded at 512 keys") == 1
+    assert caplog.text.count("bounded at 1048576 bytes") == 1
+
+
+def test_only_the_tag_limit_warns_about_tags(spans: Any, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("handler"):
+            tracepad.update_trace(tags=[str(n) for n in range(80)])
+            tracepad.update_trace(tags=["more"])
+
+    assert len(json.loads(spans.attributes("handler")[attrs.TRACE_TAGS])) == 50
+    assert caplog.text.count("trace tags are bounded at 50") == 1
+    assert "metadata" not in caplog.text
+
+
+def test_a_value_changed_after_the_call_is_not_changed_in_the_trace(spans: Any) -> None:
+    nested = {"count": 1}
+    with tracepad.span("handler"):
+        tracepad.update_trace(metadata={"nested": nested})
+        nested["count"] = 2
+        tracepad.update_trace(metadata={"other": 1})
+
+    assert json.loads(spans.attributes("handler")[attrs.TRACE_METADATA]) == {
+        "nested": {"count": 1},
+        "other": 1,
+    }
+
+
+def test_metadata_that_is_not_an_object_is_ignored_with_one_warning(
+    spans: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("handler"):
+            tracepad.update_trace(metadata='{"a": 1}')  # type: ignore[arg-type]
+            tracepad.update_trace(metadata=["a"])  # type: ignore[arg-type]
+            tracepad.update_trace(tags=["t"])
+
+    attributes = spans.attributes("handler")
+    assert attrs.TRACE_METADATA not in attributes and attributes[attrs.TRACE_TAGS] == '["t"]'
+    assert caplog.text.count("takes a mapping") == 1
+
+
+def test_a_span_that_cannot_keep_state_is_written_on_its_own_with_one_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Another provider's span that is not weak-referenceable: no accumulation, no exception."""
+
+    class Foreign(otel_api.NonRecordingSpan):
+        __hash__ = None  # type: ignore[assignment]  # unhashable: it cannot be a key
+
+        def __init__(self) -> None:
+            super().__init__(otel_api.INVALID_SPAN_CONTEXT)
+            self.written: dict[str, Any] = {}
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attributes(self, attributes: Any) -> None:
+            self.written.update(attributes)
+
+    foreign = Foreign()
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with otel_api.use_span(foreign):
+            tracepad.update_trace(tags=["a"])
+            tracepad.update_trace(tags=["b"])
+
+    assert foreign.written[attrs.TRACE_TAGS] == '["b"]'
+    assert caplog.text.count("cannot keep state") == 1

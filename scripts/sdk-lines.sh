@@ -11,7 +11,7 @@
 # the cost and bounds, #12 to 2,000 for its review, spec 017 #18 to 2,040
 # for `compile`'s own substitution, #19 to 2,100 for the key and the path,
 # #21 to 2,120 for the deprecated host variable, and #23 to 2,200 for `ruff
-# format`.
+# format`, and #24 to 2,325 for the trace state `update_trace` keeps.
 #
 # What it counts is the application; the tests are reported beside it under no
 # ceiling at all (design §8, amended; spec 010 #7). A number that charges for
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2200}"
+BUDGET="${1:-2325}"
 
 cd "$ROOT"
 

@@ -419,8 +419,10 @@ func WithTraceMetadata(metadata any) TraceOption {
 // UpdateTrace writes trace-level attributes on the context's current span
 // (spec 017 #11). A request handler rarely holds the root span — the
 // framework does — and the one thing it knows is who the user is: these land
-// where the handler stands, and the mapper resolves them for the trace. With
-// no span it logs and does nothing.
+// where the handler stands, and the mapper resolves them for the trace. Calls
+// on one span add up (spec 033 #22): the tags join the ones the package wrote
+// there, in the order first seen, and the metadata adds its keys, the later
+// value winning. With no span it logs and does nothing.
 func UpdateTrace(ctx context.Context, opts ...TraceOption) {
 	span, ok := spanOf(ctx, "tracepad.UpdateTrace")
 	if !ok {
@@ -440,14 +442,8 @@ func UpdateTrace(ctx context.Context, opts ...TraceOption) {
 	set(attrUserID, f.userID)
 	set(attrSessionID, f.sessionID)
 	set(attrTraceVersion, f.version)
-	if f.hasTags {
-		if f.tags == nil {
-			f.tags = []string{}
-		}
-		attrs = append(attrs, attribute.String(attrTraceTags, dumps(f.tags)))
-	}
-	if f.hasMetadata {
-		attrs = append(attrs, attribute.String(attrTraceMetadata, dumps(f.metadata)))
-	}
 	span.SetAttributes(attrs...)
+	if f.hasTags || f.hasMetadata {
+		writeTrace(span, &f)
+	}
 }

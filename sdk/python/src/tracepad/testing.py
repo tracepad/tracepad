@@ -30,7 +30,7 @@ from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from . import _config, _prompts, _scores, _tracing
+from . import _config, _prompts, _scores, _tracestate, _tracing
 
 # A reserved name (RFC 2606), so nothing resolves it: export is off and the
 # queue does not post, and a REST call a test forgot to stub fails loudly.
@@ -125,6 +125,7 @@ def reset() -> None:
     _target = _tracing._built = None
     _tracing._initialized = False
     _tracing._warned_kinds.clear()
+    _tracestate.reset()
     _config.forget()
     _prompts.forget()
     _scores.reset()

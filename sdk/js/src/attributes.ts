@@ -81,6 +81,15 @@ export function dumps(value: unknown): string {
   }
 }
 
+/** A value as JSON, a string too: a part of a larger document, which `dumps` is not. Never throws. */
+export function jsonText(value: unknown): string {
+  try {
+    return JSON.stringify(value, replacer) ?? JSON.stringify(String(value));
+  } catch {
+    return JSON.stringify(String(value));
+  }
+}
+
 function replacer(this: unknown, _key: string, value: unknown): unknown {
   if (typeof value === 'bigint') return Number(value);
   if (value instanceof Error) return { name: value.name, message: value.message };

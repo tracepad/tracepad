@@ -473,6 +473,7 @@ func reset() {
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
 	}
 	forgetPrompts()
+	resetTraceState()
 	warnedKinds.Lock()
 	clear(warnedKinds.seen)
 	warnedKinds.Unlock()
