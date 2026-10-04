@@ -44,6 +44,8 @@
 			{
 				label: 'Langfuse SDK',
 				body:
+					`LANGFUSE_BASE_URL=${origin}\n` +
+					`# the older name, read by older SDKs\n` +
 					`LANGFUSE_HOST=${origin}\n` +
 					`LANGFUSE_PUBLIC_KEY=${pair.public_key}\n` +
 					`LANGFUSE_SECRET_KEY=${pair.secret_key}`

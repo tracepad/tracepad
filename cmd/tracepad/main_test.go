@@ -54,7 +54,10 @@ func TestPrintStartupPrintsOnlyGeneratedSecrets(t *testing.T) {
 		// The default bind is both loopback addresses, printed as the name
 		// that reaches both (spec 001 #22, #23).
 		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces",
-		"LANGFUSE_HOST=http://localhost:4318",
+		// The JavaScript SDK reads LANGFUSE_BASE_URL alone and sends to
+		// Langfuse's cloud without it (spec 002 #35); the old name stays for
+		// the SDKs that read only that one.
+		"LANGFUSE_BASE_URL=http://localhost:4318\n  LANGFUSE_HOST=http://localhost:4318",
 		"Bearer tp-sk-generated",
 		"LANGFUSE_SECRET_KEY=tp-sk-generated",
 		`Project "app" created from TRACEPAD_PROJECTS.`,

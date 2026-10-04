@@ -39,7 +39,8 @@ Project "default" created. Connect your app with either:
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 
-  # Langfuse SDK
+  # Langfuse SDK (the JavaScript SDK reads LANGFUSE_BASE_URL alone; older SDKs read LANGFUSE_HOST)
+  LANGFUSE_BASE_URL=http://localhost:4318
   LANGFUSE_HOST=http://localhost:4318
   LANGFUSE_PUBLIC_KEY=tp-pk-…
   LANGFUSE_SECRET_KEY=tp-sk-…
@@ -107,10 +108,9 @@ A plain `python your_app.py` configures nothing; the distro's launcher (or
 your own code) is what reads these variables.
 
 The Langfuse SDKs work too, against the same endpoint under their own path —
-set `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead.
-The first start prints the older name, `LANGFUSE_HOST`, which the JavaScript
-SDK does not read; set `LANGFUSE_BASE_URL` to the same address
-([Coming from the Langfuse SDK](langfuse-sdk.md#the-switch)).
+set `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead,
+and `LANGFUSE_HOST` too for an older SDK — the four lines the first start
+prints ([Coming from the Langfuse SDK](langfuse-sdk.md#the-switch)).
 Every dialect of attribute naming is understood; see [ingest.md](ingest.md)
 for what is mapped and how.
 
