@@ -351,20 +351,26 @@ test('the keys and the projects fold at their own widths on a desktop', async ({
 	await page.goto('/settings/server');
 	const projects = page.getByRole('table').filter({ hasText: own.id });
 	await expect(projects.locator('tbody tr').first()).toBeVisible();
+	// The lines a text takes in the table: one is whole. The id is what an
+	// operator copies into the CLI, and a name of seventeen characters, which
+	// is the length of the one this test makes and of a name like
+	// `my-production-app`, is no reason for a row to be two lines tall.
+	const lines = (text: string) =>
+		projects.getByText(text).first().evaluate((node) => {
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+		});
+	expect(own.name).toHaveLength(17);
 	// A deleted project's time may break at the space between its date and its
 	// hour, and nowhere else.
 	await foldsAt(page, projects, 728, 5, 68, Infinity, async () => {
 		const deleted = projects.locator('tbody tr').filter({ hasText: 'Deleted, purged' });
 		await expect(deleted.first()).toBeVisible();
 		for (const row of await deleted.all()) expect(await torn(row)).toEqual([]);
+		expect(await lines(own.name)).toBe(1);
 	});
-	// The id is what an operator copies into the CLI: on one line, whole.
-	const lines = await projects.getByText(own.id).first().evaluate((node) => {
-		const range = document.createRange();
-		range.selectNodeContents(node);
-		return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-	});
-	expect(lines).toBe(1);
+	expect(await lines(own.id)).toBe(1);
 });
 
 // The project on screen is the one being deleted: `me` drops it at once, but

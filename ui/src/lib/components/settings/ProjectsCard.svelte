@@ -118,14 +118,16 @@
 			? 'Keep forever'
 			: `${row.retention_days} ${row.retention_days === 1 ? 'day' : 'days'}`;
 
+	const cell = 'px-2 py-1.5';
+
 	// In a box narrower than the table the row is the project's name and its
 	// verbs, stacked; its id, retention and status fold under the name (spec
 	// 006 #24), in a plain cell for the reason the Accounts card gives (#18),
 	// so the buttons carry the name. The number is the unfolded table's width
-	// and its `min-width`, and it is more than the columns need: 697 px with a
-	// deleted project in the table on Linux's fonts, 676 on a Mac's, which keep a
-	// glyph's fractional advance where Linux rounds it up. The difference is the
-	// room a font's metrics have (spec 006 #35).
+	// and its `min-width`, and it is more than the columns need: a font's
+	// metrics decide how wide its text is, and the margin is what keeps the
+	// table from scrolling on a font that is wider than the one it was measured
+	// on (spec 006 #35).
 	const fold = new Fold(728);
 	const narrow = $derived(fold.narrow);
 </script>
@@ -151,20 +153,20 @@
 			<table class="w-full border-collapse text-left" style:min-width={fold.min}>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
-						<th scope="col" class={['px-2 py-1.5 font-medium', narrow && 'w-full']}>Name</th>
+						<th scope="col" class={[cell, 'font-medium', narrow && 'w-full']}>Name</th>
 						{#if !narrow}
-							<th scope="col" class="px-2 py-1.5 font-medium">Id</th>
-							<th scope="col" class="px-2 py-1.5 font-medium">Retention</th>
-							<th scope="col" class="px-2 py-1.5 font-medium">Status</th>
+							<th scope="col" class="{cell} font-medium">Id</th>
+							<th scope="col" class="{cell} font-medium">Retention</th>
+							<th scope="col" class="{cell} font-medium">Status</th>
 						{/if}
-						<th scope="col" class={['px-2 py-1.5 font-medium', !narrow && 'w-48']}>Actions</th>
+						<th scope="col" class={[cell, 'font-medium', !narrow && 'w-48']}>Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each projects as row (row.id)}
 						<tr class={['border-border border-b last:border-b-0', narrow && 'align-top']}>
 							{#if narrow}
-								<td class="max-w-0 px-2 py-1.5 wrap-anywhere">
+								<td class="max-w-0 {cell} wrap-anywhere">
 									{@render name(row)}
 									<div class="text-muted font-mono text-xs break-all">{row.id}</div>
 									<!-- Wraps at its spaces; the dot and the time stay whole (#24, #29). -->
@@ -174,14 +176,14 @@
 									</div>
 								</td>
 							{:else}
-								<th scope="row" class="min-w-36 px-2 py-1.5 text-left font-normal wrap-anywhere">
+								<th scope="row" class="min-w-36 {cell} text-left font-normal wrap-anywhere">
 									{@render name(row)}
 								</th>
-								<td class="text-muted px-2 py-1.5 font-mono text-xs whitespace-nowrap">{row.id}</td>
-								<td class="text-muted px-2 py-1.5 text-sm">{retention(row)}</td>
-								<td class="px-2 py-1.5 text-sm">{@render status(row)}</td>
+								<td class="text-muted {cell} font-mono text-xs whitespace-nowrap">{row.id}</td>
+								<td class="text-muted {cell} text-sm">{retention(row)}</td>
+								<td class="{cell} text-sm">{@render status(row)}</td>
 							{/if}
-							<td class="px-2 py-1.5">
+							<td class={cell}>
 								{#if row.deleted_at}
 									<Button
 										aria-label={narrow ? `Restore ${row.name}` : undefined}
