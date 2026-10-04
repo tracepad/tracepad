@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -504,6 +505,13 @@ func (r *run) parseAdminWhen(fs *flag.FlagSet, args []string, wantArgs int, need
 		return nil, usageErrorIn(fs.Name(), "no API key: set TRACEPAD_API_KEY or pass --key")
 	}
 	if r.key == "" {
+		// The token is the deployment's own credential: it goes to a server
+		// on this machine, which is where the environment that holds it is, and
+		// to no other unless it is asked for by name (spec 004 #38).
+		if !loopback(r.url) {
+			return nil, usageErrorIn(fs.Name(), "no API key: TRACEPAD_ADMIN_TOKEN is used only for a server on this machine, "+
+				"and %s is not one; pass the key with --key or TRACEPAD_API_KEY", termsafe.String(hostOf(r.url)))
+		}
 		token, err := config.AdminToken(r.opt.Env)
 		if err != nil {
 			return nil, usageErrorIn(fs.Name(), "%s", err)
@@ -514,6 +522,33 @@ func (r *run) parseAdminWhen(fs *flag.FlagSet, args []string, wantArgs int, need
 		}
 	}
 	return rest, r.connect()
+}
+
+// hostOf is the host part of a server address, for a message; the address
+// itself may carry a password, which no message repeats.
+func hostOf(address string) string {
+	if u, err := url.Parse(address); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return "that address"
+}
+
+// loopback says whether a server address names this machine: `localhost`, a
+// name under `.localhost`, or an address in 127.0.0.0/8 or `::1`.
+func loopback(address string) bool {
+	if address == "" {
+		address = client.DefaultURL // what an empty --url means to the client
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Unmap().IsLoopback()
 }
 
 // parseUnauthenticated is the same without the key requirement, for the one

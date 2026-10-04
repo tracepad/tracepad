@@ -80,11 +80,13 @@ TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad projects ls
 ```
 
 The commands the CLI's help marks `(admin token)` — `projects create`, `rename`,
-`rm`, `restore` and `ls --deleted`, `keys` and `accounts` — also read `TRACEPAD_ADMIN_TOKEN`, or the file
+`rm`, `restore` and `ls --deleted`, `keys`, `accounts` and `system` — also read `TRACEPAD_ADMIN_TOKEN`, or the file
 `TRACEPAD_ADMIN_TOKEN_FILE` names, when there is no `--key` and no
 `TRACEPAD_API_KEY`: in the server's own container, where that is the
-environment, `tracepad keys ls` just works. A key given either way wins, and
-no other command takes the token this way.
+environment, `tracepad keys ls` just works. That is for a server on this
+machine only: against another host the token is sent only if you pass it as
+`--key` or `TRACEPAD_API_KEY`. A key given either way wins, and no other command
+takes the token this way.
 
 A person's session is a cookie rather than a header, and names the project it
 is asking about with `X-Tracepad-Project` on the routes that do not carry one

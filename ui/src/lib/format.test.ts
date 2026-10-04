@@ -5,7 +5,7 @@ import {
 	cost,
 	count,
 	counted,
-	axisDuration,
+	fineDuration,
 	duration,
 	elapsed,
 	relative,
@@ -43,19 +43,19 @@ describe('duration', () => {
 	});
 });
 
-describe('axisDuration', () => {
+describe('fineDuration', () => {
 	// An axis from 0 to 0.4 ms has ticks at 0, 0.2 and 0.4; `<1 ms` three
 	// times would be an axis that says nothing.
 	it('tells sub-millisecond ticks apart, and agrees with duration from a millisecond up', () => {
-		expect(axisDuration(0)).toBe('0 ms');
-		expect(axisDuration(0.2)).toBe('0.2 ms');
-		expect(axisDuration(0.4)).toBe('0.4 ms');
-		expect(axisDuration(0.999)).toBe('1 ms');
-		expect(axisDuration(1)).toBe(duration(1));
-		expect(axisDuration(842)).toBe(duration(842));
-		expect(axisDuration(1234)).toBe(duration(1234));
-		expect(axisDuration(null)).toBe(ABSENT);
-		expect(axisDuration(-1)).toBe(ABSENT);
+		expect(fineDuration(0)).toBe('0 ms');
+		expect(fineDuration(0.2)).toBe('0.2 ms');
+		expect(fineDuration(0.4)).toBe('0.4 ms');
+		expect(fineDuration(0.999)).toBe('1 ms');
+		expect(fineDuration(1)).toBe(duration(1));
+		expect(fineDuration(842)).toBe(duration(842));
+		expect(fineDuration(1234)).toBe(duration(1234));
+		expect(fineDuration(null)).toBe(ABSENT);
+		expect(fineDuration(-1)).toBe(ABSENT);
 	});
 });
 
@@ -152,6 +152,19 @@ describe('relative', () => {
 	it('answers the em dash for an instant that is not one', () => {
 		expect(relative(null)).toBe(ABSENT);
 		expect(relative('whenever')).toBe(ABSENT);
+	});
+});
+
+describe('a span that ends before it starts', () => {
+	// Two clocks that disagree: the sign is shown, and is never `<1 ms`, `-0`
+	// or the em dash that would hide it (review of PR #202).
+	it('keeps its sign through elapsed and wait', () => {
+		expect(elapsed('2026-08-28T12:00:01Z', '2026-08-28T12:00:00.500Z')).toBe(-500);
+		expect(wait(elapsed('2026-08-28T12:00:01Z', '2026-08-28T12:00:00.500Z'))).toBe('-500 ms');
+		const barely = elapsed('2026-08-28T12:00:00.000500000Z', '2026-08-28T12:00:00.000300000Z');
+		expect(barely).toBe(-1);
+		expect(wait(barely)).toBe('-1 ms');
+		expect(Object.is(elapsed('2026-08-28T12:00:00Z', '2026-08-28T12:00:00Z'), -0)).toBe(false);
 	});
 });
 

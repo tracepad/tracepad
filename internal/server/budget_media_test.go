@@ -39,7 +39,7 @@ func TestAMarkerNamesTheMediaTheCutLeavesOut(t *testing.T) {
 		if got.MediaCount != 1 || len(got.Media) != 1 || got.Media[0]["tracepad_media"] != sha(1) {
 			t.Errorf("media = %d %v, want the one reference past the preview", got.MediaCount, got.Media)
 		}
-		if got.Media[0]["mime_type"] != "image/png" || got.Media[0]["size"] != float64(1000) {
+		if got.Media[0]["mime_type"] != "image/png" || fmt.Sprint(got.Media[0]["size"]) != "1000" {
 			t.Errorf("the reference was not carried as stored: %v", got.Media[0])
 		}
 		if got.Preview == "" {
@@ -122,45 +122,58 @@ func TestAMarkerNamesTheMediaTheCutLeavesOut(t *testing.T) {
 		}
 	})
 
-	// The reviewer's case: some in the preview, a few past it, and the few are
-	// all listed. Over every size of payload and of share, the list is exactly
-	// the references the preview does not hold, up to its limit, and the marker
-	// stays in its share.
+	// Over every size of payload and of share, with text and references
+	// alternating and a reference that carries a key after `tracepad_media`:
+	// the list starts with the first reference the preview does not hold whole,
+	// keeps document order, is bounded, the count is every one past the
+	// preview, the preview keeps its minimum, and the marker stays in its share.
 	t.Run("the list is what the preview does not hold, at every size", func(t *testing.T) {
-		sawAHandful := false
+		line := func(n int) any {
+			return map[string]any{"type": "text", "text": fmt.Sprintf("turn %d: ", n) + strings.Repeat("words ", 40)}
+		}
 		for refs := 5; refs <= 40; refs += 5 {
-			for share := 1500; share <= 4000; share += 250 {
+			for share := 1500; share <= 4500; share += 250 {
 				many := []any{}
 				for n := 1; n <= refs; n++ {
-					many = append(many, ref(n))
+					r := ref(n)
+					if n%3 == 0 {
+						r["zz_after"] = "a key past tracepad_media"
+					}
+					many = append(many, line(n), r)
 				}
-				many = append(many, text)
 				got, ok := payloadBudget{share: share, affordable: true}.render(many, "t", "o").(truncation)
 				if !ok {
-					t.Fatalf("refs=%d share=%d: not cut", refs, share)
+					continue // it fits whole: no marker, nothing to say
 				}
-				beyond := 0
+				var beyond []int
 				for n := 1; n <= refs; n++ {
-					if !strings.Contains(got.Preview, sha(n)+`"}`) {
-						beyond++
+					if !strings.Contains(got.Preview, sha(n)+`","zz_after"`) && !strings.Contains(got.Preview, sha(n)+`"}`) {
+						beyond = append(beyond, n)
 					}
 				}
-				// The list is the references the preview does not hold, up to its
-				// limit — and fewer only when a share too small for them ran out
-				// (sixteen take about 2 KB).
-				want := min(beyond, maxListedMedia)
-				if got.MediaCount != beyond || len(got.Media) > want || (len(got.Media) < want && share >= 3000) {
-					t.Errorf("refs=%d share=%d: media_count=%d listed=%d preview=%d bytes, want %d beyond the preview and %d listed",
-						refs, share, got.MediaCount, len(got.Media), len(got.Preview), beyond, want)
+				name := fmt.Sprintf("refs=%d share=%d", refs, share)
+				if got.MediaCount != len(beyond) {
+					t.Errorf("%s: media_count = %d, want the %d past the preview", name, got.MediaCount, len(beyond))
+				}
+				if want := min(len(beyond), maxListedMedia); len(got.Media) > want || (share >= 3000 && len(got.Media) != want) {
+					t.Errorf("%s: listed %d, want %d", name, len(got.Media), want)
+				}
+				for i, listed := range got.Media {
+					if listed["tracepad_media"] != sha(beyond[i]) {
+						t.Errorf("%s: entry %d is %v, want the %dth reference in document order, starting with the first unshown",
+							name, i, listed["tracepad_media"], beyond[i])
+						break
+					}
+				}
+				// The room kept is minPreview of *encoded* text, in which each
+				// quote of the prefix costs two bytes.
+				if len(got.Preview) < minPreview*3/4 {
+					t.Errorf("%s: the preview is %d bytes, the list took its minimum", name, len(got.Preview))
 				}
 				if size := markerSize(got); size > share {
-					t.Errorf("refs=%d share=%d: the marker is %d bytes", refs, share, size)
+					t.Errorf("%s: the marker is %d bytes", name, size)
 				}
-				sawAHandful = sawAHandful || (beyond > 0 && beyond <= maxListedMedia && got.Preview != "")
 			}
-		}
-		if !sawAHandful {
-			t.Error("no size made a handful of references fall past a preview: the case was not exercised")
 		}
 	})
 
@@ -221,7 +234,7 @@ func TestExpandIOSaysWhatMediaTheCutLeftOut(t *testing.T) {
 	if !marker.Truncated || marker.MediaCount != 1 || len(marker.Media) != 1 || marker.Media[0]["tracepad_media"] != sha {
 		t.Errorf("marker = %+v, want it to name the image the preview does not reach", marker)
 	}
-	if marker.Media[0]["size"] != float64(48210) || marker.Media[0]["mime_type"] != "image/png" {
+	if fmt.Sprint(marker.Media[0]["size"]) != "48210" || marker.Media[0]["mime_type"] != "image/png" {
 		t.Errorf("the reference was not carried as it is stored: %v", marker.Media[0])
 	}
 }

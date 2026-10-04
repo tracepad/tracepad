@@ -51,7 +51,7 @@
 		type Arrangement,
 		type BlockId
 	} from '$lib/dashboard';
-	import { axisDuration, cost, count, relative, timestamp } from '$lib/format';
+	import { fineDuration, cost, count, relative, timestamp } from '$lib/format';
 	import { dashboard, setDashboard } from '$lib/preferences.svelte';
 	import { STILL } from '$lib/phone';
 	import { href, project } from '$lib/project.svelte';
@@ -445,7 +445,7 @@
 									{ label: 'p50', values: series.p50, token: 'accent' },
 									{ label: 'p95', values: series.p95, token: 'warn' }
 								]}
-								format={(value) => axisDuration(value)}
+								format={(value) => fineDuration(value)}
 								summary="Median and 95th percentile latency per {bucket}."
 							/>
 						{:else if id === 'errors'}

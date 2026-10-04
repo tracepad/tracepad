@@ -1322,7 +1322,8 @@ func listenTarget(listen string) string {
 
 func (r *run) system(ctx context.Context, args []string) error {
 	fs := r.flags("system")
-	if _, err := r.parse(fs, args, 0); err != nil {
+	// A key answers for its project, the admin token for the deployment.
+	if _, err := r.parseAdmin(fs, args, 0); err != nil {
 		return err
 	}
 	body, err := r.api.Get(ctx, "/api/v1/system", nil)

@@ -112,9 +112,6 @@ var bareMarkerSize = markerSize(truncation{
 	TraceID:       strings.Repeat("f", 32),
 	ObservationID: strings.Repeat("f", 16),
 	Full:          ioPath(strings.Repeat("f", 32), strings.Repeat("f", 16)),
-	// A count is worth its few bytes in every marker: whether the cut hid
-	// media is the one thing a consumer cannot find out from a preview.
-	MediaCount: 1 << 20,
 })
 
 // budgetNeeded is what `?budget=` would have to be for this response to carry
@@ -161,123 +158,170 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		Full:          ioPath(traceID, observationID),
 	}
 	text := string(encoded)
-	refs := mediaReferences(value)
-	if len(refs) == 0 {
+	spans := mediaSpans(text)
+	// The room the media fields take is settled once, from what the payload
+	// holds, and the preview is cut to what is left (spec 004 #39): no search
+	// for a fixed point, and a payload with no media pays nothing.
+	var distinct []mediaSpan
+	seen := map[string]bool{}
+	for _, one := range spans {
+		if !seen[one.key] {
+			seen[one.key] = true
+			distinct = append(distinct, one)
+		}
+	}
+	marker.MediaCount = len(distinct)
+	avail := b.share - markerSize(marker) - previewKeyOverhead
+	if len(distinct) == 0 || avail < 0 {
+		// Nothing to name, or a share that cannot carry even the count.
+		marker.MediaCount = 0
 		if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
 			marker.Preview = fitString(text, room)
 		}
 		return marker
 	}
 
-	// The references the preview does not reach are what the marker is least
-	// able to do without, and each one listed shortens the preview, which can
-	// leave one more reference beyond it. So the two are settled together: the
-	// preview is cut, what lies past it is listed, the preview is cut again
-	// with the list's room taken, and so on until the list stops growing — it
-	// only grows, and is bounded, so it does. What the preview holds whole is
-	// never listed.
-	ends := mediaEnds(text)
-	beyond := func(preview string) []map[string]any {
-		var out []map[string]any
-		for _, ref := range refs {
-			if end, ok := ends[ref[mapping.MediaRefKey].(string)]; !ok || end > len(preview) {
-				out = append(out, ref)
+	// The list's room: the longest entry's size for each of them, up to the limit, and never so
+	// much that the preview has less than minPreview left (unless the share has
+	// no room for a preview at all, and then the list may have it).
+	var longest int
+	for _, one := range distinct {
+		longest = max(longest, len(one.encoded)+1)
+	}
+	reserve := longest*min(len(distinct), maxListedMedia) + mediaKeyOverhead
+	if spare := avail - minPreview; spare >= mediaKeyOverhead {
+		reserve = min(reserve, spare)
+	} else {
+		reserve = min(reserve, max(avail, 0))
+	}
+	if reserve > 0 && reserve <= mediaKeyOverhead {
+		reserve = 0 // not room for one entry: the count alone
+	}
+	if room := avail - reserve; room >= minPreview {
+		marker.Preview = fitString(text, room)
+	}
+
+	// Past the preview: the references whose object it does not hold whole,
+	// in document order — the first of them first. A body shown anywhere in
+	// the preview is shown.
+	shown := map[string]bool{}
+	for _, one := range spans {
+		if one.end <= len(marker.Preview) {
+			shown[one.key] = true
+		}
+	}
+	var beyond []mediaSpan
+	for _, one := range distinct {
+		if !shown[one.key] {
+			beyond = append(beyond, one)
+		}
+	}
+	marker.MediaCount = len(beyond)
+	if reserve > 0 {
+		room := reserve - mediaKeyOverhead
+		for _, one := range beyond {
+			if len(marker.Media) == maxListedMedia || len(one.encoded)+1 > room {
+				break
 			}
+			room -= len(one.encoded) + 1
+			marker.Media = append(marker.Media, one.ref)
 		}
-		return out
-	}
-	cut := func(listed []map[string]any) string {
-		marker.MediaCount, marker.Media = len(refs), listed
-		if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
-			return fitString(text, room)
-		}
-		return ""
-	}
-	var listed []map[string]any
-	preview := cut(nil)
-	for range maxListedMedia + 1 {
-		next := fitReferences(beyond(preview), b.share-bareMarkerSize-mediaKeyOverhead)
-		if len(next) == len(listed) {
-			break
-		}
-		listed = next
-		preview = cut(listed)
-	}
-	marker.Preview = preview
-	marker.Media = listed
-	marker.MediaCount = len(beyond(preview))
-	if marker.MediaCount == 0 {
-		marker.Media = nil
 	}
 	return marker
 }
 
-// mediaEnds is where each media reference ends in the payload's JSON text, by
-// body: the offset just past the reference's object, the first time the body
-// appears. The text is what json.Marshal wrote, in which a reference is
-// `{"mime_type":…,"size":…,"tracepad_media":"<sha>"}` — `tracepad_media` is the
-// last key a reference has, and a quote inside a string is escaped, so the
-// sequence below is only ever a key and never text a prompt quoted.
-func mediaEnds(text string) map[string]int {
-	const key = `"` + mapping.MediaRefKey + `":"`
-	ends := map[string]int{}
-	for from := 0; ; {
-		at := strings.Index(text[from:], key)
-		if at < 0 {
-			return ends
-		}
-		start := from + at + len(key)
-		from = start
-		if start+64 > len(text) || !isSHA256Hex(text[start:start+64]) {
-			continue
-		}
-		if _, seen := ends[text[start:start+64]]; !seen {
-			ends[text[start:start+64]] = start + 64 + len(`"}`)
-		}
-	}
+// mediaSpan is one media reference in a payload's JSON text: where its object
+// lies, the reference as stored, and the body it names (a placeholder, which
+// holds no bytes, is another from the same SHA-256).
+type mediaSpan struct {
+	start, end int
+	key        string
+	ref        map[string]any
+	encoded    []byte
 }
 
-// mediaReferences are the media references in a payload (spec 041 #4), once
-// each, in document order: an object whose `tracepad_media` is a SHA-256 in
-// hex and that carries a `mime_type`, which is what the interface recognises
-// as one too. A body sent twice is one reference; a placeholder, which holds no
-// bytes, is another from the same body.
-func mediaReferences(value any) []map[string]any {
-	var found []map[string]any
-	seen := map[string]bool{}
-	var walk func(node any)
-	walk = func(node any) {
-		switch node := node.(type) {
-		case map[string]any:
-			if sha, ok := node[mapping.MediaRefKey].(string); ok && isSHA256Hex(sha) {
-				if _, ok := node["mime_type"].(string); ok {
-					key := sha
-					if stored, ok := node["stored"].(bool); ok && !stored {
-						key += ":placeholder"
-					}
-					if !seen[key] {
-						seen[key] = true
-						found = append(found, node)
-					}
-					return
+// mediaSpans finds the media references (spec 041 #4) in the JSON text of a
+// payload, in document order, by structure: the text is walked once, strings
+// skipped whole, and an object that has a `tracepad_media` member holding a
+// SHA-256 and a string `mime_type` is a reference from its `{` to its `}`,
+// whatever else it carries and in whatever order. A hash that appears inside a
+// string is text, however it is quoted.
+func mediaSpans(text string) []mediaSpan {
+	const key = mapping.MediaRefKey
+	var (
+		spans     []mediaSpan
+		open      []int            // where each container still open began
+		holders   = map[int]bool{} // the objects that hold a hash under the key
+		lastKey   string
+		afterKey  bool
+		isKeyNext = func(from int) bool {
+			for ; from < len(text); from++ {
+				switch text[from] {
+				case ' ', '\t', '\n', '\r':
+				default:
+					return text[from] == ':'
 				}
 			}
-			keys := make([]string, 0, len(node))
-			for key := range node {
-				keys = append(keys, key)
+			return false
+		}
+	)
+	for i := 0; i < len(text); i++ {
+		switch c := text[i]; c {
+		case '"':
+			end := i + 1
+			for end < len(text) && text[end] != '"' {
+				if text[end] == '\\' {
+					end++
+				}
+				end++
 			}
-			slices.Sort(keys) // the order json.Marshal writes them in
-			for _, key := range keys {
-				walk(node[key])
+			content := ""
+			if end <= len(text) && end > i+1 {
+				content = text[i+1 : min(end, len(text))]
 			}
-		case []any:
-			for _, child := range node {
-				walk(child)
+			switch {
+			case isKeyNext(end + 1):
+				lastKey, afterKey = content, true
+			case afterKey && lastKey == key && isSHA256Hex(content) && len(open) > 0 && text[open[len(open)-1]] == '{':
+				holders[open[len(open)-1]] = true
+				afterKey = false
+			default:
+				afterKey = false
 			}
+			i = end
+		case '{', '[':
+			open = append(open, i)
+			afterKey = false
+		case '}', ']':
+			if len(open) == 0 {
+				continue
+			}
+			start := open[len(open)-1]
+			open = open[:len(open)-1]
+			afterKey = false
+			if !holders[start] {
+				continue
+			}
+			delete(holders, start)
+			var ref map[string]any
+			decoder := json.NewDecoder(strings.NewReader(text[start : i+1]))
+			decoder.UseNumber()
+			if decoder.Decode(&ref) != nil {
+				continue
+			}
+			sha, _ := ref[key].(string)
+			if _, typed := ref["mime_type"].(string); !typed || !isSHA256Hex(sha) {
+				continue
+			}
+			one := mediaSpan{start: start, end: i + 1, key: sha, ref: ref, encoded: []byte(text[start : i+1])}
+			if stored, ok := ref["stored"].(bool); ok && !stored {
+				one.key += ":placeholder"
+			}
+			spans = append(spans, one)
 		}
 	}
-	walk(value)
-	return found
+	slices.SortFunc(spans, func(a, b mediaSpan) int { return a.start - b.start })
+	return spans
 }
 
 // isSHA256Hex says whether text is a lowercase hex SHA-256, 64 characters.
@@ -291,24 +335,6 @@ func isSHA256Hex(text string) bool {
 		}
 	}
 	return true
-}
-
-// fitReferences takes as many references, first to last, as fit in room bytes
-// and in maxListedMedia, commas included.
-func fitReferences(refs []map[string]any, room int) []map[string]any {
-	var fit []map[string]any
-	for _, ref := range refs {
-		if len(fit) == maxListedMedia {
-			break
-		}
-		encoded, err := json.Marshal(ref)
-		if err != nil || len(encoded)+1 > room {
-			break
-		}
-		room -= len(encoded) + 1
-		fit = append(fit, ref)
-	}
-	return fit
 }
 
 // encodedPayload is a payload encoding/json has already written, placed in an

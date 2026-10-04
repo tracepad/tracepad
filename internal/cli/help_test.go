@@ -35,6 +35,7 @@ func TestAdminCommandsFallBackToTheAdminToken(t *testing.T) {
 		{"neither", nil, []string{"keys", "ls"}, ExitUsage, "no admin token: set TRACEPAD_ADMIN_TOKEN"},
 		{"both spellings", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken, "TRACEPAD_ADMIN_TOKEN_FILE": file}, []string{"keys", "ls"}, ExitUsage, "both set"},
 		{"a file that is not there", map[string]string{"TRACEPAD_ADMIN_TOKEN_FILE": file + ".missing"}, []string{"keys", "ls"}, ExitUsage, "TRACEPAD_ADMIN_TOKEN_FILE"},
+		{"system, the deployment's view", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken}, []string{"system"}, ExitOK, ""},
 		// A project key reaches its own project's listing; the token is for what
 		// only it reaches, the deleted ones.
 		{"projects ls, no key", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken}, []string{"projects", "ls"}, ExitUsage, "no API key"},
@@ -131,5 +132,51 @@ func TestEveryCommandHasHelpOfItsOwn(t *testing.T) {
 		if got := usageFor(command); got == Usage || !strings.Contains(got, "tracepad "+command) {
 			t.Errorf("usageFor(%q) is not that command's help:\n%s", command, got)
 		}
+	}
+}
+
+// The admin token is read from the environment for a server on this machine
+// and for no other: a TRACEPAD_URL or --url that names someone else's host is
+// not sent the deployment's credential by default (review of PR #202, spec 004
+// #38). With the key given by name it goes anywhere, as it always did.
+func TestTheAdminTokenIsOnlyOfferedToThisMachine(t *testing.T) {
+	for address, want := range map[string]bool{
+		"":                              true,
+		"http://localhost:4318":         true,
+		"http://LOCALHOST:4318/":        true,
+		"http://tracepad.localhost":     true,
+		"http://127.0.0.1:4318":         true,
+		"http://127.1.2.3:80":           true,
+		"http://[::1]:4318":             true,
+		"http://[::ffff:127.0.0.1]:80":  true,
+		"http://user:pw@localhost:4318": true,
+		"https://tracepad.example.com":  false,
+		"http://10.0.0.5:4318":          false,
+		"http://localhost.example.com":  false,
+		"http://127.0.0.1.example.com":  false,
+		"http://0.0.0.0:4318":           false,
+		"localhost:4318":                false,
+		"not a url":                     false,
+	} {
+		if got := loopback(address); got != want {
+			t.Errorf("loopback(%q) = %v, want %v", address, got, want)
+		}
+	}
+
+	h := newAdminCLI(t)
+	h.env = map[string]string{"TRACEPAD_URL": "https://tracepad.example.com", "TRACEPAD_ADMIN_TOKEN": testAdminToken}
+	out := h.run(t.Context(), false, "keys", "ls")
+	if out.code != ExitUsage || !strings.Contains(out.stderr, "only for a server on this machine") ||
+		!strings.Contains(out.stderr, "tracepad.example.com") {
+		t.Errorf("keys ls against another host: exit %d, %s", out.code, out.stderr)
+	}
+	if strings.Contains(out.stderr+out.stdout, testAdminToken) {
+		t.Error("the token reached the output")
+	}
+	// Asked for by name, it goes where it is sent.
+	h.env["TRACEPAD_URL"] = h.url
+	h.env["TRACEPAD_API_KEY"] = testAdminToken
+	if out := h.run(t.Context(), false, "keys", "ls", "--url", h.url); out.code != ExitOK {
+		t.Errorf("keys ls with a key: exit %d, %s", out.code, out.stderr)
 	}
 }

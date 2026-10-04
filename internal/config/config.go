@@ -517,17 +517,13 @@ func parseProxyEntry(entry string) (netip.Prefix, error) {
 // Whitespace around the value is dropped, as a shell or an editor leaves a
 // newline behind. The value is never quoted in an error: it is the secret.
 func readAdminToken() (string, error) {
-	inline := strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN"))
-	name, token := "TRACEPAD_ADMIN_TOKEN", inline
+	token, err := AdminToken(os.Getenv)
+	if err != nil {
+		return "", err
+	}
+	name := "TRACEPAD_ADMIN_TOKEN"
 	if strings.TrimSpace(os.Getenv("TRACEPAD_ADMIN_TOKEN_FILE")) != "" {
-		if inline != "" {
-			return "", errors.New("TRACEPAD_ADMIN_TOKEN and TRACEPAD_ADMIN_TOKEN_FILE are both set; set one")
-		}
-		fromFile, err := AdminTokenFile(os.Getenv)
-		if err != nil {
-			return "", err
-		}
-		name, token = "TRACEPAD_ADMIN_TOKEN_FILE", fromFile
+		name = "TRACEPAD_ADMIN_TOKEN_FILE"
 	}
 	if token != "" && SecretLength(token) < MinSecretLength {
 		return "", fmt.Errorf("%s: the admin token is %d characters; it creates owner accounts, "+
@@ -538,11 +534,12 @@ func readAdminToken() (string, error) {
 
 // AdminToken is the admin token as the environment getenv reads holds it:
 // TRACEPAD_ADMIN_TOKEN, or the contents of the file TRACEPAD_ADMIN_TOKEN_FILE
-// names, trimmed; "" when neither is set. Both set is the server's refusal
-// here too, since a client that preferred one would be guessing which the
-// operator meant. It checks no length — that is the server's rule for a token
-// it will accept, not a client's for one it presents — and never quotes the
-// value.
+// names, trimmed; "" when neither is set. Both set is a refusal, since which one
+// the operator meant is not something to guess about the credential that owns
+// the deployment. It is the one reading: the server's start (readAdminToken,
+// which adds the length rule) and the CLI's commands that take the token both
+// go through it. It checks no length — that is the server's rule for a token it
+// will accept, not a client's for one it presents — and never quotes the value.
 func AdminToken(getenv func(string) string) (string, error) {
 	inline := strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN"))
 	if strings.TrimSpace(getenv("TRACEPAD_ADMIN_TOKEN_FILE")) == "" {

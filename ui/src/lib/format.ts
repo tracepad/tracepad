@@ -40,7 +40,7 @@ export function duration(ms: number | null | undefined): string {
  * a millisecond it keeps what the number has; from one up it is `duration`
  * (spec 006 #34).
  */
-export function axisDuration(ms: number | null | undefined): string {
+export function fineDuration(ms: number | null | undefined): string {
 	if (ms == null || !Number.isFinite(ms) || ms < 0 || ms >= 1) return duration(ms);
 	return `${round(ms, 2)} ms`;
 }
@@ -194,13 +194,16 @@ export function instant(iso: string | null | undefined): Date | null {
  * while the server, which subtracts the nanoseconds and truncates, said 0 for
  * the same trace's latency. The difference is taken at full precision and
  * truncated the way the server does, so a one-span trace reads the same in its
- * header, its list row and its tree.
+ * header, its list row and its tree. A span that ends before it starts — two
+ * clocks that disagree — comes out negative, rounded down so that even a
+ * fraction of a millisecond is at least -1: it is for `wait` to draw, which keeps
+ * the sign, and never for `duration`, which would call it `<1 ms` or absent.
  */
 export function elapsed(from: string | null | undefined, to: string | null | undefined): number | null {
 	const start = epochNs(from);
 	const end = epochNs(to);
 	if (start == null || end == null) return null;
-	return Math.trunc(Number(end - start) / 1e6);
+	return Math.floor(Number(end - start) / 1e6);
 }
 
 /** An API timestamp as nanoseconds since the epoch, or null if it is not one. */

@@ -83,7 +83,8 @@ docker exec -e TRACEPAD_API_KEY tracepad /tracepad keys rm tp-pk-… --project $
 
 Inside the container the admin token is already in the environment, or in the
 file `TRACEPAD_ADMIN_TOKEN_FILE` names, and the commands the CLI's help marks
-`(admin token)` read it from there when no key is set — so
+`(admin token)` read it from there when no key is set (the server being on this
+machine, which inside the container it is) — so
 `docker exec tracepad /tracepad keys ls --url http://localhost:4318` needs no
 `-e` and no paste. No other command takes it that way; they ask for a key.
 

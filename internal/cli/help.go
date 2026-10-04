@@ -25,9 +25,10 @@ func usageFor(topic string) string {
 	for ; len(words) > 0; words = words[:len(words)-1] {
 		if blocks := synopsisBlocks(words); blocks != "" {
 			footer := "\nConnection: --url URL (env TRACEPAD_URL), --key KEY (env TRACEPAD_API_KEY), --json.\n"
-			if strings.Contains(blocks, "admin token)") {
-				footer += "(admin token): the admin token goes in --key or TRACEPAD_API_KEY; with neither\n" +
-					"set, TRACEPAD_ADMIN_TOKEN (or the file TRACEPAD_ADMIN_TOKEN_FILE names) is used.\n"
+			if strings.Contains(blocks, "admin token") {
+				footer += "(admin token): the admin token goes in --key or TRACEPAD_API_KEY; with neither set,\n" +
+					"TRACEPAD_ADMIN_TOKEN (or the file TRACEPAD_ADMIN_TOKEN_FILE names) is used for a\n" +
+					"server on this machine (localhost, 127.0.0.0/8, ::1) and for no other.\n"
 			}
 			return blocks + footer + "\n`tracepad --help` lists every command.\n"
 		}
