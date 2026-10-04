@@ -32,7 +32,7 @@ Tracepad's own API instead, and the table below lists the equivalent for each.
     application keeps sending to Langfuse's cloud, its default. A `base_url`
     (Python) or `baseUrl` (JavaScript) passed in code beats both variables, so
     check for one in the code as well. The server's first-start output and the
-    key dialog still print the old name, so add the new one beside it.
+    key dialog print both names.
 
 3. Run the application and open the interface. The trace list fills as the
    SDK flushes.

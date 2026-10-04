@@ -392,12 +392,13 @@ Project %q created%s
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://%s/v1/traces
   OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer %s"
 
-  # Langfuse SDK
+  # Langfuse SDK (the JavaScript SDK reads LANGFUSE_BASE_URL alone; older SDKs read LANGFUSE_HOST)
+  LANGFUSE_BASE_URL=http://%s
   LANGFUSE_HOST=http://%s
   LANGFUSE_PUBLIC_KEY=%s
   LANGFUSE_SECRET_KEY=%s
 
-`, c.Project.Name, intro, host, secret, host, c.Keys.PublicKey, secret)
+`, c.Project.Name, intro, host, secret, host, host, c.Keys.PublicKey, secret)
 		if c.Scopes == store.GeneratedKeyScopes {
 			fmt.Fprint(w, readKeyHint(ui.Enabled && setupURL != "", adminToken))
 		}

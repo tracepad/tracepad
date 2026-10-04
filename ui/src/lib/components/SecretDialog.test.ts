@@ -29,6 +29,12 @@ describe('the secret dialog', () => {
 		expect(screen.getByText(/OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http:\/\/tracepad.test\/v1\/traces/))
 			.toBeTruthy();
 		expect(screen.getByText(/LANGFUSE_SECRET_KEY=tp-sk-new/)).toBeTruthy();
+		// The JavaScript SDK reads LANGFUSE_BASE_URL alone, and without it sends
+		// to Langfuse's cloud (spec 002 #35): the new name comes first, the old
+		// one stays for the SDKs that read only it.
+		const langfuse = screen.getByText(/LANGFUSE_SECRET_KEY=tp-sk-new/).textContent ?? '';
+		expect(langfuse.indexOf('LANGFUSE_BASE_URL=http://tracepad.test')).toBe(0);
+		expect(langfuse).toContain('LANGFUSE_HOST=http://tracepad.test');
 	});
 
 	it('gives a key without ingest only the Tracepad lines', () => {
