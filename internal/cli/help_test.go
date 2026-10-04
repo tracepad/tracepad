@@ -35,6 +35,9 @@ func TestAdminCommandsFallBackToTheAdminToken(t *testing.T) {
 		{"neither", nil, []string{"keys", "ls"}, ExitUsage, "no admin token: set TRACEPAD_ADMIN_TOKEN"},
 		{"both spellings", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken, "TRACEPAD_ADMIN_TOKEN_FILE": file}, []string{"keys", "ls"}, ExitUsage, "both set"},
 		{"a file that is not there", map[string]string{"TRACEPAD_ADMIN_TOKEN_FILE": file + ".missing"}, []string{"keys", "ls"}, ExitUsage, "TRACEPAD_ADMIN_TOKEN_FILE"},
+		// A project key reaches its own project's listing; the token is for what
+		// only it reaches, the deleted ones.
+		{"projects ls, no key", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken}, []string{"projects", "ls"}, ExitUsage, "no API key"},
 		// Not marked: the token is never offered to a command the usage text
 		// does not say takes it.
 		{"traces ls", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken}, []string{"traces", "ls"}, ExitUsage, "no API key"},
@@ -102,6 +105,16 @@ func TestHelpIsTheCommandsOwn(t *testing.T) {
 	if typo.code != ExitUsage || !strings.Contains(typo.stderr, "tracepad keys rm") ||
 		strings.Contains(typo.stderr, "tracepad traces ls") {
 		t.Errorf("keys list: exit %d, stderr:\n%s", typo.code, typo.stderr)
+	}
+
+	// Every command that reads the admin token says so in its help.
+	for _, command := range []string{"accounts ls", "accounts rm", "keys ls", "projects create", "projects rm"} {
+		if got := usageFor(command); !strings.Contains(got, "TRACEPAD_ADMIN_TOKEN") {
+			t.Errorf("the help of %q does not say where the admin token is read from:\n%s", command, got)
+		}
+	}
+	if got := usageFor("traces ls"); strings.Contains(got, "TRACEPAD_ADMIN_TOKEN") {
+		t.Errorf("traces ls help mentions the admin token:\n%s", got)
 	}
 
 	// What has no block of its own still prints something that helps.

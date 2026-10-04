@@ -148,7 +148,9 @@ func (r *run) projectsList(ctx context.Context, args []string) error {
 	var deleted bool
 	fs := r.flags("projects ls")
 	fs.BoolVar(&deleted, "deleted", false, "")
-	if _, err := r.parseAdmin(fs, args, 0); err != nil {
+	// The admin token is for the deleted projects; the listing of the
+	// project a key reaches is that key's (spec 004 #38).
+	if _, err := r.parseAdminWhen(fs, args, 0, func() bool { return deleted }); err != nil {
 		return err
 	}
 	query := url.Values{}

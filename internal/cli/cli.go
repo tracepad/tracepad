@@ -337,16 +337,16 @@ was last used, to within a minute.
 Accounts. People sign in; programs use keys. These need the admin
 token, and keeping it somewhere is how you get back in when every owner's
 password is lost — set it, run accounts invite, open the link:
-  tracepad accounts ls
-  tracepad accounts show   <id|email>
+  tracepad accounts ls                                 (admin token)
+  tracepad accounts show   <id|email>                  (admin token)
   tracepad accounts create <email> [--name N] [--owner]
-                           [--project <project-id>:viewer|editor]...
-  tracepad accounts invite <id|email>
+                           [--project <project-id>:viewer|editor]...  (admin token)
+  tracepad accounts invite <id|email>                  (admin token)
   tracepad accounts set    <id|email> [--name N] [--owner | --no-owner]
-                           [--disable | --enable]
-  tracepad accounts grant  <id|email> <project-id> viewer|editor
-  tracepad accounts revoke <id|email> <project-id>
-  tracepad accounts rm     <id|email> [--confirm <email>]
+                           [--disable | --enable]      (admin token)
+  tracepad accounts grant  <id|email> <project-id> viewer|editor  (admin token)
+  tracepad accounts revoke <id|email> <project-id>     (admin token)
+  tracepad accounts rm     <id|email> [--confirm <email>]  (admin token)
 
 An owner has every project; everyone else has a role in the ones they are
 given. accounts create prints the invitation link once — carry it to the
@@ -488,9 +488,20 @@ func (r *run) parse(fs *flag.FlagSet, args []string, wantArgs int) ([]string, er
 // decides what a bearer may do — and no command that is not marked takes it
 // this way (spec 004 #38).
 func (r *run) parseAdmin(fs *flag.FlagSet, args []string, wantArgs int) ([]string, error) {
+	return r.parseAdminWhen(fs, args, wantArgs, func() bool { return true })
+}
+
+// parseAdminWhen is parseAdmin for a command that needs the admin token only
+// sometimes — `projects ls`, whose project key is enough until `--deleted` —
+// and says whether it does once its flags are read. Where it does not, it is
+// parse: no token is read and none is asked for.
+func (r *run) parseAdminWhen(fs *flag.FlagSet, args []string, wantArgs int, needed func() bool) ([]string, error) {
 	rest, err := r.parseFlags(fs, args, wantArgs)
 	if err != nil {
 		return nil, err
+	}
+	if r.key == "" && !needed() {
+		return nil, usageErrorIn(fs.Name(), "no API key: set TRACEPAD_API_KEY or pass --key")
 	}
 	if r.key == "" {
 		token, err := config.AdminToken(r.opt.Env)

@@ -5,6 +5,7 @@ import {
 	cost,
 	count,
 	counted,
+	axisDuration,
 	duration,
 	elapsed,
 	relative,
@@ -39,6 +40,22 @@ describe('duration', () => {
 		expect(duration(null)).toBe(ABSENT);
 		expect(duration(undefined)).toBe(ABSENT);
 		expect(duration(Number.NaN)).toBe(ABSENT);
+	});
+});
+
+describe('axisDuration', () => {
+	// An axis from 0 to 0.4 ms has ticks at 0, 0.2 and 0.4; `<1 ms` three
+	// times would be an axis that says nothing.
+	it('tells sub-millisecond ticks apart, and agrees with duration from a millisecond up', () => {
+		expect(axisDuration(0)).toBe('0 ms');
+		expect(axisDuration(0.2)).toBe('0.2 ms');
+		expect(axisDuration(0.4)).toBe('0.4 ms');
+		expect(axisDuration(0.999)).toBe('1 ms');
+		expect(axisDuration(1)).toBe(duration(1));
+		expect(axisDuration(842)).toBe(duration(842));
+		expect(axisDuration(1234)).toBe(duration(1234));
+		expect(axisDuration(null)).toBe(ABSENT);
+		expect(axisDuration(-1)).toBe(ABSENT);
 	});
 });
 

@@ -265,6 +265,14 @@ func (s *Store) backupBefore(firstPending string) (string, error) {
 		return "", nil // fresh database, nothing worth backing up
 	}
 	tag := strings.TrimSuffix(strings.TrimPrefix(firstPending, "migrations/"), ".sql")
+	// A backup the server could not recognise afterwards would never be
+	// expired or deleted (spec 044 #23): a migration whose name is not the
+	// shape isBackup reads is refused before it is applied, not backed up
+	// under a name that outlives the rule.
+	if !migrationTag(tag) {
+		return "", fmt.Errorf("backup before migration: %q is not a migration name of the form NNNN_name, "+
+			"so its backup could not be told from an operator's own file", firstPending)
+	}
 	dst := s.path + ".pre-" + tag + ".bak"
 	// VACUUM INTO refuses to overwrite a database; the state before *this*
 	// run is what matters after a crashed earlier attempt (spec 001, edge

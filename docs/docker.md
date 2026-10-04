@@ -584,7 +584,7 @@ to delete or to include in a backup. On a file system that cannot lock at all
 says in a `WARN` that nothing guards the directory: do not run two.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
-migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
+migration it writes `tracepad.db.pre-<NNNN>_<name>.bak` beside the database — a
 full copy as it stood before the upgrade, readable by its owner only, for
 rolling that upgrade back by swapping the file in. Once the upgrade's
 migrations have committed, the server removes the backups of earlier upgrades,

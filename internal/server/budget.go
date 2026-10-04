@@ -160,34 +160,81 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		ObservationID: observationID,
 		Full:          ioPath(traceID, observationID),
 	}
-	// Spent before the preview: a reference the cut leaves out is what the
-	// marker is least able to do without, and a preview is a prefix of text
-	// that a reader can ask for the rest of. The room is reserved for every
-	// reference, and what the preview turns out to hold is taken off after.
+	text := string(encoded)
 	refs := mediaReferences(value)
-	if len(refs) > 0 {
-		marker.MediaCount = len(refs)
-		marker.Media = fitReferences(refs, b.share-markerSize(marker)-mediaKeyOverhead)
-	}
-	room := b.share - markerSize(marker) - previewKeyOverhead
-	if room >= minPreview {
-		marker.Preview = fitString(string(encoded), room)
-	}
-	if len(refs) > 0 {
-		marker.Media = slices.DeleteFunc(marker.Media, func(ref map[string]any) bool {
-			return strings.Contains(marker.Preview, ref[mapping.MediaRefKey].(string))
-		})
-		if len(marker.Media) == 0 {
-			marker.Media = nil
+	if len(refs) == 0 {
+		if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
+			marker.Preview = fitString(text, room)
 		}
-		marker.MediaCount = 0
+		return marker
+	}
+
+	// The references the preview does not reach are what the marker is least
+	// able to do without, and each one listed shortens the preview, which can
+	// leave one more reference beyond it. So the two are settled together: the
+	// preview is cut, what lies past it is listed, the preview is cut again
+	// with the list's room taken, and so on until the list stops growing — it
+	// only grows, and is bounded, so it does. What the preview holds whole is
+	// never listed.
+	ends := mediaEnds(text)
+	beyond := func(preview string) []map[string]any {
+		var out []map[string]any
 		for _, ref := range refs {
-			if !strings.Contains(marker.Preview, ref[mapping.MediaRefKey].(string)) {
-				marker.MediaCount++
+			if end, ok := ends[ref[mapping.MediaRefKey].(string)]; !ok || end > len(preview) {
+				out = append(out, ref)
 			}
 		}
+		return out
+	}
+	cut := func(listed []map[string]any) string {
+		marker.MediaCount, marker.Media = len(refs), listed
+		if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
+			return fitString(text, room)
+		}
+		return ""
+	}
+	var listed []map[string]any
+	preview := cut(nil)
+	for range maxListedMedia + 1 {
+		next := fitReferences(beyond(preview), b.share-bareMarkerSize-mediaKeyOverhead)
+		if len(next) == len(listed) {
+			break
+		}
+		listed = next
+		preview = cut(listed)
+	}
+	marker.Preview = preview
+	marker.Media = listed
+	marker.MediaCount = len(beyond(preview))
+	if marker.MediaCount == 0 {
+		marker.Media = nil
 	}
 	return marker
+}
+
+// mediaEnds is where each media reference ends in the payload's JSON text, by
+// body: the offset just past the reference's object, the first time the body
+// appears. The text is what json.Marshal wrote, in which a reference is
+// `{"mime_type":…,"size":…,"tracepad_media":"<sha>"}` — `tracepad_media` is the
+// last key a reference has, and a quote inside a string is escaped, so the
+// sequence below is only ever a key and never text a prompt quoted.
+func mediaEnds(text string) map[string]int {
+	const key = `"` + mapping.MediaRefKey + `":"`
+	ends := map[string]int{}
+	for from := 0; ; {
+		at := strings.Index(text[from:], key)
+		if at < 0 {
+			return ends
+		}
+		start := from + at + len(key)
+		from = start
+		if start+64 > len(text) || !isSHA256Hex(text[start:start+64]) {
+			continue
+		}
+		if _, seen := ends[text[start:start+64]]; !seen {
+			ends[text[start:start+64]] = start + 64 + len(`"}`)
+		}
+	}
 }
 
 // mediaReferences are the media references in a payload (spec 041 #4), once

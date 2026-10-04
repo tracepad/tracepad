@@ -33,6 +33,19 @@ export function duration(ms: number | null | undefined): string {
 }
 
 /**
+ * A duration on a chart's axis or in its tooltip. The stored latency is whole
+ * milliseconds, so `duration` calls everything under one `<1 ms`; but a
+ * percentile over a rolled-up histogram is a real number, and the ticks of an
+ * axis that spans 0 to 0.4 ms (0, 0.2, 0.4) must not all read the same. Under
+ * a millisecond it keeps what the number has; from one up it is `duration`
+ * (spec 006 #34).
+ */
+export function axisDuration(ms: number | null | undefined): string {
+	if (ms == null || !Number.isFinite(ms) || ms < 0 || ms >= 1) return duration(ms);
+	return `${round(ms, 2)} ms`;
+}
+
+/**
  * A wait — time to first token — formatted like a duration but keeping its
  * sign. `duration` renders a negative as absent, and it is right to: a
  * negative latency is a corrupt row. A negative TTFT is not. The client said

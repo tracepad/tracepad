@@ -89,6 +89,91 @@ func TestAMarkerNamesTheMediaTheCutLeavesOut(t *testing.T) {
 		}
 	})
 
+	// Review of #202: references the preview holds are not listed, and the ones
+	// past it are, whatever the list's own room costs the preview.
+	t.Run("what the preview holds is not listed and what it does not is", func(t *testing.T) {
+		many := []any{}
+		for n := 1; n <= 40; n++ {
+			many = append(many, ref(n))
+		}
+		many = append(many, text)
+		big := payloadBudget{share: 3000, affordable: true}
+		got, _ := big.render(many, "t", "o").(truncation)
+		var inPreview int
+		for n := 1; n <= 40; n++ {
+			if strings.Contains(got.Preview, sha(n)) {
+				inPreview++
+			}
+		}
+		if inPreview == 0 || inPreview == 40 {
+			t.Fatalf("%d of 40 references are in the preview, want some and not all", inPreview)
+		}
+		if got.MediaCount != 40-inPreview || len(got.Media) != min(got.MediaCount, maxListedMedia) {
+			t.Errorf("media_count = %d, listed %d, want the %d the preview does not hold, the first %d listed",
+				got.MediaCount, len(got.Media), 40-inPreview, maxListedMedia)
+		}
+		for _, listed := range got.Media {
+			if strings.Contains(got.Preview, listed["tracepad_media"].(string)) {
+				t.Errorf("%v is listed and in the preview", listed["tracepad_media"])
+			}
+		}
+		if size := markerSize(got); size > big.share {
+			t.Errorf("the marker is %d bytes, over its share of %d", size, big.share)
+		}
+	})
+
+	// The reviewer's case: some in the preview, a few past it, and the few are
+	// all listed. Over every size of payload and of share, the list is exactly
+	// the references the preview does not hold, up to its limit, and the marker
+	// stays in its share.
+	t.Run("the list is what the preview does not hold, at every size", func(t *testing.T) {
+		sawAHandful := false
+		for refs := 5; refs <= 40; refs += 5 {
+			for share := 1500; share <= 4000; share += 250 {
+				many := []any{}
+				for n := 1; n <= refs; n++ {
+					many = append(many, ref(n))
+				}
+				many = append(many, text)
+				got, ok := payloadBudget{share: share, affordable: true}.render(many, "t", "o").(truncation)
+				if !ok {
+					t.Fatalf("refs=%d share=%d: not cut", refs, share)
+				}
+				beyond := 0
+				for n := 1; n <= refs; n++ {
+					if !strings.Contains(got.Preview, sha(n)+`"}`) {
+						beyond++
+					}
+				}
+				// The list is the references the preview does not hold, up to its
+				// limit — and fewer only when a share too small for them ran out
+				// (sixteen take about 2 KB).
+				want := min(beyond, maxListedMedia)
+				if got.MediaCount != beyond || len(got.Media) > want || (len(got.Media) < want && share >= 3000) {
+					t.Errorf("refs=%d share=%d: media_count=%d listed=%d preview=%d bytes, want %d beyond the preview and %d listed",
+						refs, share, got.MediaCount, len(got.Media), len(got.Preview), beyond, want)
+				}
+				if size := markerSize(got); size > share {
+					t.Errorf("refs=%d share=%d: the marker is %d bytes", refs, share, size)
+				}
+				sawAHandful = sawAHandful || (beyond > 0 && beyond <= maxListedMedia && got.Preview != "")
+			}
+		}
+		if !sawAHandful {
+			t.Error("no size made a handful of references fall past a preview: the case was not exercised")
+		}
+	})
+
+	// A hash a prompt quotes is text, not the reference: the reference after
+	// the cut is still listed.
+	t.Run("a hash quoted in the text does not make the reference seen", func(t *testing.T) {
+		quoting := map[string]any{"type": "text", "text": "the file is " + sha(1) + ". " + strings.Repeat("padding ", 2000)}
+		got := marker(t, []any{quoting, ref(1)})
+		if got.MediaCount != 1 || len(got.Media) != 1 {
+			t.Errorf("media = %d %v, want the reference past the preview despite the quoted hash", got.MediaCount, got.Media)
+		}
+	})
+
 	t.Run("things that are not references are not counted", func(t *testing.T) {
 		got := marker(t, []any{text,
 			map[string]any{"tracepad_media": "not-a-hash", "mime_type": "image/png"},

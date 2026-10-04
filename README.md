@@ -28,7 +28,7 @@ old form working for at least one release and says so in the
   fields and filters are added; a documented one is not renamed or removed. The
   CLI's JSON output is that API's bytes, so it is as stable as the API.
 - **The data on disk.** Schema migrations run on start and only go forward; the
-  server copies the database beside itself (`tracepad.db.pre-<migration>.bak`)
+  server copies the database beside itself (`tracepad.db.pre-<NNNN>_<name>.bak`)
   before applying one. A downgrade is not supported, so back up before an
   upgrade ([docs/install.md](docs/install.md#upgrading)).
 - **The Python, Node and Go packages** follow [semantic versioning](https://semver.org/):

@@ -148,7 +148,7 @@ companions: traces, scores, prompts, the raw OTLP archive, images, accounts and
 keys (hashed). There is no second store to keep in step with it. Beside it is
 `tracepad.db.lock`, which a running server holds so that a second one on the same
 directory refuses to start, and an
-upgrade that applies a migration leaves `tracepad.db.pre-<migration>.bak`
+upgrade that applies a migration leaves `tracepad.db.pre-<NNNN>_<name>.bak`
 ([below](#upgrading)).
 
 ## As a service
@@ -232,7 +232,7 @@ upgrade is only as safe as the copy you took before it.
    large database takes a while and logs its progress.
 
 **The server keeps a copy of its own, too.** Before every start that applies a
-migration it writes `tracepad.db.pre-<migration>.bak` beside the database — a
+migration it writes `tracepad.db.pre-<NNNN>_<name>.bak` beside the database — a
 full copy as it stood before, readable by its owner only, for rolling that
 upgrade back by putting the file in place of `tracepad.db` with the server
 stopped. The backups of earlier upgrades are removed once the new migrations have
