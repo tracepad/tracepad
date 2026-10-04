@@ -28,6 +28,7 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace as otel
 
 from . import _attributes as attrs
+from . import _tracestate
 from ._config import VERSION, Config, adopt, resolve, resolve_timeout
 from ._generation import Stream, read_response
 from ._log import logger
@@ -429,6 +430,10 @@ def update_trace(
     version of this trace's own logic — a pipeline revision, a prompt bundle,
     an experiment arm — beside `release`, the deployment's, set once at
     `init` (spec 038 #3).
+
+    Calls on one span add up (spec 017 #24): `tags` join the ones the package
+    wrote there, in the order first seen and without repeats, and `metadata`
+    adds its keys, the later value winning.
     """
     span = otel.get_current_span()
     if not span.is_recording():
@@ -437,10 +442,8 @@ def update_trace(
     _set(span, attrs.TRACE_NAME, name)
     _set(span, attrs.USER_ID, user_id)
     _set(span, attrs.SESSION_ID, session_id)
-    if tags is not None:
-        _set(span, attrs.TRACE_TAGS, attrs.dumps(list(tags)))
-    if metadata is not None:
-        _set(span, attrs.TRACE_METADATA, attrs.dumps(metadata))
+    if tags is not None or metadata is not None:
+        span.set_attributes(_tracestate.update(span, tags, metadata))
     _set(span, attrs.TRACE_VERSION, version or None)
 
 

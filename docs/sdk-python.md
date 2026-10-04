@@ -297,7 +297,15 @@ tracepad.update(level="WARNING", status_message="retried once")
 ```
 
 Both act on the *current* span, whoever started it, and the store resolves the
-trace-level ones for the trace. Outside every span, in a process that traces,
+trace-level ones for the trace. Calls on one span add up: `tags` are merged in
+the order they first appeared, without repeats, and `metadata` is merged by key
+across calls, the later value winning — the package keeps what it has written on
+the span, in memory and under a lock, and writes the one array and the one
+object whole each time. Only what *this package* wrote is merged: tags another
+writer set on the same span are not readable through the OpenTelemetry API and
+are replaced by the first call. Tags are bounded at 50 and metadata at 512 keys
+and 1 MiB, as the server bounds them, and the first time one bites the package
+says so in a warning. Outside every span, in a process that traces,
 both log a warning and do nothing — that call is a mistake. On a span that does
 not record — tracing off, or a sampler's choice — they do nothing with a debug
 line: that is configuration, and a warning on every call would teach an

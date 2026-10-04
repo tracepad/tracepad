@@ -54,7 +54,10 @@ func (runContextProcessor) OnStart(parent context.Context, span sdktrace.ReadWri
 	attempt.saw(span)
 }
 
-func (runContextProcessor) OnEnd(sdktrace.ReadOnlySpan)      {}
+func (runContextProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
+	forgetTraceState(span.SpanContext())
+}
+
 func (runContextProcessor) Shutdown(context.Context) error   { return nil }
 func (runContextProcessor) ForceFlush(context.Context) error { return nil }
 

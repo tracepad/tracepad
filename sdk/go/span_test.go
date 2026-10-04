@@ -2,8 +2,12 @@ package tracepad
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -121,6 +125,141 @@ func TestUpdateActsOnTheCurrentSpanWhoeverStartedIt(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got, value)
 		}
 	}
+}
+
+// Spec 033 #22: calls on one span add up, in memory, and both attributes are
+// written whole — the wire is one JSON array and one JSON object.
+func TestUpdateTraceAddsToWhatThePackageWroteOnTheSpan(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	UpdateTrace(ctx, WithTags("a", "b"), WithTraceMetadata(map[string]any{"channel": "web", "tier": 1}))
+	UpdateTrace(ctx, WithTags("b", "c"), WithTraceMetadata(map[string]any{"tier": 2, "region": "eu"}))
+	UpdateTrace(ctx, WithTags())
+	UpdateTrace(ctx, WithUserID("u-1"))
+	span.End()
+
+	attrs := r.attrs(t, "handler")
+	if got := str(t, attrs, attrTraceTags); got != `["a","b","c"]` {
+		t.Errorf("tags = %s, want [a b c]", got)
+	}
+	if got := str(t, attrs, attrTraceMetadata); got != `{"channel":"web","region":"eu","tier":2}` {
+		t.Errorf("metadata = %s", got)
+	}
+	for key := range attrs {
+		if strings.HasPrefix(key, attrTraceMetadata+".") {
+			t.Errorf("per-key attribute %s was written", key)
+		}
+	}
+}
+
+func TestTraceMetadataStringsThatLookLikeJSONStayStrings(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"raw": `{"not":"parsed"}`, "n": "1"}))
+	span.End()
+	if got := str(t, r.attrs(t, "handler"), attrTraceMetadata); got != `{"n":"1","raw":"{\"not\":\"parsed\"}"}` {
+		t.Errorf("metadata = %s", got)
+	}
+}
+
+func TestTwoHundredTraceMetadataKeysLeaveTheStepItsAttributes(t *testing.T) {
+	r := setup(t)
+	ctx, step := Span(context.Background(), "handler")
+	Update(ctx, WithOutput("the answer"))
+	entries := map[string]any{}
+	for n := range 200 {
+		entries[fmt.Sprintf("k%d", n)] = n
+	}
+	UpdateTrace(ctx, WithTraceMetadata(entries))
+	step.End()
+
+	attrs := r.attrs(t, "handler")
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(str(t, attrs, attrTraceMetadata)), &decoded); err != nil || len(decoded) != 200 {
+		t.Fatalf("metadata has %d keys, err %v", len(decoded), err)
+	}
+	if got := str(t, attrs, attrOutput); got != "the answer" {
+		t.Errorf("the step's output = %q", got)
+	}
+	if len(attrs) > 20 {
+		t.Errorf("%d attributes on the span, want a handful", len(attrs))
+	}
+}
+
+// Run with -race: the merge and the write of the attribute are one critical
+// section, so the last writer cannot leave an attribute without the others.
+func TestConcurrentUpdateTraceCallsLoseNothing(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	var wg sync.WaitGroup
+	for n := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			UpdateTrace(ctx, WithTags(fmt.Sprintf("t%d", n)), WithTraceMetadata(map[string]any{fmt.Sprintf("k%d", n): n}))
+		}()
+	}
+	wg.Wait()
+	span.End()
+
+	attrs := r.attrs(t, "handler")
+	var tags []string
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(str(t, attrs, attrTraceTags)), &tags); err != nil || len(tags) != 32 {
+		t.Errorf("tags = %v, err %v", tags, err)
+	}
+	if err := json.Unmarshal([]byte(str(t, attrs, attrTraceMetadata)), &metadata); err != nil || len(metadata) != 32 {
+		t.Errorf("metadata has %d keys, err %v", len(metadata), err)
+	}
+}
+
+func TestTraceMetadataAndTagsAreBoundedAsTheServerBoundsThem(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	entries := map[string]any{}
+	var tags []string
+	for n := range 600 {
+		entries[fmt.Sprintf("k%03d", n)] = n
+	}
+	for n := range 80 {
+		tags = append(tags, fmt.Sprint(n))
+	}
+	UpdateTrace(ctx, WithTraceMetadata(entries), WithTags(tags...))
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"k000": "replaced", "late": 1}))
+	span.End()
+
+	attrs := r.attrs(t, "handler")
+	var metadata map[string]any
+	var gotTags []string
+	_ = json.Unmarshal([]byte(str(t, attrs, attrTraceMetadata)), &metadata)
+	_ = json.Unmarshal([]byte(str(t, attrs, attrTraceTags)), &gotTags)
+	if len(metadata) != maxTraceKeys || metadata["k000"] != "replaced" || metadata["late"] != nil {
+		t.Errorf("metadata has %d keys, k000 = %v, late = %v", len(metadata), metadata["k000"], metadata["late"])
+	}
+	if len(gotTags) != maxTraceTags {
+		t.Errorf("%d tags, want %d", len(gotTags), maxTraceTags)
+	}
+}
+
+func TestASpansTraceStateIsForgottenWhenItEnds(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	UpdateTrace(ctx, WithTags("a"))
+	key := spanKey{span.SpanContext().TraceID(), span.SpanContext().SpanID()}
+	traceStates.mu.Lock()
+	_, held := traceStates.byspan[key]
+	traceStates.mu.Unlock()
+	if !held {
+		t.Fatal("no state was kept")
+	}
+	forgetTraceState(span.SpanContext())
+	traceStates.mu.Lock()
+	_, held = traceStates.byspan[key]
+	traceStates.mu.Unlock()
+	if held || slices.Contains(traceStates.order, key) {
+		t.Error("the state outlived the span")
+	}
+	span.End()
 }
 
 // In Go the function names the shape and WithType only the kind written

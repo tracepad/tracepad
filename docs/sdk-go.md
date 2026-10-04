@@ -267,7 +267,15 @@ tracepad.Update(ctx, tracepad.WithLevel("WARNING"), tracepad.WithStatusMessage("
 ```
 
 Both act on the context's current span, whoever started it, and the store
-resolves the trace-level ones for the trace. `Update` takes `WithName`,
+resolves the trace-level ones for the trace. Calls on one span add up: the tags
+are merged in the order they first appeared, without repeats, and
+`WithTraceMetadata` is merged by key across calls, the later value winning — the
+package keeps what it has written on the span, under a lock, and writes the one
+array and the one object whole each time, so concurrent calls lose nothing. Only
+what *this package* wrote is merged: tags another writer set on the same span are
+not readable through the OpenTelemetry API and are replaced by the first call.
+Tags are bounded at 50 and metadata at 512 keys and 1 MiB, as the server bounds
+them, and the first time one bites the package logs a warning. `Update` takes `WithName`,
 `WithInput`, `WithOutput`, `WithMetadata`, `WithLevel`, `WithStatusMessage` and
 `WithType`. Outside every span, in a process that traces, both log a warning
 and do nothing — that call is a mistake. On a span that does not record —
@@ -280,8 +288,8 @@ ignore the package's warnings.
 | `WithTraceName(string)` | The trace's name |
 | `WithUserID(string)` | Who the trace is for |
 | `WithSessionID(string)` | The session it belongs to |
-| `WithTags(...string)` | Its tags |
-| `WithTraceMetadata(any)` | Free metadata on the trace, a JSON object |
+| `WithTags(...string)` | Its tags, merged with those of earlier calls on the span |
+| `WithTraceMetadata(any)` | Free metadata on the trace, a JSON object, merged by key across calls |
 | `WithTraceVersion(string)` | The version of this trace's own logic |
 
 `WithTraceVersion` is the version of *this trace's* logic — a pipeline

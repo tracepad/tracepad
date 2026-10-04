@@ -355,3 +355,84 @@ def test_a_generator_that_raises_ends_its_span_as_an_error(spans: Any) -> None:
     assert span.status.status_code is StatusCode.ERROR
     assert [event.name for event in span.events] == ["exception"]
     assert json.loads(span.attributes[attrs.OUTPUT]) == ["a"]
+
+
+def test_update_trace_calls_on_one_span_add_up(spans: Any) -> None:
+    """Spec 017 #24: tags are the union in the order first seen, metadata merges by
+    top-level key with the later value winning, and both are written whole — the
+    wire is one JSON array and one JSON object."""
+    with tracepad.span("handler", input="in"):
+        tracepad.update_trace(tags=["a", "b"], metadata={"channel": "web", "tier": 1})
+        tracepad.update_trace(tags=["b", "c"], metadata={"tier": 2, "region": "eu"})
+        tracepad.update_trace(tags=[])
+        tracepad.update_trace(user_id="u-1")
+
+    attributes = spans.attributes("handler")
+    assert json.loads(attributes[attrs.TRACE_TAGS]) == ["a", "b", "c"]
+    assert json.loads(attributes[attrs.TRACE_METADATA]) == {
+        "channel": "web",
+        "tier": 2,
+        "region": "eu",
+    }
+    assert not [key for key in attributes if key.startswith(f"{attrs.TRACE_METADATA}.")]
+
+
+def test_update_trace_metadata_strings_that_look_like_json_stay_strings(spans: Any) -> None:
+    with tracepad.span("handler"):
+        tracepad.update_trace(metadata={"raw": '{"not": "parsed"}', "n": "1"})
+    assert json.loads(spans.attributes("handler")[attrs.TRACE_METADATA]) == {
+        "raw": '{"not": "parsed"}',
+        "n": "1",
+    }
+
+
+def test_two_hundred_trace_metadata_keys_are_one_attribute(spans: Any) -> None:
+    with tracepad.span("handler") as step:
+        step.update(output="the answer")
+        tracepad.update_trace(metadata={f"k{n}": n for n in range(200)})
+
+    attributes = spans.attributes("handler")
+    assert len(json.loads(attributes[attrs.TRACE_METADATA])) == 200
+    assert attributes[attrs.OUTPUT] == "the answer"
+    assert len(attributes) < 20
+
+
+def test_concurrent_update_trace_calls_lose_nothing(spans: Any) -> None:
+    import threading
+
+    with tracepad.span("handler") as step:
+        carried = step.span
+
+        def call(n: int) -> None:
+            with otel_api.use_span(carried):
+                tracepad.update_trace(tags=[f"t{n}"], metadata={f"k{n}": n})
+
+        threads = [threading.Thread(target=call, args=(n,)) for n in range(32)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    attributes = spans.attributes("handler")
+    assert sorted(json.loads(attributes[attrs.TRACE_TAGS])) == sorted(f"t{n}" for n in range(32))
+    assert len(json.loads(attributes[attrs.TRACE_METADATA])) == 32
+
+
+def test_trace_metadata_is_bounded_as_the_server_bounds_it(
+    spans: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    from tracepad import _tracestate
+
+    _tracestate._warned = False
+    with caplog.at_level(logging.WARNING, logger="tracepad"):
+        with tracepad.span("handler"):
+            tracepad.update_trace(
+                metadata={f"k{n}": n for n in range(600)}, tags=[str(n) for n in range(80)]
+            )
+            tracepad.update_trace(metadata={"k0": "replaced", "late": 1})
+
+    attributes = spans.attributes("handler")
+    metadata = json.loads(attributes[attrs.TRACE_METADATA])
+    assert len(metadata) == 512 and metadata["k0"] == "replaced" and "late" not in metadata
+    assert len(json.loads(attributes[attrs.TRACE_TAGS])) == 50
+    assert caplog.text.count("is bounded") == 1

@@ -218,6 +218,57 @@ describe('span, event and generation', () => {
     });
   });
 
+  // Spec 032 #24: calls on one span add up, in memory, and both attributes
+  // are written whole — the wire is one JSON array and one JSON object.
+  test('updateTrace adds tags and metadata keys to what the span carries', () => {
+    const seen = spans();
+    tracepad.span('handler', () => {
+      tracepad.updateTrace({ tags: ['a', 'b'], metadata: { channel: 'web', tier: 1 } });
+      tracepad.updateTrace({ tags: ['b', 'c'], metadata: { tier: 2, region: 'eu' } });
+      tracepad.updateTrace({ tags: [] });
+      tracepad.updateTrace({ userId: 'u-1' });
+    });
+    const attributes = seen.attributes('handler');
+    expect(JSON.parse(attributes[attrs.TRACE_TAGS] as string)).toEqual(['a', 'b', 'c']);
+    expect(JSON.parse(attributes[attrs.TRACE_METADATA] as string)).toEqual({ channel: 'web', tier: 2, region: 'eu' });
+    expect(Object.keys(attributes).filter((key) => key.startsWith(`${attrs.TRACE_METADATA}.`))).toEqual([]);
+  });
+
+  test('metadata strings that look like JSON stay strings', () => {
+    const seen = spans();
+    tracepad.span('handler', () => tracepad.updateTrace({ metadata: { raw: '{"not":"parsed"}', n: '1' } }));
+    expect(JSON.parse(seen.attributes('handler')[attrs.TRACE_METADATA] as string)).toEqual({ raw: '{"not":"parsed"}', n: '1' });
+  });
+
+  test('two hundred metadata keys are one attribute and leave the step its own', () => {
+    const seen = spans();
+    tracepad.span('handler', (step) => {
+      step.update({ output: 'the answer' });
+      tracepad.updateTrace({ metadata: Object.fromEntries(Array.from({ length: 200 }, (_, n) => [`k${n}`, n])) });
+    });
+    const attributes = seen.attributes('handler');
+    expect(Object.keys(JSON.parse(attributes[attrs.TRACE_METADATA] as string))).toHaveLength(200);
+    expect(attributes[attrs.OUTPUT]).toBe('the answer');
+    expect(Object.keys(attributes).length).toBeLessThan(20);
+  });
+
+  test('metadata and tags are bounded as the server bounds them, and it says so once', () => {
+    const seen = spans();
+    tracepad.span('handler', () => {
+      tracepad.updateTrace({
+        metadata: Object.fromEntries(Array.from({ length: 600 }, (_, n) => [`k${n}`, n])),
+        tags: Array.from({ length: 80 }, (_, n) => String(n)),
+      });
+      tracepad.updateTrace({ metadata: { k0: 'replaced', late: 1 } });
+    });
+    const attributes = seen.attributes('handler');
+    const metadata = JSON.parse(attributes[attrs.TRACE_METADATA] as string) as Record<string, unknown>;
+    expect(Object.keys(metadata)).toHaveLength(512);
+    expect(metadata.k0).toBe('replaced');
+    expect(metadata.late).toBeUndefined();
+    expect(JSON.parse(attributes[attrs.TRACE_TAGS] as string)).toHaveLength(50);
+  });
+
   test('an empty version is no version, as in Go', () => {
     const seen = spans();
     tracepad.span('handler', () => tracepad.updateTrace({ version: '' }));

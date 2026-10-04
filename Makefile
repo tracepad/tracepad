@@ -204,7 +204,7 @@ py-lint: ## Lint and format-check the Python package and scripts/ with the ruff 
 # for `compile`'s own substitution (spec 017 #18), and for the key and the path
 # (spec 017 #19), for the deprecated host variable (spec 017 #21), and for
 # `ruff format` (spec 017 #23).
-SDK_BUDGET := 2200
+SDK_BUDGET := 2275
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
@@ -226,7 +226,7 @@ sdk-go-unit: ## The Go package's vet and unit tests alone (part of the gate)
 # cost and bounds of spec 042, for the key and the path (spec 033 #18), and for
 # writing a long item list in batches (spec 033 #19), and for the deprecated
 # host variable (spec 033 #20).
-SDK_GO_BUDGET := 2620
+SDK_GO_BUDGET := 2790
 
 sdk-go-lines: ## Report the Go package's application lines against its budget
 	scripts/sdk-go-lines.sh $(SDK_GO_BUDGET)
@@ -259,7 +259,7 @@ sdk-js-unit: ## The Node package's type check and unit suite alone (part of the 
 # `tracepad/testing` (spec 040 #13), for the cost and bounds of spec 042, for
 # the key and the path (spec 032 #17), and for writing a long item list in
 # batches (spec 032 #21), and for the deprecated host variable (spec 032 #23).
-SDK_JS_BUDGET := 2345
+SDK_JS_BUDGET := 2425
 
 sdk-js-lines: ## Report the Node package's application lines against its budget
 	scripts/sdk-js-lines.sh $(SDK_JS_BUDGET)
