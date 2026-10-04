@@ -1,0 +1,164 @@
+# The server image on Docker Hub (spec 020 #33). The same multi-arch index as
+# on GHCR, at the same digest: GHCR stays the canonical registry and the home
+# of the attestation, which `gh attestation verify` finds for the copy by the
+# digest the two share.
+#
+#   - `release-server.yml` calls this workflow for a stable tag, after `image`
+#     has pushed and attested the index on GHCR (`needs: image`);
+#   - `workflow_dispatch` does it by hand, on the tag: a release whose mirror
+#     failed, or was never set up, and which cannot be re-run any more — GitHub
+#     lets a run's jobs be re-run for 30 days. Start it on the tag's ref, which
+#     is also what the `release` environment's deployment policy lets in (a
+#     dispatch from a branch is refused by that policy, before this file runs):
+#
+#         gh workflow run mirror-image.yml --ref vX.Y.Z
+#
+# One job for both, because the job that holds Docker Hub's credentials checks
+# nothing out (release-server.yml, #19) and so cannot run a script from the
+# tag: what is committed here is the whole of it, and
+# `scripts/mirror-step-test.sh` lifts the step out of this file to test it.
+#
+# It decides everything from the tag it runs on and from what exists now, and
+# not from what the release run knew when it started. Which tags a release may
+# move is a question about the tags that exist (release-server.yml, `check`,
+# #16), and a re-run weeks later is asked it again: a back-patch, or the
+# mirror of an older release re-run after a newer one is out, moves its exact
+# version and not `latest` or `X.Y` — they move forward only. The question is
+# asked after the exact version is copied and right before the moving tags are,
+# which leaves a window of seconds in which a tag pushed at that moment is not
+# seen; `scripts/mirror-step-test.sh` holds this rule to `check`'s.
+#
+# Nothing waits for it and nothing is taken back by it: a Docker Hub that is
+# down, a token that has expired or credentials never set make this run red and
+# leave the release, the docs, the Homebrew tap and GHCR as they are.
+name: Mirror the image to Docker Hub
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      digest:
+        description: "The index's digest on GHCR, as `image` pushed and attested it; read from the version's tag on GHCR when empty"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    environment: release
+    # A few copies of an image that is already on GHCR; a `skopeo` that hangs
+    # against Docker Hub must not hold the tag's group for the default six hours.
+    timeout-minutes: 20
+    # A group for each tag, so that the same tag is not copied twice at once.
+    # Not one group for all: GitHub keeps one running and one pending job per
+    # group, and a newer job replaces the pending one whatever
+    # `cancel-in-progress` says, so three tags dispatched in a row would lose the
+    # middle one without a failure. Different tags run side by side, and that
+    # is safe because no run moves a moving tag backwards: each decides by the
+    # tags that exist, not by when it ran.
+    concurrency:
+      group: mirror-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read # the repository's tag names, through the API — nothing is checked out
+      packages: read # the image on GHCR, which a package that is not public needs a login to read
+    steps:
+      - name: Copy the index to Docker Hub
+        env:
+          SOURCE: ghcr.io/${{ github.repository }}
+          MIRROR: docker.io/${{ github.repository }}
+          DIGEST: ${{ inputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A stable release's tag and nothing else, by the shape
+          # scripts/release-tag.sh accepts: the `release` environment lets in
+          # any `v*` tag, a pre-release among them, and that is not mirrored.
+          num='(0|[1-9][0-9]*)'
+          if ! [[ $GITHUB_REF_NAME =~ ^v$num\.$num\.$num$ ]]; then
+            echo "::error::'$GITHUB_REF_NAME' is not a stable release tag (vX.Y.Z); a pre-release is not mirrored"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error title=Not mirrored to Docker Hub::$GITHUB_REF_NAME is on GHCR and was not copied to $MIRROR: the variable DOCKERHUB_USERNAME and the secret DOCKERHUB_TOKEN of the release environment must both be set. Set them, then re-run this job or, once the run is more than 30 days old, start it on the tag: gh workflow run mirror-image.yml --ref $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+          # Skopeo's logins in a file of this job's, removed with the runner;
+          # one for each end, because a package that is not public needs one
+          # to be read. The tokens go through stdin, never a command line.
+          export REGISTRY_AUTH_FILE="$RUNNER_TEMP/auth.json"
+          skopeo login "${SOURCE%%/*}" --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+
+          # The digest `image` attested, when called by the release. By hand
+          # it is what the version's own tag holds on GHCR — the raw manifest's
+          # hash is the digest, whatever the index says — and nothing here
+          # checks that it is the one that was attested: the person who runs it
+          # does, with `gh attestation verify oci://$SOURCE:<version>`
+          # (AGENTS.md, Releasing).
+          if [ -z "$DIGEST" ]; then
+            DIGEST="sha256:$(skopeo inspect --raw "docker://$SOURCE:$version" | sha256sum | cut -d' ' -f1)"
+          fi
+          if ! [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no digest to mirror: '$DIGEST'"
+            exit 1
+          fi
+
+          skopeo login "${MIRROR%%/*}" --username "$DOCKERHUB_USERNAME" --password-stdin <<< "$DOCKERHUB_TOKEN"
+
+          # The exact version, from GHCR, whatever else is decided. The digest
+          # each copy reports is compared with the one that was read (the
+          # attested one, from a release): a difference stops here, before the
+          # next tag. `--preserve-digests` keeps every
+          # manifest of the index as it was.
+          copy() {
+            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" "docker://$1" "docker://$MIRROR:$2"
+            got="$(cat "$RUNNER_TEMP/digest")"
+            if [ "$got" != "$DIGEST" ]; then
+              echo "::error::$MIRROR:$2 is $got, not $DIGEST"
+              exit 1
+            fi
+            echo "mirrored $MIRROR:$2 at $DIGEST"
+          }
+          copy "$SOURCE@$DIGEST" "$version"
+
+          # What else this release may move, by the tags that exist now — asked
+          # after the copy above and before the next one, as late as it can be:
+          # the same rule as `check` (#16), whose `git tag` is the API here
+          # because nothing is checked out. Only stable tags are compared, by
+          # the shape `check` and scripts/release-tag.sh apply — no leading
+          # zeros, which `sort -V` and git's sort order differently — so
+          # `sort -V` orders them.
+          stable="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
+                    sed -n 's|^refs/tags/||p' | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/')"
+          # An empty answer would make every release the newest.
+          if ! grep -qxF "$GITHUB_REF_NAME" <<< "$stable"; then
+            echo "::error::$GITHUB_REF_NAME is not among the tags $GITHUB_REPOSITORY lists; its exact version is mirrored and nothing else"
+            exit 1
+          fi
+          newest="$(sort -V <<< "$stable" | tail -1)"
+          line="v${version%.*}"
+          newest_on_line="$(awk -v p="$line." 'index($0, p) == 1' <<< "$stable" | sort -V | tail -1)"
+          names=()
+          if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
+            names+=("${version%.*}")
+          else
+            echo "not moving ${version%.*}: $newest_on_line is newer on that line"
+          fi
+          if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+            names+=(latest)
+          else
+            echo "not moving latest: $newest is newer"
+          fi
+
+          # The moving tags are pointed at what the copy left on Docker Hub, by
+          # digest, which moves no blob and reads GHCR once.
+          for name in ${names[@]+"${names[@]}"}; do
+            copy "$MIRROR@$DIGEST" "$name"
+          done

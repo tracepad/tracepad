@@ -312,6 +312,9 @@ release-tag-test: ## Assert which tags the release workflow accepts, as stable, 
 release-notes-test: ## Assert how the release notes are cut from CHANGELOG.md, and that it keeps [Unreleased] (part of the gate)
 	scripts/release-notes.sh --self-test
 
+mirror-step-test: ## Run mirror-image.yml's Docker Hub mirror step, as committed, against stand-ins for skopeo and gh (part of the gate)
+	scripts/mirror-step-test.sh
+
 sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE
 	@for copy in sdk/js/LICENSE sdk/python/LICENSE; do \
 		cmp -s LICENSE "$$copy" || { echo "sdk-notices: $$copy differs from ./LICENSE; copy it again"; exit 1; }; \
@@ -326,7 +329,7 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 sdk-release-check: ## Assert the SDK tag checks against the versions in the tree
 	scripts/sdk-release-check-test.sh
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -375,5 +378,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \
-	doc-anchors doc-anchors-self-test release-tag-test release-notes-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
+	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks

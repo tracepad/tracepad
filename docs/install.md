@@ -97,6 +97,9 @@ way:
 gh attestation verify oci://ghcr.io/tracepad/tracepad:0.1.0 --repo tracepad/tracepad
 ```
 
+The copy on Docker Hub has the same digest, so it verifies the same way (see
+[Docker Hub](docker.md#docker-hub)).
+
 ## Put it on the path
 
 ```sh

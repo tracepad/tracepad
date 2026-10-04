@@ -116,7 +116,9 @@ docker logs tracepad          # the first run prints your app's key, once
 
 The port is published on this machine only: Tracepad speaks plain HTTP, and
 serving it to anyone else is a job for a TLS proxy in front
-([docs/docker.md](docs/docker.md#serving-over-tls)).
+([docs/docker.md](docs/docker.md#serving-over-tls)). The image is also on Docker
+Hub as `tracepad/tracepad`, the same one at the same digest
+([docs/docker.md](docs/docker.md#docker-hub)).
 
 Or as a binary: the archives for Linux, macOS and Windows on
 [Releases](https://github.com/tracepad/tracepad/releases) — one file, nothing

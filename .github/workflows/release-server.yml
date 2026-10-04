@@ -11,13 +11,16 @@
 # own token, and their provenance is signed through the workflow's OIDC
 # identity (#19). The one credential that is ours is the Homebrew tap's: a
 # GitHub App's key, held by the `release` environment and used by the `tap`
-# job alone, to mint a token good for an hour and for one repository (#27).
+# job alone, to mint a token good for an hour and for one repository (#27);
+# and Docker Hub's, held there too and used by the one job of `mirror-image.yml` (#33).
 #
 # Built where nothing can be published, published where nothing is built
 # (#19): `archives` and `image-build` run GoReleaser, `make ui`, `npm ci` and
 # buildx with read access alone and hand their outputs over as artifacts;
 # `release`, `image` and `tap` hold the write scopes and only attest, upload
-# and commit what they were handed — no checkout, no toolchain, no install.
+# and commit what they were handed — no checkout, no toolchain, no install —
+# and `mirror` (mirror-image.yml) holds Docker Hub's token, with read access to
+# the one package it copies, and does the same.
 #
 # Nothing here runs on `main`. The tag is the one act the owner performs
 # deliberately, and `latest` moves only with it (#6).
@@ -77,6 +80,7 @@ jobs:
           case "$kind" in
             prerelease)
               echo "pre-release: publishing $version alone"
+              echo "::notice::$version is published on GHCR alone; Docker Hub gets stable releases (spec 020 #33)"
               prerelease=true
               ;;
             stable)
@@ -89,12 +93,16 @@ jobs:
               # Only stable tags are compared, by the shape and not by the
               # lack of a dash: git's version sort puts `v0.3.0-rc.1` *after*
               # `v0.3.0`, and a tag that is no release at all (`v0.3.0+x`,
-              # pushed before #27 refused them) must not be the newest.
+              # pushed before #27 refused them, or `v0.3.00`, which it still
+              # refuses) must not be the newest. The shape is
+              # scripts/release-tag.sh's — no leading zeros — which is also what
+              # `mirror-image.yml` applies, and `scripts/mirror-step-test.sh`
+              # holds the two to the same answer.
               newest="$(git tag --list 'v[0-9]*' --sort=-v:refname |
-                        awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
+                        awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/' | head -1)"
               line="v${version%.*}"
               newest_on_line="$(git tag --list "$line.[0-9]*" --sort=-v:refname |
-                                awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' | head -1)"
+                                awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/' | head -1)"
 
               if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
                 tags="$tags,$image:${version%.*}"
@@ -278,6 +286,8 @@ jobs:
   image:
     needs: [check, image-build, release]
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       packages: write # the image and its attestation on GHCR
       id-token: write # signing the image's provenance
@@ -312,6 +322,31 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # The same index on Docker Hub (#33), by the reusable workflow
+  # `mirror-image.yml`, which is also what is started by hand on a tag when
+  # this job cannot be re-run. After `image`, for the digest it pushed and
+  # attested, and nothing waits for it: the release, the docs and the tap do
+  # not, so a Docker Hub that is down or a token that has expired turns this
+  # job red without taking anything back. A stable tag without credentials is
+  # that red job — a skipped one would read as done — and a pre-release is not
+  # mirrored: the job does not start for it, and `check` said so.
+  #
+  # Which tags the copy may move is worked out there, from the tags that
+  # exist when it runs, and not from `check`'s list, which a re-run would
+  # replay. The Docker Hub
+  # credentials belong to the job in that file, which checks nothing out and
+  # reads the API and the one package it copies; the scopes it is given here
+  # are the ceiling for those two reads.
+  mirror:
+    needs: [check, image]
+    if: needs.check.outputs.prerelease != 'true'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/mirror-image.yml
+    with:
+      digest: ${{ needs.image.outputs.digest }}
 
   # The documentation for this release (spec 050 #6), under `vX.Y` — the line,
   # not the patch: a back-patch replaces its line's pages. `latest` moves with

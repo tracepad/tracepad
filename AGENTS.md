@@ -700,6 +700,13 @@ reason in a comment; adding a dialect should be a table edit.
 - `make release-notes-test` — how a release's notes are cut from
   `CHANGELOG.md` (`scripts/release-notes.sh <tag>` prints them); part of the
   gate.
+- `make mirror-step-test` — the Docker Hub mirror step of `mirror-image.yml`,
+  taken out of the file as it stands and run against stand-ins for `skopeo` and `gh`:
+  no credentials is an error, the image is read by digest, and `X.Y` and
+  `latest` move only forward, by the same answer as `check`'s, whose step it runs in
+  a scratch repository over the same tags (spec 020 #33); part of the gate, and needs
+  nothing beyond `bash`, `awk` and `git`. `scripts/mirror-step-test.sh --extract`
+  prints the step to run against a registry of your own.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
@@ -820,6 +827,37 @@ and `latest`. A pre-release tag (`v0.2.0-rc.1`) publishes its exact tag alone �
 no `X.Y`, no `latest`. Two shapes are tags and nothing else is: `vX.Y.Z` and
 `vX.Y.Z-(alpha|beta|rc).N`; `v0.2.0rc1`, `v0.2.0+build` and the like are
 refused before anything is built (`scripts/release-tag.sh`). Nothing about this runs on a push to `main`.
+
+**Docker Hub is a copy, made last** (spec 020 #33). A stable release's `mirror`
+job — `mirror-image.yml`, called by `release-server.yml` after `image` — copies
+the index GHCR now holds to `docker.io/tracepad/tracepad`, at the same digest;
+a pre-release is not copied. It needs the `release` environment to hold the
+variable `DOCKERHUB_USERNAME` and the secret `DOCKERHUB_TOKEN` (a token with
+Read & Write on a public `tracepad/tracepad` repository on Docker Hub), and
+without them a stable tag ends with that job red and a message that says so — a
+stable image that is on GHCR and not on Docker Hub must not look like a
+finished release. Nothing waits for the job, so the release, the docs and the
+tap are out whatever it does. Once the credentials or Docker Hub are fixed:
+
+- **within 30 days of the run**, re-run **that one job** — its own *Re-run job*
+  button, or `gh run rerun <run> --job <id>`; *Re-run failed jobs* would also
+  re-run a failed `docs` or `tap`, which publish from the old tag again;
+- **later**, start the workflow by hand on the tag:
+  `gh workflow run mirror-image.yml --ref vX.Y.Z`. The `--ref` is not optional:
+  without it the run is on `main`, which the `release` environment refuses
+  ("not allowed to deploy"). It uses the workflow as the tag has it, so a tag
+  from before the file existed cannot be mirrored this way. This path takes
+  the digest from GHCR's `X.Y.Z` tag and does not check that it is the one the
+  release attested — check it first:
+  `gh attestation verify oci://ghcr.io/tracepad/tracepad:X.Y.Z --repo tracepad/tracepad`.
+
+Either way it works out which tags to move from the tags that exist when it
+runs, not from the old run: the exact version always moves, `X.Y` and `latest`
+only if this release is still the newest of its line and overall, so an older
+release's mirror re-run after a newer one never walks them backwards. Catching
+up on several releases needs no order and no waiting: start one run for each
+tag, together if you like — each has a concurrency group of its own, and a
+tag asked for twice waits for itself.
 
 **A back-patch is safe to tag.** `latest` and `X.Y` move only when the tag is
 the newest of its kind, so releasing `v0.2.5` after `v0.3.0` publishes `0.2.5`
