@@ -9,7 +9,9 @@
 # the streaming pass-through, spec 036 #8 to 1,700 for trace deletion, and
 # spec 040 #13 to 1,900 for `tracepad.testing`, and spec 042 #6 to 1,975 for
 # the cost and bounds, #12 to 2,000 for its review, spec 017 #18 to 2,040
-# for `compile`'s own substitution, and #19 to 2,100 for the key and the path.
+# for `compile`'s own substitution, #19 to 2,100 for the key and the path,
+# #21 to 2,120 for the deprecated host variable, and #23 to 2,200 for `ruff
+# format`.
 #
 # What it counts is the application; the tests are reported beside it under no
 # ceiling at all (design §8, amended; spec 010 #7). A number that charges for
@@ -19,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2120}"
+BUDGET="${1:-2200}"
 
 cd "$ROOT"
 

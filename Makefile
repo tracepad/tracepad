@@ -202,8 +202,9 @@ py-lint: ## Lint and format-check the Python package and scripts/ with the ruff 
 # the streaming pass-through (spec 031 #22), for trace deletion (spec 036 #8),
 # for `tracepad.testing` (spec 040 #13), for the cost and bounds of spec 042
 # for `compile`'s own substitution (spec 017 #18), and for the key and the path
-# (spec 017 #19), and for the deprecated host variable (spec 017 #21).
-SDK_BUDGET := 2120
+# (spec 017 #19), for the deprecated host variable (spec 017 #21), and for
+# `ruff format` (spec 017 #23).
+SDK_BUDGET := 2200
 
 sdk-lines: ## Report the Python package's application lines against its budget
 	scripts/sdk-lines.sh $(SDK_BUDGET)
