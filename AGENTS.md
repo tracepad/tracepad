@@ -703,8 +703,10 @@ reason in a comment; adding a dialect should be a table edit.
 - `make mirror-step-test` — the Docker Hub mirror step of `mirror-image.yml`,
   taken out of the file as it stands and run against stand-ins for `skopeo` and `gh`:
   no credentials is an error, the image is read by digest, and `X.Y` and
-  `latest` move only forward (spec 020 #33); part of the gate. `scripts/mirror-step-test.sh
-  --extract` prints the step to run against a registry of your own.
+  `latest` move only forward, by the same answer as `check`'s, whose step it runs in
+  a scratch repository over the same tags (spec 020 #33); part of the gate, and needs
+  nothing beyond `bash`, `awk` and `git`. `scripts/mirror-step-test.sh --extract`
+  prints the step to run against a registry of your own.
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no
@@ -841,14 +843,18 @@ tap are out whatever it does. Once the credentials or Docker Hub are fixed:
   button, or `gh run rerun <run> --job <id>`; *Re-run failed jobs* would also
   re-run a failed `docs` or `tap`, which publish from the old tag again;
 - **later**, start the workflow by hand on the tag:
-  `gh workflow run mirror-image.yml --ref vX.Y.Z` (the tag's ref is what the
-  `release` environment lets in, and it uses the workflow as the tag has it, so
-  a tag from before the file existed cannot be mirrored this way).
+  `gh workflow run mirror-image.yml --ref vX.Y.Z`. The `--ref` is not optional:
+  without it the run is on `main`, which the `release` environment refuses
+  ("not allowed to deploy"). It uses the workflow as the tag has it, so a tag
+  from before the file existed cannot be mirrored this way.
 
 Either way it works out which tags to move from the tags that exist when it
 runs, not from the old run: the exact version always moves, `X.Y` and `latest`
 only if this release is still the newest of its line and overall, so an older
-release's mirror re-run after a newer one never walks them backwards.
+release's mirror re-run after a newer one never walks them backwards. Catching
+up on several releases needs no order and no waiting: start one run for each
+tag, together if you like — each has a concurrency group of its own, and a
+tag asked for twice waits for itself.
 
 **A back-patch is safe to tag.** `latest` and `X.Y` move only when the tag is
 the newest of its kind, so releasing `v0.2.5` after `v0.3.0` publishes `0.2.5`

@@ -13,21 +13,36 @@
 # nothing; the image is read by digest and never by tag, and from GHCR once —
 # the other tags are made from what that left on Docker Hub; the exact version
 # always moves, `X.Y` and `latest` only when the tag is the newest by the tags
-# that exist now (a re-run of an older release must not walk them backwards);
-# the password goes through stdin; a copy that lands at another digest stops
-# the step before the next tag, and a tag that is not a stable one is refused.
+# that exist now, asked after the first copy (a re-run of an older release must
+# not walk them backwards) — and by the same answer as `check` gives for GHCR,
+# which is run here over the same tag sets; the password goes through stdin; a
+# copy that lands at another digest stops the step before the next tag, and a
+# tag that is not a stable one is refused.
+#
+# The two steps are taken out of the workflow files with awk: nothing here
+# needs more than the gate already does.
 set -euo pipefail
+
+# Run from a git hook (the pre-push of `make gate`) this inherits GIT_DIR and
+# its kin, which would point the scratch repository below at the real one.
+while IFS= read -r var; do unset "$var"; done < <(env | sed -n 's/^\(GIT_[A-Za-z_]*\)=.*/\1/p')
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="$root/.github/workflows/mirror-image.yml"
 
-extract() {
-	ruby -ryaml -e '
-		steps = YAML.load_file(ARGV[0]).dig("jobs", "mirror", "steps") or abort "no mirror job in #{ARGV[0]}"
-		step = steps.find { |s| s["name"] == "Copy the index to Docker Hub" } or abort "no mirror step"
-		puts step["run"]
-	' "$workflow"
+# extract_step <workflow> <step name>: the `run: |` block of the step, which in
+# these files sits at ten spaces under a step at six.
+extract_step() {
+	awk -v name="$2" '
+		$0 == "      - name: " name { found = 1; next }
+		found && /^      - / { exit }
+		found && /^        run: \|$/ { inrun = 1; next }
+		inrun && /^          / { sub(/^          /, ""); print; next }
+		inrun && /^[[:space:]]*$/ { print ""; next }
+		inrun { exit }
+	' "$1"
 }
+extract() { extract_step "$workflow" "Copy the index to Docker Hub"; }
 
 if [ "${1:-}" = --extract ]; then
 	extract
@@ -37,7 +52,13 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 extract >"$tmp/step.sh"
-[ -s "$tmp/step.sh" ] || { echo "mirror-step-test: the step has no script" >&2; exit 1; }
+extract_step "$root/.github/workflows/release-server.yml" "The tag, and the image tags it moves" >"$tmp/check.sh"
+for f in step check; do
+	if ! [ -s "$tmp/$f.sh" ] || ! bash -n "$tmp/$f.sh"; then
+		echo "mirror-step-test: the $f step was not found, or is not a script" >&2
+		exit 1
+	fi
+done
 
 # A skopeo that records how it was called and answers `copy` with whatever
 # STUB_DIGEST says, and `inspect --raw` with a manifest of its own; a login's
@@ -63,7 +84,9 @@ cat >"$tmp/bin/gh" <<'EOF_STUB'
 #!/usr/bin/env bash
 echo "gh $*" >>"$STUB_LOG"
 [ -z "${STUB_GH_FAIL:-}" ] || { echo "gh: HTTP 502" >&2; exit 1; }
-for t in $STUB_TAGS; do echo "refs/tags/$t"; done
+for t in $STUB_TAGS; do
+	case "$t" in v*) echo "refs/tags/$t" ;; esac # the API lists by prefix
+done
 EOF_STUB
 chmod +x "$tmp/bin/skopeo" "$tmp/bin/gh"
 if ! command -v sha256sum >/dev/null; then
@@ -82,7 +105,8 @@ fail() {
 	echo "FAIL: $*" >&2
 	failures=$((failures + 1))
 }
-re() { sed 's/[][\.*^$/]/\\&/g' <<<"$1"; } # a string as a regular expression
+# shellcheck disable=SC2001 # a character class, which ${//} cannot say
+re() { sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$1"; } # a string as an extended regular expression
 
 # run <name> <want exit> [VAR=value...]: the step, with the environment the
 # job gives it (VARs override), run on v0.1.0, the only tag, as the first
@@ -130,6 +154,12 @@ never first-release "$src:"
 [ "$(cat "$tmp/log.passwords")" = "$(printf 'ghcr-token\nhub-token')" ] || fail "first-release: the tokens did not go through stdin"
 says first-release "mirrored $dst:latest at $d"
 never first-release "skopeo inspect"
+# The tags that exist are asked for after the exact version is copied, and
+# before the moving ones are.
+first_copy="$(grep -n '^skopeo copy' "$tmp/log" | head -1 | cut -d: -f1)"
+asked="$(grep -n '^gh api' "$tmp/log" | head -1 | cut -d: -f1)"
+second_copy="$(grep -n '^skopeo copy' "$tmp/log" | sed -n 2p | cut -d: -f1)"
+{ [ "$first_copy" -lt "$asked" ] && [ "$asked" -lt "$second_copy" ]; } || fail "first-release: the tags are not asked between the first copy and the second"
 
 # By hand there is no digest: it is the hash of what GHCR holds under the version.
 run by-hand 0 DIGEST= STUB_DIGEST="$inspected"
@@ -190,19 +220,59 @@ run "digest moved" 1 STUB_DIGEST="$other"
 says "digest moved" "is $other, not $d"
 copies "digest moved" 1
 never "digest moved" ":latest"
-for ref in v0.1.0-rc.1 main v0.1 v01.0.0 sdk/go/v0.1.0; do
+for ref in v0.1.0-rc.1 v0.1 v01.0.0 vx.y.z; do
 	run "ref $ref" 1 GITHUB_REF_NAME="$ref"
 	says "ref $ref" "is not a stable release tag"
 	silent "ref $ref"
 done
+# The exact version is copied before the question is asked, and nothing moves
+# after an answer that is none.
 run "tag unlisted" 1 STUB_TAGS=""
 says "tag unlisted" "is not among the tags"
-copies "tag unlisted" 0
+copies "tag unlisted" 1
 run "api failure" 1 STUB_GH_FAIL=1
-copies "api failure" 0
+copies "api failure" 1
 run "bad digest" 1 DIGEST=latest
 says "bad digest" "no digest to mirror"
 copies "bad digest" 0
+
+# `check` and this step both answer "which tags may this release move" (#16),
+# one from `git tag` and the other from the API; they must give the same
+# answer over the same tags. `check`'s step is run for real, in a repository
+# that has exactly these tags.
+agree() { # agree <ref> <tags...>
+	local ref="$1" repo="$tmp/repo" tags="${*:2}" t by_check by_mirror
+	rm -rf "$repo"
+	mkdir "$repo"
+	git -C "$repo" init -q
+	git -C "$repo" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -q --allow-empty -m x
+	for t in $tags; do git -C "$repo" tag "$t"; done
+	ln -s "$root/scripts" "$repo/scripts"
+	: >"$tmp/output"
+	(cd "$repo" && GITHUB_REF_NAME="$ref" GITHUB_REPOSITORY=tracepad/tracepad GITHUB_OUTPUT="$tmp/output" \
+		bash "$tmp/check.sh" >/dev/null 2>&1) || { fail "agree $ref in [$tags]: check refused it"; return; }
+	by_check="$(sed -n 's/^tags=//p' "$tmp/output" | tr ',' '\n' | sed "s|^$(re "$src"):||" | sort | paste -sd' ' -)"
+	run "agree $ref" 0 GITHUB_REF_NAME="$ref" STUB_TAGS="$tags"
+	by_mirror="$(sed -n "s|^skopeo copy .* docker://$(re "$dst"):||p" "$tmp/log" | sort | paste -sd' ' -)"
+	[ "$by_check" = "$by_mirror" ] || fail "check moves [$by_check] and the mirror [$by_mirror] for $ref among [$tags]"
+}
+agree v0.1.0 v0.1.0
+agree v0.2.0 v0.2.0 v0.2.1
+agree v0.2.1 v0.2.0 v0.2.1
+agree v0.2.1 v0.1.0 v0.2.0 v0.2.1 v0.3.0-rc.1
+agree v0.2.4 v0.2.4 v0.2.5 v0.3.0
+agree v0.2.5 v0.2.4 v0.2.5 v0.3.0
+agree v0.3.0 v0.2.4 v0.2.5 v0.3.0
+agree v0.1.5 v0.1.5 v0.10.0
+agree v0.10.0 v0.1.5 v0.10.0
+agree v0.9.0 v0.9.0 v0.10.0
+agree v0.10.0 v0.9.0 v0.10.0
+agree v0.2.0 v0.2.0 v0.3.0-rc.1
+agree v0.3.0 v0.3.0-rc.1 v0.3.0
+agree v0.2.0 v0.2.0 "v0.3.0+x"
+agree v0.2.9 v0.2.9 v0.3.0-rc.2 "v0.3.0+x" sdk/go/v9.0.0 sdk-py/v9.0.0 sdk-js/v9.0.0
+agree v1.0.0 v0.9.9 v0.10.0 v1.0.0
+agree v0.10.0 v0.9.9 v0.10.0 v1.0.0
 
 if [ "$failures" -gt 0 ]; then
 	echo "mirror-step-test: $failures failure(s)" >&2

@@ -8,7 +8,8 @@
 #   - `workflow_dispatch` does it by hand, on the tag: a release whose mirror
 #     failed, or was never set up, and which cannot be re-run any more — GitHub
 #     lets a run's jobs be re-run for 30 days. Start it on the tag's ref, which
-#     is also what the `release` environment's deployment policy lets in:
+#     is also what the `release` environment's deployment policy lets in (a
+#     dispatch from a branch is refused by that policy, before this file runs):
 #
 #         gh workflow run mirror-image.yml --ref vX.Y.Z
 #
@@ -22,7 +23,10 @@
 # move is a question about the tags that exist (release-server.yml, `check`,
 # #16), and a re-run weeks later is asked it again: a back-patch, or the
 # mirror of an older release re-run after a newer one is out, moves its exact
-# version and not `latest` or `X.Y` — they move forward only.
+# version and not `latest` or `X.Y` — they move forward only. The question is
+# asked after the exact version is copied and right before the moving tags are,
+# which leaves a window of seconds in which a tag pushed at that moment is not
+# seen; `scripts/mirror-step-test.sh` holds this rule to `check`'s.
 #
 # Nothing waits for it and nothing is taken back by it: a Docker Hub that is
 # down, a token that has expired or credentials never set make this run red and
@@ -44,11 +48,15 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     environment: release
-    # One at a time and none cancelled, as for `tap`: two tags close together
-    # would otherwise move `latest` in whichever order the copies finish.
-    # Each run works out which tags it may move when it gets its turn.
+    # A group for each tag, so that the same tag is not copied twice at once.
+    # Not one group for all: GitHub keeps one running and one pending job per
+    # group, and a newer job replaces the pending one whatever
+    # `cancel-in-progress` says, so three tags dispatched in a row would lose the
+    # middle one without a failure. Different tags run side by side, and that
+    # is safe because no run moves a moving tag backwards: each decides by the
+    # tags that exist, not by when it ran.
     concurrency:
-      group: mirror
+      group: mirror-${{ github.ref }}
       cancel-in-progress: false
     permissions:
       contents: read # the repository's tag names, through the API — nothing is checked out
@@ -65,11 +73,11 @@ jobs:
         run: |
           set -euo pipefail
           # A stable release's tag and nothing else, by the shape
-          # scripts/release-tag.sh accepts. A pre-release is not mirrored, and
-          # a branch has no image.
+          # scripts/release-tag.sh accepts: the `release` environment lets in
+          # any `v*` tag, a pre-release among them, and that is not mirrored.
           num='(0|[1-9][0-9]*)'
           if ! [[ $GITHUB_REF_NAME =~ ^v$num\.$num\.$num$ ]]; then
-            echo "::error::'$GITHUB_REF_NAME' is not a stable release tag (vX.Y.Z); a pre-release is not mirrored, and this has to run on the tag: gh workflow run mirror-image.yml --ref vX.Y.Z"
+            echo "::error::'$GITHUB_REF_NAME' is not a stable release tag (vX.Y.Z); a pre-release is not mirrored"
             exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
@@ -96,21 +104,39 @@ jobs:
             exit 1
           fi
 
-          # What this release may move, by the tags that exist now: the same
-          # rule as `check` (#16), whose `git tag` is the API here because
-          # nothing is checked out. Only stable tags are compared, so `sort -V`
-          # orders them. The exact version always moves.
+          skopeo login "${MIRROR%%/*}" --username "$DOCKERHUB_USERNAME" --password-stdin <<< "$DOCKERHUB_TOKEN"
+
+          # The exact version, from GHCR, whatever else is decided. The digest
+          # each copy reports is compared with the one attested: a difference
+          # stops here, before the next tag. `--preserve-digests` keeps every
+          # manifest of the index as it was.
+          copy() {
+            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" "docker://$1" "docker://$MIRROR:$2"
+            got="$(cat "$RUNNER_TEMP/digest")"
+            if [ "$got" != "$DIGEST" ]; then
+              echo "::error::$MIRROR:$2 is $got, not $DIGEST"
+              exit 1
+            fi
+            echo "mirrored $MIRROR:$2 at $DIGEST"
+          }
+          copy "$SOURCE@$DIGEST" "$version"
+
+          # What else this release may move, by the tags that exist now — asked
+          # after the copy above and before the next one, as late as it can be:
+          # the same rule as `check` (#16), whose `git tag` is the API here
+          # because nothing is checked out. Only stable tags are compared, so
+          # `sort -V` orders them.
           stable="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
                     sed -n 's|^refs/tags/||p' | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/')"
           # An empty answer would make every release the newest.
           if ! grep -qxF "$GITHUB_REF_NAME" <<< "$stable"; then
-            echo "::error::$GITHUB_REF_NAME is not among the tags $GITHUB_REPOSITORY lists"
+            echo "::error::$GITHUB_REF_NAME is not among the tags $GITHUB_REPOSITORY lists; its exact version is mirrored and nothing else"
             exit 1
           fi
           newest="$(sort -V <<< "$stable" | tail -1)"
           line="v${version%.*}"
           newest_on_line="$(awk -v p="$line." 'index($0, p) == 1' <<< "$stable" | sort -V | tail -1)"
-          names=("$version")
+          names=()
           if [ "$newest_on_line" = "$GITHUB_REF_NAME" ]; then
             names+=("${version%.*}")
           else
@@ -122,23 +148,8 @@ jobs:
             echo "not moving latest: $newest is newer"
           fi
 
-          skopeo login "${MIRROR%%/*}" --username "$DOCKERHUB_USERNAME" --password-stdin <<< "$DOCKERHUB_TOKEN"
-
-          # One copy from GHCR, under the exact version; the moving tags are
-          # then pointed at what that left on Docker Hub, by digest, which
-          # moves no blob. `--preserve-digests` keeps every manifest of the
-          # index as it was, and the digest each copy reports is compared with
-          # the one attested: a difference stops here, before the next tag.
-          copy() {
-            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" "docker://$1" "docker://$MIRROR:$2"
-            got="$(cat "$RUNNER_TEMP/digest")"
-            if [ "$got" != "$DIGEST" ]; then
-              echo "::error::$MIRROR:$2 is $got, not $DIGEST"
-              exit 1
-            fi
-            echo "mirrored $MIRROR:$2 at $DIGEST"
-          }
-          copy "$SOURCE@$DIGEST" "${names[0]}"
-          for name in "${names[@]:1}"; do
+          # The moving tags are pointed at what the copy left on Docker Hub, by
+          # digest, which moves no blob and reads GHCR once.
+          for name in ${names[@]+"${names[@]}"}; do
             copy "$MIRROR@$DIGEST" "$name"
           done

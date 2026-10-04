@@ -178,7 +178,7 @@ the wrong choice for a machine you are not watching; `X.Y` is the pin for
 ### Docker Hub
 
 Every stable release is also on Docker Hub, as `docker.io/tracepad/tracepad`
-(`docker pull tracepad/tracepad`), under the same tags as on GHCR:
+(`docker pull tracepad/tracepad`), with the same exact tags (`0.1.0`) as on GHCR:
 
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
@@ -191,6 +191,12 @@ the digest of `tracepad/tracepad:0.1.0` is the digest of
 `ghcr.io/tracepad/tracepad:0.1.0`. Pick the one your network can reach, or
 the one your registry mirror already caches. A pre-release (`0.2.0-rc.1`) is
 on GHCR only.
+
+The moving tags, `X.Y` and `latest`, follow the same rule on both — only
+forward, to the newest release of the line and overall — but each registry
+applies it when its own copy is made, so while two releases overlap they can
+point at different releases for a short while. Anything you deploy should pin
+an exact tag, or a digest, which is the same on both.
 
 The build-provenance attestation lives with GHCR's image and is found by
 digest, so it covers the copy: verify it exactly as for the GHCR image, by
