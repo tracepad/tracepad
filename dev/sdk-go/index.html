@@ -2053,7 +2053,18 @@ thing it knows is who the user is:</p>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Update</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithLevel</span><span class="p">(</span><span class="s">"WARNING"</span><span class="p">),</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithStatusMessage</span><span class="p">(</span><span class="s">"retried once"</span><span class="p">))</span>
 </code></pre></div>
 <p>Both act on the context's current span, whoever started it, and the store
-resolves the trace-level ones for the trace. <code>Update</code> takes <code>WithName</code>,
+resolves the trace-level ones for the trace. Calls on one span add up: the tags
+are merged in the order they first appeared, without repeats, and
+<code>WithTraceMetadata</code> is merged by key across calls, the later value winning — the
+package keeps what it has written on the span, under a lock, and writes the one
+array and the one object whole each time, so concurrent calls lose nothing. Only
+what <em>this package</em> wrote is merged: tags another writer set on the same span are
+not readable through the OpenTelemetry API and are replaced by the first call.
+Tags are bounded at 50 and metadata at 512 keys and 1 MiB, as the server bounds
+them, and the first time each bites the package logs a warning. Values are
+encoded when the call is made, so changing one afterwards changes nothing in the
+trace, and metadata that is not an object — a string of JSON included — is
+ignored with a warning. <code>Update</code> takes <code>WithName</code>,
 <code>WithInput</code>, <code>WithOutput</code>, <code>WithMetadata</code>, <code>WithLevel</code>, <code>WithStatusMessage</code> and
 <code>WithType</code>. Outside every span, in a process that traces, both log a warning
 and do nothing — that call is a mistake. On a span that does not record —
@@ -2082,11 +2093,11 @@ ignore the package's warnings.</p>
 </tr>
 <tr>
 <td><code>WithTags(...string)</code></td>
-<td>Its tags</td>
+<td>Its tags, merged with those of earlier calls on the span</td>
 </tr>
 <tr>
 <td><code>WithTraceMetadata(any)</code></td>
-<td>Free metadata on the trace, a JSON object</td>
+<td>Free metadata on the trace, a JSON object, merged by key across calls</td>
 </tr>
 <tr>
 <td><code>WithTraceVersion(string)</code></td>

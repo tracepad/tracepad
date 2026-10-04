@@ -2184,8 +2184,17 @@ thing it knows is who the user is:</p>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">update</span><span class="p">({</span><span class="w"> </span><span class="nx">level</span><span class="o">:</span><span class="w"> </span><span class="s1">'WARNING'</span><span class="p">,</span><span class="w"> </span><span class="nx">statusMessage</span><span class="o">:</span><span class="w"> </span><span class="s1">'retried once'</span><span class="w"> </span><span class="p">});</span>
 </code></pre></div>
 <p>Both act on the <em>current</em> span, whoever started it, and the store resolves the
-trace-level ones for the trace. Outside every span, in a process that traces,
-both warn and do nothing — that call is a mistake. On a span that does not
+trace-level ones for the trace. Calls on one span add up: <code>tags</code> are merged in
+the order they first appeared, without repeats, and <code>metadata</code> is merged by key
+across calls, the later value winning — the package keeps what it has written on
+the span and writes the one array and the one object whole each time. Only what
+<em>this package</em> wrote is merged: tags another writer set on the same span are not
+readable through the OpenTelemetry API and are replaced by the first call. Tags
+are bounded at 50 and metadata at 512 keys and 1 MiB, as the server bounds
+them, and the first time each bites the package says so in a warning. Values are
+encoded when the call is made, so changing one afterwards changes nothing in the
+trace, and metadata that is not an object is ignored with a warning. Outside
+every span, in a process that traces, both warn and do nothing — that call is a mistake. On a span that does not
 record — tracing off, or a sampler's choice — they do nothing with a
 <code>diag.debug</code> line: that is configuration, and a warning on every call would
 teach an operator to ignore the package's warnings.</p>
