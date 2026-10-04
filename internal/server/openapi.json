@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tracepad API",
-    "summary": "Lightweight, self-hosted, OTLP-native store for LLM and agent traces.",
+    "summary": "LLM observability and evals in a single binary: a self-hosted, OTLP-native store for LLM and agent traces, prompts, datasets and scores.",
     "description": "The read API is the product's contract: the UI, the CLI and the MCP server are thin clients over exactly these endpoints, and a feature that is not here does not exist. Responses are flat snake_case JSON with RFC 3339 timestamps and opaque cursors. Every response spends a byte budget on payloads (default 51200, `?budget=` to override): a payload that does not fit is cut at a UTF-8 boundary and replaced by a truncation marker naming where the whole of it lives.",
     "license": {"name": "Apache-2.0", "identifier": "Apache-2.0"},
     "version": "0.1.0"
@@ -78,7 +78,7 @@
       "post": {
         "tags": ["ingest"],
         "summary": "OTLP ingest under the Langfuse SDK's path",
-        "description": "The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_HOST` to a tracepad is the whole migration.",
+        "description": "The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_BASE_URL` (older SDKs: `LANGFUSE_HOST`) to a tracepad moves the traces.",
         "operationId": "ingestTracesLangfuse",
         "x-tracepad-scope": "ingest",
         "requestBody": {"required": true, "content": {

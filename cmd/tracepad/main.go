@@ -128,7 +128,7 @@ func usage() {
 // helpText is what `tracepad help` prints, a function of its own so the test
 // that holds it to the configuration can read it (spec 001 #24).
 func helpText() string {
-	return `Tracepad — lightweight OTLP-native store and viewer for LLM traces.
+	return `Tracepad — LLM observability and evals in a single binary.
 
 Usage:
   tracepad [serve] [flags]   run the server (default command)

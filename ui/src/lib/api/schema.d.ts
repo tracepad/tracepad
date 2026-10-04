@@ -52,7 +52,7 @@ export interface paths {
         put?: never;
         /**
          * OTLP ingest under the Langfuse SDK's path
-         * @description The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_HOST` to a tracepad is the whole migration.
+         * @description The same endpoint as `/v1/traces`, at the path a Langfuse SDK sends to. Setting `LANGFUSE_BASE_URL` (older SDKs: `LANGFUSE_HOST`) to a tracepad moves the traces.
          */
         post: operations["ingestTracesLangfuse"];
         delete?: never;

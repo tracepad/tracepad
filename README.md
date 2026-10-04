@@ -5,9 +5,50 @@
 
 # Tracepad
 
-A lightweight, self-hosted store and viewer for LLM and agent application
-traces. Single binary, embedded database, OTLP-native ingestion — point any
-OpenTelemetry-instrumented app at it and browse your traces.
+**LLM observability and evals in a single binary.**
+
+Tracepad is a self-hosted home for the traces, prompts, datasets and scores of
+your LLM and agent applications. It is one binary of about 20 MB with SQLite
+inside — no Postgres, no ClickHouse, no Redis, no object store — and it has
+been measured idling in under 30 MB of memory (the figures, with their dates,
+are under [What it is built for](#what-it-is-built-for)).
+
+Point any OpenTelemetry instrumentation at it, or an application that already
+sends traces with the Langfuse SDK, by changing an endpoint. Then close the
+loop in the same place: version prompts and deploy one by moving a label, run
+a dataset and compare two runs case by case, score traces from code, from an
+LLM judge you run, or by hand through review queues, and watch quality move
+next to cost and latency.
+
+Everything Tracepad holds is readable over one API — from the web interface,
+the CLI in the same binary, or a read-only MCP server — so a coding agent can
+start from the trace instead of guessing. Retention, erasure of one user's data
+and a replayable OTLP export are built in. Apache-2.0, with nothing held back
+behind a licence key.
+
+![A search over what the traces said, a trace's tree with a generation's usage, cost and prompt, and two eval runs compared score by score](https://github.com/tracepad/tracepad/raw/main/docs/assets/demo-ui.gif)
+
+- **Traces** — OTLP/HTTP from any OpenTelemetry SDK, with the GenAI
+  conventions mapped; full-text search over prompts and answers; sessions,
+  users, tokens of every class and cost.
+- **Prompts** — append-only versions, movable labels, diffs, and the prompt
+  version on every trace it produced.
+- **Evals** — versioned datasets, runs, and a comparison that says which cases
+  improved and which regressed; a harness for Python, Node and Go.
+- **Scores and review** — typed score configs; scores from code, a judge or a
+  person; annotation queues; quality trends over time.
+- **For agents** — a read API with response budgets, a CLI that prints JSON
+  when piped, a read-only MCP server, and an agent skill that ships inside the
+  binary.
+- **Your data** — retention per project, erasure of one user's data down to
+  the raw archive, and `tracepad export --otlp` to replay every byte you sent
+  anywhere else.
+
+Sized for a team, not a fleet: up to about a million spans a day on one
+ordinary machine ([what it is built for](#what-it-is-built-for)). Coming from
+the Langfuse SDK? [docs/langfuse-sdk.md](docs/langfuse-sdk.md) is the switch,
+and [docs/compare.md](docs/compare.md) sets Tracepad beside the tools you may
+be weighing it against.
 
 **Status: beta.** Tracepad runs real workloads, and what is stable and what may
 still change before 1.0 is written down in [What beta means](#what-beta-means).
@@ -98,11 +139,12 @@ store — ClickHouse and its neighbours — and the honest answer is that this i
 not that.
 
 Rough figures, measured on a synthetic corpus of about 2,000 traces (the binary
-size is that of the current build; the other four date from 2026-08-30 and have
-not been re-measured since):
+size and the empty server's memory were measured on 2026-10-04; the rest date
+from 2026-08-30 and have not been re-measured since):
 
 - **Binary** — 19.6 MiB on `darwin/arm64`, 7.6 MiB gzipped.
-- **Memory** — ~27 MiB resident at rest, ~63 MiB under ingest.
+- **Memory** — ~15 MiB resident at rest on an empty database (2026-10-04);
+  ~27 MiB at rest and ~63 MiB under ingest on the corpus.
 - **Ingest** — ~1,900 spans/s from one sequential client, which is headroom
   rather than the ceiling: the envelope above is set by what the file and the
   queries carry, not by what the intake keeps up with.
@@ -228,6 +270,8 @@ tracepad traces last --error --full     # the CLI, in the same binary
 The CLI and the MCP server are HTTP clients of that API and contain no logic of
 their own, so all three return the same bytes. See [docs/api.md](docs/api.md),
 [docs/cli.md](docs/cli.md) and [docs/mcp.md](docs/mcp.md).
+
+![The newest failed trace in a terminal: its tree, the failing generation's status and input, then the same trace as JSON through jq](https://github.com/tracepad/tracepad/raw/main/docs/assets/demo-cli.gif)
 
 The MCP surface reads and nothing else — administration is deliberately not
 reachable as a tool.

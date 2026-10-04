@@ -112,10 +112,16 @@ the trace list stays empty. `http/json` works too ([below](#the-json-encoding)).
 **Langfuse SDK** — point it at Tracepad instead of Langfuse:
 
 ```sh
-export LANGFUSE_HOST=http://localhost:4318
+export LANGFUSE_BASE_URL=http://localhost:4318
+export LANGFUSE_HOST=http://localhost:4318   # the older name, for older SDKs
 export LANGFUSE_PUBLIC_KEY=tp-pk-…
 export LANGFUSE_SECRET_KEY=tp-sk-…
 ```
+
+The JavaScript SDK 5.x reads `LANGFUSE_BASE_URL` alone, and with only
+`LANGFUSE_HOST` set it keeps sending to Langfuse's cloud. What else changes,
+and what does not carry over, is in
+[Coming from the Langfuse SDK](langfuse-sdk.md).
 
 **The `tracepad` package** — the same exporter with the ergonomics on top, in
 Python ([sdk-python.md](sdk-python.md)) and in Node ([sdk-js.md](sdk-js.md)):

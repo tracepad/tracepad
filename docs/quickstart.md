@@ -107,7 +107,10 @@ A plain `python your_app.py` configures nothing; the distro's launcher (or
 your own code) is what reads these variables.
 
 The Langfuse SDKs work too, against the same endpoint under their own path —
-set `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead.
+set `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead.
+The first start prints the older name, `LANGFUSE_HOST`, which the JavaScript
+SDK does not read; set `LANGFUSE_BASE_URL` to the same address
+([Coming from the Langfuse SDK](langfuse-sdk.md#the-switch)).
 Every dialect of attribute naming is understood; see [ingest.md](ingest.md)
 for what is mapped and how.
 

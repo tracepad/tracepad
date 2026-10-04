@@ -1,5 +1,6 @@
-// Package tracepad is the ergonomics of tracing an LLM application in Go,
-// over the OpenTelemetry SDK.
+// Package tracepad is the Go client for Tracepad, LLM observability and evals
+// in a single binary: tracing, prompts, scores and evals for an LLM
+// application in Go, over the OpenTelemetry SDK.
 //
 //	shutdown, err := tracepad.Init(ctx) // TRACEPAD_URL / TRACEPAD_API_KEY
 //	defer shutdown(ctx)

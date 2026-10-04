@@ -78,5 +78,6 @@ These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://<server>/v1/traces` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | `authorization=Bearer <secret key>` |
 
-The Langfuse SDKs take `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
-`LANGFUSE_SECRET_KEY` instead ([ingest.md](ingest.md#connecting-an-application)).
+The Langfuse SDKs take `LANGFUSE_BASE_URL` (older ones `LANGFUSE_HOST`),
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` instead
+([langfuse-sdk.md](langfuse-sdk.md#the-switch)).
