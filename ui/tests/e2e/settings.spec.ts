@@ -351,20 +351,20 @@ test('the keys and the projects fold at their own widths on a desktop', async ({
 	await page.goto('/settings/server');
 	const projects = page.getByRole('table').filter({ hasText: own.id });
 	await expect(projects.locator('tbody tr').first()).toBeVisible();
+	// The id is what an operator copies into the CLI, and a project's name is
+	// no reason for a row to be two lines tall: at the fold width each is whole
+	// on one line. The name is at least seventeen characters, the length of
+	// `my-production-app`, which is what it is checked at.
+	expect(own.name.length).toBeGreaterThanOrEqual(17);
 	// A deleted project's time may break at the space between its date and its
 	// hour, and nowhere else.
 	await foldsAt(page, projects, 728, 5, 68, Infinity, async () => {
 		const deleted = projects.locator('tbody tr').filter({ hasText: 'Deleted, purged' });
 		await expect(deleted.first()).toBeVisible();
 		for (const row of await deleted.all()) expect(await torn(row)).toEqual([]);
+		expect(await torn(projects.getByText(own.name).first())).toEqual([]);
 	});
-	// The id is what an operator copies into the CLI: on one line, whole.
-	const lines = await projects.getByText(own.id).first().evaluate((node) => {
-		const range = document.createRange();
-		range.selectNodeContents(node);
-		return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-	});
-	expect(lines).toBe(1);
+	expect(await torn(projects.getByText(own.id).first())).toEqual([]);
 });
 
 // The project on screen is the one being deleted: `me` drops it at once, but

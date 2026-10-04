@@ -11,6 +11,7 @@
 	import Folded from '../Folded.svelte';
 	import SecretDialog from '../SecretDialog.svelte';
 	import Card from './Card.svelte';
+	import { inset } from './inset';
 	import ViewerNote from './ViewerNote.svelte';
 
 	// API keys (spec 007 #9). Several active pairs are what makes rotation
@@ -139,13 +140,13 @@
 				<table class="w-full border-collapse text-left text-sm" style:min-width={fold.min}>
 					<thead class="text-subtle text-xs whitespace-nowrap">
 						<tr class="border-border border-b">
-							<th scope="col" class={['px-3 py-1.5 font-medium', narrow && 'w-full']}>Name</th>
+							<th scope="col" class={[inset, 'font-medium', narrow && 'w-full']}>Name</th>
 							{#if !narrow}
-								<th scope="col" class="px-3 py-1.5 font-medium">Scopes</th>
-								<th scope="col" class="px-3 py-1.5 font-medium">Created</th>
-								<th scope="col" class="px-3 py-1.5 font-medium">Last used</th>
+								<th scope="col" class="{inset} font-medium">Scopes</th>
+								<th scope="col" class="{inset} font-medium">Created</th>
+								<th scope="col" class="{inset} font-medium">Last used</th>
 							{/if}
-							<th scope="col" class="w-24 px-3 py-1.5"><span class="sr-only">Actions</span></th>
+							<th scope="col" class="w-24 {inset}"><span class="sr-only">Actions</span></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -153,7 +154,7 @@
 							{@const warning = outlived(key.created_by)}
 							<tr class="border-border border-b align-top last:border-b-0">
 								{#if narrow}
-									<td class="max-w-0 px-3 py-1.5 wrap-anywhere">
+									<td class="max-w-0 {inset} wrap-anywhere">
 										{@render identity(key, true)}
 										<div class="text-muted text-xs">
 											<Folded
@@ -168,22 +169,22 @@
 										{#if warning}{@render outlivedNote()}{/if}
 									</td>
 								{:else}
-									<th scope="row" class="min-w-40 px-3 py-1.5 text-left font-normal wrap-anywhere">
+									<th scope="row" class="min-w-40 {inset} text-left font-normal wrap-anywhere">
 										{@render identity(key)}
 									</th>
-									<td class="text-muted px-3 py-1.5">{key.scopes.join(', ')}</td>
-									<td class="text-muted max-w-0 min-w-44 px-3 py-1.5">
+									<td class="text-muted {inset}">{key.scopes.join(', ')}</td>
+									<td class="text-muted max-w-0 min-w-44 {inset}">
 										<span class="tabular-nums whitespace-nowrap">{timestamp(key.created_at)}</span>
 										<span class="block truncate text-xs" title={minter(key.created_by)}>
 											by {minter(key.created_by)}
 										</span>
 										{#if warning}{@render outlivedNote()}{/if}
 									</td>
-									<td class="text-muted px-3 py-1.5 tabular-nums whitespace-nowrap">
+									<td class="text-muted {inset} tabular-nums whitespace-nowrap">
 										{timeOrNever(key.last_used_at)}
 									</td>
 								{/if}
-								<td class="px-3 py-1.5">
+								<td class={inset}>
 									<Button
 										aria-label={narrow ? `Revoke ${key.public_key}` : undefined}
 										onclick={() => (

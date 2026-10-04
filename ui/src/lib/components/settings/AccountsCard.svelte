@@ -16,6 +16,7 @@
 	import ConfirmCard from '../ConfirmCard.svelte';
 	import AccountDialog from './AccountDialog.svelte';
 	import Card from './Card.svelte';
+	import { inset } from './inset';
 	import InviteDialog from './InviteDialog.svelte';
 
 	// Who can see what (spec 028 #14). This is the page an owner opens to
@@ -74,7 +75,7 @@
 		return notice;
 	}
 
-	const cell = 'px-3 py-1.5 text-sm';
+	const cell = `${inset} text-sm`;
 
 	/** Colour is never the message on its own (spec 006 #14): the word is there too. */
 	const tone = (where: ReturnType<typeof standing>) =>
@@ -112,14 +113,14 @@
 			>
 				<thead class="text-subtle text-xs whitespace-nowrap">
 					<tr class="border-border border-b">
-						<th scope="col" class="px-3 py-1.5 font-medium">Email</th>
+						<th scope="col" class="{inset} font-medium">Email</th>
 						{#if !narrow}
-							<th scope="col" class="px-3 py-1.5 font-medium">Name</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Status</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Last login</th>
-							<th scope="col" class="px-3 py-1.5 font-medium">Projects</th>
+							<th scope="col" class="{inset} font-medium">Name</th>
+							<th scope="col" class="{inset} font-medium">Status</th>
+							<th scope="col" class="{inset} font-medium">Last login</th>
+							<th scope="col" class="{inset} font-medium">Projects</th>
 						{/if}
-						<th scope="col" class={['px-3 py-1.5 font-medium', !narrow && 'w-44']}>
+						<th scope="col" class={[inset, 'font-medium', !narrow && 'w-44']}>
 							Actions
 						</th>
 					</tr>
@@ -132,7 +133,7 @@
 								<!-- A cell, not the row's header: a header is read out before
 								     every cell in the row, and this one holds the whole account.
 								     The buttons carry the email in their names instead. -->
-								<td class="px-3 py-1.5 wrap-anywhere">
+								<td class="{inset} wrap-anywhere">
 									{row.email}
 									<div class="text-muted text-xs">
 										{#if row.name}{row.name} ·{/if}
@@ -144,7 +145,7 @@
 									<div class="text-muted text-xs">Projects: {reaches(row)}</div>
 								</td>
 							{:else}
-								<th scope="row" class="px-3 py-1.5 text-left font-normal">{row.email}</th>
+								<th scope="row" class="{inset} text-left font-normal">{row.email}</th>
 								<td class="text-muted {cell}">{row.name || '—'}</td>
 								<td class={cell}><span class={tone(where)}>{where}</span></td>
 								<td class="text-muted {cell} tabular-nums whitespace-nowrap">
@@ -152,7 +153,7 @@
 								</td>
 								<td class="text-muted {cell}">{reaches(row)}</td>
 							{/if}
-							<td class="px-3 py-1.5">
+							<td class={inset}>
 								<div class={['flex gap-1.5', narrow && 'flex-col']}>
 									<Button
 										aria-label={narrow ? `Edit ${row.email}` : undefined}

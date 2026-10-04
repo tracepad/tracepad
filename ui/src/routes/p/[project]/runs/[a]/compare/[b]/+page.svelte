@@ -335,8 +335,8 @@
 												{score.name}
 											</td>
 											<td class="text-muted px-3 py-1.5">{type}</td>
-											<td class={[numeric, 'min-w-30']}>{@render side(score, 'a')}</td>
-											<td class={[numeric, 'min-w-30']}>{@render side(score, 'b')}</td>
+											<td class={[numeric, 'min-w-26']}>{@render side(score, 'a')}</td>
+											<td class={[numeric, 'min-w-26']}>{@render side(score, 'b')}</td>
 										{/if}
 										<td class={[numeric, (score.delta ?? 0) > 0 && score.direction === 'higher' && 'text-ok', (score.delta ?? 0) < 0 && score.direction === 'higher' && 'text-danger']}>
 											{deltaText(score.delta)}
