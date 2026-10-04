@@ -9,7 +9,7 @@
 # 2,100 for trace deletion, spec 040 #13 to 2,350 for `tracepadtest`, spec
 # 042 #6 to 2,450 for the cost and bounds, #11 and #12 to 2,500 for its review,
 # spec 033 #18 to 2,575 for the key and the path, and spec 033 #19 to 2,600
-# for writing a long item list in batches, and spec 033 #22 to 2,790 for the
+# for writing a long item list in batches, and spec 033 #22 to 2,860 for the
 # trace state `UpdateTrace` keeps.
 #
 # What it counts is the application — `tracepadtest` and the hook it opens
@@ -22,7 +22,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2790}"
+BUDGET="${1:-2860}"
 
 cd "$ROOT"
 

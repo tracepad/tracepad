@@ -443,7 +443,7 @@ def update_trace(
     _set(span, attrs.USER_ID, user_id)
     _set(span, attrs.SESSION_ID, session_id)
     if tags is not None or metadata is not None:
-        span.set_attributes(_tracestate.update(span, tags, metadata))
+        _tracestate.update(span, tags, metadata)
     _set(span, attrs.TRACE_VERSION, version or None)
 
 

@@ -275,7 +275,10 @@ array and the one object whole each time, so concurrent calls lose nothing. Only
 what *this package* wrote is merged: tags another writer set on the same span are
 not readable through the OpenTelemetry API and are replaced by the first call.
 Tags are bounded at 50 and metadata at 512 keys and 1 MiB, as the server bounds
-them, and the first time one bites the package logs a warning. `Update` takes `WithName`,
+them, and the first time each bites the package logs a warning. Values are
+encoded when the call is made, so changing one afterwards changes nothing in the
+trace, and metadata that is not an object — a string of JSON included — is
+ignored with a warning. `Update` takes `WithName`,
 `WithInput`, `WithOutput`, `WithMetadata`, `WithLevel`, `WithStatusMessage` and
 `WithType`. Outside every span, in a process that traces, both log a warning
 and do nothing — that call is a mistake. On a span that does not record —

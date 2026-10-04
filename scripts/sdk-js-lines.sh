@@ -11,7 +11,7 @@
 # 040 #13 to 2,200 for `tracepad/testing`, spec 042 #6 to 2,250 for the cost
 # and bounds, #12 to 2,275 for its review, spec 032 #17 to 2,300 for the
 # key and the path, and spec 032 #21 to 2,325 for writing a long item list
-# in batches, and spec 032 #24 to 2,425 for the trace state `updateTrace` keeps.
+# in batches, and spec 032 #24 to 2,450 for the trace state `updateTrace` keeps.
 #
 # What it counts is the application; the tests are reported beside it under
 # no ceiling at all (design §8, amended; spec 010 #7).
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUDGET="${1:-2425}"
+BUDGET="${1:-2450}"
 
 cd "$ROOT"
 

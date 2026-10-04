@@ -358,8 +358,10 @@ the span and writes the one array and the one object whole each time. Only what
 *this package* wrote is merged: tags another writer set on the same span are not
 readable through the OpenTelemetry API and are replaced by the first call. Tags
 are bounded at 50 and metadata at 512 keys and 1 MiB, as the server bounds
-them, and the first time one bites the package says so in a warning. Outside every span, in a process that traces,
-both warn and do nothing — that call is a mistake. On a span that does not
+them, and the first time each bites the package says so in a warning. Values are
+encoded when the call is made, so changing one afterwards changes nothing in the
+trace, and metadata that is not an object is ignored with a warning. Outside
+every span, in a process that traces, both warn and do nothing — that call is a mistake. On a span that does not
 record — tracing off, or a sampler's choice — they do nothing with a
 `diag.debug` line: that is configuration, and a warning on every call would
 teach an operator to ignore the package's warnings.

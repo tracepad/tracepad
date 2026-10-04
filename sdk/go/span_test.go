@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -213,53 +212,132 @@ func TestConcurrentUpdateTraceCallsLoseNothing(t *testing.T) {
 	}
 }
 
-func TestTraceMetadataAndTagsAreBoundedAsTheServerBoundsThem(t *testing.T) {
+func TestTraceMetadataIsBoundedAsTheServerBoundsItAndSaysSoOncePerKind(t *testing.T) {
 	r := setup(t)
 	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
 	entries := map[string]any{}
-	var tags []string
 	for n := range 600 {
 		entries[fmt.Sprintf("k%03d", n)] = n
 	}
-	for n := range 80 {
-		tags = append(tags, fmt.Sprint(n))
-	}
-	UpdateTrace(ctx, WithTraceMetadata(entries), WithTags(tags...))
+	UpdateTrace(ctx, WithTraceMetadata(entries))
 	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"k000": "replaced", "late": 1}))
 	span.End()
+	ctx, heavy := r.provider.Tracer("the.framework").Start(context.Background(), "heavy")
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"small": 1}))
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"big": strings.Repeat("x", maxTraceBytes), "small": 2}))
+	heavy.End()
 
-	attrs := r.attrs(t, "handler")
-	var metadata map[string]any
-	var gotTags []string
-	_ = json.Unmarshal([]byte(str(t, attrs, attrTraceMetadata)), &metadata)
-	_ = json.Unmarshal([]byte(str(t, attrs, attrTraceTags)), &gotTags)
+	var metadata, small map[string]any
+	_ = json.Unmarshal([]byte(str(t, r.attrs(t, "handler"), attrTraceMetadata)), &metadata)
+	_ = json.Unmarshal([]byte(str(t, r.attrs(t, "heavy"), attrTraceMetadata)), &small)
 	if len(metadata) != maxTraceKeys || metadata["k000"] != "replaced" || metadata["late"] != nil {
 		t.Errorf("metadata has %d keys, k000 = %v, late = %v", len(metadata), metadata["k000"], metadata["late"])
 	}
-	if len(gotTags) != maxTraceTags {
-		t.Errorf("%d tags, want %d", len(gotTags), maxTraceTags)
+	if len(small) != 1 || fmt.Sprint(small["small"]) != "2" {
+		t.Errorf("the heavy span's metadata = %v, want only small = 2", small)
+	}
+	logs := r.logs.String()
+	for _, kind := range []string{"bounded at 512 keys", "bounded at 1048576 bytes"} {
+		if strings.Count(logs, kind) != 1 {
+			t.Errorf("%q was said %d times, want once:\n%s", kind, strings.Count(logs, kind), logs)
+		}
 	}
 }
 
+func TestOnlyTheTagLimitWarnsAboutTags(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	var tags []string
+	for n := range 80 {
+		tags = append(tags, fmt.Sprint(n))
+	}
+	UpdateTrace(ctx, WithTags(tags...))
+	UpdateTrace(ctx, WithTags("more"))
+	span.End()
+
+	var got []string
+	_ = json.Unmarshal([]byte(str(t, r.attrs(t, "handler"), attrTraceTags)), &got)
+	if len(got) != maxTraceTags {
+		t.Errorf("%d tags, want %d", len(got), maxTraceTags)
+	}
+	logs := r.logs.String()
+	if strings.Count(logs, "trace tags are bounded at 50") != 1 || strings.Contains(logs, "metadata") {
+		t.Errorf("the log says:\n%s", logs)
+	}
+}
+
+// A value is read when the call is made: changing it afterwards, from another
+// goroutine, changes nothing in the trace and races with nothing.
+func TestAValueChangedAfterTheCallIsNotChangedInTheTrace(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	nested := map[string]any{"count": 1}
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"nested": nested}))
+	done := make(chan struct{})
+	go func() {
+		nested["count"] = 2
+		close(done)
+	}()
+	<-done
+	UpdateTrace(ctx, WithTraceMetadata(map[string]any{"other": 1}))
+	span.End()
+	if got := str(t, r.attrs(t, "handler"), attrTraceMetadata); got != `{"nested":{"count":1},"other":1}` {
+		t.Errorf("metadata = %s", got)
+	}
+}
+
+func TestMetadataThatIsNotAnObjectIsIgnoredWithOneWarning(t *testing.T) {
+	r := setup(t)
+	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
+	UpdateTrace(ctx, WithTraceMetadata(`{"a": 1}`))
+	UpdateTrace(ctx, WithTraceMetadata([]string{"a"}))
+	UpdateTrace(ctx, WithTags("t"))
+	span.End()
+
+	attrs := r.attrs(t, "handler")
+	if _, written := attrs[attrTraceMetadata]; written || str(t, attrs, attrTraceTags) != `["t"]` {
+		t.Errorf("attributes = %v", attrs)
+	}
+	if n := strings.Count(r.logs.String(), "takes a JSON object"); n != 1 {
+		t.Errorf("the warning was said %d times, want once", n)
+	}
+}
+
+// The processor Init registers drops a span's state when the span really ends,
+// and the table does not hold a span the provider never told it about.
 func TestASpansTraceStateIsForgottenWhenItEnds(t *testing.T) {
 	r := setup(t)
+	r.provider.RegisterSpanProcessor(runContextProcessor{})
 	ctx, span := r.provider.Tracer("the.framework").Start(context.Background(), "handler")
 	UpdateTrace(ctx, WithTags("a"))
 	key := spanKey{span.SpanContext().TraceID(), span.SpanContext().SpanID()}
-	traceStates.mu.Lock()
-	_, held := traceStates.byspan[key]
-	traceStates.mu.Unlock()
-	if !held {
+	held := func() bool {
+		traceStates.mu.Lock()
+		defer traceStates.mu.Unlock()
+		_, ok := traceStates.byspan[key]
+		return ok && traceStates.order.Len() > 0
+	}
+	if !held() {
 		t.Fatal("no state was kept")
 	}
-	forgetTraceState(span.SpanContext())
-	traceStates.mu.Lock()
-	_, held = traceStates.byspan[key]
-	traceStates.mu.Unlock()
-	if held || slices.Contains(traceStates.order, key) {
+	span.End()
+	if held() {
 		t.Error("the state outlived the span")
 	}
-	span.End()
+}
+
+func TestTheTraceStateTableIsBounded(t *testing.T) {
+	resetTraceState()
+	for n := range maxTrackedSpans + 10 {
+		var id trace.SpanID
+		id[0], id[1], id[2] = byte(n), byte(n>>8), 1
+		stateOf(trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: id}))
+	}
+	traceStates.mu.Lock()
+	defer traceStates.mu.Unlock()
+	if len(traceStates.byspan) != maxTrackedSpans || traceStates.order.Len() != maxTrackedSpans {
+		t.Errorf("%d states in the table, want %d", len(traceStates.byspan), maxTrackedSpans)
+	}
 }
 
 // In Go the function names the shape and WithType only the kind written

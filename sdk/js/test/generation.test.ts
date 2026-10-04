@@ -252,21 +252,61 @@ describe('span, event and generation', () => {
     expect(Object.keys(attributes).length).toBeLessThan(20);
   });
 
-  test('metadata and tags are bounded as the server bounds them, and it says so once', () => {
+  test('metadata is bounded as the server bounds it, and says so once per kind', () => {
     const seen = spans();
     tracepad.span('handler', () => {
-      tracepad.updateTrace({
-        metadata: Object.fromEntries(Array.from({ length: 600 }, (_, n) => [`k${n}`, n])),
-        tags: Array.from({ length: 80 }, (_, n) => String(n)),
-      });
+      tracepad.updateTrace({ metadata: Object.fromEntries(Array.from({ length: 600 }, (_, n) => [`k${n}`, n])) });
       tracepad.updateTrace({ metadata: { k0: 'replaced', late: 1 } });
     });
-    const attributes = seen.attributes('handler');
-    const metadata = JSON.parse(attributes[attrs.TRACE_METADATA] as string) as Record<string, unknown>;
+    tracepad.span('heavy', () => {
+      tracepad.updateTrace({ metadata: { small: 1 } });
+      tracepad.updateTrace({ metadata: { big: 'x'.repeat(1 << 20), small: 2 } });
+    });
+    const metadata = JSON.parse(seen.attributes('handler')[attrs.TRACE_METADATA] as string) as Record<string, unknown>;
     expect(Object.keys(metadata)).toHaveLength(512);
     expect(metadata.k0).toBe('replaced');
     expect(metadata.late).toBeUndefined();
-    expect(JSON.parse(attributes[attrs.TRACE_TAGS] as string)).toHaveLength(50);
+    expect(JSON.parse(seen.attributes('heavy')[attrs.TRACE_METADATA] as string)).toEqual({ small: 2 });
+    expect(warnings.filter((line) => line.includes('bounded at 512 keys'))).toHaveLength(1);
+    expect(warnings.filter((line) => line.includes('bounded at 1048576 bytes'))).toHaveLength(1);
+  });
+
+  test('only the tag limit warns about tags', () => {
+    const seen = spans();
+    tracepad.span('handler', () => {
+      tracepad.updateTrace({ tags: Array.from({ length: 80 }, (_, n) => String(n)) });
+      tracepad.updateTrace({ tags: ['more'] });
+    });
+    expect(JSON.parse(seen.attributes('handler')[attrs.TRACE_TAGS] as string)).toHaveLength(50);
+    expect(warnings.filter((line) => line.includes('trace tags are bounded at 50'))).toHaveLength(1);
+    expect(warnings.some((line) => line.includes('metadata'))).toBe(false);
+  });
+
+  test('a value changed after the call is not changed in the trace, and __proto__ is a key', () => {
+    const seen = spans();
+    const nested = { count: 1 };
+    tracepad.span('handler', () => {
+      tracepad.updateTrace({ metadata: JSON.parse('{"nested": {"count": 1}, "__proto__": 7}') as Record<string, unknown> });
+      tracepad.updateTrace({ metadata: { nested } });
+      nested.count = 2;
+      tracepad.updateTrace({ metadata: { other: 1 } });
+    });
+    const text = seen.attributes('handler')[attrs.TRACE_METADATA] as string;
+    expect(text).toContain('"__proto__":7');
+    expect(JSON.parse(text)).toMatchObject({ nested: { count: 1 }, other: 1 });
+  });
+
+  test('metadata that is not an object is ignored with one warning', () => {
+    const seen = spans();
+    tracepad.span('handler', () => {
+      tracepad.updateTrace({ metadata: '{"a":1}' as unknown as Record<string, unknown> });
+      tracepad.updateTrace({ metadata: ['a'] as unknown as Record<string, unknown> });
+      tracepad.updateTrace({ tags: ['t'] });
+    });
+    const attributes = seen.attributes('handler');
+    expect(attributes[attrs.TRACE_METADATA]).toBeUndefined();
+    expect(attributes[attrs.TRACE_TAGS]).toBe('["t"]');
+    expect(warnings.filter((line) => line.includes('takes an object'))).toHaveLength(1);
   });
 
   test('an empty version is no version, as in Go', () => {

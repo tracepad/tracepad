@@ -40,7 +40,7 @@ import { stamp } from './harness.js';
 import { VERSION, describe } from './http.js';
 import { type Logger, setLogger, warn } from './log.js';
 import { flushScores } from './scores.js';
-import { merge } from './tracestate.js';
+import { merge, reset as resetTraceState } from './tracestate.js';
 
 let initialized = false;
 let handedOut = false;
@@ -971,6 +971,7 @@ export function reset(): void {
   initialized = false;
   rearmHostWarning();
   warnedKinds.clear();
+  resetTraceState();
   handedOut = false;
   exiting = undefined;
   process.off('beforeExit', atExit);
