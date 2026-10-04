@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.">
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
       
       
       
@@ -550,6 +550,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -736,6 +764,34 @@
     
   
     Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
   
 
     
@@ -1487,10 +1543,16 @@
 
 
 <h1 id="tracepad-documentation">Tracepad documentation</h1>
-<p>Tracepad is a lightweight, self-hosted store and viewer for LLM and agent
-application traces: one binary, an embedded database, OTLP-native ingestion.
-Point any OpenTelemetry-instrumented app at it and browse what it did.</p>
-<p>New here? <a href="quickstart/">Quickstart</a> goes from nothing to a trace on screen.</p>
+<p>Tracepad is LLM observability and evals in a single binary: traces, prompt
+versions, datasets and eval runs, scores and annotation queues for LLM and
+agent applications, self-hosted on one embedded database. Point any
+OpenTelemetry-instrumented app at it, or one that sends with the Langfuse SDK,
+and read what it did in the browser, from the CLI, or through your coding
+agent over MCP.</p>
+<p>New here? <a href="quickstart/">Quickstart</a> goes from nothing to a trace on screen.
+Already sending with the Langfuse SDK? <a href="langfuse-sdk/">Coming from the Langfuse SDK</a>
+is the switch. Weighing your options? <a href="compare/">How Tracepad compares</a> sets
+it beside the tools that cover the same ground.</p>
 <h2 id="get-started">Get started</h2>
 <ul>
 <li><a href="quickstart/">Quickstart</a>: the first trace on screen.</li>
@@ -1498,6 +1560,8 @@ Point any OpenTelemetry-instrumented app at it and browse what it did.</p>
   upgrade, back up.</li>
 <li><a href="docker/">Docker</a>: the image, its volume, TLS in front, upgrades.</li>
 <li><a href="configuration/">Configuration</a>: every environment variable.</li>
+<li><a href="compare/">How Tracepad compares</a>: what other tools need to run, and
+  where they do more.</li>
 </ul>
 <h2 id="send-traces">Send traces</h2>
 <ul>
@@ -1506,6 +1570,8 @@ Point any OpenTelemetry-instrumented app at it and browse what it did.</p>
 <li><a href="sdk-python/">Python</a>, <a href="sdk-js/">Node</a> and <a href="sdk-go/">Go</a>: the
   packages, each a thin layer over OpenTelemetry.</li>
 <li><a href="media/">Media</a>: images and files in traces.</li>
+<li><a href="langfuse-sdk/">Coming from the Langfuse SDK</a>: what carries over, and what
+  goes through Tracepad's API instead.</li>
 </ul>
 <h2 id="use-it">Use it</h2>
 <ul>

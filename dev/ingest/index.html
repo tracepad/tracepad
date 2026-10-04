@@ -6,14 +6,14 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.">
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
       
       
       
         <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/ingest/">
       
       
-        <link rel="prev" href="../configuration/">
+        <link rel="prev" href="../compare/">
       
       
         <link rel="next" href="../sdk-python/">
@@ -437,6 +437,34 @@
     
   
     Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
   
 
     
@@ -878,6 +906,34 @@
     
   
     Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
   
 
     
@@ -1871,10 +1927,15 @@ would make it drop the batch.</p>
 gRPC receiver, and an SDK left to its own default may choose it — the application reports nothing and
 the trace list stays empty. <code>http/json</code> works too (<a href="#the-json-encoding">below</a>).</p>
 <p><strong>Langfuse SDK</strong> — point it at Tracepad instead of Langfuse:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_HOST</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>tp-pk-…
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>tp-sk-…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_BASE_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_HOST</span><span class="o">=</span>http://localhost:4318<span class="w">   </span><span class="c1"># the older name, for older SDKs</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>tp-pk-…
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
+<p>The JavaScript SDK 5.x reads <code>LANGFUSE_BASE_URL</code> alone, and with only
+<code>LANGFUSE_HOST</code> set it keeps sending to Langfuse's cloud. What else changes,
+and what does not carry over, is in
+<a href="../langfuse-sdk/">Coming from the Langfuse SDK</a>.</p>
 <p><strong>The <code>tracepad</code> package</strong> — the same exporter with the ergonomics on top, in
 Python (<a href="../sdk-python/">sdk-python.md</a>) and in Node (<a href="../sdk-js/">sdk-js.md</a>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># or: npm install tracepad @opentelemetry/api</span>
