@@ -12,14 +12,15 @@
 # identity (#19). The one credential that is ours is the Homebrew tap's: a
 # GitHub App's key, held by the `release` environment and used by the `tap`
 # job alone, to mint a token good for an hour and for one repository (#27);
-# and Docker Hub's, held there too and used by the `mirror` job alone (#33).
+# and Docker Hub's, held there too and used by the one job of `mirror-image.yml` (#33).
 #
 # Built where nothing can be published, published where nothing is built
 # (#19): `archives` and `image-build` run GoReleaser, `make ui`, `npm ci` and
 # buildx with read access alone and hand their outputs over as artifacts;
-# `release`, `image`, `mirror` and `tap` hold the write scopes and only attest,
-# upload, copy and commit what they were handed — no checkout, no toolchain,
-# no install.
+# `release`, `image` and `tap` hold the write scopes and only attest, upload
+# and commit what they were handed — no checkout, no toolchain, no install —
+# and `mirror` (mirror-image.yml) holds Docker Hub's token, with read access to
+# the one package it copies, and does the same.
 #
 # Nothing here runs on `main`. The tag is the one act the owner performs
 # deliberately, and `latest` moves only with it (#6).
@@ -318,83 +319,30 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-  # The same index on Docker Hub, under the same tags and at the same digest
-  # (#33). GHCR stays the canonical registry and the home of the attestation;
-  # `gh attestation verify` finds it for the copy by the digest the two share.
-  # The copy is read back from GHCR by digest rather than taken from the
-  # archive, so what lands on Docker Hub is what was pushed and attested.
+  # The same index on Docker Hub (#33), by the reusable workflow
+  # `mirror-image.yml`, which is also what is started by hand on a tag when
+  # this job cannot be re-run. After `image`, for the digest it pushed and
+  # attested, and nothing waits for it: the release, the docs and the tap do
+  # not, so a Docker Hub that is down or a token that has expired turns this
+  # job red without taking anything back. A stable tag without credentials is
+  # that red job — a skipped one would read as done — and a pre-release is not
+  # mirrored: the job does not start for it, and `check` said so.
   #
-  # After `image`, and nothing waits for it: the release, the docs and the tap
-  # do not, so a Docker Hub that is down or a token that has expired turns this
-  # job red without taking anything back. It needs no artifact, so it can be
-  # re-run alone for as long as GitHub keeps the run. A stable tag without
-  # credentials is that red job — a skipped one would read as done — and a
-  # pre-release is not mirrored: the job does not start for it, and `check`
-  # said so.
-  #
-  # The one job that reads Docker Hub's credentials. It checks nothing out and
-  # holds no scope but the read of the package it copies, which a package
-  # that is not public needs. `scripts/mirror-step-test.sh` runs the step
-  # below as it stands in this file, against a stand-in for skopeo.
+  # Which tags the copy may move is worked out there, from the tags that
+  # exist when it runs, and not from `check`'s list, which a re-run would
+  # replay. The Docker Hub
+  # credentials belong to the job in that file, which checks nothing out and
+  # reads the API and the one package it copies; the scopes it is given here
+  # are the ceiling for those two reads.
   mirror:
     needs: [check, image]
     if: needs.check.outputs.prerelease != 'true'
-    runs-on: ubuntu-latest
-    environment: release
     permissions:
+      contents: read
       packages: read
-    steps:
-      - name: Copy the index to Docker Hub
-        env:
-          SOURCE: ghcr.io/${{ github.repository }}
-          MIRROR: docker.io/${{ github.repository }}
-          DIGEST: ${{ needs.image.outputs.digest }}
-          TAGS: ${{ needs.check.outputs.tags }}
-          GH_TOKEN: ${{ github.token }}
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
-            echo "::error title=Not mirrored to Docker Hub::$GITHUB_REF_NAME is on GHCR and was not copied to $MIRROR: the variable DOCKERHUB_USERNAME and the secret DOCKERHUB_TOKEN of the release environment must both be set. Set them and re-run this job; it needs nothing else."
-            exit 1
-          fi
-          if ! [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::the image job gave no digest to mirror: '$DIGEST'"
-            exit 1
-          fi
-          # Docker's config file again, for the same reason as in `image`; a
-          # login for each end, because a package that is not public needs one
-          # to be read.
-          export REGISTRY_AUTH_FILE="$RUNNER_TEMP/auth.json"
-          skopeo login "${SOURCE%%/*}" --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
-          skopeo login "${MIRROR%%/*}" --username "$DOCKERHUB_USERNAME" --password-stdin <<< "$DOCKERHUB_TOKEN"
-          # `check` spelled every tag against GHCR; each one keeps its name
-          # and loses nothing else. One that is not under GHCR is a bug here,
-          # and is refused before the first copy.
-          names=()
-          for tag in ${TAGS//,/ }; do
-            name="${tag#"$SOURCE":}"
-            if [ "$name" = "$tag" ] || [ -z "$name" ]; then
-              echo "::error::'$tag' is not a tag of $SOURCE"
-              exit 1
-            fi
-            names+=("$name")
-          done
-          if [ "${#names[@]}" -eq 0 ]; then
-            echo "::error::no tags to mirror"
-            exit 1
-          fi
-          for name in "${names[@]}"; do
-            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" \
-              "docker://$SOURCE@$DIGEST" "docker://$MIRROR:$name"
-            got="$(cat "$RUNNER_TEMP/digest")"
-            if [ "$got" != "$DIGEST" ]; then
-              echo "::error::$MIRROR:$name is $got, not $DIGEST"
-              exit 1
-            fi
-            echo "mirrored $MIRROR:$name at $DIGEST"
-          done
+    uses: ./.github/workflows/mirror-image.yml
+    with:
+      digest: ${{ needs.image.outputs.digest }}
 
   # The documentation for this release (spec 050 #6), under `vX.Y` — the line,
   # not the patch: a back-patch replaces its line's pages. `latest` moves with

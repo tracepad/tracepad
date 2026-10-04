@@ -312,7 +312,7 @@ release-tag-test: ## Assert which tags the release workflow accepts, as stable, 
 release-notes-test: ## Assert how the release notes are cut from CHANGELOG.md, and that it keeps [Unreleased] (part of the gate)
 	scripts/release-notes.sh --self-test
 
-mirror-step-test: ## Run release-server.yml's Docker Hub mirror step, as committed, against a stand-in for skopeo (part of the gate)
+mirror-step-test: ## Run mirror-image.yml's Docker Hub mirror step, as committed, against stand-ins for skopeo and gh (part of the gate)
 	scripts/mirror-step-test.sh
 
 sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE

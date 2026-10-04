@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-# The Docker Hub mirror's step, as it stands in `release-server.yml` (spec 020
-# #33). The step is inline in the workflow because the job that holds Docker
-# Hub's credentials checks nothing out; this takes its `run:` block out of the
-# file, so that what is tested is what is committed, and runs it against a
-# stand-in for skopeo that records its calls.
+# The Docker Hub mirror's step, as it stands in `mirror-image.yml` (spec 020
+# #33). The step is inline because the job that holds Docker Hub's credentials
+# checks nothing out; this takes its `run:` block out of the file, so that what
+# is tested is what is committed, and runs it against stand-ins for `skopeo`
+# and `gh` that record their calls.
 #
 #   scripts/mirror-step-test.sh              the cases below (part of the gate)
 #   scripts/mirror-step-test.sh --extract    print the step's script, to run by
-#                                            hand against a registry of your own
+#                                            hand against registries of your own
 #
 # What it holds: without both credentials the step fails and says so, and calls
-# nothing; the image is read by digest and never by tag; each tag keeps its
-# name; the password goes through stdin; a copy that lands at another digest, a
-# tag that is not GHCR's and a digest that is not one are refused.
+# nothing; the image is read by digest and never by tag, and from GHCR once —
+# the other tags are made from what that left on Docker Hub; the exact version
+# always moves, `X.Y` and `latest` only when the tag is the newest by the tags
+# that exist now (a re-run of an older release must not walk them backwards);
+# the password goes through stdin; a copy that lands at another digest stops
+# the step before the next tag, and a tag that is not a stable one is refused.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-workflow="$root/.github/workflows/release-server.yml"
+workflow="$root/.github/workflows/mirror-image.yml"
 
 extract() {
 	ruby -ryaml -e '
@@ -37,14 +40,17 @@ extract >"$tmp/step.sh"
 [ -s "$tmp/step.sh" ] || { echo "mirror-step-test: the step has no script" >&2; exit 1; }
 
 # A skopeo that records how it was called and answers `copy` with whatever
-# STUB_DIGEST says. A login's password is read from stdin, as the real one is,
-# and kept apart so the test can say it was never on a command line.
+# STUB_DIGEST says, and `inspect --raw` with a manifest of its own; a login's
+# password is read from stdin, as the real one is, and kept apart so the test
+# can say it was never on a command line. A gh that answers the list of refs
+# the API would, or fails.
 mkdir "$tmp/bin"
 cat >"$tmp/bin/skopeo" <<'EOF_STUB'
 #!/usr/bin/env bash
 echo "skopeo $*" >>"$STUB_LOG"
 case "$1" in
 login) cat >>"$STUB_LOG.passwords" ;;
+inspect) printf '%s' '{"stub":"manifest"}' ;;
 copy)
 	while [ $# -gt 0 ]; do
 		[ "$1" = --digestfile ] && printf '%s' "$STUB_DIGEST" >"$2"
@@ -53,10 +59,21 @@ copy)
 	;;
 esac
 EOF_STUB
-chmod +x "$tmp/bin/skopeo"
+cat >"$tmp/bin/gh" <<'EOF_STUB'
+#!/usr/bin/env bash
+echo "gh $*" >>"$STUB_LOG"
+[ -z "${STUB_GH_FAIL:-}" ] || { echo "gh: HTTP 502" >&2; exit 1; }
+for t in $STUB_TAGS; do echo "refs/tags/$t"; done
+EOF_STUB
+chmod +x "$tmp/bin/skopeo" "$tmp/bin/gh"
+if ! command -v sha256sum >/dev/null; then
+	printf '#!/usr/bin/env bash\nshasum -a 256 "$@"\n' >"$tmp/bin/sha256sum"
+	chmod +x "$tmp/bin/sha256sum"
+fi
 
 d=sha256:0000000000000000000000000000000000000000000000000000000000000001
 other=sha256:0000000000000000000000000000000000000000000000000000000000000002
+inspected="sha256:$(printf '%s' '{"stub":"manifest"}' | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-64)"
 src=ghcr.io/tracepad/tracepad
 dst=docker.io/tracepad/tracepad
 failures=0
@@ -65,18 +82,20 @@ fail() {
 	echo "FAIL: $*" >&2
 	failures=$((failures + 1))
 }
+re() { sed 's/[][\.*^$/]/\\&/g' <<<"$1"; } # a string as a regular expression
 
 # run <name> <want exit> [VAR=value...]: the step, with the environment the
-# job gives it (VARs override), TAGS and DIGEST as for a stable release.
+# job gives it (VARs override), run on v0.1.0, the only tag, as the first
+# release is.
 run() {
 	name="$1" want="$2"
 	shift 2
 	: >"$tmp/log"
 	rm -f "$tmp/log.passwords"
 	set +e
-	out="$(env -i PATH="$tmp/bin:$PATH" HOME="$tmp" RUNNER_TEMP="$tmp" GITHUB_ACTOR=actor GITHUB_REF_NAME=v0.1.0 \
-		STUB_LOG="$tmp/log" STUB_DIGEST="$d" SOURCE="$src" MIRROR="$dst" DIGEST="$d" \
-		TAGS="$src:0.1.0,$src:0.1,$src:latest" GH_TOKEN=ghcr-token \
+	out="$(env -i PATH="$tmp/bin:$PATH" HOME="$tmp" RUNNER_TEMP="$tmp" GITHUB_ACTOR=actor \
+		GITHUB_REF_NAME=v0.1.0 GITHUB_REPOSITORY=tracepad/tracepad STUB_TAGS="v0.1.0" \
+		STUB_LOG="$tmp/log" STUB_DIGEST="$d" SOURCE="$src" MIRROR="$dst" DIGEST="$d" GH_TOKEN=ghcr-token \
 		DOCKERHUB_USERNAME=hub DOCKERHUB_TOKEN=hub-token \
 		${@+"$@"} bash "$tmp/step.sh" 2>&1 </dev/null)"
 	status=$?
@@ -88,39 +107,75 @@ run() {
 }
 says() { grep -qF -- "$2" <<<"$out" || fail "$1: the output lacks '$2'"; }
 calls() { grep -qF -- "$2" "$tmp/log" || fail "$1: no call with '$2'"; }
-calls_end() { grep -qE -- "$2\$" "$tmp/log" || fail "$1: no call ending '$2'"; }
+# calls_end <name> <from> <to>: a copy of <from> to the tag <to>, and nothing after it
+calls_end() { grep -qE -- "^skopeo copy .* docker://$(re "$2") docker://$(re "$3")\$" "$tmp/log" || fail "$1: no copy of $2 to $3"; }
 never() { ! grep -qF -- "$2" "$tmp/log" || fail "$1: '$2' was called"; }
-silent() { [ ! -s "$tmp/log" ] || fail "$1: skopeo was called"; }
+silent() { [ ! -s "$tmp/log" ] || fail "$1: skopeo or gh was called"; }
+copies() { [ "$(grep -c '^skopeo copy' "$tmp/log")" = "$2" ] || fail "$1: not $2 copies"; }
 
-# A stable release: three tags, each from the digest and under its own name.
-run stable 0
-calls stable "skopeo login ghcr.io --username actor --password-stdin"
-calls stable "skopeo login docker.io --username hub --password-stdin"
-calls stable "copy --all --preserve-digests"
-calls_end stable "docker://$src@$d docker://$dst:0\\.1\\.0"
-calls_end stable "docker://$src@$d docker://$dst:0\\.1"
-calls_end stable "docker://$src@$d docker://$dst:latest"
-[ "$(grep -c '^skopeo copy' "$tmp/log")" = 3 ] || fail "stable: not three copies"
-never stable "hub-token"
-never stable "ghcr-token"
-never stable "$src:"
-[ "$(cat "$tmp/log.passwords")" = "$(printf 'ghcr-token\nhub-token')" ] || fail "stable: the tokens did not go through stdin"
-says stable "mirrored $dst:latest at $d"
+# The first release: its exact tag, `0.1` and `latest`. The first copy is from
+# GHCR by digest; the other two are made from Docker Hub's own, by digest.
+run first-release 0
+calls first-release "skopeo login ghcr.io --username actor --password-stdin"
+calls first-release "skopeo login docker.io --username hub --password-stdin"
+calls first-release "copy --all --preserve-digests"
+calls_end first-release "$src@$d" "$dst:0.1.0"
+calls_end first-release "$dst@$d" "$dst:0.1"
+calls_end first-release "$dst@$d" "$dst:latest"
+copies first-release 3
+[ "$(grep -c "docker://$(re "$src")" "$tmp/log")" = 1 ] || fail "first-release: GHCR was read more than once"
+never first-release "hub-token"
+never first-release "ghcr-token"
+never first-release "$src:"
+[ "$(cat "$tmp/log.passwords")" = "$(printf 'ghcr-token\nhub-token')" ] || fail "first-release: the tokens did not go through stdin"
+says first-release "mirrored $dst:latest at $d"
+never first-release "skopeo inspect"
 
-# A back-patch moves its exact tag, and not what it did not move.
-run "back-patch" 0 TAGS="$src:0.2.5"
-calls_end "back-patch" "docker://$dst:0\\.2\\.5"
-never "back-patch" ":latest"
+# By hand there is no digest: it is the hash of what GHCR holds under the version.
+run by-hand 0 DIGEST= STUB_DIGEST="$inspected"
+calls by-hand "skopeo inspect --raw docker://$src:0.1.0"
+calls_end by-hand "$src@$inspected" "$dst:0.1.0"
+
+# A newer release on the same line, and a candidate beside it, which counts for nothing.
+run newest 0 GITHUB_REF_NAME=v0.2.1 STUB_TAGS="v0.1.0 v0.2.0 v0.2.1 v0.3.0-rc.1"
+calls_end newest "$src@$d" "$dst:0.2.1"
+calls_end newest "$dst@$d" "$dst:0.2"
+calls_end newest "$dst@$d" "$dst:latest"
+
+# An older release's mirror re-run after a newer one: its exact tag, and
+# neither of the moving ones — what #16 refuses on GHCR, refused on Docker Hub.
+run re-run 0 GITHUB_REF_NAME=v0.2.0 STUB_TAGS="v0.2.0 v0.2.1"
+calls_end re-run "$src@$d" "$dst:0.2.0"
+copies re-run 1
+says re-run "not moving 0.2: v0.2.1 is newer on that line"
+says re-run "not moving latest: v0.2.1 is newer"
+
+# A back-patch to an older line: its version, and its own line's tag.
+run back-patch 0 GITHUB_REF_NAME=v0.2.5 STUB_TAGS="v0.2.4 v0.2.5 v0.3.0"
+calls_end back-patch "$src@$d" "$dst:0.2.5"
+calls_end back-patch "$dst@$d" "$dst:0.2"
+copies back-patch 2
+never back-patch ":latest"
+says back-patch "not moving latest: v0.3.0 is newer"
+
+# `0.10` is not on `0.1`'s line, and 0.9 is older than 0.10.
+run "two digits" 0 GITHUB_REF_NAME=v0.1.5 STUB_TAGS="v0.1.5 v0.10.0"
+calls_end "two digits" "$dst@$d" "$dst:0.1"
+never "two digits" ":latest"
+run "two digits, newer" 0 GITHUB_REF_NAME=v0.10.0 STUB_TAGS="v0.9.0 v0.10.0"
+calls_end "two digits, newer" "$dst@$d" "$dst:latest"
 
 # Another registry, as in a rehearsal: both logins and every copy follow it.
-run "other registry" 0 SOURCE=reg:5000/ghcr/tracepad MIRROR=reg:5000/hub/tracepad TAGS=reg:5000/ghcr/tracepad:0.1.0
+run "other registry" 0 SOURCE=reg:5000/ghcr/tracepad MIRROR=reg:5000/hub/tracepad
 calls "other registry" "skopeo login reg:5000 --username hub"
-calls "other registry" "docker://reg:5000/ghcr/tracepad@$d docker://reg:5000/hub/tracepad:0.1.0"
+calls_end "other registry" "reg:5000/ghcr/tracepad@$d" "reg:5000/hub/tracepad:0.1.0"
 
-# No credentials, or half of them: an explicit error, and nothing called.
+# No credentials, or half of them: an explicit error that names the way back,
+# and nothing called.
 run "no credentials" 1 DOCKERHUB_USERNAME= DOCKERHUB_TOKEN=
 says "no credentials" "::error"
 says "no credentials" "DOCKERHUB_TOKEN"
+says "no credentials" "gh workflow run mirror-image.yml --ref v0.1.0"
 silent "no credentials"
 run "no username" 1 DOCKERHUB_USERNAME=
 says "no username" "::error"
@@ -129,21 +184,25 @@ run "no token" 1 DOCKERHUB_TOKEN=
 says "no token" "::error"
 silent "no token"
 
-# What is wrong is refused, and nothing is half done.
+# What is wrong is refused, and nothing is half done: after a copy that lands
+# elsewhere the next tag is not made.
 run "digest moved" 1 STUB_DIGEST="$other"
 says "digest moved" "is $other, not $d"
-run "foreign tag" 1 TAGS="$src:0.1.0,ghcr.io/someone/else:0.1.0"
-says "foreign tag" "is not a tag of $src"
-never "foreign tag" "copy"
-run "bare repository" 1 TAGS="$src:"
-says "bare repository" "is not a tag of $src"
-run "no tags" 1 TAGS=
-says "no tags" "no tags to mirror"
+copies "digest moved" 1
+never "digest moved" ":latest"
+for ref in v0.1.0-rc.1 main v0.1 v01.0.0 sdk/go/v0.1.0; do
+	run "ref $ref" 1 GITHUB_REF_NAME="$ref"
+	says "ref $ref" "is not a stable release tag"
+	silent "ref $ref"
+done
+run "tag unlisted" 1 STUB_TAGS=""
+says "tag unlisted" "is not among the tags"
+copies "tag unlisted" 0
+run "api failure" 1 STUB_GH_FAIL=1
+copies "api failure" 0
 run "bad digest" 1 DIGEST=latest
-says "bad digest" "gave no digest"
-silent "bad digest"
-run "no digest" 1 DIGEST=
-says "no digest" "gave no digest"
+says "bad digest" "no digest to mirror"
+copies "bad digest" 0
 
 if [ "$failures" -gt 0 ]; then
 	echo "mirror-step-test: $failures failure(s)" >&2
