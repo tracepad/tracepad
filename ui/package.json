@@ -53,6 +53,9 @@
   "overrides": {
     "openapi-typescript": {
       "typescript": "$typescript"
+    },
+    "@sveltejs/kit": {
+      "cookie": "^0.7.2"
     }
   }
 }
