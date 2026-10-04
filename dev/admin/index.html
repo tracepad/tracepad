@@ -1814,6 +1814,14 @@ the new secret.</p>
 or <code>TRACEPAD_API_KEY</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
 </code></pre></div>
+<p>The commands the CLI's help marks <code>(admin token)</code> — <code>projects create</code>, <code>rename</code>,
+<code>rm</code>, <code>restore</code> and <code>ls --deleted</code>, <code>keys</code>, <code>accounts</code> and <code>system</code> — also read <code>TRACEPAD_ADMIN_TOKEN</code>, or the file
+<code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, when there is no <code>--key</code> and no
+<code>TRACEPAD_API_KEY</code>: in the server's own container, where that is the
+environment, <code>tracepad keys ls</code> just works. That is for a server on this
+machine only: against another host the token is sent only if you pass it as
+<code>--key</code> or <code>TRACEPAD_API_KEY</code>. A key given either way wins, and no other command
+takes the token this way.</p>
 <p>A person's session is a cookie rather than a header, and names the project it
 is asking about with <code>X-Tracepad-Project</code> on the routes that do not carry one
 in the path. See <a href="../accounts/#what-a-session-may-ask">accounts.md</a>.</p>

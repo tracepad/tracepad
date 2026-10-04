@@ -2865,7 +2865,18 @@ id as a positional, which is the same argument under a second spelling — so
 passing both is a usage error rather than one of them quietly winning, and that
 holds when the two agree as well. The commands marked as needing
 the admin token in <a href="../admin/">admin.md</a> take it as <code>--key</code> or
-<code>TRACEPAD_API_KEY</code>, since it rides in the same header as a project key.</p>
+<code>TRACEPAD_API_KEY</code>, since it rides in the same header as a project key — and,
+with neither set, from <code>TRACEPAD_ADMIN_TOKEN</code> or the file
+<code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, which is what the server's own container has
+in its environment — but only for a server on this machine (<code>localhost</code>,
+<code>127.0.0.0/8</code>, <code>::1</code>; a name that merely resolves there is not taken for it): the deployment's credential is not sent to another host
+unless you pass it as <code>--key</code> or <code>TRACEPAD_API_KEY</code>. Those are <code>projects</code>
+(<code>create</code>, <code>rename</code>, <code>rm</code>, <code>restore</code> and <code>ls --deleted</code>; a plain <code>projects ls</code> is
+the project key's), <code>keys</code>, <code>accounts</code> and <code>system</code> (the deployment's view, where
+a key gets its project's); no other command reads the admin token this way.</p>
+<p><code>tracepad &lt;command&gt; --help</code>, and the error a mistyped command ends in, print the
+help of that command (<code>keys --help</code> of the group), not the whole text; <code>tracepad
+--help</code> lists every command.</p>
 <h3 id="accounts"><code>accounts</code></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>ls
 <a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>show<span class="w">   </span>&lt;id<span class="p">|</span>email&gt;

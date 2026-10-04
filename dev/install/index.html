@@ -1785,7 +1785,7 @@ companions: traces, scores, prompts, the raw OTLP archive, images, accounts and
 keys (hashed). There is no second store to keep in step with it. Beside it is
 <code>tracepad.db.lock</code>, which a running server holds so that a second one on the same
 directory refuses to start, and an
-upgrade that applies a migration leaves <code>tracepad.db.pre-&lt;migration&gt;.bak</code>
+upgrade that applies a migration leaves <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>
 (<a href="#upgrading">below</a>).</p>
 <h2 id="as-a-service">As a service</h2>
 <p>Any supervisor that restarts a process will do; <code>SIGTERM</code> (or Ctrl-C) is the
@@ -1861,13 +1861,16 @@ upgrade is only as safe as the copy you took before it.</p>
 </li>
 </ol>
 <p><strong>The server keeps a copy of its own, too.</strong> Before every start that applies a
-migration it writes <code>tracepad.db.pre-&lt;migration&gt;.bak</code> beside the database — a
+migration it writes <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code> beside the database — a
 full copy as it stood before, readable by its owner only, for rolling that
 upgrade back by putting the file in place of <code>tracepad.db</code> with the server
 stopped. The backups of earlier upgrades are removed once the new migrations have
 committed, and the newest goes seven days after it was written; that week is the
 window for a rollback, and the copy holds everything erased or swept since (see
-<a href="../docker/#upgrading-and-backing-up-first">docker.md</a> for removing it sooner).</p>
+<a href="../docker/#upgrading-and-backing-up-first">docker.md</a> for removing it sooner).
+The server deletes only files named exactly <code>pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code> — a
+migration's number and name — so a backup you take yourself is safe from it
+under any other name, and best kept outside the data directory.</p>
 <h2 id="backing-up">Backing up</h2>
 <p>The data is one SQLite database, so a backup is a copy of it. Two ways, and
 both must include the <code>-wal</code> file's contents — which is why neither one is a
@@ -1882,7 +1885,9 @@ carries on, with the <code>sqlite3</code> command-line shell (any recent version
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sudo<span class="w"> </span>sqlite3<span class="w"> </span>/var/lib/tracepad/tracepad.db<span class="w"> </span><span class="s2">".backup '/backups/tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.db'"</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/backups/tracepad-*.db
 </code></pre></div>
-<p>Either file is the whole database — every prompt and completion your
+<p>Put either one outside the data directory, or name it anything but
+<code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>, the shape the server's own take and
+delete. Either file is the whole database — every prompt and completion your
 applications sent, and the password hashes of your accounts — so keep it as
 private as the directory it came from.</p>
 <p><strong>Restoring</strong> is the reverse, with the server stopped: put the file back as

@@ -1813,6 +1813,12 @@ mints or revokes keys — so from a terminal it takes the admin token:</p>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># move your applications onto the new pair, then revoke the printed one</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>keys<span class="w"> </span>rm<span class="w"> </span>tp-pk-…<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
 </code></pre></div>
+<p>Inside the container the admin token is already in the environment, or in the
+file <code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, and the commands the CLI's help marks
+<code>(admin token)</code> read it from there when no key is set (the server being on this
+machine, which inside the container it is) — so
+<code>docker exec tracepad /tracepad keys ls --url http://localhost:4318</code> needs no
+<code>-e</code> and no paste. No other command takes it that way; they ask for a key.</p>
 <p>A key minted this way is shown in your browser or printed to your terminal,
 never to the container's log. A deployment that declares its keys in <code>TRACEPAD_PROJECTS</code>
 from the start never has one printed: the server names the variable where the
@@ -2285,7 +2291,7 @@ to delete or to include in a backup. On a file system that cannot lock at all
 (NFS without a lock daemon, some FUSE volumes) the server starts anyway and
 says in a <code>WARN</code> that nothing guards the directory: do not run two.</p>
 <p><strong>The server keeps a copy of its own, too.</strong> Before every start that applies a
-migration it writes <code>tracepad.db.pre-&lt;migration&gt;.bak</code> beside the database — a
+migration it writes <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code> beside the database — a
 full copy as it stood before the upgrade, readable by its owner only, for
 rolling that upgrade back by swapping the file in. Once the upgrade's
 migrations have committed, the server removes the backups of earlier upgrades,
@@ -2293,11 +2299,17 @@ naming each in its log; the sweeper removes the newest seven days after it was
 written. That week is the window for a rollback — and the copy holds
 everything erased or swept since, as does any tar of the volume taken in it.
 Once the upgrade has proved itself you can remove it sooner. This removes
-every backup there is, names each one, and does nothing on a volume that has
-none:</p>
+every backup the server wrote, names each one, and does nothing on a volume
+that has none:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span>find<span class="w"> </span>/data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db.pre-*.bak'</span><span class="w"> </span>-print<span class="w"> </span>-exec<span class="w"> </span>rm<span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span>find<span class="w"> </span>/data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db.pre-[0-9][0-9][0-9][0-9]_*.bak'</span><span class="w"> </span>-print<span class="w"> </span>-exec<span class="w"> </span>rm<span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
 </code></pre></div>
+<p>The server deletes only files named exactly that way — <code>pre-</code>, the four-digit
+number of a migration, an underscore and its name — so a copy you take yourself
+is safe from it under any other name. Better still, keep it outside the data
+directory (the tar above does); if it must sit beside the database, call it
+anything but <code>pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>: <code>tracepad.db.pre-upgrade-&lt;sha&gt;.bak</code> is
+fine, <code>tracepad.db.pre-0035_mine.bak</code> would be taken for the server's own.</p>
 <p>A data-subject erasure does not rewrite this file; while it exists, the
 erasure's answer names it and the day it goes — see
 <a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>.</p>

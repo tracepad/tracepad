@@ -1867,6 +1867,9 @@ fit comes back as a marker:</p>
 <p>The <code>trace_id</code>/<code>observation_id</code> pair is exactly what <code>get_observation_io</code>
 takes. That is why the tool exists: without it the markers would be dead ends
 for a consumer that has tools but no URL fetcher.</p>
+<p>A cut payload that holds images or files carries <code>media_count</code> in the same
+marker, so a missing picture is a reference past the preview and not a lost one
+(<a href="../api/#the-response-budget">api.md</a>). The tools never fetch the bytes.</p>
 <h2 id="a-worked-example">A worked example</h2>
 <p>"Why did the last production run fail?"</p>
 <ol>
