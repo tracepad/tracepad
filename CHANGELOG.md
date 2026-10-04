@@ -86,7 +86,8 @@ one.
 
 - Release archives for Linux, macOS and Windows on amd64 and arm64 with
   checksums and build-provenance attestations, and a multi-architecture image
-  on `ghcr.io/tracepad/tracepad`. See [docs/install.md](docs/install.md) and
-  [docs/docker.md](docs/docker.md).
+  on `ghcr.io/tracepad/tracepad`, mirrored to Docker Hub as
+  `tracepad/tracepad` at the same digest for stable releases. See
+  [docs/install.md](docs/install.md) and [docs/docker.md](docs/docker.md).
 
 [Unreleased]: https://github.com/tracepad/tracepad/commits/main

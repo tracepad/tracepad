@@ -3,7 +3,8 @@
 `ghcr.io/tracepad/tracepad` is the server, the web interface and the CLI in one
 image — the same binary the release archives carry, built from the `Dockerfile`
 in this repository. It runs as a non-root user, keeps everything under `/data`,
-and listens on `4318`.
+and listens on `4318`. The same image is on Docker Hub as
+[`tracepad/tracepad`](#docker-hub).
 
 ```sh
 docker run -d --name tracepad \
@@ -154,8 +155,8 @@ keys as they are. See [admin.md](admin.md) and [cli.md](cli.md).
 
 | | |
 |---|---|
-| Name | `ghcr.io/tracepad/tracepad` |
-| Tags | `X.Y.Z`, `X.Y`, `latest`; a pre-release publishes its exact tag alone |
+| Name | `ghcr.io/tracepad/tracepad`, and `tracepad/tracepad` on [Docker Hub](#docker-hub) |
+| Tags | `X.Y.Z`, `X.Y`, `latest`; a pre-release publishes its exact tag alone, on GHCR |
 | Platforms | `linux/amd64`, `linux/arm64` |
 | User | `nonroot`, uid **65532** |
 | Entrypoint | `/tracepad` — arguments are the server's flags |
@@ -173,6 +174,38 @@ pulling a new image.
 Pin a tag in anything you deploy. `latest` is convenient for a laptop and is
 the wrong choice for a machine you are not watching; `X.Y` is the pin for
 "patches yes, surprises no".
+
+### Docker Hub
+
+Every stable release is also on Docker Hub, as `docker.io/tracepad/tracepad`
+(`docker pull tracepad/tracepad`), under the same tags as on GHCR:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
+  tracepad/tracepad
+```
+
+GHCR is where releases are published and what the examples here use; Docker
+Hub carries a copy of the same multi-architecture image, byte for byte, so
+the digest of `tracepad/tracepad:0.1.0` is the digest of
+`ghcr.io/tracepad/tracepad:0.1.0`. Pick the one your network can reach, or
+the one your registry mirror already caches. A pre-release (`0.2.0-rc.1`) is
+on GHCR only.
+
+The build-provenance attestation lives with GHCR's image and is found by
+digest, so it covers the copy: verify it exactly as for the GHCR image, by
+name or by the digest you pulled.
+
+```sh
+gh attestation verify oci://docker.io/tracepad/tracepad:0.1.0 --repo tracepad/tracepad
+```
+
+Do not add `--bundle-from-oci`: that reads the attestation from the registry
+you name, and Docker Hub does not hold it.
+
+The copy is made after the GHCR image is published, so for a short while after
+a release — longer, if the copy has to be repeated — `0.1.0` can be on GHCR and
+not yet on Docker Hub. The GHCR image is never held back by it.
 
 ## The volume, and who owns it
 
