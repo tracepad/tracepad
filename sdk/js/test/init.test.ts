@@ -220,6 +220,19 @@ describe('configuration', () => {
     expect(resolve({ host: null as unknown as string }).host).toBe('http://from-host:4318');
   });
 
+  test('the host loses its trailing slashes, and a long run of them costs linear time', () => {
+    process.env.TRACEPAD_API_KEY = KEY;
+    expect(resolve({ host: 'http://argument:4318///' }).host).toBe('http://argument:4318');
+    expect(resolve({ host: 'http://argument:4318/base/' }).host).toBe('http://argument:4318/base');
+    expect(() => resolve({ host: '///' })).toThrow('no host;');
+    // `/\/+$/` took seconds on this: it retries at every slash of a run that
+    // does not end the string (CodeQL js/polynomial-redos).
+    const slashes = '/'.repeat(50_000);
+    const started = performance.now();
+    expect(resolve({ host: `http://argument:4318${slashes}x${slashes}` }).host).toBe(`http://argument:4318${slashes}x`);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   test('spanProcessor applies the logger, so its deprecated-host warning goes there and is not spent', () => {
     process.env.TRACEPAD_API_KEY = KEY;
     process.env.TRACEPAD_HOST = 'http://from-host:4318';
