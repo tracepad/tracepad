@@ -133,7 +133,7 @@ async function rolled(name: string) {
 		.poll(
 			async () => {
 				const response = await fetch(
-					`${baseURL}/api/v1/stats/scores?name=${name}&group_by=day&${WINDOW.replace(/&/g, '&')}`,
+					`${baseURL}/api/v1/stats/scores?name=${name}&group_by=day&${WINDOW}`,
 					{ headers: { Authorization: `Bearer ${key}` } }
 				);
 				if (!response.ok) return -1;

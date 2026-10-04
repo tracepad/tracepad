@@ -275,7 +275,7 @@ test('a user id in the traces table links to the page', async ({ page }) => {
 	// The cell's own link, which stops the row's click from opening the peek
 	// panel over it (spec 023, Application contract).
 	await page.getByRole('link', { name: BOB, exact: true }).first().click();
-	await expect(page).toHaveURL(new RegExp(`/users/${encodeURIComponent(BOB).replace('@', '%40')}`));
+	await expect(page).toHaveURL(new RegExp(`/users/${encodeURIComponent(BOB)}$`));
 	await expect(page.locator('dt').filter({ hasText: /^Sessions$/ })).toBeVisible();
 });
 
