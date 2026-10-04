@@ -28,7 +28,7 @@ export interface ConfigOptions {
 /** Build a Config, throwing when the two required values are nowhere. */
 export function resolve(options: ConfigOptions = {}): Config {
   const [picked, deprecated] = pickHost(options.host);
-  const host = picked.replace(/\/+$/, '');
+  const host = trimTrailingSlashes(picked);
   const key = pick(options.key, 'TRACEPAD_API_KEY');
   const missing = [
     ['host', host],
@@ -100,6 +100,15 @@ function pickHost(argument: string | undefined): [host: string, deprecated: bool
   if (url) return [url, false];
   const legacy = (process.env.TRACEPAD_HOST ?? '').trim();
   return [legacy, legacy !== ''];
+}
+
+/** Without the slashes at the end. A loop, not `/\/+$/`: a regex engine
+ * retries that one at every slash of a long run that does not end the
+ * string, which is quadratic in the run. */
+function trimTrailingSlashes(host: string): string {
+  let end = host.length;
+  while (end > 0 && host.charCodeAt(end - 1) === 0x2f) end--;
+  return host.slice(0, end);
 }
 
 function pick(argument: string | undefined, variable: string): string {
