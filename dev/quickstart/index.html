@@ -1553,15 +1553,16 @@ your application — then prints it, once:</p>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  # Langfuse SDK
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  LANGFUSE_HOST=http://localhost:4318
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  LANGFUSE_PUBLIC_KEY=tp-pk-…
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  LANGFUSE_SECRET_KEY=tp-sk-…
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>This key holds the ingest scope alone: it sends spans and scores and fetches
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>prompts, and cannot read what was sent. For the CLI, an agent or the eval
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>harness, mint a key that reads in Settings → Project → API keys once you are
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>signed in.
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  # Langfuse SDK (the JavaScript SDK reads LANGFUSE_BASE_URL alone; older SDKs read LANGFUSE_HOST)
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  LANGFUSE_BASE_URL=http://localhost:4318
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  LANGFUSE_HOST=http://localhost:4318
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  LANGFUSE_PUBLIC_KEY=tp-pk-…
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  LANGFUSE_SECRET_KEY=tp-sk-…
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>This key holds the ingest scope alone: it sends spans and scores and fetches
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>prompts, and cannot read what was sent. For the CLI, an agent or the eval
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>harness, mint a key that reads in Settings → Project → API keys once you are
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>signed in.
 </code></pre></div>
 <p>(With an admin token configured the note names <code>tracepad keys create</code> too, and
 on a server nobody can sign in to, how to configure the token.)</p>
@@ -1607,10 +1608,9 @@ opentelemetry-distro opentelemetry-exporter-otlp-proto-http</code>):</p>
 <p>A plain <code>python your_app.py</code> configures nothing; the distro's launcher (or
 your own code) is what reads these variables.</p>
 <p>The Langfuse SDKs work too, against the same endpoint under their own path —
-set <code>LANGFUSE_BASE_URL</code>, <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> instead.
-The first start prints the older name, <code>LANGFUSE_HOST</code>, which the JavaScript
-SDK does not read; set <code>LANGFUSE_BASE_URL</code> to the same address
-(<a href="../langfuse-sdk/#the-switch">Coming from the Langfuse SDK</a>).
+set <code>LANGFUSE_BASE_URL</code>, <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> instead,
+and <code>LANGFUSE_HOST</code> too for an older SDK — the four lines the first start
+prints (<a href="../langfuse-sdk/#the-switch">Coming from the Langfuse SDK</a>).
 Every dialect of attribute naming is understood; see <a href="../ingest/">ingest.md</a>
 for what is mapped and how.</p>
 <p><strong>In Python, with a decorator instead.</strong> The <code>tracepad</code> package is a thin
