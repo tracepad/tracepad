@@ -24,7 +24,11 @@
 set -euo pipefail
 
 # Run from a git hook (the pre-push of `make gate`) this inherits GIT_DIR and
-# its kin, which would point the scratch repository below at the real one.
+# its kin — in a linked worktree, the hook's GIT_DIR is that worktree's directory
+# inside the shared repository — which would point the scratch repository below
+# at the real one: `git init` under it rewrote the shared `.git/config` with
+# `core.bare = true`. Nothing of it may reach the scratch repository (see also
+# the ceiling and the check of the real repository at the end).
 while IFS= read -r var; do unset "$var"; done < <(env | sed -n 's/^\(GIT_[A-Za-z_]*\)=.*/\1/p')
 # And the machine's own git configuration — a signing key, a hooks path —
 # which the scratch repository must not depend on: the gate runs everywhere.
@@ -54,6 +58,19 @@ fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+# git finds no repository above the scratch directory, whatever is in the
+# environment or the working directory.
+export GIT_CEILING_DIRECTORIES="$tmp"
+
+# What the real repository looked like before: this test makes repositories of
+# its own and must not have touched this one.
+outer_state() {
+	git -C "$root" config --local --get core.bare || echo "core.bare unset"
+	git -C "$root" config --local --get core.worktree || echo "core.worktree unset"
+	git -C "$root" tag --list | cksum
+	git -C "$root" rev-parse --git-common-dir
+}
+outer_before="$(outer_state)"
 extract >"$tmp/step.sh"
 extract_step "$root/.github/workflows/release-server.yml" "The tag, and the image tags it moves" >"$tmp/check.sh"
 for f in step check; do
@@ -261,7 +278,7 @@ agree() { # agree <ref> <tags...>
 	local ref="$1" repo="$tmp/repo" tags="${*:2}" t by_check by_mirror
 	rm -rf "$repo"
 	mkdir "$repo"
-	scratch_git -C "$repo" init -q
+	scratch_git init -q "$repo"
 	scratch_git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
 	for t in $tags; do scratch_git -C "$repo" tag "$t"; done
 	ln -s "$root/scripts" "$repo/scripts"
@@ -302,6 +319,8 @@ agree v0.3.1 v0.3.0 v0.3.00 v0.3.1 v0.3.01
 agree v0.2.9 v0.2.9 v0.3.00 v1.02.0 v01.0.0
 agree v1.0.0 v0.9.9 v0.10.0 v1.0.0
 agree v0.10.0 v0.9.9 v0.10.0 v1.0.0
+
+[ "$(outer_state)" = "$outer_before" ] || fail "the repository this runs in was changed (core.bare, core.worktree or its tags): was [$outer_before], is [$(outer_state)]"
 
 if [ "$failures" -gt 0 ]; then
 	echo "mirror-step-test: $failures failure(s)" >&2
