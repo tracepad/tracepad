@@ -84,7 +84,7 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c
 ARG VERSION
 ARG REVISION
 LABEL org.opencontainers.image.title="Tracepad" \
-      org.opencontainers.image.description="Lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces" \
+      org.opencontainers.image.description="LLM observability and evals in a single binary: traces, prompts, datasets, scores and review queues for LLM and agent apps" \
       org.opencontainers.image.source="https://github.com/tracepad/tracepad" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$REVISION" \

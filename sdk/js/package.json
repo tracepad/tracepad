@@ -1,7 +1,7 @@
 {
   "name": "tracepad",
   "version": "0.1.0",
-  "description": "The Node package for Tracepad: a thin layer of ergonomics over the OpenTelemetry SDK",
+  "description": "Tracing, prompts, scores and evals for Node LLM apps, on OpenTelemetry — the client for Tracepad, the single-binary self-hosted LLM observability server",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -14,8 +14,13 @@
     "otlp",
     "llm",
     "observability",
+    "llm-observability",
     "tracing",
-    "evals"
+    "evals",
+    "evaluation",
+    "prompts",
+    "agents",
+    "self-hosted"
   ],
   "type": "module",
   "main": "./dist/index.cjs",

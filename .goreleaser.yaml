@@ -81,7 +81,7 @@ brews:
       name: homebrew-tap
     directory: Formula
     homepage: 'https://github.com/{{ envOrDefault "GITHUB_REPOSITORY" "tracepad/tracepad" }}'
-    description: Lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces
+    description: LLM observability and evals in a single binary
     license: Apache-2.0
     skip_upload: true
     test: |

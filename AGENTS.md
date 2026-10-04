@@ -1,6 +1,7 @@
 # Tracepad — agent guide
 
-Lightweight, self-hosted, OTLP-native store and viewer for LLM/agent traces.
+LLM observability and evals in a single binary: a self-hosted, OTLP-native
+store for LLM/agent traces, prompts, datasets and scores.
 Single Go binary, embedded SQLite, UI/CLI/MCP as thin clients over one read
 API. This file routes; it does not duplicate what specs and docs say.
 

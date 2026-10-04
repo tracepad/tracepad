@@ -1,10 +1,16 @@
 # Tracepad documentation
 
-Tracepad is a lightweight, self-hosted store and viewer for LLM and agent
-application traces: one binary, an embedded database, OTLP-native ingestion.
-Point any OpenTelemetry-instrumented app at it and browse what it did.
+Tracepad is LLM observability and evals in a single binary: traces, prompt
+versions, datasets and eval runs, scores and annotation queues for LLM and
+agent applications, self-hosted on one embedded database. Point any
+OpenTelemetry-instrumented app at it, or one that sends with the Langfuse SDK,
+and read what it did in the browser, from the CLI, or through your coding
+agent over MCP.
 
 New here? [Quickstart](quickstart.md) goes from nothing to a trace on screen.
+Already sending with the Langfuse SDK? [Coming from the Langfuse SDK](langfuse-sdk.md)
+is the switch. Weighing your options? [How Tracepad compares](compare.md) sets
+it beside the tools that cover the same ground.
 
 ## Get started
 
@@ -13,6 +19,8 @@ New here? [Quickstart](quickstart.md) goes from nothing to a trace on screen.
   upgrade, back up.
 - [Docker](docker.md): the image, its volume, TLS in front, upgrades.
 - [Configuration](configuration.md): every environment variable.
+- [How Tracepad compares](compare.md): what other tools need to run, and
+  where they do more.
 
 ## Send traces
 
@@ -21,6 +29,8 @@ New here? [Quickstart](quickstart.md) goes from nothing to a trace on screen.
 - [Python](sdk-python.md), [Node](sdk-js.md) and [Go](sdk-go.md): the
   packages, each a thin layer over OpenTelemetry.
 - [Media](media.md): images and files in traces.
+- [Coming from the Langfuse SDK](langfuse-sdk.md): what carries over, and what
+  goes through Tracepad's API instead.
 
 ## Use it
 

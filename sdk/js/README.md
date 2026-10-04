@@ -1,7 +1,7 @@
 # tracepad
 
-The Node package for [Tracepad](https://github.com/tracepad/tracepad), a
-lightweight, self-hosted, OTLP-native store and viewer for LLM traces. A thin
+The Node package for [Tracepad](https://github.com/tracepad/tracepad) — LLM
+observability and evals in a single binary, self-hosted. A thin
 layer of ergonomics over the OpenTelemetry SDK: it owns no transport, no
 batching, no retry and no context propagation, and it wraps no provider
 client.

@@ -2,7 +2,7 @@
 # on GitHub as it is; this file only decides how the same files are laid out
 # as a site. `make docs-site` builds it and rehearses the versioned deploy.
 site_name: Tracepad
-site_description: A lightweight, self-hosted, OTLP-native store and viewer for LLM and agent traces.
+site_description: LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.
 site_url: https://tracepad.github.io/tracepad/
 repo_url: https://github.com/tracepad/tracepad
 repo_name: tracepad/tracepad
@@ -99,12 +99,14 @@ nav:
       - Installing the binary: install.md
       - Docker: docker.md
       - Configuration: configuration.md
+      - How Tracepad compares: compare.md
   - Send traces:
       - Sending traces: ingest.md
       - Python package: sdk-python.md
       - Node package: sdk-js.md
       - Go package: sdk-go.md
       - Media: media.md
+      - Coming from the Langfuse SDK: langfuse-sdk.md
   - Use it:
       - Web interface: ui.md
       - Scores: scores.md
