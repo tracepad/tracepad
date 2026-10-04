@@ -1744,6 +1744,8 @@ or exits non-zero and says why not. The container image is attested the same
 way:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>oci://ghcr.io/tracepad/tracepad:0.1.0<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
 </code></pre></div>
+<p>The copy on Docker Hub has the same digest, so it verifies the same way (see
+<a href="../docker/#docker-hub">Docker Hub</a>).</p>
 <h2 id="put-it-on-the-path">Put it on the path</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
