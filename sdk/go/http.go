@@ -20,7 +20,7 @@ import (
 
 // Version is the package's own, sent as its User-Agent and as the tracer's
 // instrumentation version.
-const Version = "0.1.0"
+const Version = "0.1.0-rc.1"
 
 // ErrConfig is returned by Init, and by the REST calls made without it, when
 // neither the options nor the environment name a host and a key (spec 017
