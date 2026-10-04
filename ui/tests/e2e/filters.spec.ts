@@ -363,7 +363,20 @@ for (const width of [320, 375, 414, 600, 639]) {
 			await signIn(page);
 			await page.goto(`/traces${query && `?${query}`}`);
 
+			// A bare path is redirected to the project's on the client (spec 029
+			// #3), and `goto` can return before that lands: the page is empty for
+			// a few tens of milliseconds, and `all()` below does not wait. So wait
+			// for the address and for every part this case must measure, rather
+			// than measure whatever happened to be drawn.
+			await expect(page).toHaveURL(/\/p\/[0-9a-f]{32}\/traces(\?|$)/);
 			const search = page.getByRole('searchbox', { name: /^Search/ });
+			await expect(search).toBeVisible();
+			await expect(page.getByRole('button', { name: /^Filters/ })).toBeVisible();
+			if (name === 'a window written out')
+				await expect(page.getByRole('button', { name: /^Time range: / })).toHaveAccessibleName(/→/);
+			if (query.includes('environment='))
+				await expect(page.getByRole('button', { name: /^Remove filter / })).toBeVisible();
+
 			const parts = [
 				search,
 				page.getByRole('button', { name: /^Time range: / }),
@@ -381,7 +394,8 @@ for (const width of [320, 375, 414, 600, 639]) {
 			expect(boxes.some((b) => b.who === 2)).toBe(true);
 
 			// A field you can type into: the bar's width, less its padding.
-			const field = boxes.find((b) => b.who === 0)!;
+			const field = boxes.find((b) => b.who === 0);
+			if (!field) throw new Error('the search box was not measured');
 			expect(field.w).toBeGreaterThanOrEqual(width - 40);
 
 			for (const b of boxes) {
