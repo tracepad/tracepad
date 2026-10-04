@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +146,7 @@ func TestTheAdminTokenIsOnlyOfferedToThisMachine(t *testing.T) {
 		"":                              true,
 		"http://localhost:4318":         true,
 		"http://LOCALHOST:4318/":        true,
-		"http://tracepad.localhost":     true,
+		"http://tracepad.localhost":     false,
 		"http://127.0.0.1:4318":         true,
 		"http://127.1.2.3:80":           true,
 		"http://[::1]:4318":             true,
@@ -178,5 +180,34 @@ func TestTheAdminTokenIsOnlyOfferedToThisMachine(t *testing.T) {
 	h.env["TRACEPAD_API_KEY"] = testAdminToken
 	if out := h.run(t.Context(), false, "keys", "ls", "--url", h.url); out.code != ExitOK {
 		t.Errorf("keys ls with a key: exit %d, %s", out.code, out.stderr)
+	}
+}
+
+// The token found in the environment is sent straight to the server, not
+// through a proxy the environment names (review of PR #202); a key given by name
+// travels as any request does.
+func TestTheAdminTokenFromTheEnvironmentBypassesAProxy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+		want bool // a transport with no proxy
+	}{
+		{"the token", map[string]string{"TRACEPAD_ADMIN_TOKEN": testAdminToken}, []string{"keys", "ls"}, true},
+		{"a key by name", map[string]string{"TRACEPAD_API_KEY": testAdminToken}, []string{"keys", "ls"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
+			t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+			r := newRun(Options{Env: func(key string) string { return tc.env[key] }, Stdout: io.Discard, Stderr: io.Discard})
+			fs := r.flags("keys ls")
+			if _, err := r.parseAdmin(fs, nil, 0); err != nil {
+				t.Fatal(err)
+			}
+			transport, custom := r.api.HTTP.Transport.(*http.Transport)
+			if got := custom && transport.Proxy == nil; got != tc.want {
+				t.Errorf("a transport with no proxy = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

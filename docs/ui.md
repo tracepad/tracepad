@@ -837,10 +837,10 @@ rather than working around them:
   the button: it fetches `GET /api/v1/observations/{id}/io` — the one endpoint
   no budget applies to — and swaps the whole document in. The preview is a
   prefix cut on a byte boundary, so it is shown as text rather than parsed;
-- when the cut left media references out of the preview — an image sent after a
-  long prompt — the panel draws the ones the marker names above the preview and
-  says how many there are (*2 images or files are referenced past this
-  preview*), so a picture that is in the payload never reads as dropped;
+- when the payload holds media — an image sent after a long prompt — the panel
+  says how many references there are (*This payload holds 2 images or files,
+  which the preview may not show*), above the banner that loads the whole
+  payload, so a picture that is in the payload never reads as dropped;
 - a marker the budget left no room for a preview in is the banner alone;
 - a trace with more payloads than the budget can carry markers for gets none
   of them, and each payload offers a load button of its own.

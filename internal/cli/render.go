@@ -308,7 +308,7 @@ type truncationMarker struct {
 	Size      int    `json:"size"`
 	Preview   string `json:"preview"`
 	Full      string `json:"full"`
-	// MediaCount is how many media references lie beyond the preview
+	// MediaCount is how many media references the payload holds
 	// (spec 004 #39).
 	MediaCount int `json:"media_count"`
 }
@@ -334,7 +334,7 @@ func payloadText(raw json.RawMessage) string {
 		// (spec 004 #39).
 		media := ""
 		if marker.MediaCount > 0 {
-			media = fmt.Sprintf("; %d media file(s) beyond the preview", marker.MediaCount)
+			media = fmt.Sprintf("; %d media file(s) in the payload", marker.MediaCount)
 		}
 		return fmt.Sprintf("%s… (%s truncated%s; whole payload at %s)",
 			marker.Preview, byteSize(marker.Size), media, marker.Full)

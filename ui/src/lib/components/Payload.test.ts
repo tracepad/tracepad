@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Truncation } from '$lib/api/client.svelte';
 import Payload, { isTruncated } from './Payload.svelte';
 
@@ -96,53 +96,26 @@ describe('a payload the budget could not carry', () => {
 });
 
 // Found upgrading a live install: the image was in the stored input, past the
-// preview, and the screen read as if it had been dropped. The marker names it
-// (spec 004 #39), and the panel shows it.
+// preview, and the screen read as if it had been dropped. The marker says the
+// payload holds media (spec 004 #39), and the panel says so beside the banner
+// that loads the rest.
 describe('a payload cut before its media (spec 004 #39)', () => {
-	const sha = 'd'.repeat(64);
-	beforeEach(() => {
-		URL.createObjectURL = vi.fn(() => 'blob:tracepad/1');
-		URL.revokeObjectURL = vi.fn();
-	});
-
-	it('draws the reference the preview does not reach, and says how many', () => {
-		render(Payload, {
-			label: 'Input',
-			value: {
-				...marker,
-				media_count: 1,
-				media: [{ tracepad_media: sha, mime_type: 'image/png', size: 48_210 }]
-			},
-			loading: false,
-			onload: () => {}
-		});
-
-		expect(screen.getByText('image/png · 48 KB')).toBeInTheDocument();
-		expect(screen.getByTestId('hidden-media')).toHaveTextContent(
-			'1 image or file is referenced past this preview; the whole payload has it.'
+	it('says how many the payload holds, above the banner that loads them', () => {
+		render(Payload, { label: 'Input', value: { ...marker, media_count: 1 }, loading: false, onload: () => {} });
+		expect(screen.getByTestId('media-count')).toHaveTextContent(
+			'This payload holds 1 image or file, which the preview may not show — load the whole payload to see it.'
 		);
+		expect(screen.getByRole('button', { name: /Load the whole payload/ })).toBeInTheDocument();
 	});
 
-	it('counts the ones the marker had no room to spell out', () => {
-		render(Payload, {
-			label: 'Input',
-			value: {
-				...marker,
-				media_count: 20,
-				media: [{ tracepad_media: sha, mime_type: 'image/png', size: 48_210 }]
-			},
-			loading: false,
-			onload: () => {}
-		});
-
-		expect(screen.getByTestId('hidden-media')).toHaveTextContent(
-			'20 images or files are referenced past this preview — the first 1 shown here'
-		);
+	it('counts several', () => {
+		render(Payload, { label: 'Input', value: { ...marker, media_count: 20 }, loading: false, onload: () => {} });
+		expect(screen.getByTestId('media-count')).toHaveTextContent('20 images or files');
 	});
 
-	it('says nothing when the cut left no media out', () => {
+	it('says nothing when the payload holds none', () => {
 		render(Payload, { label: 'Input', value: marker, loading: false, onload: () => {} });
-		expect(screen.queryByTestId('hidden-media')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('media-count')).not.toBeInTheDocument();
 	});
 });
 

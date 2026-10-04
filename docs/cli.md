@@ -866,7 +866,7 @@ the admin token in [admin.md](admin.md) take it as `--key` or
 with neither set, from `TRACEPAD_ADMIN_TOKEN` or the file
 `TRACEPAD_ADMIN_TOKEN_FILE` names, which is what the server's own container has
 in its environment — but only for a server on this machine (`localhost`,
-`127.0.0.0/8`, `::1`): the deployment's credential is not sent to another host
+`127.0.0.0/8`, `::1`; a name that merely resolves there is not taken for it): the deployment's credential is not sent to another host
 unless you pass it as `--key` or `TRACEPAD_API_KEY`. Those are `projects`
 (`create`, `rename`, `rm`, `restore` and `ls --deleted`; a plain `projects ls` is
 the project key's), `keys`, `accounts` and `system` (the deployment's view, where

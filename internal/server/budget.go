@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -27,28 +26,18 @@ import (
 // carries the ready-made URL for an HTTP consumer and the raw id pair for an
 // MCP one, whose `get_observation_io` tool takes exactly that pair (#2, #17).
 //
-// A payload that holds media (spec 041 #4) says so when the cut leaves a
-// reference out: `media_count` is how many references lie beyond the preview,
-// `media` the first of them, each exactly as it is stored. Without that, an
-// image the application sent looked lost when its reference sat after the cut
-// (spec 004 #39).
+// A payload that holds media (spec 041 #4) says how many references it holds:
+// `media_count`. Without that, an image the application sent looked lost when
+// its reference sat after the cut (spec 004 #39).
 type truncation struct {
-	Truncated     bool             `json:"truncated"`
-	Size          int              `json:"size"`
-	Preview       string           `json:"preview,omitempty"`
-	TraceID       string           `json:"trace_id"`
-	ObservationID string           `json:"observation_id"`
-	Full          string           `json:"full"`
-	MediaCount    int              `json:"media_count,omitempty"`
-	Media         []map[string]any `json:"media,omitempty"`
+	Truncated     bool   `json:"truncated"`
+	Size          int    `json:"size"`
+	Preview       string `json:"preview,omitempty"`
+	TraceID       string `json:"trace_id"`
+	ObservationID string `json:"observation_id"`
+	Full          string `json:"full"`
+	MediaCount    int    `json:"media_count,omitempty"`
 }
-
-// maxListedMedia bounds the references a marker spells out; `media_count` says
-// how many there are. The marker lives inside a budget of its own share.
-const maxListedMedia = 16
-
-// mediaKeyOverhead is what the `media` array costs before its first entry.
-const mediaKeyOverhead = len(`,"media":[]`)
 
 // ioPath is where the whole payload lives: the one budget-exempt endpoint
 // (#3), which is why a marker can always name a working follow-up.
@@ -157,184 +146,20 @@ func (b payloadBudget) render(value any, traceID, observationID string) any {
 		ObservationID: observationID,
 		Full:          ioPath(traceID, observationID),
 	}
-	text := string(encoded)
-	spans := mediaSpans(text)
-	// The room the media fields take is settled once, from what the payload
-	// holds, and the preview is cut to what is left (spec 004 #39): no search
-	// for a fixed point, and a payload with no media pays nothing.
-	var distinct []mediaSpan
-	seen := map[string]bool{}
-	for _, one := range spans {
-		if !seen[one.key] {
-			seen[one.key] = true
-			distinct = append(distinct, one)
+	// A payload that holds media says how many references it holds, and a
+	// preview of text cannot be trusted to show them (spec 004 #39). The count
+	// is a few bytes, taken off the preview's room; a share too small to carry
+	// it carries none.
+	if count := mapping.CountMediaReferences(value); count > 0 {
+		marker.MediaCount = count
+		if markerSize(marker) > b.share {
+			marker.MediaCount = 0
 		}
 	}
-	marker.MediaCount = len(distinct)
-	avail := b.share - markerSize(marker) - previewKeyOverhead
-	if len(distinct) == 0 || avail < 0 {
-		// Nothing to name, or a share that cannot carry even the count.
-		marker.MediaCount = 0
-		if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
-			marker.Preview = fitString(text, room)
-		}
-		return marker
-	}
-
-	// The list's room: the longest entry's size for each of them, up to the limit, and never so
-	// much that the preview has less than minPreview left (unless the share has
-	// no room for a preview at all, and then the list may have it).
-	var longest int
-	for _, one := range distinct {
-		longest = max(longest, len(one.encoded)+1)
-	}
-	reserve := longest*min(len(distinct), maxListedMedia) + mediaKeyOverhead
-	if spare := avail - minPreview; spare >= mediaKeyOverhead {
-		reserve = min(reserve, spare)
-	} else {
-		reserve = min(reserve, max(avail, 0))
-	}
-	if reserve > 0 && reserve <= mediaKeyOverhead {
-		reserve = 0 // not room for one entry: the count alone
-	}
-	if room := avail - reserve; room >= minPreview {
-		marker.Preview = fitString(text, room)
-	}
-
-	// Past the preview: the references whose object it does not hold whole,
-	// in document order — the first of them first. A body shown anywhere in
-	// the preview is shown.
-	shown := map[string]bool{}
-	for _, one := range spans {
-		if one.end <= len(marker.Preview) {
-			shown[one.key] = true
-		}
-	}
-	var beyond []mediaSpan
-	for _, one := range distinct {
-		if !shown[one.key] {
-			beyond = append(beyond, one)
-		}
-	}
-	marker.MediaCount = len(beyond)
-	if reserve > 0 {
-		room := reserve - mediaKeyOverhead
-		for _, one := range beyond {
-			if len(marker.Media) == maxListedMedia || len(one.encoded)+1 > room {
-				break
-			}
-			room -= len(one.encoded) + 1
-			marker.Media = append(marker.Media, one.ref)
-		}
+	if room := b.share - markerSize(marker) - previewKeyOverhead; room >= minPreview {
+		marker.Preview = fitString(string(encoded), room)
 	}
 	return marker
-}
-
-// mediaSpan is one media reference in a payload's JSON text: where its object
-// lies, the reference as stored, and the body it names (a placeholder, which
-// holds no bytes, is another from the same SHA-256).
-type mediaSpan struct {
-	start, end int
-	key        string
-	ref        map[string]any
-	encoded    []byte
-}
-
-// mediaSpans finds the media references (spec 041 #4) in the JSON text of a
-// payload, in document order, by structure: the text is walked once, strings
-// skipped whole, and an object that has a `tracepad_media` member holding a
-// SHA-256 and a string `mime_type` is a reference from its `{` to its `}`,
-// whatever else it carries and in whatever order. A hash that appears inside a
-// string is text, however it is quoted.
-func mediaSpans(text string) []mediaSpan {
-	const key = mapping.MediaRefKey
-	var (
-		spans     []mediaSpan
-		open      []int            // where each container still open began
-		holders   = map[int]bool{} // the objects that hold a hash under the key
-		lastKey   string
-		afterKey  bool
-		isKeyNext = func(from int) bool {
-			for ; from < len(text); from++ {
-				switch text[from] {
-				case ' ', '\t', '\n', '\r':
-				default:
-					return text[from] == ':'
-				}
-			}
-			return false
-		}
-	)
-	for i := 0; i < len(text); i++ {
-		switch c := text[i]; c {
-		case '"':
-			end := i + 1
-			for end < len(text) && text[end] != '"' {
-				if text[end] == '\\' {
-					end++
-				}
-				end++
-			}
-			content := ""
-			if end <= len(text) && end > i+1 {
-				content = text[i+1 : min(end, len(text))]
-			}
-			switch {
-			case isKeyNext(end + 1):
-				lastKey, afterKey = content, true
-			case afterKey && lastKey == key && isSHA256Hex(content) && len(open) > 0 && text[open[len(open)-1]] == '{':
-				holders[open[len(open)-1]] = true
-				afterKey = false
-			default:
-				afterKey = false
-			}
-			i = end
-		case '{', '[':
-			open = append(open, i)
-			afterKey = false
-		case '}', ']':
-			if len(open) == 0 {
-				continue
-			}
-			start := open[len(open)-1]
-			open = open[:len(open)-1]
-			afterKey = false
-			if !holders[start] {
-				continue
-			}
-			delete(holders, start)
-			var ref map[string]any
-			decoder := json.NewDecoder(strings.NewReader(text[start : i+1]))
-			decoder.UseNumber()
-			if decoder.Decode(&ref) != nil {
-				continue
-			}
-			sha, _ := ref[key].(string)
-			if _, typed := ref["mime_type"].(string); !typed || !isSHA256Hex(sha) {
-				continue
-			}
-			one := mediaSpan{start: start, end: i + 1, key: sha, ref: ref, encoded: []byte(text[start : i+1])}
-			if stored, ok := ref["stored"].(bool); ok && !stored {
-				one.key += ":placeholder"
-			}
-			spans = append(spans, one)
-		}
-	}
-	slices.SortFunc(spans, func(a, b mediaSpan) int { return a.start - b.start })
-	return spans
-}
-
-// isSHA256Hex says whether text is a lowercase hex SHA-256, 64 characters.
-func isSHA256Hex(text string) bool {
-	if len(text) != 64 {
-		return false
-	}
-	for i := 0; i < len(text); i++ {
-		if c := text[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // encodedPayload is a payload encoding/json has already written, placed in an

@@ -33,16 +33,24 @@ export function duration(ms: number | null | undefined): string {
 }
 
 /**
- * A duration on a chart's axis or in its tooltip. The stored latency is whole
- * milliseconds, so `duration` calls everything under one `<1 ms`; but a
- * percentile over a rolled-up histogram is a real number, and the ticks of an
- * axis that spans 0 to 0.4 ms (0, 0.2, 0.4) must not all read the same. Under
- * a millisecond it keeps what the number has; from one up it is `duration`
- * (spec 006 #34).
+ * A duration that may be a real number of milliseconds under one — a percentile
+ * over a rolled-up histogram, or the difference of two. `duration` calls
+ * everything under a millisecond `<1 ms`, right for the whole milliseconds a
+ * trace stores; `0.2 → 0.6` is a change of `0.4 ms` and not of `<1 ms`. Zero and
+ * what rounds to it stay `<1 ms`, as `duration` says them (spec 006 #34).
  */
 export function fineDuration(ms: number | null | undefined): string {
-	if (ms == null || !Number.isFinite(ms) || ms < 0 || ms >= 1) return duration(ms);
-	return `${round(ms, 2)} ms`;
+	if (ms == null || !Number.isFinite(ms) || ms <= 0 || ms >= 1) return duration(ms);
+	const rounded = round(ms, 2);
+	return rounded === '0' || rounded === '1' ? duration(ms) : `${rounded} ms`;
+}
+
+/**
+ * The same for a chart's axis and tooltip, where the ticks of an axis that spans
+ * 0 to 0.4 ms (0, 0.2, 0.4) must not all read `<1 ms`: zero is `0 ms` there.
+ */
+export function axisDuration(ms: number | null | undefined): string {
+	return ms === 0 ? '0 ms' : fineDuration(ms);
 }
 
 /**

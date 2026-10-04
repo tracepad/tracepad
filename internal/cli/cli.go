@@ -504,7 +504,8 @@ func (r *run) parseAdminWhen(fs *flag.FlagSet, args []string, wantArgs int, need
 	if r.key == "" && !needed() {
 		return nil, usageErrorIn(fs.Name(), "no API key: set TRACEPAD_API_KEY or pass --key")
 	}
-	if r.key == "" {
+	fromEnvironment := r.key == ""
+	if fromEnvironment {
 		// The token is the deployment's own credential: it goes to a server
 		// on this machine, which is where the environment that holds it is, and
 		// to no other unless it is asked for by name (spec 004 #38).
@@ -521,7 +522,15 @@ func (r *run) parseAdminWhen(fs *flag.FlagSet, args []string, wantArgs int, need
 				"TRACEPAD_ADMIN_TOKEN_FILE or TRACEPAD_API_KEY, or pass --key")
 		}
 	}
-	return rest, r.connect()
+	if err := r.connect(); err != nil {
+		return nil, err
+	}
+	if fromEnvironment {
+		// And it goes straight there: an HTTP_PROXY in the environment would
+		// otherwise be handed the header.
+		r.api.WithoutProxy()
+	}
+	return rest, nil
 }
 
 // hostOf is the host part of a server address, for a message; the address
@@ -533,8 +542,9 @@ func hostOf(address string) string {
 	return "that address"
 }
 
-// loopback says whether a server address names this machine: `localhost`, a
-// name under `.localhost`, or an address in 127.0.0.0/8 or `::1`.
+// loopback says whether a server address names this machine: `localhost`
+// itself, or an address in 127.0.0.0/8 or `::1`. A name that merely resolves
+// there — `*.localhost`, a hosts-file entry — is not taken for it.
 func loopback(address string) bool {
 	if address == "" {
 		address = client.DefaultURL // what an empty --url means to the client
@@ -544,7 +554,7 @@ func loopback(address string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+	if host == "localhost" {
 		return true
 	}
 	ip, err := netip.ParseAddr(host)

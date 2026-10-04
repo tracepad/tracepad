@@ -1824,19 +1824,6 @@ export interface components {
             retryable: boolean;
             reason: string;
         };
-        /** @description What ingest leaves in a payload where an image or a file was (spec 041 #4); `GET /api/v1/media/{sha256}` returns the bytes. */
-        MediaReference: {
-            /** @description The body's SHA-256 */
-            tracepad_media: string;
-            mime_type: string;
-            /** @description The body's size in bytes */
-            size: number;
-            /**
-             * @description Present under the project's placeholder setting: no bytes were kept
-             * @constant
-             */
-            stored?: false;
-        };
         /** @description A payload too large for this response's budget. `full` is the URL that returns it whole; `trace_id` and `observation_id` are the same target for a consumer that speaks tools rather than URLs. */
         Truncation: {
             /** @constant */
@@ -1848,10 +1835,8 @@ export interface components {
             trace_id: string;
             observation_id: string;
             full: string;
-            /** @description Present only when the payload holds media references (spec 041 #4) that the preview does not show whole: how many. An image the application sent is not lost because its reference sits after the cut. */
+            /** @description Present only when the payload holds media references (spec 041 #4): how many distinct bodies. The preview is text and may not reach them; an image the application sent is not lost because its reference sits after the cut. `full` returns the payload with every reference in place. */
             media_count?: number;
-            /** @description The first of those references, each as it is stored in the payload. Shorter than `media_count` when the marker's share of the budget or the limit of 16 ran out; `full` returns all of them. */
-            media?: components["schemas"]["MediaReference"][];
         };
         /** @description One judgement. A score needs a trace or a session, and either a `value` or a `string_value`. */
         ScoreInput: {

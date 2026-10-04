@@ -622,12 +622,10 @@ does not fit is cut on a UTF-8 boundary and replaced by a marker:
 the same target for a consumer that speaks tools rather than URLs — they are
 exactly what the MCP `get_observation_io` tool takes.
 
-**Media past the cut.** A payload that holds images or files holds
-[references](media.md) to them, and a reference after the cut is not in the
-preview. The marker says so rather than leave it looking lost: `media_count` is
-how many references the preview does not show whole, and `media` lists the first
-of them (at most 16, fewer when the marker's share of the budget runs out), each
-exactly as it is stored in the payload:
+**Media in a cut payload.** A payload that holds images or files holds
+[references](media.md) to them, and one after the cut is not in the preview,
+which would make the picture look lost. The marker says how many references the
+payload holds, as `media_count` — distinct bodies, a placeholder counted as one:
 
 ```json
 {
@@ -637,36 +635,13 @@ exactly as it is stored in the payload:
   "trace_id": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",
   "observation_id": "2b3c4d5e6f7a8b9c",
   "full": "/api/v1/observations/2b3c4d5e6f7a8b9c/io?trace_id=4f8c…",
-  "media_count": 1,
-  "media": [{"mime_type": "image/png", "size": 48210, "tracepad_media": "9f86d081…"}]
+  "media_count": 1
 }
 ```
 
-Both fields are absent when the cut left no reference out. The bytes of a
-reference are at `GET /api/v1/media/{sha256}`, and `full` returns the payload
-with every reference in place.
-
-Markers cost bytes too. A trace with more payloads than the budget can carry
-markers for gets none of them and one line saying so:
-
-```json
-"expansion": {
-  "expanded": false,
-  "payloads": 600,
-  "budget_needed": 178000,
-  "retryable": true,
-  "reason": "a budget of 51200 bytes cannot carry markers for 600 payloads; retry with ?budget=178000, or read one payload at a time from /api/v1/observations/{id}/io"
-}
-```
-
-When even the largest budget the server allows could not carry them,
-`retryable` is `false` and the reason says so instead of naming a budget the
-server would refuse: `no budget can carry markers for 40000 payloads (…
-bytes needed, 5242880 is the maximum); read payloads one at a time …`.
-
-Nothing is lost: the tree already carries every observation id, so any payload
-is one `/observations/{id}/io` call away, and `budget_needed` is the number to
-retry `?budget=` with. The key is absent when the expansion happened normally.
+The field is absent when the payload holds none, and when the share left for the
+marker was too small to carry it. `full` returns the payload with every
+reference in place, and the bytes of one are at `GET /api/v1/media/{sha256}`.
 
 ## One observation's payloads
 
