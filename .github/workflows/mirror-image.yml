@@ -48,6 +48,9 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     environment: release
+    # A few copies of an image that is already on GHCR; a `skopeo` that hangs
+    # against Docker Hub must not hold the tag's group for the default six hours.
+    timeout-minutes: 20
     # A group for each tag, so that the same tag is not copied twice at once.
     # Not one group for all: GitHub keeps one running and one pending job per
     # group, and a newer job replaces the pending one whatever
@@ -94,8 +97,11 @@ jobs:
           skopeo login "${SOURCE%%/*}" --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
 
           # The digest `image` attested, when called by the release. By hand
-          # it is what the version's own tag holds on GHCR: the raw manifest's
-          # hash is the digest, whatever the index says.
+          # it is what the version's own tag holds on GHCR — the raw manifest's
+          # hash is the digest, whatever the index says — and nothing here
+          # checks that it is the one that was attested: the person who runs it
+          # does, with `gh attestation verify oci://$SOURCE:<version>`
+          # (AGENTS.md, Releasing).
           if [ -z "$DIGEST" ]; then
             DIGEST="sha256:$(skopeo inspect --raw "docker://$SOURCE:$version" | sha256sum | cut -d' ' -f1)"
           fi
@@ -107,8 +113,9 @@ jobs:
           skopeo login "${MIRROR%%/*}" --username "$DOCKERHUB_USERNAME" --password-stdin <<< "$DOCKERHUB_TOKEN"
 
           # The exact version, from GHCR, whatever else is decided. The digest
-          # each copy reports is compared with the one attested: a difference
-          # stops here, before the next tag. `--preserve-digests` keeps every
+          # each copy reports is compared with the one that was read (the
+          # attested one, from a release): a difference stops here, before the
+          # next tag. `--preserve-digests` keeps every
           # manifest of the index as it was.
           copy() {
             skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/digest" "docker://$1" "docker://$MIRROR:$2"
@@ -124,10 +131,12 @@ jobs:
           # What else this release may move, by the tags that exist now — asked
           # after the copy above and before the next one, as late as it can be:
           # the same rule as `check` (#16), whose `git tag` is the API here
-          # because nothing is checked out. Only stable tags are compared, so
+          # because nothing is checked out. Only stable tags are compared, by
+          # the shape `check` and scripts/release-tag.sh apply — no leading
+          # zeros, which `sort -V` and git's sort order differently — so
           # `sort -V` orders them.
           stable="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' |
-                    sed -n 's|^refs/tags/||p' | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/')"
+                    sed -n 's|^refs/tags/||p' | awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/')"
           # An empty answer would make every release the newest.
           if ! grep -qxF "$GITHUB_REF_NAME" <<< "$stable"; then
             echo "::error::$GITHUB_REF_NAME is not among the tags $GITHUB_REPOSITORY lists; its exact version is mirrored and nothing else"

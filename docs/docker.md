@@ -195,8 +195,11 @@ on GHCR only.
 The moving tags, `X.Y` and `latest`, follow the same rule on both — only
 forward, to the newest release of the line and overall — but each registry
 applies it when its own copy is made, so while two releases overlap they can
-point at different releases for a short while. Anything you deploy should pin
-an exact tag, or a digest, which is the same on both.
+end up pointing at different releases: GHCR's `latest` stays at whichever
+release finished publishing last, Docker Hub's follows the newest tag, and
+neither registry corrects the other until the next release that moves it.
+Anything you deploy should pin an exact tag, or a digest, which is the same
+on both.
 
 The build-provenance attestation lives with GHCR's image and is found by
 digest, so it covers the copy: verify it exactly as for the GHCR image, by

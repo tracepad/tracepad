@@ -846,7 +846,10 @@ tap are out whatever it does. Once the credentials or Docker Hub are fixed:
   `gh workflow run mirror-image.yml --ref vX.Y.Z`. The `--ref` is not optional:
   without it the run is on `main`, which the `release` environment refuses
   ("not allowed to deploy"). It uses the workflow as the tag has it, so a tag
-  from before the file existed cannot be mirrored this way.
+  from before the file existed cannot be mirrored this way. This path takes
+  the digest from GHCR's `X.Y.Z` tag and does not check that it is the one the
+  release attested — check it first:
+  `gh attestation verify oci://ghcr.io/tracepad/tracepad:X.Y.Z --repo tracepad/tracepad`.
 
 Either way it works out which tags to move from the tags that exist when it
 runs, not from the old run: the exact version always moves, `X.Y` and `latest`

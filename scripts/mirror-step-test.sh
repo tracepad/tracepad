@@ -26,6 +26,9 @@ set -euo pipefail
 # Run from a git hook (the pre-push of `make gate`) this inherits GIT_DIR and
 # its kin, which would point the scratch repository below at the real one.
 while IFS= read -r var; do unset "$var"; done < <(env | sed -n 's/^\(GIT_[A-Za-z_]*\)=.*/\1/p')
+# And the machine's own git configuration — a signing key, a hooks path —
+# which the scratch repository must not depend on: the gate runs everywhere.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="$root/.github/workflows/mirror-image.yml"
@@ -195,6 +198,14 @@ never "two digits" ":latest"
 run "two digits, newer" 0 GITHUB_REF_NAME=v0.10.0 STUB_TAGS="v0.9.0 v0.10.0"
 calls_end "two digits, newer" "$dst@$d" "$dst:latest"
 
+# Names that mean something to a regular expression are matched as names:
+# the escaping itself, and two registries whose names would match other lines.
+[ "$(re 'a+b(c){d}|e?.f[g]*^$')" = 'a\+b\(c\)\{d\}\|e\?\.f\[g\]\*\^\$' ] || fail "re: not every metacharacter is escaped"
+[ "$(re 'a/b:c@d')" = 'a/b:c@d' ] || fail "re: it escaped what is no metacharacter"
+run "metacharacters" 0 SOURCE='reg:5000/g+h(1)/tp' MIRROR='reg:5000/h{2}x?/tp'
+calls_end "metacharacters" 'reg:5000/g+h(1)/tp'"@$d" 'reg:5000/h{2}x?/tp:0.1.0'
+calls_end "metacharacters" 'reg:5000/h{2}x?/tp'"@$d" 'reg:5000/h{2}x?/tp:latest'
+
 # Another registry, as in a rehearsal: both logins and every copy follow it.
 run "other registry" 0 SOURCE=reg:5000/ghcr/tracepad MIRROR=reg:5000/hub/tracepad
 calls "other registry" "skopeo login reg:5000 --username hub"
@@ -240,20 +251,32 @@ copies "bad digest" 0
 # one from `git tag` and the other from the API; they must give the same
 # answer over the same tags. `check`'s step is run for real, in a repository
 # that has exactly these tags.
+# The scratch repository is made under a home whose git configuration signs every
+# commit and tag with a program that fails, as a contributor's might; it must not
+# matter, and the test fails if it does.
+mkdir "$tmp/home"
+printf '[commit]\n\tgpgsign = true\n[tag]\n\tgpgSign = true\n[gpg]\n\tprogram = false\n' >"$tmp/home/.gitconfig"
+scratch_git() { HOME="$tmp/home" git "$@"; }
 agree() { # agree <ref> <tags...>
 	local ref="$1" repo="$tmp/repo" tags="${*:2}" t by_check by_mirror
 	rm -rf "$repo"
 	mkdir "$repo"
-	git -C "$repo" init -q
-	git -C "$repo" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -q --allow-empty -m x
-	for t in $tags; do git -C "$repo" tag "$t"; done
+	scratch_git -C "$repo" init -q
+	scratch_git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
+	for t in $tags; do scratch_git -C "$repo" tag "$t"; done
 	ln -s "$root/scripts" "$repo/scripts"
 	: >"$tmp/output"
-	(cd "$repo" && GITHUB_REF_NAME="$ref" GITHUB_REPOSITORY=tracepad/tracepad GITHUB_OUTPUT="$tmp/output" \
-		bash "$tmp/check.sh" >/dev/null 2>&1) || { fail "agree $ref in [$tags]: check refused it"; return; }
-	by_check="$(sed -n 's/^tags=//p' "$tmp/output" | tr ',' '\n' | sed "s|^$(re "$src"):||" | sort | paste -sd' ' -)"
+	# As Actions runs a `run:` block: `bash -e -o pipefail`; what it said is kept
+	# for the failure.
+	if ! check_out="$(cd "$repo" && HOME="$tmp/home" GITHUB_REF_NAME="$ref" GITHUB_REPOSITORY=tracepad/tracepad GITHUB_OUTPUT="$tmp/output" \
+		bash -e -o pipefail "$tmp/check.sh" 2>&1)"; then
+		fail "agree $ref in [$tags]: check refused it:"
+		echo "$check_out" >&2
+		return
+	fi
+	by_check="$(sed -n 's/^tags=//p' "$tmp/output" | tr ',' '\n' | sed -E "s#^$(re "$src"):##" | sort | paste -sd' ' -)"
 	run "agree $ref" 0 GITHUB_REF_NAME="$ref" STUB_TAGS="$tags"
-	by_mirror="$(sed -n "s|^skopeo copy .* docker://$(re "$dst"):||p" "$tmp/log" | sort | paste -sd' ' -)"
+	by_mirror="$(sed -En "s#^skopeo copy .* docker://$(re "$dst"):##p" "$tmp/log" | sort | paste -sd' ' -)"
 	[ "$by_check" = "$by_mirror" ] || fail "check moves [$by_check] and the mirror [$by_mirror] for $ref among [$tags]"
 }
 agree v0.1.0 v0.1.0
@@ -271,6 +294,12 @@ agree v0.2.0 v0.2.0 v0.3.0-rc.1
 agree v0.3.0 v0.3.0-rc.1 v0.3.0
 agree v0.2.0 v0.2.0 "v0.3.0+x"
 agree v0.2.9 v0.2.9 v0.3.0-rc.2 "v0.3.0+x" sdk/go/v9.0.0 sdk-py/v9.0.0 sdk-js/v9.0.0
+# A tag the shape refuses — a leading zero — is no release for either: it must
+# not be the newest, whichever way a version sort would read it.
+agree v0.3.0 v0.3.0 v0.3.00
+agree v0.3.0 v0.3.0 v0.3.00 v01.2.3 v0.03.1
+agree v0.3.1 v0.3.0 v0.3.00 v0.3.1 v0.3.01
+agree v0.2.9 v0.2.9 v0.3.00 v1.02.0 v01.0.0
 agree v1.0.0 v0.9.9 v0.10.0 v1.0.0
 agree v0.10.0 v0.9.9 v0.10.0 v1.0.0
 
