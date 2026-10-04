@@ -21,7 +21,7 @@ second SDK: two exporters to the same store send every span twice.
 | The service has | Do this |
 |---|---|
 | OpenTelemetry | Environment only — `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (never gRPC), `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` set to the server's URL plus `/v1/traces`, and `OTEL_EXPORTER_OTLP_HEADERS` set to `authorization=Bearer <key>`. |
-| The Langfuse SDK | The bridge — `LANGFUSE_HOST` set to the Tracepad URL, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to a Tracepad key pair (`tp-pk-…`, `tp-sk-…`). No code changes. |
+| The Langfuse SDK | The bridge — `LANGFUSE_BASE_URL` set to the Tracepad URL (and `LANGFUSE_HOST` too for older SDKs; the JS SDK 5.x reads only `LANGFUSE_BASE_URL` and otherwise sends to Langfuse's cloud), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` to a Tracepad key pair (`tp-pk-…`, `tp-sk-…`). No code changes. |
 | Nothing, in Python, Node or Go | The `tracepad` package for that language (below). |
 | Nothing, in another language | That language's OpenTelemetry SDK with its OTLP/HTTP exporter, configured as in the first row. |
 

@@ -2,14 +2,15 @@
 
 Tracepad accepts traces from the Langfuse SDK on the route the SDK already
 uses, `POST /api/public/otel/v1/traces`. An application that sends to Langfuse
-today sends to Tracepad by changing its host and its keys. The code stays the
-same.
+today sends to Tracepad by changing its base URL and its keys. The code stays
+the same.
 
 What moves across is everything the SDK *exports*: traces, observations,
-payloads, usage, cost, and the images it uploads. What does not move is
-anything the SDK *asks Langfuse's REST API for*. Scores, prompts, datasets and
-reads go through Tracepad's own API instead, and the table below lists the
-equivalent for each.
+payloads, usage, cost, and the images it uploads through its media channel.
+Those two routes, `/api/public/otel/v1/traces` and `/api/public/media`, are the
+only Langfuse paths Tracepad serves. What does not move is anything the SDK
+*asks Langfuse's REST API for*. Scores, prompts, datasets and reads go through
+Tracepad's own API instead, and the table below lists the equivalent for each.
 
 ## The switch
 
@@ -18,29 +19,48 @@ equivalent for each.
 2. Point the SDK at it:
 
     ```sh
-    export LANGFUSE_HOST=http://localhost:4318
+    export LANGFUSE_BASE_URL=http://localhost:4318
+    export LANGFUSE_HOST=http://localhost:4318   # the older name, for older SDKs
     export LANGFUSE_PUBLIC_KEY=tp-pk-…
     export LANGFUSE_SECRET_KEY=tp-sk-…
     ```
+
+    **Set `LANGFUSE_BASE_URL`, not only `LANGFUSE_HOST`.** The Python SDK 4.x
+    reads `LANGFUSE_BASE_URL` first and keeps `LANGFUSE_HOST` as a deprecated
+    fallback. The JavaScript SDK 5.x (`@langfuse/otel`) reads `LANGFUSE_BASE_URL`
+    and never reads `LANGFUSE_HOST`. With only the old name set, a Node
+    application keeps sending to Langfuse's cloud, its default. A `base_url`
+    (Python) or `baseUrl` (JavaScript) passed in code beats both variables, so
+    check for one in the code as well. The server's first-start output and the
+    key dialog still print the old name, so add the new one beside it.
 
 3. Run the application and open the interface. The trace list fills as the
    SDK flushes.
 
 The public key and the secret key are a Tracepad key pair. The SDK sends
 them as Basic auth, and the secret key alone also works as a bearer token
-([ingest.md](ingest.md#authentication)). A key for an application should hold `ingest`
-and nothing else. Mint one under Settings → Project → API keys, or with
-`tracepad keys create --scope ingest` ([admin.md](admin.md#keys)).
+([ingest.md](ingest.md#authentication)). A key for an application should hold
+`ingest` and nothing else. Mint one in the interface under Settings → Project →
+API keys, where `ingest` is ticked by default. From a shell, use the admin token
+and the project's id ([admin.md](admin.md#keys)):
 
-CI runs the Langfuse Python SDK against the server at one pinned version, in
-[`scripts/smoke`](../scripts/smoke). Other versions and the JavaScript SDK
-export to the same route but are not part of that test
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN \
+  tracepad keys create --project <project id> --scope ingest --name "my app"
+```
+
+CI runs the Langfuse Python SDK 4.14.5 against the server, in
+[`scripts/smoke`](../scripts/smoke). The variable names above were read from
+the source of that release and of `@langfuse/otel` 5.11.1 on 2026-10-04. The
+JavaScript SDK exports to the same route, but no test runs it
 ([What beta means](../README.md#what-beta-means)).
 
 ## What carries over
 
-Every `langfuse.*` attribute the SDK writes is read
-([ingest.md](ingest.md#what-tracepad-reads-from-your-spans)):
+Tracepad maps the `langfuse.*` attributes listed in
+[ingest.md's table](ingest.md#what-tracepad-reads-from-your-spans) into its own
+fields. Any attribute it does not map, `langfuse.experiment.*` among them, is
+kept in the observation's metadata, so nothing is dropped. In SDK terms:
 
 | From the SDK | In Tracepad |
 |---|---|
@@ -69,8 +89,10 @@ Two things work differently:
 
 ## What goes through Tracepad's API instead
 
-These calls go to Langfuse's REST API under `/api/public/…`, which Tracepad
-does not serve. Against Tracepad they get a `404`.
+These calls go to Langfuse's REST API: `/api/public/scores`, the prompt,
+dataset and trace routes, and the rest of `/api/public/…` apart from the OTLP
+and media routes above. Tracepad does not serve them, so against Tracepad they
+get a `404`.
 
 | Langfuse SDK call | In Tracepad |
 |---|---|

@@ -1,6 +1,6 @@
 ---
 name: tracepad
-description: Work with Tracepad, the self-hosted store and viewer for LLM and agent traces. Use it to answer questions from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
+description: Work with Tracepad, LLM observability and evals in a single binary — a self-hosted store for the traces and spans of LLM and agent applications, with their prompts, datasets and scores. Use it to debug from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to run evals and read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
 metadata:
   version: dev
 ---

@@ -5,8 +5,8 @@ page puts it next to other tools that cover the same ground and does not
 grade them. It lists what each one needs in order to run, under which licence,
 and where the other tools do more than Tracepad does.
 
-**Every fact about another product was checked on 2026-10-04** against the
-source linked under the table. These products change quickly, and the date
+**Every cell about another product was checked on 2026-10-04** against that
+product's documentation, linked under each table. These products change quickly, and the date
 matters more than any single cell. If something here is out of date, an issue
 or a pull request is welcome.
 
@@ -14,7 +14,7 @@ or a pull request is welcome.
 
 | | Licence | Self-hosting | What a self-hosted install runs | OTLP ingest |
 |---|---|---|---|---|
-| **Tracepad** | Apache-2.0 | Free, no features gated | One binary with SQLite inside, under 30 MB of memory at rest | HTTP (protobuf, JSON); no gRPC |
+| **Tracepad** | Apache-2.0 | Free, no features gated | One binary with SQLite inside, measured at 15–27 MiB of memory at rest | HTTP (protobuf, JSON); no gRPC |
 | Langfuse | MIT, plus commercial `ee` directories | Free; some features need a licence key, among them data retention policies, project-level roles and audit logs | Web and worker containers, PostgreSQL, ClickHouse, Redis and an S3-compatible store. The Docker Compose guide recommends at least 4 cores and 16 GiB of memory | HTTP (protobuf, JSON); no gRPC |
 | Arize Phoenix | Elastic License 2.0 | Free, no features gated | One container, with SQLite by default or PostgreSQL | gRPC and HTTP |
 | Opik | Apache-2.0 | Free; the self-hosted edition has no user management | Backend, Python backend and frontend containers, MySQL, ClickHouse, ZooKeeper, Redis and MinIO | HTTP (protobuf); no gRPC |
@@ -44,18 +44,20 @@ Tracepad's own figures are in the [README](../README.md#what-it-is-built-for).
 | | Tracepad | Langfuse | Phoenix | Opik | Laminar | LangSmith | Logfire |
 |---|---|---|---|---|---|---|---|
 | Traces, sessions, users, cost | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Prompt versions and labels | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ |
+| Prompt versions and labels | ✓ | ✓ | ✓ | ✓ | not documented | ✓ | ✓ |
 | Datasets and run comparison | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Human review and annotation queues | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Built-in LLM-as-judge evaluators | — | ✓ | ✓ | ✓ | — | ✓ | ✓ |
-| Online evaluation of live traffic | — | ✓ | — | ✓ | — | ✓ | ✓ |
-| Prompt playground | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Alerts | — | ✓ | — | ✓ | ✓ (licence key) | ✓ | ✓ |
+| Built-in LLM-as-judge evaluators | No | ✓ | ✓ | ✓ | not documented | ✓ | ✓ |
+| Online evaluation of live traffic | No | ✓ | not documented | ✓ | not documented | ✓ | ✓ |
+| Prompt playground | No | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Alerts | No | ✓ | not documented | ✓ | ✓ (licence key) | ✓ | ✓ |
 | An official MCP server | ✓ read-only | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| A managed cloud | — | ✓ | ✓ (Arize AX) | ✓ | ✓ | ✓ | ✓ |
+| A managed cloud | No | ✓ | ✓ (Arize AX) | ✓ | ✓ | ✓ | ✓ |
 
-A dash means the feature was not found in that product's documentation on
-2026-10-04. It does not mean the feature can't be built on top. On Tracepad,
+"Not documented" means the feature was not found in that product's
+documentation on 2026-10-04. It is not a claim that the product lacks it, so
+check the product's own pages before relying on that cell. "No" is said only
+of Tracepad, and does not mean the feature can't be built on top. On Tracepad,
 for example, an eval harness can call any judge model you choose and post its
 verdicts as scores ([datasets.md](datasets.md), [scores.md](scores.md)).
 
