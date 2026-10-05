@@ -446,6 +446,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-a-version-is-called-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a version is called, where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#with-homebrew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1528,6 +1539,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-a-version-is-called-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a version is called, where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#with-homebrew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1706,10 +1728,92 @@ under its own tag and moves nothing that says "latest".</p>
 <p><strong><code>go install</code> is not a way to get it.</strong> It builds without the <code>ui</code> build tag,
 which leaves a stub page where the web interface should be. Use an archive, or
 <code>make build</code> in a checkout (<a href="https://github.com/tracepad/tracepad/blob/main/README.md#getting-it">the README</a>).</p>
+<h2 id="what-a-version-is-called-where">What a version is called, where</h2>
+<p>One release has one version and several names for it, because each registry has
+its own rule for what a version may look like. For the candidate <code>0.1.0-rc.1</code> and
+for the release <code>0.1.0</code> that follows it:</p>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>Name</th>
+<th>Candidate</th>
+<th>Release</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Git tag, server</td>
+<td><code>v&lt;version&gt;</code></td>
+<td><code>v0.1.0-rc.1</code></td>
+<td><code>v0.1.0</code></td>
+</tr>
+<tr>
+<td>Git tags, packages</td>
+<td><code>sdk-py/v…</code>, <code>sdk-js/v…</code>, <code>sdk/go/v…</code></td>
+<td><code>sdk-py/v0.1.0-rc.1</code></td>
+<td><code>sdk-py/v0.1.0</code></td>
+</tr>
+<tr>
+<td>Release archives</td>
+<td><code>tracepad_&lt;version&gt;_&lt;os&gt;_&lt;arch&gt;</code></td>
+<td><code>tracepad_0.1.0-rc.1_linux_amd64.tar.gz</code></td>
+<td><code>tracepad_0.1.0_linux_amd64.tar.gz</code></td>
+</tr>
+<tr>
+<td>Container image</td>
+<td>tag</td>
+<td><code>ghcr.io/tracepad/tracepad:0.1.0-rc.1</code></td>
+<td><code>…:0.1.0</code>, and also <code>…:0.1</code> and <code>…:latest</code></td>
+</tr>
+<tr>
+<td>PyPI</td>
+<td>PEP 440</td>
+<td><code>0.1.0rc1</code></td>
+<td><code>0.1.0</code></td>
+</tr>
+<tr>
+<td>npm</td>
+<td>semver, under a dist-tag</td>
+<td><code>0.1.0-rc.1</code>, dist-tag <code>next</code></td>
+<td><code>0.1.0</code>, dist-tag <code>latest</code></td>
+</tr>
+<tr>
+<td>Go module</td>
+<td>tag of the nested module</td>
+<td><code>sdk/go/v0.1.0-rc.1</code></td>
+<td><code>sdk/go/v0.1.0</code></td>
+</tr>
+<tr>
+<td><code>tracepad version</code>, the first line of the server's log</td>
+<td>semver, without the <code>v</code></td>
+<td><code>0.1.0-rc.1</code></td>
+<td><code>0.1.0</code></td>
+</tr>
+</tbody>
+</table>
+<p>Python's spelling is the only one that differs from the tag's, and it is derived
+from it (<code>-rc.N</code> is <code>rcN</code>, <code>-beta.N</code> is <code>bN</code>, <code>-alpha.N</code> is <code>aN</code>). A candidate
+moves nothing that says "latest" — not the image's <code>latest</code> or <code>X.Y</code>, not npm's
+<code>latest</code> dist-tag, not Homebrew, not Docker Hub — so the unqualified commands in
+the README and the quickstart do not reach one. To install a candidate, name it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>ghcr.io/tracepad/tracepad:0.1.0-rc.1<span class="w">      </span><span class="c1"># the exact tag; a candidate has no `latest`</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="nv">tracepad</span><span class="o">==</span><span class="m">0</span>.1.0rc1<span class="w">              </span><span class="c1"># without `==`, pip skips pre-releases</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>npm<span class="w"> </span>install<span class="w"> </span>tracepad@next
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>go<span class="w"> </span>get<span class="w"> </span>github.com/tracepad/tracepad/sdk/go@v0.1.0-rc.1
+</code></pre></div>
+<p><strong>Until 0.1.0 is released, the unqualified commands do not install the
+candidate.</strong> <code>docker run … ghcr.io/tracepad/tracepad</code> with no tag asks for
+<code>latest</code>, which does not exist yet and answers <code>manifest unknown</code>; <code>pip install
+tracepad</code> finds only the placeholder <code>0.0.1</code>, which is not the SDK; and <code>npm
+install tracepad</code> resolves <code>latest</code>, the same placeholder. They become the right
+commands with the first stable release, and the README and the quickstart say
+what they will be then.</p>
 <h2 id="with-homebrew">With Homebrew</h2>
 <p>On macOS:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>brew<span class="w"> </span>install<span class="w"> </span>tracepad/tap/tracepad
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># later</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>brew<span class="w"> </span>install<span class="w"> </span>tracepad/tap/tracepad
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># later</span>
 </code></pre></div>
 <p>The formula in <a href="https://github.com/tracepad/homebrew-tap"><code>tracepad/homebrew-tap</code></a>
 installs the release archive for your platform — the same bytes as
@@ -1724,10 +1828,10 @@ use an archive. To check provenance, download the archive and use
 <h2 id="verify-what-you-downloaded">Verify what you downloaded</h2>
 <p>Two checks, for two different questions.</p>
 <p><strong>Is it the file the release published?</strong> The checksum:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sha256sum<span class="w"> </span>--ignore-missing<span class="w"> </span>-c<span class="w"> </span>checksums.txt<span class="w">        </span><span class="c1"># Linux</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>--ignore-missing<span class="w"> </span>-c<span class="w"> </span>checksums.txt<span class="w">    </span><span class="c1"># macOS</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sha256sum<span class="w"> </span>--ignore-missing<span class="w"> </span>-c<span class="w"> </span>checksums.txt<span class="w">        </span><span class="c1"># Linux</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>--ignore-missing<span class="w"> </span>-c<span class="w"> </span>checksums.txt<span class="w">    </span><span class="c1"># macOS</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tracepad_0.1.0_linux_amd64.tar.gz: OK
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tracepad_0.1.0_linux_amd64.tar.gz: OK
 </code></pre></div>
 <p>(On Windows, <code>Get-FileHash &lt;archive&gt;</code> prints the value to compare with the line
 in <code>checksums.txt</code>.) A checksum fetched from the same place as the archive tells
@@ -1737,19 +1841,32 @@ question.</p>
 carries a signed build-provenance attestation, which
 <a href="https://cli.github.com/manual/gh_attestation_verify"><code>gh attestation verify</code></a>
 checks against GitHub, offline of the release page:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
 </code></pre></div>
-<p>It exits <code>0</code> and names the workflow and the commit the archive was built from,
-or exits non-zero and says why not. The container image is attested the same
-way:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>oci://ghcr.io/tracepad/tracepad:0.1.0<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
+<p><strong>The answer is the exit code.</strong> At a terminal the command prints what it
+checked; with no terminal — in a script, in CI, behind a pipe — a verification
+that succeeds prints <em>nothing</em>, and that silence is the pass. A failure exits
+non-zero and says why on stderr. In a script, test the status and ask for the
+details explicitly when you want them logged:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--format<span class="w"> </span>json<span class="w"> </span>--jq<span class="w"> </span><span class="s1">'.[0].verificationResult.signature.certificate</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="s1">                      | {buildSignerURI, sourceRepositoryDigest}'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>{"buildSignerURI":"https://github.com/tracepad/tracepad/.github/workflows/release-server.yml@refs/tags/v0.1.0","sourceRepositoryDigest":"…"}
+</code></pre></div>
+<p>The signer is the release workflow at the tag you meant, and the digest is the
+full commit the archive was built from; its first seven characters are the ones
+in brackets on the first line of the server's log. Under <code>set -e</code> the plain command is enough; <code>--format json</code>
+only changes what it prints, never whether it passes. The container image is
+attested the same way:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>oci://ghcr.io/tracepad/tracepad:0.1.0<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
 </code></pre></div>
 <p>The copy on Docker Hub has the same digest, so it verifies the same way (see
 <a href="../docker/#docker-hub">Docker Hub</a>).</p>
 <h2 id="put-it-on-the-path">Put it on the path</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>tracepad<span class="w"> </span>version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tracepad_0.1.0_linux_amd64.tar.gz
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>tracepad<span class="w"> </span>version
 </code></pre></div>
 <p>The archives are not code-signed or notarized, so the two desktop systems ask
 before they run a downloaded program:</p>
@@ -1762,7 +1879,7 @@ before they run a downloaded program:</p>
   runs it once and remembers.</li>
 </ul>
 <h2 id="first-run">First run</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>tracepad
 </code></pre></div>
 <p>The server listens on <code>localhost:4318</code>: this machine only, on both loopback
 addresses, <code>127.0.0.1</code> and <code>::1</code>, so a client reaches it whichever one it tries
@@ -1793,44 +1910,44 @@ upgrade that applies a migration leaves <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;n
 <p>Any supervisor that restarts a process will do; <code>SIGTERM</code> (or Ctrl-C) is the
 graceful stop, and the server needs up to ten seconds to drain and close its
 database, so give a stop that long. On Linux with systemd:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># /etc/systemd/system/tracepad.service</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">[Unit]</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="na">Description</span><span class="o">=</span><span class="s">Tracepad</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="na">After</span><span class="o">=</span><span class="s">network.target</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">[Service]</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Listens on localhost:4318, the default: this machine only. To move it, set</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># TRACEPAD_LISTEN below rather than passing --listen, so that `tracepad</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># health` finds it too.</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="na">ExecStart</span><span class="o">=</span><span class="s">/usr/local/bin/tracepad serve</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="na">Restart</span><span class="o">=</span><span class="s">on-failure</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># The data directory: /var/lib/tracepad, owned by a user that exists only</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># while the service runs.</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="na">DynamicUser</span><span class="o">=</span><span class="s">yes</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="na">StateDirectory</span><span class="o">=</span><span class="s">tracepad</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="na">StateDirectoryMode</span><span class="o">=</span><span class="s">0700</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="na">Environment</span><span class="o">=</span><span class="s">TRACEPAD_DATA_DIR=/var/lib/tracepad</span>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="c1"># The admin token and any other TRACEPAD_* variable: a file only root reads.</span>
-<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="na">EnvironmentFile</span><span class="o">=</span><span class="s">-/etc/tracepad/tracepad.env</span>
-<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>
-<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="na">TimeoutStopSec</span><span class="o">=</span><span class="s">15</span>
-<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="na">NoNewPrivileges</span><span class="o">=</span><span class="s">yes</span>
-<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="na">PrivateTmp</span><span class="o">=</span><span class="s">yes</span>
-<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="na">ProtectSystem</span><span class="o">=</span><span class="s">strict</span>
-<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="na">ProtectHome</span><span class="o">=</span><span class="s">yes</span>
-<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>
-<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a><span class="k">[Install]</span>
-<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="na">WantedBy</span><span class="o">=</span><span class="s">multi-user.target</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># /etc/systemd/system/tracepad.service</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">[Unit]</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="na">Description</span><span class="o">=</span><span class="s">Tracepad</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="na">After</span><span class="o">=</span><span class="s">network.target</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">[Service]</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Listens on localhost:4318, the default: this machine only. To move it, set</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># TRACEPAD_LISTEN below rather than passing --listen, so that `tracepad</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1"># health` finds it too.</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="na">ExecStart</span><span class="o">=</span><span class="s">/usr/local/bin/tracepad serve</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="na">Restart</span><span class="o">=</span><span class="s">on-failure</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># The data directory: /var/lib/tracepad, owned by a user that exists only</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="c1"># while the service runs.</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="na">DynamicUser</span><span class="o">=</span><span class="s">yes</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="na">StateDirectory</span><span class="o">=</span><span class="s">tracepad</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="na">StateDirectoryMode</span><span class="o">=</span><span class="s">0700</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="na">Environment</span><span class="o">=</span><span class="s">TRACEPAD_DATA_DIR=/var/lib/tracepad</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="c1"># The admin token and any other TRACEPAD_* variable: a file only root reads.</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="na">EnvironmentFile</span><span class="o">=</span><span class="s">-/etc/tracepad/tracepad.env</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="na">TimeoutStopSec</span><span class="o">=</span><span class="s">15</span>
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="na">NoNewPrivileges</span><span class="o">=</span><span class="s">yes</span>
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="na">PrivateTmp</span><span class="o">=</span><span class="s">yes</span>
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a><span class="na">ProtectSystem</span><span class="o">=</span><span class="s">strict</span>
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a><span class="na">ProtectHome</span><span class="o">=</span><span class="s">yes</span>
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>
+<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a><span class="k">[Install]</span>
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a><span class="na">WantedBy</span><span class="o">=</span><span class="s">multi-user.target</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>/etc/tracepad
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="o">(</span><span class="w"> </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="p">;</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'TRACEPAD_ADMIN_TOKEN=%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/etc/tracepad/tracepad.env<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="o">)</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>daemon-reload
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>tracepad
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>tracepad<span class="w">          </span><span class="c1"># the first run's keys and setup link are here</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://127.0.0.1:4318
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>/etc/tracepad
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="o">(</span><span class="w"> </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="p">;</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'TRACEPAD_ADMIN_TOKEN=%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/etc/tracepad/tracepad.env<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="o">)</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>daemon-reload
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>tracepad
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>tracepad<span class="w">          </span><span class="c1"># the first run's keys and setup link are here</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://127.0.0.1:4318
 </code></pre></div>
 <p>The keys stay in the journal for as long as the journal does — the same caveat
 <a href="../docker/#the-keys-are-printed-once-to-the-log">docker.md</a> makes for the
@@ -1851,10 +1968,10 @@ upgrade is only as safe as the copy you took before it.</p>
 <li>
 <p>Download and <a href="#verify-what-you-downloaded">verify</a> the new archive, stop the
    service, replace the binary, start it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>tracepad<span class="w"> </span>version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>tracepad<span class="w"> </span>version
 </code></pre></div>
 </li>
 <li>
@@ -1878,14 +1995,14 @@ under any other name, and best kept outside the data directory.</p>
 both must include the <code>-wal</code> file's contents — which is why neither one is a
 plain <code>cp</code> of <code>tracepad.db</code> from under a running server.</p>
 <p><strong>Stopped.</strong> The simplest, and complete by construction:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>sudo<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>tracepad-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>-C<span class="w"> </span>/var/lib/tracepad<span class="w"> </span>.
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sudo<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>tracepad-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>-C<span class="w"> </span>/var/lib/tracepad<span class="w"> </span>.
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
 </code></pre></div>
 <p><strong>Running.</strong> SQLite's own online backup takes a consistent copy while the server
 carries on, with the <code>sqlite3</code> command-line shell (any recent version):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sudo<span class="w"> </span>sqlite3<span class="w"> </span>/var/lib/tracepad/tracepad.db<span class="w"> </span><span class="s2">".backup '/backups/tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.db'"</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/backups/tracepad-*.db
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sudo<span class="w"> </span>sqlite3<span class="w"> </span>/var/lib/tracepad/tracepad.db<span class="w"> </span><span class="s2">".backup '/backups/tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.db'"</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/backups/tracepad-*.db
 </code></pre></div>
 <p>Put either one outside the data directory, or name it anything but
 <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>, the shape the server's own take and
