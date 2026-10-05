@@ -623,6 +623,18 @@ API. This file routes; it does not duplicate what specs and docs say.
   human's (#12). The docs build writes `llms.txt`, `llms-full.txt` and each
   page's Markdown, and `deploy.sh` mirrors them, with `install.sh`, at the
   site's root (#3, #14).
+- ✅ Spec 054 (`tracepad upgrade`) shipped: upgrading is a command of the
+  binary, in `internal/upgrade`, after a shell procedure in the skill failed
+  three reviews. `--plan` reads processes (`/proc`, or `kern.procargs2` on
+  macOS) and containers (`docker inspect`) and calls a server the command's
+  only when the data directory's lock records its PID and it runs the
+  installed binary on loopback (#4). A run is a directory in
+  `~/tracepad-backups/` with `state.json`, data that is never executed (#6);
+  the swap keeps the server's arguments, environment and working directory
+  (#8), the check asks the server's own address (#9), and the way back sets
+  aside and restores into a new place, deleting nothing (#11). The install
+  script asks the new binary's plan what still runs an older version, and its
+  `awk` copy of `termsafe` is gone (#15).
 
 ## Where things are
 
@@ -676,7 +688,8 @@ API. This file routes; it does not duplicate what specs and docs say.
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 | The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
-| The agent skill | `agent/skills/tracepad/` (the skill itself: `SKILL.md` and `references/`), `agent/skills/command.go` (`skills install`/`show`, the stamp), `agent/skills/drift_test.go` with its fixture in `testdata/drift/`, `docs/agents.md`, spec 037 — the skill teaches order and never restates what the binary says about itself (#2). **A PR that changes a command, a flag, an MCP tool or a route the skill names updates the skill in the same PR**: the drift test enforces the names, the reviewer the meaning (#9). Budgets: `SKILL.md` ≤ 200 lines, the whole skill ≤ 910 (#1; 900 until spec 053 #20 moved the Docker variant of the setup into the skill), and both are full: a new line is paid for by one taken out. The drift test parses the skill's `tracepad serve` lines with `config.ParseFlags`, as a start does (spec 053 #17, #19) |
+| The agent skill | `agent/skills/tracepad/` (the skill itself: `SKILL.md` and `references/`), `agent/skills/command.go` (`skills install`/`show`, the stamp), `agent/skills/drift_test.go` with its fixture in `testdata/drift/`, `docs/agents.md`, spec 037 — the skill teaches order and never restates what the binary says about itself (#2). **A PR that changes a command, a flag, an MCP tool or a route the skill names updates the skill in the same PR**: the drift test enforces the names, the reviewer the meaning (#9). Budgets: `SKILL.md` ≤ 200 lines, the whole skill ≤ 980 (#1; 900 until spec 053 #20 moved the Docker variant of the setup into the skill, 910 until spec 054 added `references/upgrade.md`), and both are full: a new line is paid for by one taken out. The drift test parses the skill's `tracepad serve` lines with `config.ParseFlags`, as a start does (spec 053 #17, #19) |
+| `tracepad upgrade` | `internal/upgrade/` (`plan.go` decides, `apply.go` and `container.go` swap, `back.go` is the one way back, `state.go` the run's record, `procs_*.go` the machine), `docs/cli.md#upgrade`, `docs/agent-upgrade.md`, the skill's `references/upgrade.md`, spec 054 — the command touches only what Decision 4 proves is its own, a way back never deletes (#11), and the integration tests build the binary twice (`-X main.version`) and serve it from a `file://` mirror; the Docker half is tested against a fake `docker` in memory that fails any test that removes something |
 | A test that needs a store | `internal/storetest` for the store's clients (`Open`, `Path`, `Writes`), `harness_test.go` inside `internal/store` for its own suite — one migrated template copied per test and a one-millisecond commit window, because a suite that opens an empty database per test and waits out the default window per lone write spends most of its time on neither the code under test nor its own assertions. The migration tests and the writer's own tests are the exceptions, on purpose |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
