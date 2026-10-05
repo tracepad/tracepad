@@ -197,6 +197,8 @@ func classifyServer(p Process, install string) (Server, bool) {
 		s.Reason = fmt.Sprintf("the lock of its data directory %s does not record it", dataDir)
 	case p.Manager != "":
 		s.Reason = "it runs as " + p.Manager + ", which restarts it"
+	case p.Unasked != "":
+		s.Reason = p.Unasked
 	case s.URL == "":
 		s.Reason = fmt.Sprintf("it listens on %s, beyond this machine", listen)
 	case isMountPoint(dataDir):

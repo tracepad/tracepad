@@ -192,6 +192,20 @@ func verifyArchive(path string, want Archived) error {
 	return nil
 }
 
+// fileSHA256 is a file's SHA-256, in hex.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // cleanEntry is a tar entry's name without its `./`.
 func cleanEntry(name string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(name), "./"), "/")
@@ -298,13 +312,21 @@ func extractDB(path, dir string) error {
 		if err != nil {
 			return err
 		}
-		name := cleanEntry(h.Name)
-		if h.Typeflag != tar.TypeReg || (name != dataDBName && name != dataDBName+"-wal" && name != dataDBName+"-shm") {
+		if h.Typeflag != tar.TypeReg {
 			continue
 		}
-		target, err := safeJoin(dir, name)
-		if err != nil {
-			return err
+		// The name written is one of three the command knows, never the
+		// archive's own.
+		var target string
+		switch cleanEntry(h.Name) {
+		case dataDBName:
+			target = filepath.Join(dir, dataDBName)
+		case dataDBName + "-wal":
+			target = filepath.Join(dir, dataDBName+"-wal")
+		case dataDBName + "-shm":
+			target = filepath.Join(dir, dataDBName+"-shm")
+		default:
+			continue
 		}
 		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {

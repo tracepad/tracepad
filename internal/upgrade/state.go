@@ -26,7 +26,12 @@ const (
 	stepStarted        = "started"         // the new server or container runs
 	stepChecked        = "checked"         // the verdict is in `verdict`
 	stepSkill          = "skill"           // the skill's copies reinstalled
-	stepBackBegun      = "back_begun"      // the way back started
+	stepBackBegun      = "back_begun"      // the way back changed what runs
+	stepBackAside      = "back_set_aside"  // what the new version left is set aside
+	stepBackMoved      = "back_moved"      // the restore is in the data's place
+	stepBackVolume     = "back_volume"     // container: the archive restored into <vol>-<run>
+	stepBackBinary     = "back_binary"     // the old binary is back
+	stepBackStarted    = "back_started"    // the old version runs again
 	stepBackDone       = "back_done"       // the way back finished
 )
 
@@ -89,6 +94,8 @@ type ProcessState struct {
 	// to the new one.
 	PIDFile bool `json:"pid_file"`
 	NewPID  int  `json:"new_pid,omitempty"`
+	// BackPID is the old version a way back started, or found running.
+	BackPID int `json:"back_pid,omitempty"`
 	// Old is the copy of the running version in the run directory.
 	Old string `json:"old"`
 }
@@ -104,6 +111,8 @@ type ContainerState struct {
 	NewRef   string `json:"new_ref"`
 	Restart  string `json:"restart"`
 	NewID    string `json:"new_id,omitempty"`
+	// BackID is the old image's container a way back ran.
+	BackID string `json:"back_id,omitempty"`
 }
 
 // Step is one thing a run did, and when.
@@ -263,7 +272,7 @@ func (s *State) validate(dirName string) error {
 		c := s.Container
 		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
 			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
-			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.NewID != "" && !containerID.MatchString(c.NewID)) {
+			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
 			return errors.New("its container is not one a run records")
 		}
 		if !isLoopbackBase(c.URL) {

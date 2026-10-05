@@ -633,3 +633,80 @@ func TestARefusedRunLeavesNoDirectory(t *testing.T) {
 		t.Error("the server was stopped")
 	}
 }
+
+// A way back that stopped after it had moved the data is taken up where it
+// stopped, and its refusal never asks for what the new version wrote to be
+// removed (the second review).
+func TestAWayBackCutShortAfterTheMoveIsTakenUpAgain(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.sendTrace(2)
+	w.waitCount(2)
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("upgrade: %d %s", code, rep.Summary)
+	}
+	w.sendTrace(3)
+	w.waitCount(3)
+	deps := w.deps()
+	failing := true
+	deps.Version = func(ctx context.Context, path string) (string, error) {
+		if failing && strings.Contains(filepath.Base(path), ".tracepad.") {
+			return "", fmt.Errorf("a disk that is full")
+		}
+		return binaryVersion(ctx, path)
+	}
+	first, code := w.run(deps, "--back", rep.Run.ID)
+	after := w.data + ".after-" + rep.Run.ID
+	if code != exitStuck || strings.Contains(first.Summary, "rm -r") {
+		t.Fatalf("first --back: %d %s", code, first.Summary)
+	}
+	if _, err := os.Stat(filepath.Join(after, "tracepad.db")); err != nil {
+		t.Fatalf("not set aside: %v", err)
+	}
+	failing = false
+	second, code := w.run(deps, "--back", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("second --back: %d %s", code, second.Summary)
+	}
+	w.waitVersion(vOld)
+	if got := w.count(); got != 2 {
+		t.Errorf("traces: %d", got)
+	}
+}
+
+// Cut short between its two moves — the data set aside, the restore not yet
+// in its place — the way back is taken up at the second move.
+func TestAWayBackCutShortBetweenItsMovesIsTakenUpAgain(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.waitCount(1)
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("upgrade: %d %s", code, rep.Summary)
+	}
+	w.sendTrace(2)
+	w.waitCount(2)
+	t.Cleanup(func() { renameDir = os.Rename })
+	renameDir = func(from, to string) error {
+		if to == w.data {
+			return fmt.Errorf("an interrupted rename")
+		}
+		return os.Rename(from, to)
+	}
+	first, code := w.run(w.deps(), "--back", rep.Run.ID)
+	if code != exitStuck || strings.Contains(first.Summary, "rm -r") {
+		t.Fatalf("first --back: %d %s", code, first.Summary)
+	}
+	renameDir = os.Rename
+	second, code := w.run(w.deps(), "--back", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("second --back: %d %s", code, second.Summary)
+	}
+	w.waitVersion(vOld)
+	if got := w.count(); got != 1 {
+		t.Errorf("traces: %d", got)
+	}
+}

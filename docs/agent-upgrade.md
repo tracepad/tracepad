@@ -40,9 +40,11 @@ will do and what is the person's; you show it to them. `tracepad upgrade` then
 backs the data up into `~/tracepad-backups/<run>/` before it stops anything,
 puts the new binary in place, starts the server again with the same
 arguments and environment (or recreates the container with the same mounts,
-ports, restart policy and variables), and checks it. A new version that does
-not answer is rolled back at once; one that answers but whose trace count
-looks wrong is left running, and the person decides. Nothing is ever deleted:
+ports, restart policy and variables), and checks it. A new version that exits,
+crash-loops or answers as another version is rolled back at once; one that
+runs but stays silent through the wait (a long migration runs before the
+server listens), or answers with a trace count that looks wrong, is left
+running, and the person decides (exit `4`). Nothing is ever deleted:
 what a way back replaces is set aside, renamed. Then the project's `tracepad`
 package moves to the same version, and you report.
 

@@ -1,8 +1,8 @@
 # Upgrading Tracepad
 
 `tracepad upgrade` does the upgrade: it backs the data up before it stops
-anything, swaps, checks the new version, and goes back by itself when that does
-not answer, deleting nothing. Your part: run the plan, show it to the human,
+anything, swaps, checks the new version, and goes back by itself when that exits
+or answers as another, deleting nothing. Your part: run the plan, show it to the human,
 run the upgrade, act on its exit status, and report. Never improvise around a
 refusal: it says what is the human's.
 

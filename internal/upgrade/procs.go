@@ -20,9 +20,15 @@ type Process struct {
 	// Stdout is the regular file its output goes to, or empty (a terminal, a
 	// pipe, /dev/null, or not known).
 	Stdout string
+	// PPID is its parent's.
+	PPID int
 	// Manager names what started and restarts it, when that is a service
 	// manager: "the systemd unit tracepad.service", "the launchd job X".
 	Manager string
+	// Unasked is set when a service manager it sits in could not be asked
+	// whether it runs it: why. Such a server is the person's (the second
+	// review): the command never assumes it is free to stop one.
+	Unasked string
 }
 
 // Getenv reads the process's environment.

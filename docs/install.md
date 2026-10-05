@@ -321,8 +321,9 @@ Update Tracepad to the latest release: follow https://tracepad.github.io/tracepa
 
 It archives the data directory into `~/tracepad-backups/<run>/` with the server
 stopped, puts the new binary in place, starts it with the same arguments and
-environment, and checks it; a version that does not answer is rolled back at
-once, and `tracepad upgrade --back <run>` takes the way back later. Nothing is
+environment, and checks it; a version that exits or answers as another version
+is rolled back at once, one that runs but stays silent is left for you to
+decide, and `tracepad upgrade --back <run>` takes the way back later. Nothing is
 deleted on the way: what a way back replaces is set aside as
 `<data>.after-<run>`. The whole of it is [cli.md](cli.md#upgrade).
 

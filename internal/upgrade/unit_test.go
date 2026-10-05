@@ -214,6 +214,9 @@ func TestWhatServerIsTheCommands(t *testing.T) {
 		{"no executable", func(p *Process) { p.Exe = "" }, "could not be read"},
 		{"a lock that records another", func(p *Process) { p.PID = 43 }, "does not record it"},
 		{"a service", func(p *Process) { p.Manager = "the systemd unit tracepad.service" }, "restarts it"},
+		{"a service that could not be asked", func(p *Process) {
+			p.Unasked = "it sits in the systemd unit tracepad.service, which could not be asked whether it runs it (no bus)"
+		}, "could not be asked"},
 		{"beyond this machine", func(p *Process) { p.Argv[3] = "0.0.0.0:4318" }, "beyond this machine"},
 		{"all interfaces", func(p *Process) { p.Argv[3] = ":4318" }, "beyond this machine"},
 		{"relative, no cwd", func(p *Process) { p.Argv[5] = "rel"; p.Cwd = "" }, "relative"},

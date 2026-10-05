@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -100,6 +99,12 @@ func (r *runner) upgrade(ctx context.Context) *Report {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+refusal
 		return rep
 	}
+	// From here a run changes what runs; an interrupt must not leave a
+	// server or a container down half way (the second review), so every swap
+	// and its way back finish on a context of their own. Everything before
+	// this — downloads, pulls, the archive's room — stays interruptible.
+	ctx, cancel := afterStop(ctx)
+	defer cancel()
 	switch {
 	case p.server != nil:
 		j.swapProcess(ctx, p)
@@ -379,8 +384,6 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		rep.Run = nil
 		return
 	}
-	ctx, cancel := afterStop(ctx)
-	defer cancel()
 	if err := j.step(stepStopSent); err != nil {
 		j.stuck("could not record the run's state: " + err.Error())
 		return
@@ -417,29 +420,24 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		j.done("put tracepad %s at %s", p.to, st.Binary.Path)
 	}
 
-	if err := j.startServer(); err != nil {
+	started, err := j.start()
+	if err != nil {
 		j.goBack(ctx, "tracepad "+p.to+" did not start: "+err.Error())
 		return
 	}
+	ps.NewPID = started.PID()
 	_ = j.step(stepStarted)
 	j.done("started tracepad %s as pid %d, with the old server's arguments and environment", p.to, ps.NewPID)
 
-	exited := j.newProc.Exited()
-	c := r.check(ctx, ps.URL, p.to, st.CountBefore, func() bool {
-		select {
-		case <-exited:
-			return false
-		default:
-			return true
-		}
-	})
+	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	j.verdict(ctx, c)
 }
 
-// startServer starts the installed binary with the old server's arguments,
+// start starts the installed binary with the old server's arguments,
 // environment and working directory, its output appended to the old log.
-func (j *job) startServer() error {
+// A server.pid that named a server of this run is moved to the new one.
+func (j *job) start() (Started, error) {
 	ps := j.st.Process
 	if info, err := os.Stat(ps.Log); err == nil {
 		ps.LogOffset = info.Size()
@@ -448,18 +446,22 @@ func (j *job) startServer() error {
 	}
 	started, err := j.r.deps.Sys.Start(StartSpec{Path: j.spec.Exe, Argv: j.spec.Argv, Env: j.spec.Env, Dir: j.spec.Dir, Log: ps.Log})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	j.newProc = started
-	oldPID := ps.PID
-	ps.NewPID = started.PID()
 	pidFile := filepath.Join(ps.DataDir, "server.pid")
-	if b, err := os.ReadFile(pidFile); err == nil && strings.TrimSpace(string(b)) == strconv.Itoa(oldPID) {
-		if writeFileAtomic(pidFile, []byte(strconv.Itoa(ps.NewPID)+"\n")) == nil {
-			ps.PIDFile = true
+	if b, err := os.ReadFile(pidFile); err == nil {
+		named := strings.TrimSpace(string(b))
+		for _, pid := range []int{ps.PID, ps.NewPID, ps.BackPID} {
+			if pid > 0 && named == strconv.Itoa(pid) {
+				if writeFileAtomic(pidFile, []byte(strconv.Itoa(started.PID())+"\n")) == nil {
+					ps.PIDFile = true
+				}
+				break
+			}
 		}
 	}
-	return nil
+	return started, nil
 }
 
 // verdict acts on a check of the new version (Decision 9).
@@ -509,16 +511,12 @@ func (j *job) goBack(ctx context.Context, why string) {
 	j.rep.Summary = fmt.Sprintf("Not upgraded: %s. The way back did not finish: %s", why, outcome.why)
 }
 
-// upgradeCmd is how to run the command later: the installed binary when it
-// has the command, else the copy of this one the run kept — after a way back
-// to a release from before the command, the installed binary does not know
-// the word.
+// upgradeCmd is how to run the command later on this run: its own copy of
+// the binary that ran it, by its absolute path (the second review). A bare
+// `tracepad` could be another binary first on PATH, or after a way back a
+// release from before the command; the copy is the code that wrote the
+// state, and stays with it.
 func (j *job) upgradeCmd(args string) string {
-	if b := j.st.Binary; b != nil && b.Path != "" {
-		if exec.Command(b.Path, "upgrade", "--help").Run() == nil {
-			return "tracepad upgrade " + args
-		}
-	}
 	return shq(filepath.Join(j.dir, "upgrader")) + " upgrade " + args
 }
 

@@ -108,7 +108,7 @@ one.
   `--plan` changes nothing and says what is yours; the upgrade restarts the
   server with the same arguments and environment (or recreates the container
   with the same mounts, ports, restart policy and variables), checks it, and
-  goes back at once when it does not answer. A coding agent does it from one
+  goes back at once when it exits or answers as another version. A coding agent does it from one
   line, `Update Tracepad to the latest release: follow
   https://tracepad.github.io/tracepad/agent-upgrade.md`, and the install
   script names what still runs an older version

@@ -41,7 +41,9 @@ type fakeDocker struct {
 	// failRestore makes the way back's busybox restore fail.
 	silentRef   string
 	failRestore bool
-	dbFile      []byte
+	// onCall runs before each call: a test's interrupt.
+	onCall func(args []string)
+	dbFile []byte
 }
 
 func newFakeDocker(t *testing.T) *fakeDocker {
@@ -104,8 +106,15 @@ func mountValue(m string) map[string]string {
 	return out
 }
 
-func (d *fakeDocker) Run(_ context.Context, args ...string) ([]byte, error) {
+func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 	d.calls = append(d.calls, slices.Clone(args))
+	// As exec.CommandContext does: a cancelled context runs nothing.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if d.onCall != nil {
+		d.onCall(args)
+	}
 	joined := strings.Join(args, " ")
 	for _, removal := range []string{"rm ", "rmi ", "volume rm", "prune", "container rm", "image rm", "-delete"} {
 		if strings.HasPrefix(joined, removal) || strings.Contains(joined, " "+removal) {
@@ -555,6 +564,9 @@ func TestAContainerUpgradeKeepsMountsPolicyAndVariables(t *testing.T) {
 	if code != exitPending || plan.To != "0.2.0" || len(plan.Containers) != 1 || !plan.Containers[0].Target {
 		t.Fatalf("plan: %d %+v", code, plan)
 	}
+	if len(plan.Next) == 0 || !strings.HasPrefix(plan.Next[0], deps.Self+" upgrade") {
+		t.Errorf("the plan hands on a bare command: %q", plan.Next)
+	}
 	if len(d.calls) == 0 || slices.ContainsFunc(d.calls, func(c []string) bool { return c[0] == "stop" || c[0] == "run" }) {
 		t.Fatalf("the plan acted: %q", d.calls)
 	}
@@ -572,6 +584,9 @@ func TestAContainerUpgradeKeepsMountsPolicyAndVariables(t *testing.T) {
 	}
 	if i := slices.IndexFunc(newC.Mounts, func(m mount) bool { return m.Destination == "/tls" }); i < 0 || newC.Mounts[i].RW || newC.Mounts[i].Source != bind {
 		t.Errorf("the read-only bind: %+v", newC.Mounts)
+	}
+	if want := filepath.Join(rep.Run.Dir, "upgrader") + " upgrade --back " + rep.Run.ID; !strings.Contains(strings.Join(rep.Next, "\n"), want) {
+		t.Errorf("the way back is not handed on by this binary's copy: %q", rep.Next)
 	}
 	before := d.byName["tracepad-app-before-"+rep.Run.ID]
 	if before == nil || before.HostConfig.RestartPolicy.Name != "no" || before.State.Running {
@@ -769,5 +784,56 @@ func TestTheRemovalsRemoveContainersBeforeVolumes(t *testing.T) {
 	first := strings.Index(sentence, "docker volume rm ")
 	if last < 0 || first < 0 || last > first {
 		t.Errorf("a volume is removed before a container that mounts it: %s", sentence)
+	}
+}
+
+// An interrupt after docker stop must not leave the container down: the
+// rest of the run, and its way back, finish on a context of their own (the
+// second review).
+func TestAnInterruptAfterTheContainerStopsStillBringsItBack(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	d.failRun = true
+	deps := containerDeps(t, d)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.onCall = func(args []string) {
+		if args[0] == "stop" {
+			cancel()
+		}
+	}
+	var out bytes.Buffer
+	code := run(ctx, Options{Args: []string{"--json"}, Stdout: &out, Stderr: io.Discard}, deps)
+	var rep Report
+	_ = json.Unmarshal(out.Bytes(), &rep)
+	if code != exitWentBack {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	cur := d.byName["tracepad-app"]
+	if cur == nil || !cur.State.Running || cur.HostConfig.RestartPolicy.Name != "always" || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.1.0" {
+		t.Errorf("the old container: %+v", cur)
+	}
+}
+
+// The container's archive is pinned by its bytes: one changed since is not
+// restored.
+func TestAContainerArchiveChangedSinceIsNotRestored(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	archive := filepath.Join(rep.Run.Dir, "data.tar.gz")
+	if err := os.WriteFile(archive, archiveOf(t, map[string][]byte{"./tracepad.db": d.dbFile, "./extra": []byte("x")}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	back, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitStuck || !strings.Contains(back.Summary, "checksum changed") {
+		t.Fatalf("%d %s", code, back.Summary)
+	}
+	if _, ok := d.volumes["tracepad-app-"+rep.Run.ID]; ok {
+		t.Error("a volume was made from it")
 	}
 }

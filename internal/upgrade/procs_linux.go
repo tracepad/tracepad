@@ -93,7 +93,8 @@ func inspectLinux(pid int) (Process, error) {
 			p.Stdout = out
 		}
 	}
-	p.Manager = systemdManager(p, cgroupOf(dir))
+	p.PPID = procPPID(dir)
+	p.Manager, p.Unasked = systemdManager(p, cgroupOf(dir))
 	return p, nil
 }
 
@@ -122,6 +123,21 @@ func readNulList(file string) ([]string, error) {
 		out[i] = string(p)
 	}
 	return out, nil
+}
+
+// procPPID is the parent's PID in /proc/<pid>/status.
+func procPPID(dir string) int {
+	b, err := os.ReadFile(dir + "/status")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "PPid:"); ok {
+			n, _ := strconv.Atoi(strings.TrimSpace(v))
+			return n
+		}
+	}
+	return 0
 }
 
 // procUID is the real UID in /proc/<pid>/status.

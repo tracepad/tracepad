@@ -97,7 +97,15 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+firstLine(err.Error()))
 		return
 	}
-	st.Archive = &Archived{DBSize: -1}
+	// The archive's bytes are pinned as the process archive's are: a file
+	// changed between the upgrade and a way back is not restored (the second
+	// review).
+	sum, err := fileSHA256(archive)
+	if err != nil {
+		j.goBack(ctx, "the archive of the volume "+cs.Volume+" does not read: "+err.Error())
+		return
+	}
+	st.Archive = &Archived{SHA256: sum, DBSize: -1}
 	_ = j.step(stepArchived)
 	j.done("archived the volume %s into %s and read it back whole", cs.Volume, archive)
 

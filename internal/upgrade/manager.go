@@ -3,6 +3,7 @@ package upgrade
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os/exec"
 	"path"
 	"strconv"
@@ -42,9 +43,10 @@ var unitShow = func(user bool, unit string) (mainPID int, execStart string, err 
 	return mainPID, execStart, nil
 }
 
-// jobPID reads a launchd job's PID (`launchctl print`), in this user's GUI
-// domain or its user domain; 0 when it runs nothing.
-var jobPID = func(uid int, label string) (int, error) {
+// jobPID reads a launchd job's PID and its program's arguments (`launchctl
+// print`), in this user's GUI domain or its user domain; PID 0 when it runs
+// nothing.
+var jobPID = func(uid int, label string) (pid int, arguments string, err error) {
 	var last error
 	for _, domain := range []string{"gui/", "user/"} {
 		out, err := runQuiet("launchctl", "print", domain+strconv.Itoa(uid)+"/"+label)
@@ -52,15 +54,27 @@ var jobPID = func(uid int, label string) (int, error) {
 			last = err
 			continue
 		}
+		var args []string
+		inArgs := false
 		s := bufio.NewScanner(strings.NewReader(out))
 		for s.Scan() {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(s.Text()), "pid = "); ok {
-				return strconv.Atoi(strings.TrimSpace(v))
+			line := strings.TrimSpace(s.Text())
+			switch {
+			case inArgs && line == "}":
+				inArgs = false
+			case inArgs:
+				args = append(args, line)
+			case line == "arguments = {":
+				inArgs = true
+			case strings.HasPrefix(line, "program = "):
+				args = append(args, strings.TrimPrefix(line, "program = "))
+			case strings.HasPrefix(line, "pid = "):
+				pid, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid = ")))
 			}
 		}
-		return 0, nil
+		return pid, strings.Join(args, " "), nil
 	}
-	return 0, last
+	return 0, "", last
 }
 
 func runQuiet(name string, args ...string) (string, error) {
@@ -70,9 +84,10 @@ func runQuiet(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// systemdManager names the unit that runs p, given its /proc/<pid>/cgroup:
-// empty when no unit can be shown to run it.
-func systemdManager(p Process, cgroup string) string {
+// systemdManager decides, from p's /proc/<pid>/cgroup, which unit runs p:
+// managed names it; unasked says why the unit p sits in could not be asked,
+// which makes p the person's all the same.
+func systemdManager(p Process, cgroup string) (managed, unasked string) {
 	for _, line := range strings.Split(strings.TrimSpace(cgroup), "\n") {
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
@@ -85,14 +100,16 @@ func systemdManager(p Process, cgroup string) string {
 		user := strings.Contains(parts[2], "/user@") && !strings.HasPrefix(unit, "user@")
 		mainPID, execStart, err := unitShow(user, unit)
 		if err != nil {
-			return ""
+			return "", fmt.Sprintf("it sits in the systemd unit %s, which could not be asked whether it runs it (%v): restart it yourself, or with sudo systemctl restart %s if the unit is what runs it", unit, firstLine(err.Error()), unit)
 		}
-		if mainPID == p.PID || startsThis(execStart, p) {
-			return "the systemd unit " + unit
+		_, argv, _ := strings.Cut(execStart, "argv[]=")
+		argv, _, _ = strings.Cut(argv, " ;")
+		if mainPID == p.PID || startsThis(execStart, p) || (mainPID > 0 && mainPID == p.PPID && namesTracepad(argv)) {
+			return "the systemd unit " + unit, ""
 		}
-		return ""
+		return "", ""
 	}
-	return ""
+	return "", ""
 }
 
 // startsThis says whether a unit's ExecStart starts this binary with this
@@ -110,16 +127,35 @@ func startsThis(execStart string, p Process) bool {
 	return strings.Join(words[1:], " ") == strings.Join(p.Argv[1:], " ")
 }
 
-// launchdManager names the launchd job that runs p: the job its
-// XPC_SERVICE_NAME names, when that job's PID is p's.
-func launchdManager(p Process, uid int) string {
+// namesTracepad says whether a service's command runs the binary through a
+// wrapper — `sh -c 'tracepad serve …'` without exec, whose PID is the
+// server's parent's: a word of it is a path to a `tracepad`.
+func namesTracepad(command string) bool {
+	for _, word := range strings.FieldsFunc(command, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\'' || r == '"' || r == ';' || r == '&' || r == '|'
+	}) {
+		if isTracepadName(word) {
+			return true
+		}
+	}
+	return false
+}
+
+// launchdManager decides which launchd job runs p: the job its
+// XPC_SERVICE_NAME names, when that job's PID is p's, or p's parent's and
+// the job's program runs a tracepad. A job that cannot be asked makes p the
+// person's.
+func launchdManager(p Process, uid int) (managed, unasked string) {
 	label := p.Getenv("XPC_SERVICE_NAME")
 	if label == "" || label == "0" || strings.HasPrefix(label, "application.") {
-		return ""
+		return "", ""
 	}
-	pid, err := jobPID(uid, label)
-	if err != nil || pid != p.PID {
-		return ""
+	pid, arguments, err := jobPID(uid, label)
+	if err != nil {
+		return "", fmt.Sprintf("it sits in the launchd job %s, which could not be asked whether it runs it (%v): restart it yourself, or with launchctl kickstart -k gui/%d/%s if the job is what runs it", label, firstLine(err.Error()), uid, label)
 	}
-	return "the launchd job " + label
+	if pid > 0 && (pid == p.PID || pid == p.PPID && namesTracepad(arguments)) {
+		return "the launchd job " + label, ""
+	}
+	return "", ""
 }

@@ -1103,9 +1103,11 @@ server only at the server's own address. The design is spec 054.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
-  compared). A new version that does not answer goes back at once. One that
-  answers but counts fewer traces, or cannot count them, is left running for
-  you to decide.
+  compared). A new version that exits (a container that crash-loops counts),
+  or answers as another version, goes back at once (exit `3`). One that runs
+  but stays silent through the two-minute wait — a long migration runs before
+  the server listens — or answers but counts fewer traces, or cannot count
+  them, is left running for you to decide (exit `4`).
 - `--check RUN` asks again, for a server that was still starting, and never
   goes back by itself. `--back RUN` takes a run's way back: the archive is
   restored beside the data and checked before anything stops, what the new

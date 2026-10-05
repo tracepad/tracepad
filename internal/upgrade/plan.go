@@ -167,6 +167,13 @@ func (r *runner) pickTarget(p *plan) error {
 	return nil
 }
 
+// self is this command, as the person runs it again: the binary running it,
+// by its absolute path, never a bare `tracepad` another binary on PATH may
+// answer to (the second review).
+func (r *runner) self() string {
+	return shq(r.deps.Self) + " upgrade"
+}
+
 func canonicalDir(dir string) string {
 	if real, err := filepath.EvalSymlinks(dir); err == nil {
 		return filepath.Clean(real)
@@ -186,7 +193,7 @@ func (r *runner) othersBehind(p *plan) {
 		switch {
 		case s == p.server || !older(s.Version):
 		case s.Ours:
-			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): tracepad upgrade --data-dir %s", s.Proc.PID, s.Version, shq(s.DataDir)))
+			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): %s --data-dir %s", s.Proc.PID, s.Version, r.self(), shq(s.DataDir)))
 		default:
 			p.person = append(p.person, fmt.Sprintf("server pid %d runs %s; %s. %s", s.Proc.PID, s.Version, s.Reason, serverAdvice(*s)))
 		}
@@ -196,7 +203,7 @@ func (r *runner) othersBehind(p *plan) {
 		switch {
 		case c == p.container || !older(c.Version):
 		case c.Ours:
-			p.later = append(p.later, fmt.Sprintf("container %s (%s): tracepad upgrade --container %s", c.Name, c.Version, shq(c.Name)))
+			p.later = append(p.later, fmt.Sprintf("container %s (%s): %s --container %s", c.Name, c.Version, r.self(), shq(c.Name)))
 		default:
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(*c, p.to)))
 		}
@@ -276,7 +283,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {
-			rep.Next = append(rep.Next, "tracepad upgrade "+c)
+			rep.Next = append(rep.Next, r.self()+" "+c)
 		}
 		return
 	}
@@ -321,7 +328,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 	if len(steps) > 0 {
 		steps = append(steps, "install the skill again wherever a copy is marked with its .version")
 		rep.Plan = steps
-		next := "tracepad upgrade"
+		next := r.self()
 		if r.flags.to != "" {
 			next += " --to " + p.to
 		}

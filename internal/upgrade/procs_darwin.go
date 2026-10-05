@@ -87,7 +87,10 @@ func inspectDarwin(pid int) (Process, error) {
 			p.Exe = filepath.Join(p.Cwd, p.Exe)
 		}
 	}
-	p.Manager = launchdManager(p, os.Getuid())
+	if k, err := unix.SysctlKinfoProc("kern.proc.pid", pid); err == nil {
+		p.PPID = int(k.Eproc.Ppid)
+	}
+	p.Manager, p.Unasked = launchdManager(p, os.Getuid())
 	return p, nil
 }
 

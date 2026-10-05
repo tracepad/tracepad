@@ -625,7 +625,8 @@ It pulls the new tag, stops the container, archives the volume into
 `<name>-before-<run>` with its restart policy set to `no`, and runs the new
 image with the same mounts, ports, restart policy and labels, and the
 variables you set (not the old image's own), through an env file. A new
-version that does not answer goes back at once: the archive is restored into a
+version that exits, crash-loops or answers as another version goes back at
+once (one that runs but stays silent is left for you to decide): the archive is restored into a
 new volume, `<volume>-<run>`, and the old image runs on it; the volume the new
 version migrated is left as it was. Nothing is removed — not a container, not
 a volume — and the report gives the commands for what is set aside. Like any
