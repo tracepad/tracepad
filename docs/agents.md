@@ -84,6 +84,12 @@ docker run --rm --user "$(id -u):$(id -g)" \
   ghcr.io/tracepad/tracepad skills install --dir /skills
 ```
 
+Not `docker exec` into the running server: the files would be written to that
+container's own layer and vanish with it. The image sets `TRACEPAD_IN_CONTAINER`,
+and with it set `skills install` refuses a target that is not on a mounted
+volume, naming the command above, rather than printing *installed* for a copy
+nobody can reach.
+
 `docker run --rm ghcr.io/tracepad/tracepad skills show` prints the skill
 without writing anything.
 

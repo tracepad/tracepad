@@ -89,6 +89,13 @@ machine, which inside the container it is) — so
 `docker exec tracepad /tracepad keys ls --url http://localhost:4318` needs no
 `-e` and no paste. No other command takes it that way; they ask for a key.
 
+**`docker exec` is for commands that talk to the server, and `skills install`
+does not.** It writes files, and in the running container they would land in the
+container's own layer — gone with the container, and the image has no shell to
+look for them with. Inside a container `skills install` refuses a target that
+is not on a mounted volume; run it in a container of its own, onto a directory
+you mount, as [agents.md](agents.md#from-the-docker-image) shows.
+
 A key minted this way is shown in your browser or printed to your terminal,
 never to the container's log. A deployment that declares its keys in `TRACEPAD_PROJECTS`
 from the start never has one printed: the server names the variable where the

@@ -727,18 +727,37 @@ func envOr(key, def string) string {
 	return def
 }
 
-// parseOnOff reads a boolean-ish switch. Spelled on/off in the docs, but the
-// usual true/false/1/0 are accepted too — an operator should never have to
-// look up which spelling this particular flag wanted.
+// onOff reads the words an on/off switch is spelled with: on/off in the docs,
+// but the usual true/false/1/0 and yes/no are accepted too — an operator should
+// never have to look up which spelling this particular flag wanted. ok is false
+// for any other word. The one list, for parseOnOff and IsOn.
+func onOff(word string) (value, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(word)) {
+	case "on", "true", "1", "yes":
+		return true, true
+	case "off", "false", "0", "no":
+		return false, true
+	}
+	return false, false
+}
+
+// IsOn reports whether a value switches something on, in the words an on/off
+// variable is read with; anything else, a word it refuses included, is off.
+// For the callers outside this package that read one of the variables
+// (TRACEPAD_IN_CONTAINER, spec 037 #17).
+func IsOn(value string) bool {
+	on, _ := onOff(value)
+	return on
+}
+
+// parseOnOff reads an on/off environment variable (see onOff for the words).
 func parseOnOff(key string, def bool) (bool, error) {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	switch v {
-	case "":
+	if v == "" {
 		return def, nil
-	case "on", "true", "1", "yes":
-		return true, nil
-	case "off", "false", "0", "no":
-		return false, nil
+	}
+	if on, ok := onOff(v); ok {
+		return on, nil
 	}
 	return false, fmt.Errorf("%s: want on or off, got %q", key, v)
 }

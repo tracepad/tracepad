@@ -1036,8 +1036,12 @@ the directory whole, and a `tracepad` directory the command did not install is
 refused unless `--force`. A `tracepad` symlink in your own skills directory is
 followed only into a skill the command installed, or with `--force` into an
 empty directory; with `--project` no link on the way is followed at all.
-Either refusal holds with `--force` too.
-Exit `1` for that refusal, `2` for a usage error.
+Either refusal holds with `--force` too. Inside a container (the image sets
+`TRACEPAD_IN_CONTAINER`) it writes only onto a mounted volume — not the
+container's own layer, not a `tmpfs` — and otherwise refuses, printing the
+`docker run … -v DIR:/skills … skills install --dir /skills` that works, so
+`docker exec … skills install` is refused ([agents.md](agents.md#from-the-docker-image)).
+Exit `1` for any of these refusals, `2` for a usage error.
 The whole of it is [agents.md](agents.md).
 
 ## Version skew

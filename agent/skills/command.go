@@ -44,6 +44,10 @@ replaces the directory whole, so an update leaves nothing of the old version
 behind, and it refuses a tracepad directory it did not install unless --force.
 Run it again after upgrading the binary.
 
+In a container (TRACEPAD_IN_CONTAINER set, as the image sets it) install writes
+only onto a mounted volume, not the container's own layer or a tmpfs, and
+refuses anything else, because those go when the container does.
+
 show prints SKILL.md, or one of its references (show debugging.md), to stdout.
 
 Neither talks to a server.
@@ -62,6 +66,10 @@ type Options struct {
 	// Getwd is the directory --project resolves against; os.Getwd in
 	// production.
 	Getwd func() (string, error)
+	// MountInfo opens the list of the process's mounts, /proc/self/mountinfo
+	// in production. Read only when TRACEPAD_IN_CONTAINER says this is a
+	// container (#17).
+	MountInfo func() (io.ReadCloser, error)
 	// GOOS decides where the home directory is read from; runtime.GOOS
 	// when empty.
 	GOOS string
@@ -90,6 +98,9 @@ func Run(opt Options) int {
 	}
 	if opt.GOOS == "" {
 		opt.GOOS = runtime.GOOS
+	}
+	if opt.MountInfo == nil {
+		opt.MountInfo = func() (io.ReadCloser, error) { return os.Open("/proc/self/mountinfo") }
 	}
 	err := run(opt)
 	var usage *usageError
@@ -184,6 +195,9 @@ func runInstall(opt Options, args []string) error {
 		return err
 	}
 	target := filepath.Join(base, Name)
+	if err := checkContainerTarget(opt, target); err != nil {
+		return err
+	}
 	done, err := install(Files(), root, target, opt.Version, *force, *project)
 	if err != nil {
 		return err
