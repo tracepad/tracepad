@@ -65,7 +65,10 @@ one.
   (`tracepad skills install`), including setting Tracepad up for a project
   from nothing: a local server, a key, the application connected, and the
   first trace read back
-  ([docs/agent-setup.md](docs/agent-setup.md)).
+  ([docs/agent-setup.md](docs/agent-setup.md)), and upgrading it: a backup
+  first, the server it started restarted on the new version and checked
+  against the backup, a way back, then the skill and the project's package
+  ([docs/agent-upgrade.md](docs/agent-upgrade.md)).
 
 #### Web interface
 
@@ -100,7 +103,9 @@ one.
   `curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh`, which
   installs the binary and the agent skill into `~/.local/bin` without `sudo`.
   It verifies the checksum, and the attestation too when `gh` can. It
-  installs a release candidate only when `TRACEPAD_VERSION` names one.
+  installs a release candidate only when `TRACEPAD_VERSION` names one. After
+  an update it names each `tracepad serve` still running the binary it
+  replaced.
 - The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
   Markdown beside its HTML, on the documentation site.
 

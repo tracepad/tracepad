@@ -98,7 +98,10 @@ installed tracepad 0.1.0 at /home/you/.local/bin/tracepad
 ```
 
 Running it again upgrades to the newest stable release, or says that version
-is already installed. A release candidate is installed only when you name it
+is already installed. After an update it names each `tracepad serve` still
+running the binary it replaced, by process id and command line, since that
+server keeps the old version until it is restarted, and its last line is the
+one to hand your agent for [the rest of the upgrade](#upgrading). A release candidate is installed only when you name it
 (`… | TRACEPAD_VERSION=0.1.0-rc.1 sh`), and until 0.1.0 is out the line above
 stops and prints that form. A check that fails stops it, with nothing
 installed. It never uses `sudo` and edits no shell profile. When
@@ -300,6 +303,18 @@ do that from a terminal ([admin.md](admin.md#keys)). Behind a proxy, set
 is printed at the address your people use.
 
 ## Upgrading
+
+**With your coding agent**, for a server it started:
+
+```text
+Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md
+```
+
+It backs the data directory up, installs the new binary with the install
+script, restarts the server and checks it against the backup, going back to
+the backup when the check fails; then it updates the skill and the project's
+`tracepad` package ([agent-upgrade.md](agent-upgrade.md)). A service like the
+one below it leaves to you, with the commands. By hand:
 
 Schema migrations run on start, forward only: a new binary opens the existing
 data directory and brings it up to date. **A downgrade is not supported** — an

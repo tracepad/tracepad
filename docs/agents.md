@@ -37,10 +37,11 @@ The [install script](install.md#with-the-install-script) runs this command
 for you, in each skills directory an agent on the machine has made.
 
 The skill is plain files. `SKILL.md` is what the agent loads when a task
-matches its description. Five references are read only when the task needs
-one: debugging, instrumenting a service, evals, administration, and setting
+matches its description. Six references are read only when the task needs
+one: debugging, instrumenting a service, evals, administration, setting
 Tracepad up for a project from nothing, which
-[agent-setup.md](agent-setup.md) hands an agent.
+[agent-setup.md](agent-setup.md) hands an agent, and upgrading it, which
+[agent-upgrade.md](agent-upgrade.md) does.
 `tracepad skills show` prints `SKILL.md` and `tracepad skills show
 debugging.md` a reference, for reading it without installing it.
 

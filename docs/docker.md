@@ -610,6 +610,11 @@ still being written after five seconds is cut off either way.
 
 ## Upgrading, and backing up first
 
+A coding agent upgrades a container it started for a project
+(`tracepad-<project>`) with one line, the same as the binary:
+`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md`
+([agent-upgrade.md](agent-upgrade.md)). By hand:
+
 Schema migrations run on start, as they do on a host: a new image opens the
 existing `/data` and brings it forward. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything here handles — so

@@ -97,6 +97,7 @@ nav:
   - Get started:
       - Quickstart: quickstart.md
       - Agent setup: agent-setup.md
+      - Agent upgrade: agent-upgrade.md
       - Installing the binary: install.md
       - Docker: docker.md
       - Configuration: configuration.md
