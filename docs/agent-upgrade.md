@@ -47,15 +47,21 @@ In outline:
 2. **The version to go to**: the newest stable release from GitHub, or the one
    the person named. An older version is refused: migrations run forward
    only, and an older binary does not open a database a newer one migrated.
-3. **Your own server**: the install script with `TRACEPAD_VERSION`, the server
-   stopped, its data directory archived into `~/tracepad-backups/`, the new
-   binary started on the same port and directory.
-4. **Your own container**: the image pulled, the volume archived from the
-   stopped container, a new container with the same volumes, ports and
-   variables, the old one kept, renamed, for the way back.
+3. **Your own server**: a backup directory of this run's own in
+   `~/tracepad-backups/`, room for the backup checked and a copy of the
+   running version put in it, the install script with `TRACEPAD_VERSION`, the
+   server stopped, its data directory archived and the archive read back, the
+   new binary started on the same port and directory. A failure after the stop
+   starts the old version again on the data as it was.
+4. **Your own container**: the same, with the volume archived from the
+   stopped container, a new container with the same volumes, ports and the
+   variables the person set, and the old one kept, renamed.
 5. **The check**: the log's first line names the new version, `health` says
-   it, the trace count is what it was, and a test span arrives. Otherwise the
-   way back: the archive restored and the old binary or container started.
+   it, the trace count has not dropped, and a test span arrives. Otherwise the
+   way back, which deletes nothing: what the upgrade left is set aside (the
+   data directory renamed, or the new container renamed and the volume left as
+   it is), the archive is restored into a new place, and the old version starts
+   only when every step of that has succeeded.
 6. **The skill and the package**: the skill installed again wherever it was,
    and the project's pinned `tracepad` package moved to the same version, with
    the project's tests run.
@@ -71,8 +77,8 @@ In outline:
 - Free space for the backup, when there is not enough.
 - A binary that a package manager installed (Homebrew: `brew upgrade
   tracepad`).
-- Deleting the backup and the old container once the upgrade has proved
-  itself.
+- Deleting the backup, the old container, and whatever a way back set aside,
+  once they are sure they no longer want it.
 
 ## The report
 

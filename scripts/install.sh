@@ -157,12 +157,50 @@ put_in_place() {
 	}
 }
 
+# termsafe is internal/termsafe's rule for a line read from stdin, so a value
+# from another process cannot drive the terminal: C0 and C1 controls, DEL and
+# the bidirectional embeddings, overrides and isolates become visible escapes
+# (\x1b, \u009b, \u202e), and a byte that is not UTF-8 is shown as \xNN.
+# Bytes, not characters, whatever the locale; cmd/tracepad's test holds it to
+# termsafe.String.
+termsafe() {
+	LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i }
+	{
+		out = ""
+		n = length($0)
+		for (i = 1; i <= n; i++) {
+			b = ord[substr($0, i, 1)]
+			if (b >= 32 && b < 127) { out = out substr($0, i, 1); continue }
+			if (b < 128) { out = out sprintf("\\x%02x", b); continue }
+			len = 0
+			if (b >= 194 && b < 224) { len = 2; cp = b - 192 }
+			else if (b >= 224 && b < 240) { len = 3; cp = b - 224 }
+			else if (b >= 240 && b < 245) { len = 4; cp = b - 240 }
+			ok = len > 0 && i + len - 1 <= n
+			for (k = 1; ok && k < len; k++) {
+				c = ord[substr($0, i + k, 1)]
+				if (c < 128 || c > 191) ok = 0
+				else cp = cp * 64 + c - 128
+			}
+			if (ok && len == 3 && (cp < 2048 || (cp >= 55296 && cp <= 57343))) ok = 0
+			if (ok && len == 4 && (cp < 65536 || cp > 1114111)) ok = 0
+			if (!ok) { out = out sprintf("\\x%02x", b); continue }
+			if ((cp >= 128 && cp <= 159) || (cp >= 8234 && cp <= 8238) || (cp >= 8294 && cp <= 8297))
+				out = out sprintf("\\u%04x", cp)
+			else
+				out = out substr($0, i, len)
+			i += len - 1
+		}
+		print out
+	}'
+}
+
 # old_servers prints "PID COMMAND" for every `tracepad serve` still running
 # the binary this run replaced, found by the path of its executable, whatever
 # name started it and on whatever port: /proc on Linux, lsof on macOS. A
 # command line is anyone's to write, so it never decides which process is
 # named — one whose executable cannot be read (another user's) is not — and it
-# is printed without its control characters, which could drive the terminal.
+# is printed through termsafe, so nothing in it can drive the terminal.
 old_servers() {
 	real="$(cd "$dir" && pwd -P)/tracepad"
 	ps -A -o pid= -o args= 2>/dev/null | while read -r pid args; do
@@ -171,7 +209,7 @@ old_servers() {
 			lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" || true
 		exe="${exe% (deleted)}"
 		if [ -n "$exe" ] && { [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; }; then
-			say "$pid $(printf '%s' "$args" | tr -d '\000-\037\177')"
+			say "$pid $(printf '%s\n' "$args" | termsafe)"
 		fi
 	done
 }
@@ -321,7 +359,9 @@ main() {
 	else
 		# Otherwise the local default address only, whatever address the CLI
 		# is set to, and for three seconds at most: this is a hint, not a step
-		# that may hang.
+		# that may hang. Whatever answers there is not this binary's process
+		# (that would have been found above), so restarting it changes nothing
+		# this script did: it is only named.
 		"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
 		probe=$!
 		(sleep 3 && kill "$probe") >/dev/null 2>&1 &
@@ -331,7 +371,7 @@ main() {
 		running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
 		if [ -n "$running" ] && [ "$running" != "$version" ]; then
 			say ""
-			say "The server at localhost:4318 is still running $running; restart it to run $version."
+			say "Tracepad $running answers at localhost:4318, and it is not this binary: a container, or another install."
 		fi
 	fi
 

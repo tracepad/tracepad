@@ -26,7 +26,7 @@ fail() {
 # The system tools the script uses, and only those, by symlink.
 sys="$tmp/sys"
 mkdir -p "$sys"
-for tool in sh curl tar gzip sed awk cut head tr mktemp rm mkdir cp chmod mv cat sleep sha256sum shasum; do
+for tool in sh curl tar gzip sed awk cut head mktemp rm mkdir cp chmod mv cat sleep sha256sum shasum; do
 	if path="$(command -v "$tool")"; then
 		ln -s "$path" "$sys/$tool"
 	fi
@@ -178,7 +178,8 @@ ends_with_agent_line again
 release 0.3.0 stable
 run upgrade 0 FAKE_RUNNING=0.2.0
 has "$out" "updated tracepad 0.2.0 → 0.3.0 at $bin" upgrade
-has "$out" "The server at localhost:4318 is still running 0.2.0; restart it to run 0.3.0" upgrade
+has "$out" "Tracepad 0.2.0 answers at localhost:4318, and it is not this binary: a container, or another install." upgrade
+lacks "$out" "restart" upgrade
 ends_with_upgrade_line upgrade 0.3.0
 
 # --- A pinned candidate, with or without its v.
@@ -301,7 +302,7 @@ servers="4100001 tracepad serve --listen localhost:4319 --data-dir /data/a
 4100004 tail -f /data/a/server.log
 4100005 sh -c echo tracepad serve
 4100006 $bin serve --data-dir /data/spoofed
-4100007 tracepad serve --data-dir /data/c${esc}]0;title${esc}[2J"
+4100007 tracepad serve --data-dir /data/c${esc}]0;title${esc}[2J$(printf '\302\2332J\342\200\256x')"
 run servers 0 TRACEPAD_VERSION=0.3.0 FAKE_RUNNING=0.2.0 FAKE_PS="$servers" \
 	FAKE_EXES="4100001=$realbin
 4100002=$bin
@@ -316,9 +317,9 @@ lacks "$out" "4100003" servers
 lacks "$out" "4100004" servers
 lacks "$out" "4100005" servers
 lacks "$out" "4100006" servers
-has "$out" "  pid 4100007: tracepad serve --data-dir /data/c]0;title[2J" servers
+has "$out" '  pid 4100007: tracepad serve --data-dir /data/c\x1b]0;title\x1b[2J\u009b2J\u202ex' servers
 lacks "$out" "$esc" servers
-lacks "$out" "The server at localhost:4318" servers
+lacks "$out" "answers at localhost:4318" servers
 ends_with_upgrade_line servers 0.3.0
 # Nothing replaced, nothing named: the setup line, as on a first install.
 run servers-again 0 TRACEPAD_VERSION=0.3.0 FAKE_PS="$servers" FAKE_EXES="4100001=$realbin"
@@ -328,7 +329,7 @@ ends_with_agent_line servers-again
 run servers-other 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING=0.3.0 \
 	FAKE_PS="4100003 /usr/local/bin/tracepad serve" FAKE_EXES="4100003=/usr/local/bin/tracepad"
 lacks "$out" "is still running here" servers-other
-has "$out" "The server at localhost:4318 is still running 0.3.0; restart it to run 0.4.0-rc.1" servers-other
+has "$out" "Tracepad 0.3.0 answers at localhost:4318, and it is not this binary: a container, or another install." servers-other
 
 # --- A mirror over plain HTTP is refused, not trusted.
 run plain-http 1 TRACEPAD_DOWNLOAD_URL=http://127.0.0.1:9/releases
