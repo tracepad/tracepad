@@ -295,7 +295,12 @@ from it.
 
 ## The same loop from the command line
 
+The key this runs with holds `ingest` (the scores), `read` and `write` (the
+queue).
+
 ```sh
+echo '{"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}' > accuracy.json
+echo '{"data_type": "categorical", "categories": ["warm", "neutral", "curt"]}' > tone.json
 tracepad score-configs push accuracy --file accuracy.json
 tracepad score-configs push tone     --file tone.json
 tracepad queues put weekly-review --config accuracy --config tone \
@@ -310,7 +315,7 @@ NEXT=$(tracepad queues next weekly-review --annotator ada --json)
 ITEM=$(echo "$NEXT" | jq -r .item.id)
 TRACE=$(echo "$NEXT" | jq -r .item.trace_id)
 tracepad scores add --trace "$TRACE" --name accuracy --value 0.9
-tracepad scores add --trace "$TRACE" --name tone --string warm
+tracepad scores add --trace "$TRACE" --name tone --type categorical --string warm
 tracepad queues complete weekly-review "$ITEM" --annotator ada
 
 # Or not.

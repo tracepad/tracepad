@@ -57,7 +57,7 @@ send to the server, so it stays out of the access log and out of the history of
 whoever opens it.
 
 Opening the link asks for an email, a password and an optional display name.
-The same thing over the API:
+The same thing over the API, with `token` the part of the printed link after `#token=`. It answers `201` with `{"account": {…}}`:
 
 ```sh
 curl -X POST http://localhost:4318/api/v1/setup \

@@ -43,7 +43,7 @@ nothing left to compute from, and the charts are empty because the data is.
 
 ```sh
 tracepad retention show
-tracepad retention set --days 90               # traces: 90 days
+tracepad retention set --days 90 --yes         # traces: 90 days
 tracepad retention set --raw-days 14 --yes     # raw bodies: 14 days
 tracepad retention set --stats-days 730 --yes  # statistics: two years
 tracepad retention set --forever               # traces: keep them all again (the other two windows stay as set)
@@ -51,7 +51,9 @@ tracepad retention set --forever               # traces: keep them all again (th
 
 `retention show` reads the project, which any key may do. `retention set` is
 `PATCH /api/v1/projects/{id}`, and a key needs the `write`
-[scope](api.md#scopes) for it, as a person needs the `editor` role.
+[scope](api.md#scopes) for it, as a person needs the `editor` role. A window
+that shrinks prints the dry run first; off a terminal it needs `--yes`, or it
+stops there with exit `1`.
 
 "Keep it essentially forever" is spelled `--forever`, not a very large number
 of days: a window is turned into a nanosecond cutoff, so the day count is

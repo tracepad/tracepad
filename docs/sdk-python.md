@@ -34,7 +34,7 @@ tracepad.init()
 | `export` | — | `False` attaches everything except the exporter |
 | `export_timeout` | `TRACEPAD_EXPORT_TIMEOUT` | Seconds one export may take, its retries included; `5.0` by default |
 
-The arguments win over the environment, and with neither a host nor a key the
+The arguments win over the environment, and without a host or without a key the
 call raises `TracepadConfigError` — misconfiguration discovered as a `401` in a
 log file an hour later is the bug report that rule prevents.
 

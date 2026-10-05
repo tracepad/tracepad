@@ -43,7 +43,7 @@ tracepad.init();
 | `exportTimeoutMillis` | `TRACEPAD_EXPORT_TIMEOUT` (seconds) | How long one export may take, its retries included; `5000` by default |
 | `logger` | — | Where the warnings go; `console` by default |
 
-The options win over the environment, and with neither a host nor a key the
+The options win over the environment, and without a host or without a key the
 call throws `TracepadConfigError` — misconfiguration discovered as a `401` in
 a log file an hour later is the bug report that rule prevents.
 

@@ -40,7 +40,7 @@ Sizes are bytes, durations are Go's (`30m`, `1h`), and "on/off" variables take
 | Variable | Default | What it does |
 |---|---|---|
 | `TRACEPAD_URL` | `http://localhost:4318` | The server to talk to. |
-| `TRACEPAD_API_KEY` | unset | The key, or the admin token where a command says so. Prefer it to `--key`, which shows in the process list. |
+| `TRACEPAD_API_KEY` | unset | The key, or the admin token where a command says so. Prefer it to `--key`, which shows in the process list. With it unset, a command that takes the admin token reads `TRACEPAD_ADMIN_TOKEN` or `TRACEPAD_ADMIN_TOKEN_FILE` instead, for a server on this machine only. |
 
 `tracepad health` with neither `--url` nor `TRACEPAD_URL` looks at
 `TRACEPAD_LISTEN`. [cli.md](cli.md) has the rest.
@@ -67,6 +67,21 @@ Options passed to `init` win over these. The OpenTelemetry variables
 processor's own) are the OpenTelemetry SDK's business, and it honours them as
 they are. [sdk-python.md](sdk-python.md), [sdk-js.md](sdk-js.md) and
 [sdk-go.md](sdk-go.md) have the details.
+
+## The install script
+
+Read by `scripts/install.sh` — the `curl … | sh` line of the
+[quickstart](quickstart.md#with-your-coding-agent) — and by nothing in the
+binary; the server does not warn about one left exported.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRACEPAD_VERSION` | the newest stable release | The release to install, `0.1.0-rc.1` or `v0.1.0-rc.1`. A release candidate is installed only when named here. |
+| `TRACEPAD_INSTALL_DIR` | `~/.local/bin` | Where the binary goes. Never needs `sudo` unless you point it somewhere that does. |
+| `TRACEPAD_NO_SKILL` | unset | `1` installs the binary alone, without the agent skill. |
+| `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
+
+See [install.md](install.md#with-the-install-script).
 
 ## Sending from any OpenTelemetry SDK
 

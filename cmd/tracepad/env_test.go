@@ -191,3 +191,15 @@ func TestEveryPackageReadsTheVariablesItIsDocumentedFor(t *testing.T) {
 		}
 	}
 }
+
+// TestInstallScriptReadsExactlyItsVariables: scripts/install.sh reads the
+// installer's variables and no other TRACEPAD_* name, so a variable it gains
+// or drops is a change to config.Env and to docs/configuration.md as well
+// (spec 053 #10).
+func TestInstallScriptReadsExactlyItsVariables(t *testing.T) {
+	want := ofKind(config.EnvInstaller)
+	got := names(read(t, "../../scripts/install.sh"))
+	if !slices.Equal(got, want) {
+		t.Errorf("scripts/install.sh names %v; config.Env's installer variables are %v", got, want)
+	}
+}

@@ -26,11 +26,12 @@ any combination — so the key's column is three:
 | Rename a project | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Delete or restore a project** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 
-A key that holds `write` is still the administrator of its own project. That
-is what keeps "retention changes without a restart" true in the default
-install, which has no admin token at all — the key it starts with holds all
-three scopes. A key minted for an application holds `ingest` alone and can
-change none of this; one minted for an agent holds `read` and can look at it.
+A key that holds `write` is still the administrator of its own project, so
+retention changes without a restart and without the admin token. The key the
+first start prints holds `ingest` alone and can change none of this, like any
+key minted for an application; one minted for an agent holds `read` and can
+look at it. A key with `write` is minted by an owner or editor signed in, or
+with the admin token ([Keys](#keys)).
 
 Its keys are the exception: **no project key lists, mints or revokes keys**,
 and it is answered `403` on those three routes. A key that could mint keys

@@ -20,6 +20,7 @@ tracepad skills show debugging.md
 pip install tracepad && npm install tracepad @opentelemetry/api
 docker run --rm --user "$(id -u):$(id -g)" -v "$HOME/.claude/skills:/skills" \
   ghcr.io/tracepad/tracepad skills install --dir /skills
+TRACEPAD_PROJECTS="app:tp-pk-1:tp-sk-1" nohup tracepad serve --listen localhost:4318 --data-dir /tmp/x >> "/tmp/x/log" 2>&1 &
 tracepad traces ls --limit 5 \
 ```
 
@@ -40,7 +41,9 @@ tracepad tracez ls
 tracepad traces lst
 tracepad traces ls --sinse 1h
 tracepad skills install --global
-tracepad serve --listen :9999
+tracepad serve --port 9999
+tracepad serve --listen localhost:9999 extra
+tracepad mcp --url http://localhost:9999
 tracepad skills show debuging.md
 $ tracepad traces lsx
 sudo ./bin/tracepad trace ls

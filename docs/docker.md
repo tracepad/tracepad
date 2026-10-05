@@ -363,7 +363,7 @@ flag you appended to the command line, so a container started with `--listen
 :8080` runs correctly and is marked `unhealthy` for ever.
 
 ```sh
-docker run -d -e TRACEPAD_LISTEN=:8080 -p 8080:8080 … ghcr.io/tracepad/tracepad
+docker run -d -e TRACEPAD_LISTEN=:8080 -p 127.0.0.1:8080:8080 … ghcr.io/tracepad/tracepad
 ```
 
 ### Ingest under load
@@ -524,7 +524,7 @@ loopback publish: only the proxy should be able to.
 The image declares a `HEALTHCHECK`, so Docker knows whether the server is up:
 
 ```sh
-docker inspect --format '{{.State.Health.Status}}' tracepad
+docker inspect --format '{{.State.Health.Status}}' tracepad   # healthy; starting until the first check passes
 ```
 
 It runs [`tracepad health`](cli.md#health), which needs no key — the same

@@ -49,4 +49,45 @@ else
 	default=dev
 fi
 "$run" mike set-default --branch "$branch" "$default"
-echo "docs-site: $version${alias:+ ($alias)} is on $branch; the root goes to $default"
+
+# The root also serves what agents fetch (spec 053 #3, #14): install.sh,
+# llms.txt, llms-full.txt and every page's Markdown, copied from the version
+# the root redirects to. mike's redirect alias holds HTML alone, so `latest/`
+# has none of them; the copy is made from the version `latest` names. It is a
+# commit of its own on the branch, made with git's plumbing and no checkout:
+# root files of those kinds that the version no longer has are removed, the
+# rest point at the version's own blobs. A deploy that changes none of them
+# commits nothing.
+versions="$(git show "$branch:versions.json")"
+source="$(VERSIONS="$versions" DEFAULT="$default" "$run" python -c '
+import json, os
+want = os.environ["DEFAULT"]
+for v in json.loads(os.environ["VERSIONS"]):
+    if v["version"] == want or want in v["aliases"]:
+        print(v["version"])
+        break
+')"
+[ -n "$source" ] || { echo "docs-site: no version on $branch is $default" >&2; exit 1; }
+index="$(mktemp)"
+trap 'rm -f "$index"' EXIT
+export GIT_INDEX_FILE="$index"
+git read-tree "$branch"
+# One `git update-index --index-info`, not a process per file: every root file
+# of those kinds is removed (mode 0), then the version's are added by blob.
+{
+	git ls-files | awk '!/\// && (/\.md$/ || $0 == "install.sh" || $0 == "llms.txt" || $0 == "llms-full.txt") {
+		print "0 0000000000000000000000000000000000000000\t" $0
+	}'
+	git ls-tree "$branch" "$source/" | awk -F '\t' '
+		{ split($1, meta, " "); name = substr($2, index($2, "/") + 1) }
+		meta[2] == "blob" && (name ~ /\.md$/ || name == "install.sh" || name == "llms.txt" || name == "llms-full.txt") {
+			print meta[1] " " meta[3] "\t" name
+		}'
+} | git update-index --index-info
+tree="$(git write-tree)"
+unset GIT_INDEX_FILE
+if [ "$tree" != "$(git rev-parse "$branch^{tree}")" ]; then
+	commit="$(git commit-tree "$tree" -p "$branch" -m "docs: the root's files for agents, from $source")"
+	git update-ref "refs/heads/$branch" "$commit"
+fi
+echo "docs-site: $version${alias:+ ($alias)} is on $branch; the root goes to $default, and serves $source's files for agents"

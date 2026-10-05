@@ -69,6 +69,7 @@ docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
 pip install tracepad==0.1.0rc1              # without `==`, pip skips pre-releases
 npm install tracepad@next
 go get github.com/tracepad/tracepad/sdk/go@v0.1.0-rc.1
+curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.1.0-rc.1 sh   # the binary and the skill
 ```
 
 **Until 0.1.0 is released, the unqualified commands do not install the
@@ -78,6 +79,36 @@ tracepad` finds only the placeholder `0.0.1`, which is not the SDK; and `npm
 install tracepad` resolves `latest`, the same placeholder. They become the right
 commands with the first stable release, and the README and the quickstart say
 what they will be then.
+
+## With the install script
+
+On Linux and macOS, one line downloads the archive for this machine and checks
+it against `checksums.txt`, and against its attestation too when `gh` is
+installed and logged in. It then installs `tracepad` into `~/.local/bin`, with
+the agent skill:
+
+```sh
+curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh
+```
+
+```
+installed tracepad 0.1.0 at /home/you/.local/bin/tracepad
+  verified  sha256 matches checksums.txt; build attestation verified (gh)
+  skill     installed 0.1.0 to /home/you/.claude/skills/tracepad
+```
+
+Running it again upgrades to the newest stable release, or says that version
+is already installed. A release candidate is installed only when you name it
+(`… | TRACEPAD_VERSION=0.1.0-rc.1 sh`), and until 0.1.0 is out the line above
+stops and prints that form. A check that fails stops it, with nothing
+installed. It never uses `sudo` and edits no shell profile. When
+`~/.local/bin` is not on your `PATH` it says so, and prints the line to add.
+The skill goes where an agent on this machine reads skills: `~/.claude/skills`
+for Claude Code, and `~/.agents/skills` when `~/.agents` or `~/.codex` exists.
+When neither exists, the skill is not installed.
+[configuration.md](configuration.md#the-install-script) lists the variables it
+reads. The script is [`scripts/install.sh`](../scripts/install.sh), short
+enough to read before you pipe it into a shell.
 
 ## With Homebrew
 
@@ -257,7 +288,7 @@ sudo install -d -m 0755 /etc/tracepad
 sudo systemctl daemon-reload
 sudo systemctl enable --now tracepad
 journalctl -u tracepad          # the first run's keys and setup link are here
-tracepad health --url http://127.0.0.1:4318
+tracepad health --url http://127.0.0.1:4318   # prints the version and exits 0
 ```
 
 The keys stay in the journal for as long as the journal does — the same caveat
