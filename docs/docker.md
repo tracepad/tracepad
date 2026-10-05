@@ -615,6 +615,26 @@ existing `/data` and brings it forward. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.
 
+**A container named `tracepad-<project>`, publishing on `127.0.0.1` only** —
+the one a coding agent starts in a setup — is upgraded by
+[`tracepad upgrade`](cli.md#upgrade) on the host (`--container NAME` for any
+other name), or by the agent, given
+`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md`.
+It pulls the new tag, stops the container, archives the volume into
+`~/tracepad-backups/<run>/` as below, renames the old container
+`<name>-before-<run>` with its restart policy set to `no`, and runs the new
+image with the same mounts, ports, restart policy and labels, and the
+variables you set (not the old image's own), through an env file. A new
+version that does not answer goes back at once: the archive is restored into a
+new volume, `<volume>-<run>`, and the old image runs on it; the volume the new
+version migrated is left as it was. Nothing is removed — not a container, not
+a volume — and the report gives the commands for what is set aside. Like any
+backup, the run directory holds every prompt and completion and the
+container's variables until you delete it, and an erasure does not reach it.
+Compose, a container open beyond this machine, and anything the command cannot
+reproduce exactly (privileges, devices, a network of its own, resource
+limits) are yours, as follows.
+
 Back the volume up by tarring it from a throwaway container:
 
 ```sh

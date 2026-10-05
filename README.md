@@ -121,6 +121,8 @@ Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/age
 
 It starts a server on this machine, connects your application, reads the first
 trace back and tells you what it did ([docs/agent-setup.md](docs/agent-setup.md)).
+`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md`
+updates it later, with a backup first and a way back ([docs/agent-upgrade.md](docs/agent-upgrade.md)).
 Until 0.1.0 is out, the script installs the release candidate only when you name
 it: `… | TRACEPAD_VERSION=0.1.0-rc.1 sh`.
 

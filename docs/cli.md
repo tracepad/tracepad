@@ -1064,6 +1064,66 @@ container's own layer, not a `tmpfs` — and otherwise refuses, printing the
 Exit `1` for any of these refusals, `2` for a usage error.
 The whole of it is [agents.md](agents.md).
 
+### `upgrade`
+
+```sh
+tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
+tracepad upgrade [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
+tracepad upgrade --check RUN [--json]
+tracepad upgrade --back RUN [--json]
+```
+
+Upgrades the binary at `~/.local/bin/tracepad` (or `TRACEPAD_INSTALL_DIR`) and
+one server or container you started, to the newest stable release or the one
+`--to` names — never an older one: migrations run forward only. It is local,
+like `skills`: it reads this machine's processes and containers and asks a
+server only at the server's own address. The design is spec 054.
+
+- `--plan` changes nothing. It lists the binary, every `tracepad serve` of
+  yours and every container of the image, says which the command may upgrade
+  and why each other is yours (a service, Compose, an address beyond this
+  machine, another binary), and what the upgrade would do, step by step.
+- Without it, the command does it. A **server** is the command's when it runs
+  the installed binary, its data directory's lock records its pid, it listens
+  on this machine only, and no service manager runs it. It is backed up with
+  the server stopped (the data directory archived into
+  `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
+  against the release's `checksums.txt`, and its attestation when `gh` is
+  logged in — is put in place, and the server starts again with **the same
+  arguments, environment and working directory**. A **container** is the
+  command's when it is named `tracepad-<project>` (or `--container`),
+  publishes on loopback only, keeps its data in a volume at `/data`, and is
+  not Compose's; it is recreated from `docker inspect` with the same mounts,
+  ports, restart policy, labels and the variables you set, the old one renamed
+  `<name>-before-<run>`.
+- **The check** asks the server's `/health` at its own address, and compares
+  the trace count of `/api/v1/system` before and after, with the key in
+  `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
+  compared). A new version that does not answer goes back at once. One that
+  answers but counts fewer traces, or cannot count them, is left running for
+  you to decide.
+- `--check RUN` asks again, for a server that was still starting, and never
+  goes back by itself. `--back RUN` takes a run's way back: the archive is
+  restored beside the data and checked before anything stops, what the new
+  version left is **set aside, not deleted** (`<data>.after-<run>`, or the
+  container `<name>-after-<run>` and its volume), and the old version starts
+  with its arguments. A second `--back` of the same run is refused.
+
+A run directory is a full copy of the database and of the server's
+environment, secrets included, kept until you delete it; erasing traces or a
+user does not reach it, nor what a way back set aside. The report says so, and
+gives the commands to remove each. The command never deletes any of it.
+
+Exit `0` done, healthy, or nothing to do; `1` refused, with nothing changed;
+`2` a usage error; `3` not upgraded — the way back ran and the old version
+runs again; `4` yours to decide (the report says what and how); `5` stuck — a
+step failed and could not be undone, and the report says what runs and what is
+where. `--plan` exits `10` when the upgrade would change something, `4` when
+only what is yours is behind, and `0` when everything is up to date. `--json`
+prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
+`from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
+`plan`, `done`, `set_aside`, `person`, `next` and `notes`.
+
 ## Version skew
 
 Every API response carries the server's build. When it differs from the CLI's,
