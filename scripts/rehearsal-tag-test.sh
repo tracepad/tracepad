@@ -4,26 +4,19 @@
 # newest tag, and a clone with SDK tags alone.
 set -euo pipefail
 
-# This runs inside the pre-push hook, whose environment points git at the
-# repository being pushed (GIT_DIR and the like), and on machines whose own
-# configuration installs hooks everywhere (core.hooksPath): neither may reach
-# the repositories made here, or their commits run the checks of this one.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
-
-script="$(cd "$(dirname "$0")" && pwd)/rehearsal-tag.sh"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+script="$root/scripts/rehearsal-tag.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# Every repository made here goes through the shared isolation (spec 020 #35):
+# this runs inside the pre-push hook, whose GIT_DIR names the real repository.
+# shellcheck source=scripts/lib/isolated-git.sh
+. "$root/scripts/lib/isolated-git.sh"
+isolated_git_sandbox "$work"
 
 fail() { echo "rehearsal-tag-test: $*" >&2; exit 1; }
 
-repo() { # <name>: an empty repository with a commit identity of its own
-    git init -q "$work/$1"
-    git -C "$work/$1" config user.email test@example.invalid
-    git -C "$work/$1" config user.name test
-    git -C "$work/$1" config commit.gpgsign false
-    git -C "$work/$1" config tag.gpgsign false
-}
+repo() { scratch_repo "$work/$1"; } # <name>
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; }
 expect() { # <repo> <want>
     got="$(cd "$work/$1" && "$script")" || fail "$1: the script failed"
