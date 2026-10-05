@@ -24,6 +24,7 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "scripts/docs-site/**"
+      - "scripts/install.sh"
       - ".github/workflows/site.yml"
   workflow_dispatch:
     inputs:

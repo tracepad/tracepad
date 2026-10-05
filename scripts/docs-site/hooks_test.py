@@ -6,6 +6,7 @@ are the files and the directory the hook looks for.
 """
 
 import os
+import tempfile
 import unittest
 
 import hooks
@@ -57,6 +58,100 @@ class HookTest(unittest.TestCase):
     def test_links_inside_docs_and_external_ones_are_not_touched(self):
         text = "[a](install.md#upgrading) [b](https://example.org/../README.md) [c](#top)"
         self.assertEqual(rewrite(text), text)
+
+
+AGENT_NAV = [
+    {"Home": "index.md"},
+    {"Get started": [{"Quickstart": "quickstart.md"}, {"Agent setup": "agent-setup.md"}]},
+    {"Changelog": "https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md"},
+]
+AGENT_PAGES = {
+    "index.md": "# Home\n\nThe front page. More here.\n",
+    "quickstart.md": "# Quickstart\n\nFrom [nothing](install.md) to a trace. Then more.\n\n"
+    "See [the README](../README.md#getting-it).\n",
+    "agent-setup.md": "# Agent setup\n\n```sh\ntracepad version\n```\n\n"
+    "For an agent, not a person.\n",
+}
+
+
+class AgentSiteTest(unittest.TestCase):
+    """What the build writes for agents (spec 053 #14)."""
+
+    def build(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        docs, site = os.path.join(tmp.name, "docs"), os.path.join(tmp.name, "site")
+        os.makedirs(docs)
+        os.makedirs(site)
+        for name, text in AGENT_PAGES.items():
+            with open(os.path.join(docs, name), "w") as f:
+                f.write(text)
+        hooks.on_post_build(
+            {
+                **CONFIG,
+                "docs_dir": docs,
+                "site_dir": site,
+                "site_url": "https://example.org/docs",
+                "site_name": "Tracepad",
+                "site_description": "One line about it.",
+                "nav": AGENT_NAV,
+            }
+        )
+        return site
+
+    def read(self, site, name):
+        with open(os.path.join(site, name)) as f:
+            return f.read()
+
+    def test_the_navigation_in_order_without_links_out(self):
+        pages = list(hooks.nav_pages(AGENT_NAV))
+        self.assertEqual(
+            pages,
+            [
+                (None, "Home", "index.md"),
+                ("Get started", "Quickstart", "quickstart.md"),
+                ("Get started", "Agent setup", "agent-setup.md"),
+            ],
+        )
+
+    def test_llms_txt(self):
+        text = self.read(self.build(), "llms.txt")
+        self.assertTrue(text.startswith("# Tracepad\n\n> One line about it.\n"))
+        self.assertIn(
+            "## Overview\n\n- [Home](https://example.org/docs/index.md): The front page.\n", text
+        )
+        self.assertIn(
+            "## Get started\n\n"
+            "- [Quickstart](https://example.org/docs/quickstart.md): From nothing to a trace.\n",
+            text,
+        )
+        self.assertIn(
+            "- [Agent setup](https://example.org/docs/agent-setup.md): "
+            "For an agent, not a person.\n",
+            text,
+        )
+        self.assertNotIn("CHANGELOG", text)
+
+    def test_every_page_as_markdown_with_the_links_rewritten(self):
+        page = self.read(self.build(), "quickstart.md")
+        self.assertIn("[nothing](install.md)", page)
+        self.assertIn(f"[the README]({GITHUB}/blob/main/README.md#getting-it)", page)
+
+    def test_llms_full_txt_is_every_page_in_order(self):
+        text = self.read(self.build(), "llms-full.txt")
+        marks = [
+            text.index(f"<!-- https://example.org/docs/{name} -->")
+            for name in ("index.md", "quickstart.md", "agent-setup.md")
+        ]
+        self.assertEqual(marks, sorted(marks))
+        self.assertIn("For an agent, not a person.", text)
+
+    def test_the_install_script_is_in_the_site(self):
+        with open(os.path.join(ROOT, "scripts", "install.sh")) as f:
+            self.assertEqual(self.read(self.build(), "install.sh"), f.read())
+
+    def test_a_long_first_sentence_is_cut(self):
+        self.assertEqual(len(hooks.description("# T\n\n" + "word " * 100)), 198)
 
 
 if __name__ == "__main__":
