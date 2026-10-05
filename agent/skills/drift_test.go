@@ -37,8 +37,9 @@ import (
 // skill says it deletes is the author's rule in AGENTS.md, not this file's.
 
 // The line budgets of #1: the loaded part is paid for in every conversation
-// the skill triggers in. The total was 900 until spec 053 #20.
-var shipped = budgets{skill: 200, total: 910}
+// the skill triggers in. The total was 900 until spec 053 #20, and 910 until
+// spec 053 #21 added the upgrade reference (spec 037 #19).
+var shipped = budgets{skill: 200, total: 1090}
 
 type budgets struct{ skill, total int }
 
