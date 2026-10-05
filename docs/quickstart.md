@@ -3,11 +3,40 @@
 From nothing to a trace on screen. Everything below runs on one machine and
 needs no configuration.
 
+## With your coding agent
+
+Two lines. The first goes into a terminal. It installs the binary and its
+agent skill into `~/.local/bin`, checked against the release's checksums, with
+no `sudo`:
+
+```sh
+curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh
+```
+
+Until 0.1.0 is out the newest release is a candidate, which the script installs
+only when you name it: `curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.1.0-rc.1 sh`.
+
+The second goes into your coding agent (Claude Code, Codex, Cursor):
+
+```text
+Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md
+```
+
+The agent starts a server on this machine and connects your application. It
+sends a test trace and reads it back. Then it tells you where the key is, what
+it changed, and gives you the link that creates your account.
+[agent-setup.md](agent-setup.md) is what it follows, and lists what it will
+ask you for. The rest of this page is the same by hand.
+
 ## 1. Run the server
 
 ```sh
 tracepad
 ```
+
+It runs in the foreground until Ctrl-C. Started in the background instead, it
+is up once `tracepad health` exits `0`; piped, that prints
+`{"version":"0.1.0","ok":true}`.
 
 Or in Docker, which needs nothing installed but Docker:
 
@@ -227,7 +256,7 @@ terminal, with the admin token:
 TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope ingest --name "checkout api"
 ```
 
-It prints the lines to paste: `TRACEPAD_API_KEY` for the `tracepad` packages,
+It prints the lines to paste (piped, the API's JSON, with the secret in `secret_key`): `TRACEPAD_API_KEY` for the `tracepad` packages,
 and the `LANGFUSE_*` pair for a Langfuse SDK; an OpenTelemetry exporter takes
 the same secret as `authorization=Bearer …`. See [admin.md](admin.md#keys).
 
@@ -260,7 +289,7 @@ TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope read,write -
 
 ```sh
 export TRACEPAD_API_KEY=tp-sk-…       # the key that reads
-tracepad traces                  # the newest traces
+tracepad traces ls               # the newest traces
 tracepad traces last --error --full   # the last failure, payloads included
 ```
 

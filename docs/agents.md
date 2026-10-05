@@ -33,9 +33,14 @@ repository can commit so that everyone who clones it has the skill. `--dir`
 is for any agent that reads the same layout — a `SKILL.md` with a
 `references/` directory beside it — from another place.
 
-The skill is plain files: `SKILL.md`, which the agent loads when a task
-matches its description, and four references it reads only when the task
-needs one — debugging, instrumenting a service, evals, administration.
+The [install script](install.md#with-the-install-script) runs this command
+for you, in each skills directory an agent on the machine has made.
+
+The skill is plain files. `SKILL.md` is what the agent loads when a task
+matches its description. Five references are read only when the task needs
+one: debugging, instrumenting a service, evals, administration, and setting
+Tracepad up for a project from nothing, which
+[agent-setup.md](agent-setup.md) hands an agent.
 `tracepad skills show` prints `SKILL.md` and `tracepad skills show
 debugging.md` a reference, for reading it without installing it.
 

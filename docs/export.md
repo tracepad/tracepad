@@ -247,7 +247,7 @@ for file in tracepad-export/*.pb tracepad-export/*.json; do
     *)      type=application/x-protobuf ;;
   esac
   curl -sS -X POST http://collector:4318/v1/traces \
-    -H "Content-Type: $type" -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: $type" -H "Authorization: Bearer $RECEIVER_TOKEN" \
     --data-binary "@$file" >/dev/null
 done
 ```
@@ -260,7 +260,7 @@ arrival order by construction:
 jq -r '"\(.id) \(.content_type)"' tracepad-export/manifest.jsonl |
 while read -r id type; do
   curl -sS -X POST http://collector:4318/v1/traces \
-    -H "Content-Type: $type" -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: $type" -H "Authorization: Bearer $RECEIVER_TOKEN" \
     --data-binary "@$(ls tracepad-export/*-"$id".*)" >/dev/null
 done
 ```

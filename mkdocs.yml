@@ -96,6 +96,7 @@ nav:
   - Home: index.md
   - Get started:
       - Quickstart: quickstart.md
+      - Agent setup: agent-setup.md
       - Installing the binary: install.md
       - Docker: docker.md
       - Configuration: configuration.md

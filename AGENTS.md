@@ -609,6 +609,21 @@ API. This file routes; it does not duplicate what specs and docs say.
   endpoint, and the `projects`/`keys`/`retention`/`users` CLI. MCP unchanged,
   by design.
 
+- ✅ Spec 053 (agent-first onboarding) shipped: two lines, one for a
+  terminal and one for a coding agent (#1). `scripts/install.sh` (POSIX `sh`)
+  installs the newest stable release, or a pinned `TRACEPAD_VERSION`
+  candidate, into `~/.local/bin` with the skill. It checks the checksum, and
+  the attestation when `gh` is logged in, and never uses `sudo` (#4–#9). Its
+  variables are `config.Env`'s `EnvInstaller`, and
+  `make install-script-test` runs it offline against fake releases (#10).
+  `docs/agent-setup.md` is the agent's page; the procedure is the skill's
+  `references/setup.md` (#11, #13). On a loopback server it starts on a fresh
+  data directory, the agent declares the project's key through
+  `TRACEPAD_PROJECTS` into an ignored `.env`; anywhere else the key is the
+  human's (#12). The docs build writes `llms.txt`, `llms-full.txt` and each
+  page's Markdown, and `deploy.sh` mirrors them, with `install.sh`, at the
+  site's root (#3, #14).
+
 ## Where things are
 
 | Working on | Read first |
@@ -657,11 +672,11 @@ API. This file routes; it does not duplicate what specs and docs say.
 | The eval harness in Node | `sdk/js/src/harness.ts` (`stamp`, which `tracing.ts`'s processor calls at `onStart`, `Run`, `Attempt`, `scoreConfigs`, `compare`, `itemId`, the paging loop) and `datasets.ts` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-node`, `docs/sdk-js.md#evals`, spec 032 #10 — the attempt rides the OTel context, so it reaches an `await` and a callback and not a worker; the block opens no span; `wrap` is the close that can `fail`, `Symbol.asyncDispose` the one that cannot see the error and finishes |
 | The eval harness in Go | `sdk/go/harness.go` (the processor, `Run`, `Attempt`, `ScoreConfigs`, `Compare`, `ItemID`, the paging iterator) and `datasets.go` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-go`, `docs/sdk-go.md#evals`, spec 033 #10 — the item block is a context (`run.Item(ctx, item)` returns one), read by a `SpanProcessor` at `OnStart` and never a span the harness opened; `Init` registers it before the exporter and under `WithExport(false)` too; `Items` is an `iter.Seq2` over every page; there is no block that closes a run, so `Fail` on the error path is the caller's (#16) |
 | The eval harness in Python | `sdk/python/src/tracepad/_harness.py` (the processor, `Run`, `Attempt`, the score configs, `compare`, the paging loop) and `_datasets.py` (`Dataset`, `Item`), `docs/datasets.md#the-same-loop-from-python`, `docs/sdk-python.md#evals`, spec 018 — the stamping is a `ContextVar` read at `on_start` and never a span the harness opened (#3), `init` registers the processor before the exporting one and under `export=False` too, and the read side is the server's JSON as `dict`s because a model layer is a place to start disagreeing with it (#8) |
-| The documentation site | `mkdocs.yml`, `docs/index.md`, `scripts/docs-site/` (`run.sh` runs the locked toolchain, `deploy.sh` puts one version on a branch and never pushes, `hooks.py` points `docs/`'s links out of itself at GitHub, `hooks_test.py` tests it, `docs/assets/` holds the mark), `.github/workflows/site.yml` and the `docs` job of `release-server.yml`, spec 050 — a new page goes in the navigation *and* in `docs/index.md` or the strict build fails; nest list content by four spaces; `make docs-site` rehearses on `gh-pages-rehearsal`, never `gh-pages` (#9) |
+| The documentation site | `mkdocs.yml`, `docs/index.md`, `scripts/docs-site/` (`run.sh` runs the locked toolchain, `deploy.sh` puts one version on a branch and never pushes, `hooks.py` points `docs/`'s links out of itself at GitHub, `hooks_test.py` tests it, `docs/assets/` holds the mark; the build also writes `llms.txt`, `llms-full.txt`, each page's `.md` and `install.sh`, and `deploy.sh` mirrors them at the root from the version the root redirects to, spec 053 #3, #14), `.github/workflows/site.yml` and the `docs` job of `release-server.yml`, spec 050 — a new page goes in the navigation *and* in `docs/index.md` or the strict build fails; nest list content by four spaces; `make docs-site` rehearses on `gh-pages-rehearsal`, never `gh-pages` (#9) |
 | Packaging: the image and the release | `Dockerfile` + `.dockerignore` (the whole recipe — the image builds both halves from the checkout and copies no prebuilt binary), `scripts/image-check.sh` (the contract, asserted from outside because the image has no shell), `.github/workflows/release-server.yml` (GoReleaser for the archives, `buildx` for one multi-arch manifest on GHCR), the `docker` job in `ci.yml`, `docs/docker.md`, spec 020 — `tracepad health` (`internal/cli/commands.go`) is the container's `HEALTHCHECK` and the one command that needs no key |
 | Configuration | `internal/config/`, spec 001 + spec 002 Configuration tables |
 | The docs' cross-references | `scripts/doc-anchors.sh` and `scripts/doc-anchors-fixture/`, spec 026 #6 — every `[…](file.md#anchor)` in `docs/*.md`, `README.md` and `AGENTS.md` is checked against the target's headings under GitHub's slug rule, fenced code blocks and inline code spans read as neither headings nor links. It runs in `make gate`; the fixture run is its own CI step, and it also builds a file long enough that a pipe would break the check (#13, #14) |
-| The agent skill | `agent/skills/tracepad/` (the skill itself: `SKILL.md` and `references/`), `agent/skills/command.go` (`skills install`/`show`, the stamp), `agent/skills/drift_test.go` with its fixture in `testdata/drift/`, `docs/agents.md`, spec 037 — the skill teaches order and never restates what the binary says about itself (#2). **A PR that changes a command, a flag, an MCP tool or a route the skill names updates the skill in the same PR**: the drift test enforces the names, the reviewer the meaning (#9). Budgets: `SKILL.md` ≤ 200 lines, the whole skill ≤ 900 (#1) |
+| The agent skill | `agent/skills/tracepad/` (the skill itself: `SKILL.md` and `references/`), `agent/skills/command.go` (`skills install`/`show`, the stamp), `agent/skills/drift_test.go` with its fixture in `testdata/drift/`, `docs/agents.md`, spec 037 — the skill teaches order and never restates what the binary says about itself (#2). **A PR that changes a command, a flag, an MCP tool or a route the skill names updates the skill in the same PR**: the drift test enforces the names, the reviewer the meaning (#9). Budgets: `SKILL.md` ≤ 200 lines, the whole skill ≤ 900 (#1), and both are full since spec 053 added `references/setup.md`: a new line is paid for by one taken out. The drift test checks `tracepad serve`'s flags against `config.Env` (spec 053 #17) |
 | A test that needs a store | `internal/storetest` for the store's clients (`Open`, `Path`, `Writes`), `harness_test.go` inside `internal/store` for its own suite — one migrated template copied per test and a one-millisecond commit window, because a suite that opens an empty database per test and waits out the default window per lone write spends most of its time on neither the code under test nor its own assertions. The migration tests and the writer's own tests are the exceptions, on purpose |
 
 Attribute semantics for the `langfuse.*` dialect are derived from Langfuse
@@ -707,6 +722,12 @@ reason in a comment; adding a dialect should be a table edit.
   a scratch repository over the same tags (spec 020 #33); part of the gate, and needs
   nothing beyond `bash`, `awk` and `git`. `scripts/mirror-step-test.sh --extract`
   prints the step to run against a registry of your own.
+- `make install-script-test` — shellcheck `scripts/install.sh` (the
+  `curl … | sh` installer, spec 053) and its test, then run it against fake
+  releases built in a temporary directory, through `file://`, with stand-ins
+  for `uname`, `sysctl` and `gh`: no network. Part of the gate; needs `uv` (shellcheck
+  comes through `uvx` at a pinned version). A `TRACEPAD_*` name the script
+  reads must be an `EnvInstaller` in `config.Env` (`cmd/tracepad/env_test.go`).
 - `make docs-build` — build the documentation site with `mkdocs build --strict`
   from the toolchain locked in `scripts/docs-site/uv.lock` (part of the gate;
   needs `uv`; so is `make docs-site-test`, the hook's tests). A link to no

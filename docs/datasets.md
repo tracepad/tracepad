@@ -35,7 +35,7 @@ disagree about what "improved" means.
 | `PUT` | `/api/v1/datasets/{name}` | Create a dataset or replace its description and metadata | `write` |
 | `GET` | `/api/v1/datasets/{name}` | One dataset: version and counts | `read` |
 | `DELETE` | `/api/v1/datasets/{name}` | Delete it with its items and runs; dry run until `?confirm=` | `write` |
-| `POST` | `/api/v1/datasets/{name}/items` | Add or edit items, one or an array | `write` |
+| `POST` | `/api/v1/datasets/{name}/items` | Add or edit items, one or an array; the first write creates the dataset | `write` |
 | `GET` | `/api/v1/datasets/{name}/items` | The items at a version, whole | `read` |
 | `GET` | `/api/v1/datasets/{name}/items/{id}` | One item as of a version | `read` |
 | `GET` | `/api/v1/datasets/{name}/items/{id}/versions` | Every row of one item's history | `read` |
@@ -628,6 +628,7 @@ Every step above is a command, and the CLI is nothing but a client of the API
 
 ```sh
 # 1. Declare what the score names mean. Idempotent.
+echo '{"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}' > accuracy.json
 tracepad score-configs push accuracy --file accuracy.json
 
 # 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch
@@ -654,7 +655,7 @@ tracepad runs finish "$RUN_ID"
 tracepad runs show "$RUN_ID"
 tracepad runs show "$RUN_ID" --items          # the cases and what was answered
 
-# 7. The question this was all for.
+# 7. The question this was all for. BASELINE is an earlier run's id: `tracepad runs ls support-golden`.
 tracepad runs compare "$BASELINE" "$RUN_ID"
 ```
 

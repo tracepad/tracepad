@@ -106,7 +106,25 @@ the newest release only ([SECURITY.md](SECURITY.md#supported-versions)).
 
 ## Getting it
 
-In Docker, which needs nothing else installed:
+**With your coding agent**, in two lines. The first goes into a terminal and
+installs the binary and its agent skill, verified, into `~/.local/bin`:
+
+```sh
+curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh
+```
+
+The second goes into the agent (Claude Code, Codex, Cursor):
+
+```text
+Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md
+```
+
+It starts a server on this machine, connects your application, reads the first
+trace back and tells you what it did ([docs/agent-setup.md](docs/agent-setup.md)).
+Until 0.1.0 is out, the script installs the release candidate only when you name
+it: `… | TRACEPAD_VERSION=0.1.0-rc.1 sh`.
+
+**By hand**, in Docker, which needs nothing else installed:
 
 ```sh
 docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \

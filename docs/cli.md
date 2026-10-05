@@ -18,6 +18,15 @@ export TRACEPAD_API_KEY=tp-sk-…
 
 `--url` and `--key` override the environment on any command.
 
+The key the server prints on its first start holds `ingest` alone: it sends
+spans and cannot read them, so `tracepad traces ls` with it is a `403`. A key
+that reads is minted by an owner or editor in the web interface (*Settings →
+Project → API keys*), or with the admin token:
+
+```sh
+TRACEPAD_API_KEY=$TRACEPAD_ADMIN_TOKEN tracepad keys create --scope read --name agent
+```
+
 What a command may do is the key's [scopes](api.md#scopes). Everything that
 reads — `traces`, `tail`, `sessions`, `users`, `scores ls`, `scores trend`,
 `stats`, `facets`, `system`, the listings and `show`s of prompts, datasets,
@@ -982,7 +991,7 @@ Open the link it prints and set a new password.
 tracepad health [--url URL] [--json]
 ```
 
-Is the server up, and which build is it? Exit `0` and the version on stdout;
+Is the server up, and which build is it? Exit `0` and the version on stdout — on a terminal; piped, like every command, `{"version":"0.1.0","ok":true}`;
 exit `1` and the reason on stderr for anything else — a refused connection, a
 non-200, or a 200 whose body carries no version, which is what a proxy's splash
 page on the wrong port looks like.
@@ -1017,6 +1026,17 @@ TRACEPAD_LISTEN=:8080 tracepad health     # probes http://127.0.0.1:8080
 The `--listen` **flag** is not consulted, because a flag on the server's command
 line is not visible to a second process. Where both a server and its probe read
 the configuration, put the port in the environment.
+
+### `mcp`
+
+```sh
+tracepad mcp [--url URL] [--key KEY]
+```
+
+Serves the MCP tools over stdio against the server `--url` or `TRACEPAD_URL`
+names, with `--key` or `TRACEPAD_API_KEY`, which needs the `read` scope. It is
+what an MCP client that cannot speak remote HTTP runs; the tools and the
+client configuration are in [mcp.md](mcp.md).
 
 ### `skills`
 

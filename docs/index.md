@@ -7,7 +7,8 @@ OpenTelemetry-instrumented app at it, or one that sends with the Langfuse SDK,
 and read what it did in the browser, from the CLI, or through your coding
 agent over MCP.
 
-New here? [Quickstart](quickstart.md) goes from nothing to a trace on screen.
+New here? [Quickstart](quickstart.md) goes from nothing to a trace on screen,
+by hand or [through your coding agent](quickstart.md#with-your-coding-agent).
 Already sending with the Langfuse SDK? [Coming from the Langfuse SDK](langfuse-sdk.md)
 is the switch. Weighing your options? [How Tracepad compares](compare.md) sets
 it beside the tools that cover the same ground.
@@ -15,6 +16,8 @@ it beside the tools that cover the same ground.
 ## Get started
 
 - [Quickstart](quickstart.md): the first trace on screen.
+- [Agent setup](agent-setup.md): the page to hand a coding agent, which sets
+  Tracepad up for a project and reads the first trace back.
 - [Installing the binary](install.md): download, verify, run as a service,
   upgrade, back up.
 - [Docker](docker.md): the image, its volume, TLS in front, upgrades.

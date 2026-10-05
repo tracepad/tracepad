@@ -34,8 +34,9 @@ Tracepad's own API instead, and the table below lists the equivalent for each.
     check for one in the code as well. The server's first-start output and the
     key dialog print both names.
 
-3. Run the application and open the interface. The trace list fills as the
-   SDK flushes.
+3. Run the application. Check with `tracepad traces last --since 10m` under a
+   key that reads ([quickstart](quickstart.md#3-look-at-them)), or open the
+   interface. The trace list fills as the SDK flushes.
 
 The public key and the secret key are a Tracepad key pair. The SDK sends
 them as Basic auth, and the secret key alone also works as a bearer token

@@ -60,11 +60,18 @@ arrived; converting at ingest would make it the converter's output instead, and
 a bug in that conversion would be unfixable because the original would be gone.
 
 ```sh
-curl -X POST http://localhost:4318/v1/traces \
+now="$(date +%s)000000000"
+curl -sS http://localhost:4318/v1/traces \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer tp-sk-…" \
-  --data @export.json
+  -d '{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"'"$(openssl rand -hex 16)"'","spanId":"'"$(openssl rand -hex 8)"'","name":"hello","kind":1,"startTimeUnixNano":"'"$now"'","endTimeUnixNano":"'"$now"'"}]}]}]}'
 ```
+
+```
+{}
+```
+
+A `200` with `{}` means every span was accepted.
 
 ## Authentication
 
@@ -124,10 +131,11 @@ and what does not carry over, is in
 [Coming from the Langfuse SDK](langfuse-sdk.md).
 
 **The `tracepad` package** — the same exporter with the ergonomics on top, in
-Python ([sdk-python.md](sdk-python.md)) and in Node ([sdk-js.md](sdk-js.md)):
+Python ([sdk-python.md](sdk-python.md)), in Node ([sdk-js.md](sdk-js.md)) and in
+Go ([sdk-go.md](sdk-go.md)):
 
 ```sh
-pip install tracepad        # or: npm install tracepad @opentelemetry/api
+pip install tracepad        # or: npm install tracepad @opentelemetry/api, go get github.com/tracepad/tracepad/sdk/go
 export TRACEPAD_URL=http://localhost:4318
 export TRACEPAD_API_KEY=tp-sk-…
 ```
@@ -211,7 +219,7 @@ everywhere: none was sent, and Tracepad does not estimate one.
 
 | Status | Meaning |
 |---|---|
-| `200` | Committed to disk. An empty body means everything was accepted; a body carries `partial_success` with the number of skipped spans. |
+| `200` | Committed to disk. An empty body (`{}` for a JSON export) means everything was accepted; otherwise the body carries `partial_success` (`partialSuccess` in JSON) with the number of skipped spans. |
 | `400` | The body is not a decodable OTLP export. |
 | `401` | Unknown credentials. |
 | `403` | A key without the `ingest` scope ([Authentication](#authentication)). Exporters do not retry it. |

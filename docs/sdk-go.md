@@ -43,7 +43,7 @@ defer shutdown(ctx)
 | `WithLogger` | — | Where the tracing path says what it could not do; `slog.Default()` otherwise |
 | `WithTracerProvider` | — | Attach to this provider instead of the global one — for tests |
 
-The options win over the environment, and with neither a host nor a key the
+The options win over the environment, and without a host or without a key the
 call returns `ErrConfig` — misconfiguration discovered as a `401` in a log
 file an hour later is the bug report that rule prevents.
 

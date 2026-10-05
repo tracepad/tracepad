@@ -62,7 +62,10 @@ one.
   print JSON when piped.
 - An MCP server at `/mcp` and over stdio (`tracepad mcp`), read-only.
 - A skill for coding agents that ships inside the binary
-  (`tracepad skills install`).
+  (`tracepad skills install`), including setting Tracepad up for a project
+  from nothing: a local server, a key, the application connected, and the
+  first trace read back
+  ([docs/agent-setup.md](docs/agent-setup.md)).
 
 #### Web interface
 
@@ -93,5 +96,12 @@ one.
   (`tracepad 0.1.0-rc.1 (b14b11e)`), in a container as on a host, and
   [docs/install.md](docs/install.md#what-a-version-is-called-where) lists what
   one version is called in each registry and how to install a candidate.
+- An install script for Linux and macOS,
+  `curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh`, which
+  installs the binary and the agent skill into `~/.local/bin` without `sudo`.
+  It verifies the checksum, and the attestation too when `gh` can. It
+  installs a release candidate only when `TRACEPAD_VERSION` names one.
+- The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
+  Markdown beside its HTML, on the documentation site.
 
 [Unreleased]: https://github.com/tracepad/tracepad/commits/main

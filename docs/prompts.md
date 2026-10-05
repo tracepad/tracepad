@@ -246,6 +246,7 @@ Fetch by label at start-up (or per request, behind the 60-second cache), read
 replacing `{name}` and nothing else:
 
 ```python
+import os
 import re
 
 import httpx
@@ -260,7 +261,7 @@ def fill(template, variables):
 prompt = httpx.get(
     "http://localhost:4318/api/v1/prompts/summarize",
     params={"label": "production"},
-    headers={"Authorization": f"Bearer {secret_key}"},
+    headers={"Authorization": f"Bearer {os.environ['TRACEPAD_API_KEY']}"},
 ).json()
 
 messages = [

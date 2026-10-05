@@ -97,6 +97,8 @@ returns every endpoint with a one-line description. The machine-readable
 version is [`/api/v1/openapi.json`](#self-description), an OpenAPI 3.1
 document served without authentication.
 
+In the examples below, `curl …` stands for `curl -H "Authorization: Bearer $TRACEPAD_API_KEY"`.
+
 | Method | Path | Purpose | A key needs |
 |---|---|---|---|
 | `GET` | `/api/v1/traces` | List traces, filtered and paginated | `read` |
@@ -113,6 +115,11 @@ document served without authentication.
 | `GET` | `/api/v1/queues` | List the annotation queues with their progress | `read` |
 | `GET` | `/api/v1/queues/{name}/next` | The next item to annotate, claimed for ten minutes | `write` |
 | `GET` | `/api/v1/stats` | Counts, errors, cost, latency percentiles | `read` |
+| `GET` | `/api/v1/stats/scores` | Score means, rates and category shares per bucket | `read` |
+| `GET` | `/api/v1/facets` | The environments, releases and trace names in a range, with counts | `read` |
+| `GET` | `/api/v1/raw` | The archived export bodies, oldest first | `read` |
+| `GET` | `/api/v1/raw/{id}` | One archived export body, as received | `read` |
+| `GET` | `/api/v1/media/{sha256}` | One image or file a payload references | `read` |
 | `GET` | `/api/v1/prompts/{name}/diff` | Unified diff between two prompt versions | `read` |
 | `DELETE` | `/api/v1/prompts/{name}` | Delete a prompt name whole; a dry run until confirmed | `write` |
 | `DELETE` | `/api/v1/scores/{id}` | Retract one score; no dry run, a re-POST puts it back | `write` |
