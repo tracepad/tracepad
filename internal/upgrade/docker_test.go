@@ -41,6 +41,7 @@ type fakeDocker struct {
 	// failRestore makes the way back's busybox restore fail.
 	silentRef   string
 	failRestore bool
+	rootless    bool
 	// onCall runs before each call: a test's interrupt.
 	onCall func(args []string)
 	dbFile []byte
@@ -122,6 +123,11 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 		}
 	}
 	switch {
+	case args[0] == "info":
+		if d.rootless {
+			return []byte(`["name=seccomp,profile=builtin","name=rootless","name=cgroupns"]`), nil
+		}
+		return []byte(`["name=seccomp,profile=builtin","name=cgroupns"]`), nil
 	case joined == "ps -q --no-trunc":
 		var ids []string
 		for _, c := range d.byName {
@@ -538,6 +544,9 @@ func TestWhatContainerIsTheCommands(t *testing.T) {
 		{"limits", func(c *inspectContainer) { c.HostConfig.Memory = 1 << 30 }, "resource limits"},
 		{"a line break", func(c *inspectContainer) { c.Config.Env = append(c.Config.Env, "TRACEPAD_X=a\nb") }, "line break"},
 		{"stopped", func(c *inspectContainer) { c.State.Running = false }, "not running"},
+		{"a setting a recreate drops", func(c *inspectContainer) {
+			c.raw = map[string]json.RawMessage{"HostConfig": json.RawMessage(`{"PidsLimit":100}`)}
+		}, "does not reproduce (HostConfig.PidsLimit)"},
 	} {
 		c := base
 		c.Config.Env = slices.Clone(base.Config.Env)
@@ -835,5 +844,144 @@ func TestAContainerArchiveChangedSinceIsNotRestored(t *testing.T) {
 	}
 	if _, ok := d.volumes["tracepad-app-"+rep.Run.ID]; ok {
 		t.Error("a volume was made from it")
+	}
+}
+
+// A docker run the way back made and could not start (a port still taken)
+// leaves a container under the name; the next --back sets it aside and goes
+// on (the third review).
+func TestAFailedRunInTheWayBackDoesNotBlockTheNext(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	d.failRun = true
+	first, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitStuck {
+		t.Fatalf("first: %d %s", code, first.Summary)
+	}
+	d.failRun = false
+	second, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("second: %d %s", code, second.Summary)
+	}
+	left := d.byName["tracepad-app-failed-"+rep.Run.ID]
+	if left == nil || left.HostConfig.RestartPolicy.Name != "no" {
+		t.Errorf("the container the failed run left: %+v", left)
+	}
+	if cur := d.byName["tracepad-app"]; cur == nil || !cur.State.Running || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.1.0" {
+		t.Errorf("the old image does not run: %+v", cur)
+	}
+}
+
+// The person removed the new container after an upgrade: the way back has
+// nothing to set aside, and goes on.
+func TestAWayBackAfterTheNewContainerWasRemoved(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	delete(d.byName, "tracepad-app")
+	back, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, back.Summary)
+	}
+	if cur := d.byName["tracepad-app"]; cur == nil || !cur.State.Running || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.1.0" {
+		t.Errorf("the old image does not run: %+v", cur)
+	}
+}
+
+func TestRootlessDockerIsThePersons(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	d.rootless = true
+	deps := containerDeps(t, d)
+	plan, code := runReport(t, deps, "--plan")
+	if code != exitDecide || len(plan.Containers) != 1 || plan.Containers[0].Whose != "person" || !strings.Contains(plan.Containers[0].Reason, "rootless") {
+		t.Fatalf("%d %+v", code, plan.Containers)
+	}
+}
+
+// What a recreate does not carry is named, and makes the container the
+// person's; what the daemon sets by itself is not counted.
+func TestSettingsARecreateWouldDropAreNamed(t *testing.T) {
+	img := inspectImage{Config: inspectConfig{ExposedPorts: map[string]struct{}{"4318/tcp": {}}}}
+	ic := inspectContainer{ID: "0123456789abcdef"}
+	ic.Config.HostnameV = "0123456789ab"
+	ic.Config.ExposedPorts = map[string]struct{}{"4318/tcp": {}}
+	ic.HostConfig.PortBindings = map[string][]portBinding{"4318/tcp": {{HostIP: "127.0.0.1", HostPort: "4318"}}}
+	defaults := `{"HostConfig":{"ShmSize":67108864,"Runtime":"runc","CgroupnsMode":"private","MaskedPaths":["/proc/kcore"],"ConsoleSize":[0,0],
+		"PidsLimit":null,"MemorySwappiness":null,"OomScoreAdj":0,"CpusetCpus":"","BlkioWeight":0,"RestartPolicy":{"Name":"always"}},
+		"Config":{"Hostname":"0123456789ab","AttachStdout":true,"Tty":false,"Env":["A=b"]}}`
+	_ = json.Unmarshal([]byte(defaults), &ic.raw)
+	if got := unreproduced(ic, img); len(got) != 0 {
+		t.Errorf("defaults counted: %q", got)
+	}
+	set := `{"HostConfig":{"PidsLimit":100,"CpusetCpus":"0-1","MemorySwap":1073741824,"Runtime":"runsc","OomScoreAdj":500,"ShmSize":134217728},
+		"Config":{"Hostname":"mine","Tty":true,"StopTimeout":30}}`
+	_ = json.Unmarshal([]byte(set), &ic.raw)
+	ic.Config.HostnameV = "mine"
+	ic.Config.ExposedPorts["9000/tcp"] = struct{}{}
+	want := []string{"Config.ExposedPorts[9000/tcp]", "Config.Hostname", "Config.StopTimeout", "Config.Tty",
+		"HostConfig.CpusetCpus", "HostConfig.MemorySwap", "HostConfig.OomScoreAdj", "HostConfig.PidsLimit", "HostConfig.Runtime", "HostConfig.ShmSize"}
+	if got := unreproduced(ic, img); !slices.Equal(got, want) {
+		t.Errorf("named %q,\nwant %q", got, want)
+	}
+}
+
+// A deadline the caller set that runs out during the swap is not the way
+// back's: it has a budget of its own (the third review).
+func TestADeadlineSpentByTheSwapIsNotTheWayBacks(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	d.failRun = true
+	deps := containerDeps(t, d)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	d.onCall = func(args []string) {
+		if args[0] == "stop" {
+			<-ctx.Done()
+		}
+	}
+	var out bytes.Buffer
+	code := run(ctx, Options{Args: []string{"--json"}, Stdout: &out, Stderr: io.Discard}, deps)
+	var rep Report
+	_ = json.Unmarshal(out.Bytes(), &rep)
+	if code != exitWentBack {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	if cur := d.byName["tracepad-app"]; cur == nil || !cur.State.Running {
+		t.Errorf("the old container: %+v", cur)
+	}
+}
+
+// Interrupted after the stop, a healthy swap goes on to the end: the upgrade
+// is finished, not undone.
+func TestAnInterruptedHealthySwapFinishes(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.onCall = func(args []string) {
+		if args[0] == "stop" {
+			cancel()
+		}
+	}
+	var out bytes.Buffer
+	code := run(ctx, Options{Args: []string{"--json"}, Stdout: &out, Stderr: io.Discard}, deps)
+	var rep Report
+	_ = json.Unmarshal(out.Bytes(), &rep)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	if cur := d.byName["tracepad-app"]; cur == nil || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.2.0" {
+		t.Errorf("the new container: %+v", cur)
 	}
 }

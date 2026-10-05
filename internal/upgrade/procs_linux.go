@@ -87,7 +87,10 @@ func inspectLinux(pid int) (Process, error) {
 		return Process{}, fmt.Errorf("pid %d: its environment cannot be read: %w", pid, err)
 	}
 	p := Process{PID: pid, Argv: argv, Env: env, Exe: exe}
+	// A working directory removed since reads as "<dir> (deleted)", as an
+	// executable does (the third review).
 	p.Cwd, _ = os.Readlink(dir + "/cwd")
+	p.Cwd = strings.TrimSuffix(p.Cwd, " (deleted)")
 	if out, err := os.Readlink(dir + "/fd/1"); err == nil && strings.HasPrefix(out, "/") {
 		if st, err := os.Stat(out); err == nil && st.Mode().IsRegular() {
 			p.Stdout = out

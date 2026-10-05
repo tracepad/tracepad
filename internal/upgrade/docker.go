@@ -10,6 +10,7 @@ import (
 	"net"
 	"os/exec"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,16 +64,21 @@ var imageRepos = []string{"ghcr.io/tracepad/tracepad", "docker.io/tracepad/trace
 // inspectConfig is the part of a container's or an image's Config the
 // command reads.
 type inspectConfig struct {
-	Image       string            `json:"Image"`
-	Env         []string          `json:"Env"`
-	Cmd         []string          `json:"Cmd"`
-	Entrypoint  []string          `json:"Entrypoint"`
-	User        string            `json:"User"`
-	WorkingDir  string            `json:"WorkingDir"`
-	Labels      map[string]string `json:"Labels"`
-	Healthcheck json.RawMessage   `json:"Healthcheck"`
-	StopSignal  string            `json:"StopSignal"`
+	HostnameV    string              `json:"Hostname"`
+	ExposedPorts map[string]struct{} `json:"ExposedPorts"`
+	Image        string              `json:"Image"`
+	Env          []string            `json:"Env"`
+	Cmd          []string            `json:"Cmd"`
+	Entrypoint   []string            `json:"Entrypoint"`
+	User         string              `json:"User"`
+	WorkingDir   string              `json:"WorkingDir"`
+	Labels       map[string]string   `json:"Labels"`
+	Healthcheck  json.RawMessage     `json:"Healthcheck"`
+	StopSignal   string              `json:"StopSignal"`
 }
+
+// Hostname is the container's hostname, as inspect gives it.
+func (c inspectConfig) Hostname() string { return c.HostnameV }
 
 type portBinding struct {
 	HostIP   string `json:"HostIp"`
@@ -139,6 +145,9 @@ type inspectContainer struct {
 		Init           *bool             `json:"Init"`
 	} `json:"HostConfig"`
 	Mounts []mount `json:"Mounts"`
+	// raw is the whole of the inspect, for the settings the command does not
+	// reproduce: whatever is set there, it does not claim to keep.
+	raw map[string]json.RawMessage
 }
 
 type inspectImage struct {
@@ -306,6 +315,9 @@ func containerRefusal(ic inspectContainer, img inspectImage, named string) strin
 			return r.what
 		}
 	}
+	if fields := unreproduced(ic, img); len(fields) > 0 {
+		return "it has settings the command does not reproduce (" + strings.Join(fields, ", ") + "): back up its volume and recreate it yourself"
+	}
 	for _, kv := range personEnv(ic.Config.Env, img.Config.Env) {
 		if strings.ContainsAny(kv, "\r\n") {
 			k, _, _ := strings.Cut(kv, "=")
@@ -313,6 +325,82 @@ func containerRefusal(ic inspectContainer, img inspectImage, named string) strin
 		}
 	}
 	return ""
+}
+
+// hostKept are the HostConfig fields a recreate reproduces, refuses above by
+// name, or that the daemon sets the same way again; anything else that is set
+// is a setting the command would silently drop (the third review).
+var hostKept = map[string]bool{
+	// reproduced
+	"RestartPolicy": true, "PortBindings": true, "NetworkMode": true, "LogConfig": true, "Binds": true, "Mounts": true,
+	// refused above, by name
+	"AutoRemove": true, "Privileged": true, "ReadonlyRootfs": true, "CapAdd": true, "CapDrop": true, "Devices": true,
+	"DeviceRequests": true, "ExtraHosts": true, "Links": true, "VolumesFrom": true, "GroupAdd": true, "Dns": true,
+	"DnsSearch": true, "SecurityOpt": true, "Tmpfs": true, "Sysctls": true, "Ulimits": true, "Memory": true,
+	"NanoCpus": true, "CpuShares": true, "CpuQuota": true, "PidMode": true, "IpcMode": true, "UTSMode": true, "Init": true,
+	// the daemon's own, the same on a recreate
+	"MaskedPaths": true, "ReadonlyPaths": true, "ConsoleSize": true, "Isolation": true, "ContainerIDFile": true, "CgroupnsMode": true,
+}
+
+// hostDefaults are values the daemon gives a field nobody set.
+var hostDefaults = map[string][]string{
+	"ShmSize":          {"67108864"},
+	"Runtime":          {`"runc"`},
+	"MemorySwappiness": {"-1"},
+}
+
+// configKept are the Config fields a recreate reproduces or checks above.
+var configKept = map[string]bool{
+	"Env": true, "Cmd": true, "Image": true, "User": true, "Labels": true, "WorkingDir": true, "Entrypoint": true,
+	"Healthcheck": true, "StopSignal": true, "Volumes": true, "ArgsEscaped": true, "ExposedPorts": true, "Hostname": true,
+	// how a client attached when it was created, not how it runs
+	"AttachStdout": true, "AttachStderr": true,
+}
+
+func unset(raw json.RawMessage) bool {
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", "false", "0", `""`, "[]", "{}":
+		return true
+	}
+	return false
+}
+
+// unreproduced names every field of a container's inspect that is set and
+// that a recreate would not carry: a container with any is the person's,
+// and the plan names them.
+func unreproduced(ic inspectContainer, img inspectImage) []string {
+	var out []string
+	sections := func(key string) map[string]json.RawMessage {
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(ic.raw[key], &m)
+		return m
+	}
+	for k, v := range sections("HostConfig") {
+		if hostKept[k] || unset(v) || slices.Contains(hostDefaults[k], string(compactJSON(v))) {
+			continue
+		}
+		out = append(out, "HostConfig."+k)
+	}
+	for k, v := range sections("Config") {
+		if configKept[k] || unset(v) {
+			continue
+		}
+		out = append(out, "Config."+k)
+	}
+	if h := ic.Config.Hostname(); h != "" && (len(ic.ID) < 12 || h != ic.ID[:12]) {
+		out = append(out, "Config.Hostname")
+	}
+	for port := range ic.Config.ExposedPorts {
+		if _, ok := img.Config.ExposedPorts[port]; ok {
+			continue
+		}
+		if _, ok := ic.HostConfig.PortBindings[port]; ok {
+			continue
+		}
+		out = append(out, "Config.ExposedPorts["+port+"]")
+	}
+	sort.Strings(out)
+	return out
 }
 
 func compactJSON(raw json.RawMessage) []byte {
@@ -463,6 +551,19 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 	if len(ids) == 0 {
 		return nil, ""
 	}
+	// Rootless Docker, or user namespaces remapped: root in a container is
+	// not the host's, and an archive written there is not the host user's to
+	// read back. The command does not try; the person does it (the third
+	// review).
+	remapped := ""
+	if info, err := r.deps.Docker.Run(ctx, "info", "--format", "{{json .SecurityOptions}}"); err == nil {
+		switch s := string(info); {
+		case strings.Contains(s, "name=rootless"):
+			remapped = "Docker runs rootless"
+		case strings.Contains(s, "name=userns"):
+			remapped = "Docker remaps user namespaces"
+		}
+	}
 	list, err := r.inspectContainers(ctx, ids...)
 	if err != nil {
 		return nil, "the containers could not be inspected (" + firstLine(err.Error()) + ")"
@@ -480,6 +581,10 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 			continue
 		}
 		c := classifyContainer(ic, img, r.flags.container)
+		if remapped != "" && c.Ours {
+			c.Ours = false
+			c.Reason = remapped + ", and the command cannot read back an archive written in a container there: back up its volume and recreate it yourself"
+		}
 		if c.URL != "" {
 			c.Version, _ = health(ctx, r.deps.HTTP, c.URL)
 		}
@@ -505,6 +610,12 @@ func (r *runner) inspectContainers(ctx context.Context, refs ...string) ([]inspe
 	var list []inspectContainer
 	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, fmt.Errorf("docker inspect: %w", err)
+	}
+	var raws []map[string]json.RawMessage
+	if json.Unmarshal(out, &raws) == nil && len(raws) == len(list) {
+		for i := range list {
+			list[i].raw = raws[i]
+		}
 	}
 	return list, nil
 }

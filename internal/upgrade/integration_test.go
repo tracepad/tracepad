@@ -160,6 +160,12 @@ func newWorld(t *testing.T) *world {
 // person's (a sweep interval) that the upgrade must keep.
 func (w *world) start() int {
 	w.t.Helper()
+	return w.startIn(w.home)
+}
+
+// startIn starts the server with dir as its working directory.
+func (w *world) startIn(dir string) int {
+	w.t.Helper()
 	log, err := os.OpenFile(filepath.Join(w.data, "server.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		w.t.Fatal(err)
@@ -169,7 +175,7 @@ func (w *world) start() int {
 	cmd.Args[0] = "tracepad"
 	cmd.Env = []string{"HOME=" + w.home, "PATH=/usr/bin:/bin",
 		"TRACEPAD_PROJECTS=demo:" + testPK + ":" + testSK, "TRACEPAD_SWEEP_INTERVAL=2h", "TRACEPAD_SETUP=off"}
-	cmd.Dir = w.home
+	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -412,6 +418,14 @@ func TestABrokenReleaseIsNotHealthyAndTheWayBackRuns(t *testing.T) {
 	}
 	if _, err := os.Stat(w.data + ".after-" + rep.Run.ID); err != nil {
 		t.Errorf("nothing set aside: %v", err)
+	}
+	// The report names what runs after the run: the old version the way
+	// back started (Decision 19 (d)).
+	running, _ := lockedBy(w.data)
+	for _, s := range rep.Servers {
+		if s.Target && (s.PID != running || s.Version != vOld) {
+			t.Errorf("the report names pid %d (%s); pid %d runs %s", s.PID, s.Version, running, vOld)
+		}
 	}
 }
 
@@ -708,5 +722,27 @@ func TestAWayBackCutShortBetweenItsMovesIsTakenUpAgain(t *testing.T) {
 	w.waitVersion(vOld)
 	if got := w.count(); got != 1 {
 		t.Errorf("traces: %d", got)
+	}
+}
+
+// A server started from a directory removed since starts again in its data
+// directory, and the report says so (the third review).
+func TestAServerWhoseWorkingDirectoryIsGoneStartsInItsData(t *testing.T) {
+	w := newWorld(t)
+	gone := filepath.Join(w.home, "worktree")
+	if err := os.Mkdir(gone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	w.startIn(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("exit %d, %s", code, rep.Summary)
+	}
+	w.waitVersion(vNew)
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "is gone; it starts again in its data directory") {
+		t.Errorf("notes: %q", rep.Notes)
 	}
 }

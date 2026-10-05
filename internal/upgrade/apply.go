@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/config"
 )
 
 // afterArchive is a test's seam: what happens to an archive between its
@@ -174,8 +176,6 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			return nil, err.Error()
 		}
 		j.done("downloaded tracepad %s: %s", p.to, newBin.Verified)
-	}
-	if p.replaceBinary {
 		old := filepath.Join(dir, "tracepad-"+bin.Version)
 		if err := r.keepCopy(ctx, bin.Path, old, bin.Version); err != nil {
 			return nil, fmt.Sprintf("no copy of the installed %s to go back to: %v", bin.Version, err)
@@ -241,11 +241,24 @@ func (r *runner) discard(dir string) {
 	_ = os.RemoveAll(dir)
 }
 
-// afterStop is the context the rest of a run takes once it has asked a server
-// to stop: an interrupt (Ctrl-C, an agent's timeout) must not leave it down
-// half way, so the swap and its way back finish on a deadline of their own.
+// afterStop is the context a swap takes once it may stop a server: an
+// interrupt (Ctrl-C, an agent's timeout) must not leave it down half way. It
+// has no deadline of its own — an archive takes as long as the data does, and
+// its steps that wait (a stop, a check) have theirs — and the way back never
+// runs on what it leaves: wayBackContext gives it a budget of its own (the
+// third review).
 func afterStop(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+	return context.WithCancel(context.WithoutCancel(ctx))
+}
+
+// wayBackBudget is the time a way back has, fresh, whatever the swap before
+// it took: a restore of the archive, a stop, a start and a check.
+const wayBackBudget = 30 * time.Minute
+
+// wayBackContext is a way back's own context: not cancelled by an interrupt,
+// and with its own budget.
+func wayBackContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), wayBackBudget)
 }
 
 // keepCopy puts a verified copy of the binary at src into dst: a hard link
@@ -326,13 +339,38 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 	}
 	st.Process = &ProcessState{PID: s.Proc.PID, DataDir: s.DataDir, Listen: s.Listen, URL: s.URL, Log: log, Old: old}
 	j.spec = ServerSpec{Exe: st.Binary.Path, Argv: s.Proc.Argv, Env: s.Proc.Env, Dir: s.Proc.Cwd}
-	if j.spec.Dir == "" {
+	if info, err := os.Stat(j.spec.Dir); j.spec.Dir == "" || err != nil || !info.IsDir() {
+		// Its working directory is gone (a temporary directory, a worktree
+		// removed since): it would not start there again. It starts in its
+		// data directory — unless an argument is relative to the directory
+		// that is gone.
+		if relativeArgs(s.Proc.Argv) {
+			return fmt.Sprintf("server pid %d's working directory %s is gone, and its arguments name paths relative to it: restart it yourself", s.Proc.PID, s.Proc.Cwd)
+		}
+		if s.Proc.Cwd != "" {
+			j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("server pid %d's working directory %s is gone; it starts again in its data directory, %s", s.Proc.PID, s.Proc.Cwd, s.DataDir))
+		}
 		j.spec.Dir = s.DataDir
 	}
 	if err := writeJSON(filepath.Join(j.dir, "server.json"), j.spec); err != nil {
 		return err.Error()
 	}
 	return ""
+}
+
+// relativeArgs says whether a server's --data-dir is a relative path: one that
+// means something only in the directory it was started in.
+func relativeArgs(argv []string) bool {
+	args, ok := serverFlags(argv)
+	if !ok {
+		return false
+	}
+	flags, err := config.ParseFlags(args)
+	if err != nil {
+		return true
+	}
+	d, given := flags.Given("data-dir")
+	return given && d != "" && !filepath.IsAbs(d)
 }
 
 // isServer checks, right before a signal, that pid is still the server of
@@ -357,16 +395,7 @@ func (r *runner) stop(ctx context.Context, pid int) bool {
 	if err := r.deps.Sys.Signal(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return false
 	}
-	deadline := r.deps.Now().Add(r.deps.StopWait)
-	for r.deps.Sys.Alive(pid) {
-		if !r.deps.Now().Before(deadline) {
-			return false
-		}
-		if r.deps.Sleep(ctx, 250*time.Millisecond) != nil {
-			return false
-		}
-	}
-	return true
+	return r.waitGone(ctx, pid)
 }
 
 // swapProcess stops the server, archives its data, replaces the binary and
@@ -496,6 +525,8 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 // stop or a check that says not healthy.
 func (j *job) goBack(ctx context.Context, why string) {
 	j.done("%s; the way back runs", why)
+	ctx, cancel := wayBackContext(ctx)
+	defer cancel()
 	outcome := j.wayBack(ctx)
 	switch {
 	case outcome.ok && !outcome.unconfirmed:
@@ -534,7 +565,12 @@ func (j *job) refresh(ctx context.Context) {
 		if !s.Target || j.st.Process == nil {
 			continue
 		}
-		if j.st.Process.NewPID > 0 {
+		// What runs after the run: the old version a way back started, else
+		// the new one (Decision 19 (d), the third review).
+		switch {
+		case j.st.Process.BackPID > 0:
+			s.PID = j.st.Process.BackPID
+		case j.st.Process.NewPID > 0:
 			s.PID = j.st.Process.NewPID
 		}
 		s.Version, _ = health(ctx, r.deps.HTTP, j.st.Process.URL)

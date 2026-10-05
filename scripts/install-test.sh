@@ -216,12 +216,21 @@ lacks "$out" "Update Tracepad to" downgrade
 ends_with_agent_line downgrade
 [ "$("$bin" version)" = 0.3.0 ] || fail "downgrade: the binary is not 0.3.0"
 
-# --- A binary from before the command: the update says nothing of what runs.
+# --- A binary from before the command: the update says nothing of what runs,
+# and with no plan to say something runs older, the last line is the setup
+# line (spec 054 #15).
 release 0.3.1
 run no-command 0 TRACEPAD_VERSION=0.3.1
 has "$out" "updated tracepad 0.3.0 → 0.3.1" no-command
 lacks "$out" "Still running" no-command
-ends_with_upgrade_line no-command 0.3.1
+ends_with_agent_line no-command
+
+# --- An update the plan says nothing runs older than: the setup line too.
+release 0.3.2
+run update-up-to-date 0 TRACEPAD_VERSION=0.3.2 FAKE_PLAN="nothing" FAKE_PLAN_EXIT=0
+has "$out" "updated tracepad 0.3.1 → 0.3.2" update-up-to-date
+lacks "$out" "Still running" update-up-to-date
+ends_with_agent_line update-up-to-date
 run back-to-030 0 TRACEPAD_VERSION=0.3.0
 
 # --- A binary that does not run as itself is never put in place.

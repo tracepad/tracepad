@@ -632,9 +632,10 @@ version migrated is left as it was. Nothing is removed — not a container, not
 a volume — and the report gives the commands for what is set aside. Like any
 backup, the run directory holds every prompt and completion and the
 container's variables until you delete it, and an erasure does not reach it.
-Compose, a container open beyond this machine, and anything the command cannot
-reproduce exactly (privileges, devices, a network of its own, resource
-limits) are yours, as follows.
+Compose, a container open beyond this machine, rootless Docker or user
+namespace remapping, and a container with any setting the command cannot
+reproduce exactly (privileges, devices, a network of its own, resource limits,
+a hostname, a runtime — the plan names each one) are yours, as follows.
 
 Back the volume up by tarring it from a throwaway container:
 

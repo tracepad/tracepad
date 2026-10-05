@@ -161,7 +161,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 			// Nothing ran on the data, and its server runs: check it.
 			ps.BackPID = holder
 			_ = st.save(j.dir)
-			return j.checkBack(ctx, j.isServerFn(holder), false)
+			return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
 		}
 	}
 
@@ -177,7 +177,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	// second one.
 	if st.has(stepBackStarted) {
 		if ok, _ := r.isServer(ps.BackPID, ps.DataDir, j.spec); ok {
-			return j.checkBack(ctx, j.isServerFn(ps.BackPID), false)
+			return j.checkBack(ctx, r.watch(ps.BackPID, ps.DataDir, j.spec), ps.BackPID, false)
 		}
 	}
 	if lockHeld(ps.DataDir) {
@@ -192,7 +192,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	ps.BackPID = started.PID()
 	_ = j.step(stepBackStarted)
 	j.done("started %s again as pid %d, with its arguments and environment", st.From, ps.BackPID)
-	return j.checkBack(ctx, running(started), true)
+	return j.checkBack(ctx, running(started), ps.BackPID, true)
 }
 
 // swapBack restores the archive beside the data and checks it, stops the
@@ -271,11 +271,31 @@ func (r *runner) waitGone(ctx context.Context, pid int) bool {
 	return true
 }
 
-func (j *job) isServerFn(pid int) func() bool {
-	return func() bool {
-		ok, _ := j.r.isServer(pid, j.st.Process.DataDir, j.spec)
-		return ok
+// watch is a check's liveness for a server this invocation did not start:
+// its full identity — executable, arguments, the lock's record, which on
+// macOS asks lsof — is read once, and each poll after that is kill(pid, 0)
+// and the lock's record alone (the third review).
+func (r *runner) watch(pid int, dataDir string, spec ServerSpec) func() bool {
+	if ok, _ := r.isServer(pid, dataDir, spec); !ok {
+		return func() bool { return false }
 	}
+	return func() bool { return r.deps.Sys.Alive(pid) && recordsPID(dataDir, pid) }
+}
+
+// confirm reads a server's full identity once more after a check found it
+// healthy: what answered must still be the server the run recorded.
+func (r *runner) confirm(c Checked, pid int, dataDir string, spec ServerSpec) Checked {
+	if c.Verdict != verdictHealthy || pid <= 0 {
+		return c
+	}
+	if ok, err := r.isServer(pid, dataDir, spec); !ok {
+		why := "it is gone"
+		if err != nil {
+			why = err.Error()
+		}
+		c.Verdict, c.Why = verdictNotHealthy, fmt.Sprintf("pid %d answered, but %s", pid, why)
+	}
+	return c
 }
 
 // running is a started process's liveness, for a check.
@@ -292,9 +312,14 @@ func running(s Started) func() bool {
 }
 
 // checkBack checks the old version a way back started.
-func (j *job) checkBack(ctx context.Context, alive func() bool, fresh bool) wentBack {
+func (j *job) checkBack(ctx context.Context, alive func() bool, pid int, fresh bool) wentBack {
 	ps := j.st.Process
 	c := j.r.check(ctx, ps.URL, j.st.From, j.st.CountBefore, alive)
+	if !fresh {
+		// One this command started is watched through its own exit; one it
+		// found running is read once more.
+		c = j.r.confirm(c, pid, ps.DataDir, j.spec)
+	}
 	if fresh {
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	}
@@ -331,6 +356,27 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 		j.done("started %s again", cs.Name)
 		return j.checkContainer(ctx, cs.ID, false)
+	case !st.has(stepStarted) && !r.exists(ctx, "container", j.before()) && !st.has(stepBackStarted) && !j.nameIs(ctx, cs.ID):
+		// The old container was removed since (by the person): the old
+		// image runs again, on the volume the new version never ran on.
+		j.begin()
+		if out, ok := j.clearName(ctx, ""); !ok {
+			return out
+		}
+		ref := cs.OldRef
+		if img, err := r.inspectImage(ctx, ref); err != nil || img.ID != cs.OldImage {
+			ref = cs.OldImage
+		}
+		out, err := docker.Run(ctx, runArgs(j.inspect, j.image, cs.Name, ref, filepath.Join(j.dir, "env"), "")...)
+		if err != nil {
+			return j.fail(st.From + " did not start: " + firstLine(err.Error()) + "; run --back again")
+		}
+		cs.BackID = strings.TrimSpace(string(out))
+		_ = j.step(stepBackStarted)
+		j.done("%s was gone; ran %s as %s again", j.before(), ref, cs.Name)
+		return j.checkContainer(ctx, cs.BackID, true)
+	case !st.has(stepStarted) && st.has(stepBackStarted):
+		return j.checkContainer(ctx, cs.BackID, false)
 	case !st.has(stepStarted):
 		j.begin()
 		if r.exists(ctx, "container", j.before()) {
@@ -375,8 +421,6 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 			return j.fail("the volume " + vol + " exists already, and this run did not fill it: a way back failed half way and left it (then remove it: docker volume rm " + shq(vol) + "), or something else is there; nothing was touched")
 		case !st.has(stepBackAside) && r.exists(ctx, "container", j.after()):
 			return j.fail("the container " + j.after() + " exists already; nothing was touched")
-		case !r.exists(ctx, "container", j.before()):
-			return j.fail("there is no " + j.before() + " to go back to; nothing was touched")
 		}
 		if list, err := r.inspectContainers(ctx, cs.Name); err == nil && len(list) == 1 && list[0].ID != cs.NewID {
 			return j.fail("the container named " + cs.Name + " now is not the one this run started: a later run's, or one made since. " +
@@ -406,10 +450,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 
 	if !st.has(stepBackAside) {
 		j.begin()
-		if list, err := r.inspectContainers(ctx, cs.Name); err == nil && len(list) == 1 {
-			if list[0].ID != cs.NewID {
-				return j.fail("the container named " + cs.Name + " now is not the one this run started; the restored volume " + vol + " waits")
-			}
+		if list, err := r.inspectContainers(ctx, cs.Name); err == nil && len(list) == 1 && list[0].ID == cs.NewID {
 			if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
 				return j.fail(cs.Name + " did not stop: " + firstLine(err.Error()) + "; run --back again")
 			}
@@ -417,17 +458,26 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 				return j.fail(cs.Name + " could not be set aside: " + firstLine(err.Error()) + "; run --back again")
 			}
 		}
-		if _, err := docker.Run(ctx, "update", "--restart", "no", j.after()); err != nil {
-			return j.fail("the restart policy of " + j.after() + " could not be set to no: " + firstLine(err.Error()) + "; run --back again")
+		if r.exists(ctx, "container", j.after()) {
+			if _, err := docker.Run(ctx, "update", "--restart", "no", j.after()); err != nil {
+				return j.fail("the restart policy of " + j.after() + " could not be set to no: " + firstLine(err.Error()) + "; run --back again")
+			}
+			st.SetAside = append(st.SetAside, "container "+j.after())
+			j.done("stopped the new container and set it aside as %s, restart policy no", j.after())
+		} else {
+			// Removed by the person since: a fact, not a failure (the third
+			// review). There is nothing to set aside.
+			j.done("the new container is gone already (removed since the upgrade); nothing to set aside")
 		}
-		st.SetAside = append(st.SetAside, "container "+j.after())
 		_ = j.step(stepBackAside)
-		j.done("stopped the new container and set it aside as %s, restart policy no", j.after())
 	}
 
 	fresh := false
 	if !st.has(stepBackStarted) || !r.containerRunning(ctx, cs.BackID, false) {
 		j.begin()
+		if out, ok := j.clearName(ctx, cs.BackID); !ok {
+			return out
+		}
 		if cs.BackID != "" && r.exists(ctx, "container", cs.BackID) {
 			if _, err := docker.Run(ctx, "start", cs.BackID); err != nil {
 				return j.fail(st.From + " did not start on " + vol + ": " + firstLine(err.Error()) + "; run --back again")
@@ -455,6 +505,43 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 	}
 	return j.checkContainer(ctx, cs.BackID, fresh)
+}
+
+// nameIs says whether the container under the run's name is the one with
+// this id.
+func (j *job) nameIs(ctx context.Context, id string) bool {
+	list, err := j.r.inspectContainers(ctx, j.st.Container.Name)
+	return err == nil && len(list) == 1 && list[0].ID == id
+}
+
+// clearName sets aside, as <name>-failed-<run> with restart policy no, a
+// container left under the name the way back is about to run: one a docker
+// run made and could not start (a port still taken), which would otherwise
+// make every later attempt fail on the name (the third review). A container
+// under the name that runs, and is not the run's own (keep), stops the way
+// back with nothing touched.
+func (j *job) clearName(ctx context.Context, keep string) (wentBack, bool) {
+	r, cs := j.r, j.st.Container
+	list, err := r.inspectContainers(ctx, cs.Name)
+	if err != nil || len(list) != 1 || (keep != "" && list[0].ID == keep) {
+		return wentBack{}, true
+	}
+	c := list[0]
+	if c.State.Running {
+		return j.fail("a container named " + cs.Name + " runs, and it is not this run's; nothing was started"), false
+	}
+	name := j.failed()
+	for i := 2; r.exists(ctx, "container", name); i++ {
+		name = j.failed() + "-" + strconv.Itoa(i)
+	}
+	if _, err := r.deps.Docker.Run(ctx, "rename", c.ID, name); err != nil {
+		return j.fail("the container left as " + cs.Name + " could not be set aside: " + firstLine(err.Error())), false
+	}
+	_, _ = r.deps.Docker.Run(ctx, "update", "--restart", "no", name)
+	j.st.SetAside = append(j.st.SetAside, "container "+name)
+	_ = j.st.save(j.dir)
+	j.done("set the container left as %s aside as %s, restart policy no", cs.Name, name)
+	return wentBack{}, true
 }
 
 // checkArchiveDB checks a container's archive's database on the host, from a
@@ -524,7 +611,7 @@ func (r *runner) backMode(ctx context.Context) *Report {
 	}
 	defer release()
 	// Once it has begun, an interrupt must not leave the server down half way.
-	ctx, cancel := afterStop(ctx)
+	ctx, cancel := wayBackContext(ctx)
 	defer cancel()
 	out := j.wayBack(ctx)
 	switch {
@@ -576,10 +663,8 @@ func (r *runner) checkMode(ctx context.Context) *Report {
 			rep.ExitCode, rep.Summary = exitRefused, "Refused: the run's server.json does not read: "+err.Error()
 			return rep
 		}
-		c = r.check(ctx, ps.URL, st.To, st.CountBefore, func() bool {
-			ok, _ := r.isServer(ps.NewPID, ps.DataDir, spec)
-			return ok
-		})
+		c = r.check(ctx, ps.URL, st.To, st.CountBefore, r.watch(ps.NewPID, ps.DataDir, spec))
+		c = r.confirm(c, ps.NewPID, ps.DataDir, spec)
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	case kindContainer:
 		cs := st.Container

@@ -341,12 +341,13 @@ main() {
 		esac
 	fi
 
-	# After an update, or while something runs older, the agent's part is the
+	# While something runs older — the plan's 10 or 4 — the agent's part is the
 	# upgrade: the server restarted on a backup, the skill's other copies, the
-	# project's package. A downgrade is not an upgrade the agent can do.
+	# project's package (spec 054 #15). Otherwise, an update included, there is
+	# nothing of Tracepad's to upgrade, and the next step is a project's setup.
 	line="$AGENT_LINE"
-	case "$change/$plan_status" in
-	updated/* | */10 | */4) line="Update Tracepad to $version: follow $UPGRADE_PAGE" ;;
+	case "$plan_status" in
+	10 | 4) line="Update Tracepad to $version: follow $UPGRADE_PAGE" ;;
 	esac
 	say ""
 	say "Next, paste this into your coding agent (Claude Code, Codex, Cursor, …):"

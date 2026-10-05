@@ -1096,8 +1096,10 @@ server only at the server's own address. The design is spec 054.
   logged in — is put in place, and the server starts again with **the same
   arguments, environment and working directory**. A **container** is the
   command's when it is named `tracepad-<project>` (or `--container`),
-  publishes on loopback only, keeps its data in a volume at `/data`, and is
-  not Compose's; it is recreated from `docker inspect` with the same mounts,
+  publishes on loopback only, keeps its data in a volume at `/data`, is not
+  Compose's, has no setting a recreate would drop (the plan names any it
+  finds), and Docker is neither rootless nor remapping user namespaces; it is
+  recreated from `docker inspect` with the same mounts,
   ports, restart policy, labels and the variables you set, the old one renamed
   `<name>-before-<run>`.
 - **The check** asks the server's `/health` at its own address, and compares
