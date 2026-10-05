@@ -816,6 +816,14 @@ reason in a comment; adding a dialect should be a table edit.
   agent coordinating watches CI, and the session is free for the next thing.
 - Stage git changes with explicit paths (never `git add -A`); review
   `git diff --cached --name-only` before committing.
+- **A script or test that makes a git repository of its own sources
+  `scripts/lib/isolated-git.sh`** (`isolated_git_sandbox`, `scratch_repo`) and
+  never calls `git init` bare. The gate runs from the pre-push hook, whose
+  `GIT_DIR` names the real repository — in a linked worktree, the shared one —
+  and an unisolated `git init` or `git config` there rewrote the shared
+  `.git/config` twice (`core.bare = true`, a test identity), which breaks git in
+  every worktree. `make gate` runs under `scripts/gate-guard.sh`, which fails and
+  names the key if the repository is different afterwards.
 
 ## Releasing
 

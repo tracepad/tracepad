@@ -328,6 +328,9 @@ rehearsal-tag-test: ## Hold scripts/rehearsal-tag.sh to the nearest server tag f
 archive-check-test: ## Hold scripts/archive-check.sh to what it claims: a stamped build passes, one without its commit or with another one is red (part of the gate)
 	scripts/archive-check-test.sh
 
+gate-guard-test: ## Hold scripts/gate-guard.sh and scripts/lib/isolated-git.sh to what they claim, under a real pre-push hook in a linked worktree (part of the gate)
+	scripts/gate-guard-test.sh
+
 sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE
 	@for copy in sdk/js/LICENSE sdk/python/LICENSE; do \
 		cmp -s LICENSE "$$copy" || { echo "sdk-notices: $$copy differs from ./LICENSE; copy it again"; exit 1; }; \
@@ -342,7 +345,15 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 sdk-release-check: ## Assert the SDK tag checks against the versions in the tree
 	scripts/sdk-release-check-test.sh
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test archive-check-test rehearsal-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+# The gate is its checks run under scripts/gate-guard.sh, which fails the run if
+# it left the repository it ran in different (spec 020 #35): the checks make
+# git repositories of their own, the pre-push hook runs this with GIT_DIR naming
+# the real one, and a script that forgot scripts/lib/isolated-git.sh has twice
+# rewritten the shared `.git/config`.
+gate: ## Full gate: what CI runs, and the git pre-push hook
+	@scripts/gate-guard.sh $(MAKE) gate-checks
+
+gate-checks: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -391,5 +402,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \
-	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test archive-check-test rehearsal-tag-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
+	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test docs-build docs-site-test docs-site docs-site-clean gate gate-checks precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
