@@ -288,7 +288,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 		steps = append(steps,
 			fmt.Sprintf("make a run directory under %s, keep a copy of %s there to go back to, and check there is room for a backup of %s", r.deps.Backups, p.from, s.DataDir),
 			count,
-			fmt.Sprintf("stop server pid %d (SIGTERM, up to %s; never killed)", s.Proc.PID, r.deps.StopWait),
+			fmt.Sprintf("stop server pid %d (SIGTERM, up to %d seconds; never killed)", s.Proc.PID, int(r.deps.StopWait.Seconds())),
 			fmt.Sprintf("archive %s and read the archive back whole", s.DataDir),
 			fmt.Sprintf("put tracepad %s at %s", p.to, bin.Path),
 			"start it with the same arguments, environment and working directory",

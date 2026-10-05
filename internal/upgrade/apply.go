@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -106,6 +107,7 @@ func (r *runner) upgrade(ctx context.Context) *Report {
 	if rep.ExitCode == exitOK || rep.ExitCode == exitDecide {
 		rep.Next = append(rep.Next, laterOnly(next)...)
 	}
+	j.refresh(ctx)
 	j.privacy()
 	return rep
 }
@@ -352,7 +354,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	if !r.stop(ctx, ps.PID) {
 		rep.ExitCode = exitStuck
 		rep.Summary = fmt.Sprintf("Server pid %d was asked to stop and has not stopped in %s; it may still. Nothing else changed.", ps.PID, r.deps.StopWait)
-		rep.Next = append(rep.Next, "when it has stopped, start it again as it was: tracepad upgrade --back "+st.Run)
+		rep.Next = append(rep.Next, "when it has stopped, start it again as it was: "+j.upgradeCmd("--back "+st.Run))
 		return
 	}
 	_ = j.step(stepStopped)
@@ -443,12 +445,12 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 			j.r.reinstallSkill(ctx, rep, st.Binary.Path, st.To)
 			_ = j.step(stepSkill)
 		}
-		rep.Next = append(rep.Next, "to go back to "+st.From+", dropping what arrived since: tracepad upgrade --back "+st.Run)
+		rep.Next = append(rep.Next, "to go back to "+st.From+", dropping what arrived since: "+j.upgradeCmd("--back "+st.Run))
 	case verdictDecide:
 		rep.ExitCode = exitDecide
 		rep.Summary = fmt.Sprintf("Upgraded to %s; %s. Nothing was reverted: keeping it or going back is yours to decide.", st.To, c.Why)
-		rep.Person = append(rep.Person, "keep "+st.To+" (check again later: tracepad upgrade --check "+st.Run+
-			"), or go back to "+st.From+", which drops what arrived since: tracepad upgrade --back "+st.Run)
+		rep.Person = append(rep.Person, "keep "+st.To+" (check again later: "+j.upgradeCmd("--check "+st.Run)+
+			"), or go back to "+st.From+", which drops what arrived since: "+j.upgradeCmd("--back "+st.Run))
 	default:
 		j.goBack(ctx, "not healthy: "+c.Why)
 	}
@@ -466,6 +468,46 @@ func (j *job) goBack(ctx context.Context, why string) {
 	}
 	j.rep.ExitCode = exitStuck
 	j.rep.Summary = fmt.Sprintf("Not upgraded: %s. The way back did not finish: %s", why, outcome.why)
+}
+
+// upgradeCmd is how to run the command later: the installed binary when it
+// has the command, else the copy of this one the run kept — after a way back
+// to a release from before the command, the installed binary does not know
+// the word.
+func (j *job) upgradeCmd(args string) string {
+	if b := j.st.Binary; b != nil && b.Path != "" {
+		if exec.Command(b.Path, "upgrade", "--help").Run() == nil {
+			return "tracepad upgrade " + args
+		}
+	}
+	return filepath.Join(j.dir, "upgrader") + " upgrade " + args
+}
+
+// refresh brings the report's lines for the binary and the target to what
+// they are after the run.
+func (j *job) refresh(ctx context.Context) {
+	rep, r := j.rep, j.r
+	if rep.Binary != nil {
+		if v, err := r.deps.Version(ctx, rep.Binary.Path); err == nil {
+			rep.Binary.Version = v
+		}
+	}
+	for i := range rep.Servers {
+		s := &rep.Servers[i]
+		if !s.Target || j.st.Process == nil {
+			continue
+		}
+		if j.st.Process.NewPID > 0 {
+			s.PID = j.st.Process.NewPID
+		}
+		s.Version, _ = health(ctx, r.deps.HTTP, j.st.Process.URL)
+	}
+	for i := range rep.Containers {
+		c := &rep.Containers[i]
+		if c.Target && j.st.Container != nil {
+			c.Version, _ = health(ctx, r.deps.HTTP, j.st.Container.URL)
+		}
+	}
 }
 
 func (j *job) stuck(why string) {
@@ -487,7 +529,7 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 	_ = j.step(stepSkill)
 	rep.ExitCode = exitOK
 	rep.Summary = fmt.Sprintf("Upgraded the binary to %s; no server of the command's runs it.", st.To)
-	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: tracepad upgrade --back "+st.Run)
+	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: "+j.upgradeCmd("--back "+st.Run))
 }
 
 // replaceHostBinary brings the host's CLI to the container's version after a

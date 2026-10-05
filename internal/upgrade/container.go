@@ -78,7 +78,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
 		rep.ExitCode = exitStuck
 		rep.Summary = "Stuck: " + cs.Name + " did not stop: " + firstLine(err.Error())
-		rep.Next = append(rep.Next, "tracepad upgrade --back "+st.Run)
+		rep.Next = append(rep.Next, j.upgradeCmd("--back "+st.Run))
 		return
 	}
 	_ = j.step(stepStopped)

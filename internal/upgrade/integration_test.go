@@ -431,6 +431,44 @@ func TestATruncatedArchiveStartsTheOldVersionOnTheDataAsItWas(t *testing.T) {
 	}
 }
 
+// The live run of spec 054 found it: a later run's way back starts a server
+// of its own, and an earlier run's way back must stop that one, not rename
+// the data directory under it.
+func TestAnEarlierRunGoesBackPastALaterRunsWayBack(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.sendTrace(2)
+	w.waitCount(2)
+	first, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("first: %d %+v", code, first)
+	}
+	w.sendTrace(3)
+	w.waitCount(3)
+	second, code := w.run(w.deps(), "--to", vBroken, "--data-dir", w.data)
+	if code != exitWentBack {
+		t.Fatalf("second: %d %+v", code, second)
+	}
+	held, _ := lockedBy(w.data)
+	back, code := w.run(w.deps(), "--back", first.Run.ID)
+	if code != exitOK {
+		t.Fatalf("back: %d %s", code, back.Summary)
+	}
+	w.waitVersion(vOld)
+	if got := w.count(); got != 2 {
+		t.Errorf("traces: %d", got)
+	}
+	if alive(held) {
+		t.Errorf("pid %d, the later run's server, still runs", held)
+	}
+	for _, run := range []string{first.Run.ID, second.Run.ID} {
+		if _, err := os.Stat(filepath.Join(w.data+".after-"+run, "tracepad.db")); err != nil {
+			t.Errorf("not set aside for %s: %v", run, err)
+		}
+	}
+}
+
 func TestALockThatRecordsAnotherProcessIsThePersons(t *testing.T) {
 	w := newWorld(t)
 	pid := w.start()

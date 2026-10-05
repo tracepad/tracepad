@@ -29,6 +29,22 @@ func freeBytes(dir string) (int64, error) {
 	return int64(st.Bavail) * int64(st.Bsize), nil
 }
 
+// lockHeld says whether a server holds the data directory's database now: its
+// lock file is locked (spec 001 #20). A lock taken here to ask is released at
+// once.
+func lockHeld(dataDir string) bool {
+	f, err := os.OpenFile(filepath.Join(dataDir, "tracepad.db.lock"), os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return err == syscall.EWOULDBLOCK
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false
+}
+
 // lockFile takes an exclusive lock on path without waiting; ok is false when
 // another process holds it.
 func lockFile(path string) (release func(), ok bool, err error) {

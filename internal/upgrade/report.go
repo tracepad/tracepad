@@ -48,6 +48,8 @@ type Report struct {
 	Containers []ContainerReport `json:"containers"`
 	Probe      *Probe            `json:"probe,omitempty"`
 	Check      *Checked          `json:"check,omitempty"`
+	// BackCheck is the check of the old version after a way back.
+	BackCheck *Checked `json:"back_check,omitempty"`
 
 	// Plan is what the upgrade would do, in order (--plan).
 	Plan []string `json:"plan,omitempty"`
@@ -173,9 +175,16 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 	if p := rep.Probe; p != nil {
 		line("  %s answers as %s: %s", p.URL, p.Version, p.Whose)
 	}
-	if c := rep.Check; c != nil {
+	for _, cc := range []struct {
+		title string
+		c     *Checked
+	}{{"Check", rep.Check}, {"Check after the way back", rep.BackCheck}} {
+		c := cc.c
+		if c == nil {
+			continue
+		}
 		line("")
-		line("Check: %s", c.Why)
+		line("%s: %s", cc.title, c.Why)
 		if c.LogLine != "" {
 			line("  first log line  %s", c.LogLine)
 		}

@@ -90,6 +90,28 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		j.done("server pid %d still runs %s; nothing to undo", ps.PID, st.From)
 		return wentBack{ok: true}
 	}
+	// Whatever holds the data directory now — whoever started it, this run,
+	// a later run's way back, the person — may be stopped only when it is
+	// this directory's server as the run recorded it: the installed binary,
+	// the same arguments, the lock's record. Anything else stops the way back
+	// before it touches a thing, and a directory is never set aside under a
+	// server that still has it open.
+	holder := 0
+	if lockHeld(ps.DataDir) {
+		holder, _ = lockedBy(ps.DataDir)
+		ok, err := r.isServer(holder, ps.DataDir, j.spec)
+		if !ok {
+			why := fmt.Sprintf("pid %d", holder)
+			if err != nil {
+				why = err.Error()
+			}
+			return j.fail(fmt.Sprintf("pid %d holds %s, and it is not this directory's server as the run recorded it: %s. Stop it first; nothing was touched", holder, ps.DataDir, why))
+		}
+		if !st.has(stepStarted) {
+			j.done("server pid %d runs on %s; nothing to undo", holder, ps.DataDir)
+			return wentBack{ok: true}
+		}
+	}
 
 	if st.has(stepStarted) {
 		if st.Archive == nil {
@@ -117,19 +139,25 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		}
 		j.done("restored the archive into %s, and its database passes quick_check", restore)
 
-		// Only now is the new server stopped: a bad archive is found while it
+		// Only now is the server stopped: a bad archive is found while it
 		// still runs.
-		if ps.NewPID > 0 {
-			ok, err := r.isServer(ps.NewPID, ps.DataDir, j.spec)
-			switch {
-			case err != nil:
-				return j.fail(err.Error() + "; nothing was stopped, and the restore waits in " + restore)
-			case ok:
-				if !r.stop(ctx, ps.NewPID) {
-					return j.fail(fmt.Sprintf("pid %d, the new server, was asked to stop and has not; the restore waits in %s", ps.NewPID, restore))
+		if holder > 0 {
+			if ok, err := r.isServer(holder, ps.DataDir, j.spec); !ok {
+				why := "it is gone"
+				if err != nil {
+					why = err.Error()
 				}
-				j.done("stopped the new server, pid %d", ps.NewPID)
+				if r.deps.Sys.Alive(holder) || lockHeld(ps.DataDir) {
+					return j.fail(why + "; nothing was stopped, and the restore waits in " + restore)
+				}
+			} else if !r.stop(ctx, holder) {
+				return j.fail(fmt.Sprintf("server pid %d was asked to stop and has not; the restore waits in %s", holder, restore))
+			} else {
+				j.done("stopped server pid %d", holder)
 			}
+		}
+		if lockHeld(ps.DataDir) {
+			return j.fail("something took " + ps.DataDir + " meanwhile; nothing was set aside, and the restore waits in " + restore)
 		}
 		if err := os.Rename(ps.DataDir, after); err != nil {
 			return j.fail(fmt.Sprintf("%s could not be set aside (%v); nothing was started, and the restore waits in %s", ps.DataDir, err, restore))
@@ -156,7 +184,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	j.done("started %s again as pid %d, with its arguments and environment", st.From, ps.NewPID)
 
 	exited := j.newProc.Exited()
-	c := r.check(ctx, ps.URL, st.From, nil, func() bool {
+	c := r.check(ctx, ps.URL, st.From, st.CountBefore, func() bool {
 		select {
 		case <-exited:
 			return false
@@ -165,7 +193,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		}
 	})
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
-	j.rep.Check = &c
+	j.rep.BackCheck = &c
 	if c.Verdict == verdictNotHealthy {
 		return j.fail(st.From + " started again but is not healthy: " + c.Why)
 	}
@@ -238,6 +266,10 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	case !r.exists(ctx, "container", j.before()):
 		return j.fail("there is no " + j.before() + " to go back to; nothing was touched")
 	}
+	if list, err := r.inspectContainers(ctx, cs.Name); err == nil && len(list) == 1 && list[0].ID != cs.NewID {
+		return j.fail("the container named " + cs.Name + " now is not the one this run started: a later run's, or one made since. " +
+			"Go back from the run that made it first; nothing was touched")
+	}
 	check := filepath.Join(j.dir, "check-"+strconv.Itoa(os.Getpid()))
 	if err := os.Mkdir(check, 0o700); err != nil {
 		return j.fail(err.Error())
@@ -301,9 +333,9 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 
 func (j *job) checkContainer(ctx context.Context, id string) wentBack {
 	cs := j.st.Container
-	c := j.r.check(ctx, cs.URL, j.st.From, nil, func() bool { return j.r.containerRunning(ctx, id) })
+	c := j.r.check(ctx, cs.URL, j.st.From, j.st.CountBefore, func() bool { return j.r.containerRunning(ctx, id) })
 	c.LogLine = j.r.containerFirstLog(ctx, id)
-	j.rep.Check = &c
+	j.rep.BackCheck = &c
 	if c.Verdict == verdictNotHealthy {
 		return j.fail(j.st.From + " started again but is not healthy: " + c.Why)
 	}
@@ -362,6 +394,11 @@ func (r *runner) backMode(ctx context.Context) *Report {
 		rep.ExitCode = exitStuck
 		rep.Summary = "The way back did not finish: " + out.why
 	}
+	if j.st.Kind == kindProcess && j.st.Process != nil {
+		if v, err := health(ctx, r.deps.HTTP, j.st.Process.URL); err == nil {
+			rep.Notes = append(rep.Notes, j.st.Process.URL+" answers as "+v)
+		}
+	}
 	j.privacy()
 	return rep
 }
@@ -414,6 +451,6 @@ func (r *runner) checkMode(ctx context.Context) *Report {
 	if c.Verdict == verdictDecide {
 		rep.Summary = fmt.Sprintf("%s runs, but %s.", st.To, c.Why)
 	}
-	rep.Person = append(rep.Person, "go back to "+st.From+", which drops what arrived since: tracepad upgrade --back "+st.Run)
+	rep.Person = append(rep.Person, "go back to "+st.From+", which drops what arrived since: "+j.upgradeCmd("--back "+st.Run))
 	return rep
 }

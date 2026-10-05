@@ -650,3 +650,24 @@ func TestAMissingImageStopsNothing(t *testing.T) {
 		t.Error("the container was stopped")
 	}
 }
+
+func TestAWayBackLeavesALaterRunsContainerAlone(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	d.byName["tracepad-app"].ID = strings.Repeat("9", 64)
+	d.calls = nil
+	back, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitStuck || !strings.Contains(back.Summary, "not the one this run started") {
+		t.Fatalf("%d %s", code, back.Summary)
+	}
+	if slices.ContainsFunc(d.calls, func(c []string) bool {
+		return c[0] == "stop" || c[0] == "rename" || (c[0] == "volume" && c[1] == "create")
+	}) {
+		t.Errorf("it acted: %q", d.calls)
+	}
+}
