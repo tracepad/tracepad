@@ -70,6 +70,27 @@ func archiveOf(t *testing.T, files map[string][]byte) []byte {
 	return buf.Bytes()
 }
 
+// rawArchive is a gzipped tar of one entry, header as given.
+func rawArchive(t *testing.T, h tar.Header, body []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	h.Mode = 0o600
+	if h.Typeflag == tar.TypeReg {
+		h.Size = int64(len(body))
+	}
+	if err := tw.WriteHeader(&h); err != nil {
+		t.Fatal(err)
+	}
+	if h.Typeflag == tar.TypeReg {
+		_, _ = tw.Write(body)
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+	return buf.Bytes()
+}
+
 func testReleases(t *testing.T, mirror string) *Releases {
 	return &Releases{Base: "file://" + mirror, Mirror: true, OS: "linux", Arch: "amd64", Version: binaryVersion}
 }
@@ -324,10 +345,32 @@ func TestTheArchiveCountsOnlyWhenItReadsBackWhole(t *testing.T) {
 		t.Error("an archive without tracepad.db: accepted")
 	}
 
-	evil := filepath.Join(t.TempDir(), "evil.tar.gz")
-	_ = os.WriteFile(evil, archiveOf(t, map[string][]byte{"../escape": []byte("x")}), 0o600)
-	if err := extractArchive(evil, filepath.Join(t.TempDir(), "r"), 0o700); err == nil {
-		t.Error("an entry outside the directory was extracted")
+	outside := t.TempDir()
+	for name, hdr := range map[string]tar.Header{
+		"dot-dot":            {Name: "../escape", Typeflag: tar.TypeReg},
+		"dot-dot inside":     {Name: "./a/../../escape", Typeflag: tar.TypeReg},
+		"absolute":           {Name: filepath.Join(outside, "escape"), Typeflag: tar.TypeReg},
+		"symlink out":        {Name: "./tracepad.db", Typeflag: tar.TypeSymlink, Linkname: filepath.Join(outside, "escape")},
+		"hardlink out":       {Name: "./tracepad.db", Typeflag: tar.TypeLink, Linkname: "../../escape"},
+		"dot-dot, extractDB": {Name: "../tracepad.db", Typeflag: tar.TypeReg},
+	} {
+		evil := filepath.Join(t.TempDir(), "evil.tar.gz")
+		_ = os.WriteFile(evil, rawArchive(t, hdr, []byte("x")), 0o600)
+		target := filepath.Join(t.TempDir(), "r")
+		if strings.Contains(name, "extractDB") {
+			_ = os.Mkdir(target, 0o700)
+			err := extractDB(evil, target)
+			if _, statErr := os.Stat(filepath.Join(filepath.Dir(target), "tracepad.db")); err == nil && statErr == nil {
+				t.Errorf("%s: written outside", name)
+			}
+			continue
+		}
+		if err := extractArchive(evil, target, 0o700); err == nil {
+			t.Errorf("%s: extracted", name)
+		}
+		if _, err := os.Lstat(filepath.Join(outside, "escape")); err == nil {
+			t.Errorf("%s: written outside", name)
+		}
 	}
 	if err := extractArchive(out, restore, 0o700); err == nil {
 		t.Error("extracted into a directory that exists")

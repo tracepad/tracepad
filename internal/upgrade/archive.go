@@ -197,6 +197,22 @@ func cleanEntry(name string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(name), "./"), "/")
 }
 
+// safeJoin is where an archive's entry goes under dest, or an error when it
+// would go anywhere else: an absolute name, `..`, or a name that leaves dest
+// once joined and cleaned.
+func safeJoin(dest, name string) (string, error) {
+	rel := filepath.Clean(filepath.FromSlash(cleanEntry(name)))
+	if filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("the archive names %q, outside its directory", name)
+	}
+	root := filepath.Clean(dest)
+	target := filepath.Join(root, rel)
+	if !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("the archive names %q, outside its directory", name)
+	}
+	return target, nil
+}
+
 // extractArchive restores an archive into dest, which must not exist. Only
 // directories and regular files are made, and no entry may leave dest.
 func extractArchive(path, dest string, mode os.FileMode) error {
@@ -225,10 +241,10 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 		if name == "" || name == "." {
 			continue
 		}
-		if !filepath.IsLocal(filepath.FromSlash(name)) {
-			return fmt.Errorf("the archive names %q, outside its directory", h.Name)
+		target, err := safeJoin(dest, h.Name)
+		if err != nil {
+			return err
 		}
-		target := filepath.Join(dest, filepath.FromSlash(name))
 		switch h.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o700); err != nil {
@@ -253,6 +269,8 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 				return err
 			}
 			_ = os.Chtimes(target, h.ModTime, h.ModTime)
+		case tar.TypeSymlink, tar.TypeLink:
+			return fmt.Errorf("the archive holds %q, a link to %q, which a backup never has", h.Name, h.Linkname)
 		default:
 			return fmt.Errorf("the archive holds %q, which is neither a file nor a directory", h.Name)
 		}
@@ -284,7 +302,11 @@ func extractDB(path, dir string) error {
 		if h.Typeflag != tar.TypeReg || (name != dataDBName && name != dataDBName+"-wal" && name != dataDBName+"-shm") {
 			continue
 		}
-		out, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		target, err := safeJoin(dir, name)
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return err
 		}

@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"syscall"
@@ -94,7 +93,7 @@ func inspectLinux(pid int) (Process, error) {
 			p.Stdout = out
 		}
 	}
-	p.Manager = systemdUnit(dir)
+	p.Manager = systemdManager(p, cgroupOf(dir))
 	return p, nil
 }
 
@@ -146,22 +145,8 @@ func procUID(dir string) (int, bool) {
 	return 0, false
 }
 
-// systemdUnit names the service a process runs under: the last element of its
-// cgroup, when that is a `.service` (a systemd unit, a user unit, cron). A
-// terminal's, an SSH session's or tmux's is a `.scope`.
-func systemdUnit(dir string) string {
-	b, err := os.ReadFile(dir + "/cgroup")
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		if unit := path.Base(parts[2]); strings.HasSuffix(unit, ".service") {
-			return "the systemd unit " + unit
-		}
-	}
-	return ""
+// cgroupOf is /proc/<pid>/cgroup; a test gives a runner's.
+var cgroupOf = func(dir string) string {
+	b, _ := os.ReadFile(dir + "/cgroup")
+	return string(b)
 }

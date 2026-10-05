@@ -87,7 +87,7 @@ func inspectDarwin(pid int) (Process, error) {
 			p.Exe = filepath.Join(p.Cwd, p.Exe)
 		}
 	}
-	p.Manager = launchdJob(p)
+	p.Manager = launchdManager(p, os.Getuid())
 	return p, nil
 }
 
@@ -161,15 +161,4 @@ func lsofCwdStdout(pid int) (cwd, stdout string) {
 		}
 	}
 	return cwd, stdout
-}
-
-// launchdJob names the launchd job a process runs as: launchd sets
-// XPC_SERVICE_NAME to a job's label, where a terminal's processes carry `0`
-// and an application's `application.…`.
-func launchdJob(p Process) string {
-	name := p.Getenv("XPC_SERVICE_NAME")
-	if name == "" || name == "0" || strings.HasPrefix(name, "application.") {
-		return ""
-	}
-	return "the launchd job " + name
 }
