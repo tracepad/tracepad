@@ -25,6 +25,7 @@ import (
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/storetest"
+	"github.com/tracepad/tracepad/internal/upgrade"
 )
 
 // The drift test (spec 037 #8). A skill that tells an agent to run a command
@@ -37,8 +38,9 @@ import (
 // skill says it deletes is the author's rule in AGENTS.md, not this file's.
 
 // The line budgets of #1: the loaded part is paid for in every conversation
-// the skill triggers in. The total was 900 until spec 053 #20.
-var shipped = budgets{skill: 200, total: 910}
+// the skill triggers in. The total was 900 until spec 053 #20, and 910 until
+// spec 054 added the upgrade reference.
+var shipped = budgets{skill: 200, total: 980}
 
 type budgets struct{ skill, total int }
 
@@ -109,6 +111,7 @@ func TestTheDriftCheckCatchesDrift(t *testing.T) {
 		"`tracepad traces lsx`",                 // behind a prompt
 		"`tracepad trace`",                      // behind sudo, a path to the binary
 		"`tracepad skills instal`",              // behind `docker run` and the image
+		"`tracepad upgrade` has no --plann",     // an unknown flag of the upgrade (spec 054)
 	}
 	for _, needle := range want {
 		found := 0
@@ -315,6 +318,16 @@ func (s *surface) command(words []string) []string {
 			return []string{fmt.Sprintf("`tracepad serve`: %v", err)}
 		}
 		return nil
+	case "upgrade":
+		// Local, like skills: the flags are the command's own set (spec 054).
+		set := upgrade.FlagSet()
+		var problems []string
+		for _, flag := range flags(rest) {
+			if set.Lookup(flag) == nil {
+				problems = append(problems, fmt.Sprintf("`tracepad upgrade` has no --%s", flag))
+			}
+		}
+		return problems
 	case "mcp":
 		// Its flags are parsed in package main, out of this test's reach.
 		// The skill has no reason to run it; if it grows one, this test grows

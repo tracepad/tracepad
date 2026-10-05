@@ -1,6 +1,6 @@
 ---
 name: tracepad
-description: Work with Tracepad, LLM observability and evals in a single binary — a self-hosted store for the traces and spans of LLM and agent applications, with their prompts, datasets and scores. Use it to debug from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to run evals and read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; to set Tracepad up for a project from nothing — install it, start a local server, connect the application and confirm the first trace; and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
+description: Work with Tracepad, LLM observability and evals in a single binary — a self-hosted store for the traces and spans of LLM and agent applications, with their prompts, datasets and scores. Use it to debug from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to run evals and read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; to set Tracepad up for a project from nothing — install it, start a local server, connect the application and confirm the first trace; to upgrade it to a newer release — the binary, the server it runs, the skill and the application's package — with a backup first and a way back ("Update Tracepad"); and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
 metadata:
   version: dev
 ---
@@ -29,6 +29,7 @@ leaves out. Read the one that fits **before** the task's first command, and only
   [references/instrumenting.md](references/instrumenting.md).
 - Setting Tracepad up for a project that has no server or key yet:
   [references/setup.md](references/setup.md).
+- Upgrading it to a newer release: [references/upgrade.md](references/upgrade.md).
 - Score configs, datasets, eval runs, review queues:
   [references/evals.md](references/evals.md).
 - Any deletion, a key, retention, erasing a user:
@@ -193,8 +194,7 @@ that has moved since.
 - **`warning: this is tracepad X talking to a server running Y`.** The CLI and
   the server are different builds. Usually harmless; when a command or a flag
   seems missing, the server's `GET /api/v1` is the truth.
-- **This skill and the binary disagree.** When `tracepad version` differs from
-  this file's `metadata.version` (`dev` matches anything), rerun `tracepad
-  skills install` with the `--project` or `--dir` it was installed with.
+- **This skill and the binary disagree** (`tracepad version` against this file's
+  `metadata.version`; `dev` matches anything): `tracepad skills install` again, as it was installed.
 - **The server itself seems wrong.** `tracepad system`: version, uptime, row
   counts, ingest counters — the thing to paste into a bug report.

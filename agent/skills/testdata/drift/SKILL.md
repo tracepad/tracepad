@@ -48,6 +48,7 @@ tracepad skills show debuging.md
 $ tracepad traces lsx
 sudo ./bin/tracepad trace ls
 docker run --rm ghcr.io/tracepad/tracepad:0.4.0 skills instal --dir /skills
+tracepad upgrade --plann --to 0.2.0
 ```
 
 `get_trcae` is not a tool, `/api/v1/tracez` is not a route, and

@@ -125,8 +125,7 @@ func run(ctx context.Context, opt Options, deps Deps) int {
 	return rep.ExitCode
 }
 
-func parseFlags(args []string) (flags, error) {
-	var f flags
+func newFlagSet(f *flags) *flag.FlagSet {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&f.plan, "plan", false, "")
@@ -136,6 +135,15 @@ func parseFlags(args []string) (flags, error) {
 	fs.StringVar(&f.dataDir, "data-dir", "", "")
 	fs.StringVar(&f.container, "container", "", "")
 	fs.BoolVar(&f.json, "json", false, "")
+	return fs
+}
+
+// FlagSet is the command's flags, for the skill's drift test.
+func FlagSet() *flag.FlagSet { return newFlagSet(&flags{}) }
+
+func parseFlags(args []string) (flags, error) {
+	var f flags
+	fs := newFlagSet(&f)
 	if err := fs.Parse(args); err != nil {
 		return f, err
 	}
