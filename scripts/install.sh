@@ -59,7 +59,7 @@ no_stable() {
 	candidate=""
 	if [ -z "${TRACEPAD_DOWNLOAD_URL:-}" ]; then
 		candidate="$(curl --proto '=https' -fsSL "https://api.github.com/repos/$REPO/releases?per_page=10" 2>/dev/null |
-			sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1 || true)"
+			sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1 | termsafe || true)"
 	fi
 	{
 		say "tracepad install: there is no stable release of Tracepad yet, and this script installs a release candidate only when you name it."
@@ -146,7 +146,7 @@ put_in_place() {
 	new="$dir/.tracepad.$$"
 	cp "$tmp/tracepad" "$new" || fail "could not write to $dir"
 	chmod 0755 "$new"
-	now="$("$new" version 2>/dev/null || true)"
+	now="$("$new" version 2>/dev/null | termsafe || true)"
 	if [ "$now" != "$version" ]; then
 		rm -f "$new"
 		fail "the new binary says it is '$now', not $version (is $dir mounted noexec?); $bin is unchanged"
@@ -158,7 +158,8 @@ put_in_place() {
 }
 
 # termsafe is internal/termsafe's rule for a line read from stdin, so a value
-# from another process cannot drive the terminal: C0 and C1 controls, DEL and
+# from another program — a command line, whatever answers at localhost:4318, a
+# binary's own answers, GitHub's API — cannot drive the terminal: C0 and C1 controls, DEL and
 # the bidirectional embeddings, overrides and isolates become visible escapes
 # (\x1b, \u009b, \u202e), and a byte that is not UTF-8 is shown as \xNN.
 # Bytes, not characters, whatever the locale; cmd/tracepad's test holds it to
@@ -252,14 +253,14 @@ install_skill() {
 	fi
 	skill_lines=""
 	if [ -d "$HOME/.claude" ]; then
-		out="$("$bin" skills install 2>&1)" || fail "tracepad skills install: $out"
-		skill_lines="$out"
+		out="$("$bin" skills install 2>&1)" || fail "tracepad skills install: $(printf '%s\n' "$out" | termsafe)"
+		skill_lines="$(printf '%s\n' "$out" | termsafe)"
 	fi
 	if [ -d "$HOME/.agents" ] || [ -d "$HOME/.codex" ]; then
 		out="$("$bin" skills install --dir "$HOME/.agents/skills" 2>&1)" ||
-			fail "tracepad skills install --dir $HOME/.agents/skills: $out"
+			fail "tracepad skills install --dir $HOME/.agents/skills: $(printf '%s\n' "$out" | termsafe)"
 		skill_lines="${skill_lines:+$skill_lines
-}$out"
+}$(printf '%s\n' "$out" | termsafe)"
 	fi
 	if [ -z "$skill_lines" ]; then
 		skill_lines="not installed: no ~/.claude, ~/.agents or ~/.codex here. For your agent, one of:
@@ -294,7 +295,7 @@ main() {
 
 	before=""
 	replaced=no
-	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null || true)"
+	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null | termsafe || true)"
 	warning=""
 	if [ "$before" = "$version" ]; then
 		headline="tracepad $version is already installed at $bin"
@@ -368,7 +369,7 @@ main() {
 		watchdog=$!
 		wait "$probe" 2>/dev/null || true
 		kill "$watchdog" 2>/dev/null || true
-		running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
+		running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health" | termsafe)"
 		if [ -n "$running" ] && [ "$running" != "$version" ]; then
 			say ""
 			say "Tracepad $running answers at localhost:4318, and it is not this binary: a container, or another install."

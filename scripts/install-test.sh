@@ -330,6 +330,10 @@ run servers-other 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING=0.3.0 \
 	FAKE_PS="4100003 /usr/local/bin/tracepad serve" FAKE_EXES="4100003=/usr/local/bin/tracepad"
 lacks "$out" "is still running here" servers-other
 has "$out" "Tracepad 0.3.0 answers at localhost:4318, and it is not this binary: a container, or another install." servers-other
+# Whatever answers there may say anything: what it says is escaped.
+run servers-other-escapes 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING="0.3.0${esc}[2J$(printf '\342\200\256')"
+has "$out" 'Tracepad 0.3.0\x1b[2J\u202e answers at localhost:4318' servers-other-escapes
+lacks "$out" "$esc" servers-other-escapes
 
 # --- A mirror over plain HTTP is refused, not trusted.
 run plain-http 1 TRACEPAD_DOWNLOAD_URL=http://127.0.0.1:9/releases
