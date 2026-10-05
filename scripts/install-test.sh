@@ -195,10 +195,18 @@ has "$out" "tracepad 0.4.0-rc.1 is installed at $bin, newer than the newest stab
 has "$out" "| TRACEPAD_VERSION=0.3.0 sh" no-downgrade
 [ "$("$bin" version)" = 0.4.0-rc.1 ] || fail "no-downgrade: the binary was replaced"
 
-# --- Pinned, it may, and says what that means.
-run downgrade 0 TRACEPAD_VERSION=0.3.0
+# --- Pinned, it may, and says what that means: a server still running the
+# newer binary is named and left running, and the agent is not sent to
+# upgrade.md, which refuses a step back.
+run downgrade 0 TRACEPAD_VERSION=0.3.0 FAKE_RUNNING=0.4.0-rc.1 \
+	FAKE_PS="4100001 tracepad serve --data-dir /data/a" FAKE_EXES="4100001=$(cd "$home/.local/bin" && pwd -P)/tracepad"
 has "$out" "downgraded tracepad 0.4.0-rc.1 → 0.3.0" downgrade
 has "$out" "does not open a database a newer one migrated" downgrade
+has "$out" "Still running the binary this replaced, 0.4.0-rc.1, on data it may have migrated, which 0.3.0 does not open; leave it running:" downgrade
+has "$out" "  pid 4100001: tracepad serve --data-dir /data/a" downgrade
+lacks "$out" "restart" downgrade
+lacks "$out" "Update Tracepad to" downgrade
+ends_with_agent_line downgrade
 [ "$("$bin" version)" = 0.3.0 ] || fail "downgrade: the binary is not 0.3.0"
 
 # --- A binary that does not run as itself is never put in place.
@@ -309,7 +317,9 @@ run servers 0 TRACEPAD_VERSION=0.3.0 FAKE_RUNNING=0.2.0 FAKE_PS="$servers" \
 4100003=/usr/local/bin/tracepad
 4100005=/bin/sh
 4100007=$realbin"
-has "$out" "tracepad 0.2.0 is still running here, from the binary this replaced. Restart it to run 0.3.0:" servers
+has "$out" "Still running the binary this replaced (0.2.0); restart each to run 0.3.0:" servers
+# 4100006's executable cannot be read, so the search is not complete, and says so.
+has "$out" "Could not check every process for the binary this replaced" servers
 has "$out" "  pid 4100001: tracepad serve --listen localhost:4319 --data-dir /data/a" servers
 has "$out" "  pid 4100002: $bin serve --data-dir /data/b" servers
 has "$out" "kill <pid> and the same command" servers
@@ -334,6 +344,27 @@ has "$out" "Tracepad 0.3.0 answers at localhost:4318, and it is not this binary:
 run servers-other-escapes 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING="0.3.0${esc}[2J$(printf '\342\200\256')"
 has "$out" 'Tracepad 0.3.0\x1b[2J\u202e answers at localhost:4318' servers-other-escapes
 lacks "$out" "$esc" servers-other-escapes
+
+# A run that replaced nothing searched nothing, so what answers at
+# localhost:4318 may be this binary's own server, never restarted: it gets the
+# restart hint, not "not this binary".
+run servers-not-replaced 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING=0.3.0
+has "$out" "Tracepad 0.3.0 answers at localhost:4318; if it runs this binary, restart it to run 0.4.0-rc.1." servers-not-replaced
+lacks "$out" "not this binary" servers-not-replaced
+# With no ps at all, an update says it could not check, and keeps the hint.
+mkdir -p "$tmp/nops"
+cp "$fake/uname" "$fake/sysctl" "$fake/gh" "$fake/lsof" "$tmp/nops/"
+run servers-no-ps-first 0 TRACEPAD_VERSION=0.2.0 FAKE_RUNNING=0.4.0-rc.1 PATH="$tmp/nops:$sys"
+run servers-no-ps 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING=0.2.0 PATH="$tmp/nops:$sys"
+has "$out" "Could not check every process for the binary this replaced" servers-no-ps
+has "$out" "Tracepad 0.2.0 answers at localhost:4318; if it runs this binary, restart it to run 0.4.0-rc.1." servers-no-ps
+ends_with_upgrade_line servers-no-ps 0.4.0-rc.1
+# A binary there that gives no version is still a binary this run replaced.
+printf '#!/bin/sh\nexit 1\n' >"$bin"
+run replaced-mute 0 TRACEPAD_VERSION=0.3.0 FAKE_PS="4100001 tracepad serve" FAKE_EXES="4100001=$realbin"
+has "$out" "updated tracepad (a binary that gave no version) → 0.3.0" replaced-mute
+has "$out" "  pid 4100001: tracepad serve" replaced-mute
+ends_with_upgrade_line replaced-mute 0.3.0
 
 # --- A mirror over plain HTTP is refused, not trusted.
 run plain-http 1 TRACEPAD_DOWNLOAD_URL=http://127.0.0.1:9/releases

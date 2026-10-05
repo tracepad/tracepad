@@ -196,23 +196,30 @@ termsafe() {
 	}'
 }
 
-# old_servers prints "PID COMMAND" for every `tracepad serve` still running
-# the binary this run replaced, found by the path of its executable, whatever
-# name started it and on whatever port: /proc on Linux, lsof on macOS. A
-# command line is anyone's to write, so it never decides which process is
-# named — one whose executable cannot be read (another user's) is not — and it
-# is printed through termsafe, so nothing in it can drive the terminal.
+# old_servers writes "PID COMMAND" to $tmp/servers for every `tracepad serve`
+# still running the binary this run replaced, found by the path of its
+# executable, whatever name started it and on whatever port: /proc on Linux,
+# lsof on macOS. A command line is anyone's to write, so it never decides which
+# process is named. searched is yes only when ps listed the processes and the
+# executable of every candidate could be read: otherwise nothing may be said
+# about what was not found.
 old_servers() {
+	: >"$tmp/servers"
+	searched=no
+	ps -A -o pid= -o args= >"$tmp/ps" 2>/dev/null || return 0
+	searched=yes
 	real="$(cd "$dir" && pwd -P)/tracepad"
-	ps -A -o pid= -o args= 2>/dev/null | while read -r pid args; do
+	while read -r pid args; do
 		case "$args" in *tracepad*" serve"*) ;; *) continue ;; esac
 		exe="$(readlink "/proc/$pid/exe" 2>/dev/null ||
 			lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" || true
 		exe="${exe% (deleted)}"
-		if [ -n "$exe" ] && { [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; }; then
-			say "$pid $(printf '%s\n' "$args" | termsafe)"
+		if [ -z "$exe" ]; then
+			searched=no
+		elif [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; then
+			printf '%s %s\n' "$pid" "$args" >>"$tmp/servers"
 		fi
-	done
+	done <"$tmp/ps"
 }
 
 # newer A B: whether version A is later than B, by semver's order — a release
@@ -243,6 +250,17 @@ newer() {
 	}'
 }
 
+# skill_into runs `tracepad skills install ARGS…` and adds what it said to
+# skill_lines, escaped once, or fails with it.
+skill_into() {
+	status=0
+	out="$("$bin" skills install "$@" 2>&1)" || status=$?
+	out="$(printf '%s\n' "$out" | termsafe)"
+	[ "$status" = 0 ] || fail "tracepad skills install $*: $out"
+	skill_lines="${skill_lines:+$skill_lines
+}$out"
+}
+
 # install_skill installs the skill where an agent on this machine reads
 # skills: Claude Code's directory, and the shared one Codex reads. A directory
 # no agent has made is not made here.
@@ -253,14 +271,10 @@ install_skill() {
 	fi
 	skill_lines=""
 	if [ -d "$HOME/.claude" ]; then
-		out="$("$bin" skills install 2>&1)" || fail "tracepad skills install: $(printf '%s\n' "$out" | termsafe)"
-		skill_lines="$(printf '%s\n' "$out" | termsafe)"
+		skill_into
 	fi
 	if [ -d "$HOME/.agents" ] || [ -d "$HOME/.codex" ]; then
-		out="$("$bin" skills install --dir "$HOME/.agents/skills" 2>&1)" ||
-			fail "tracepad skills install --dir $HOME/.agents/skills: $(printf '%s\n' "$out" | termsafe)"
-		skill_lines="${skill_lines:+$skill_lines
-}$(printf '%s\n' "$out" | termsafe)"
+		skill_into --dir "$HOME/.agents/skills"
 	fi
 	if [ -z "$skill_lines" ]; then
 		skill_lines="not installed: no ~/.claude, ~/.agents or ~/.codex here. For your agent, one of:
@@ -293,8 +307,10 @@ main() {
 
 	resolve_version
 
+	# change is what this run did to $bin: none, installed (nothing was
+	# there), updated or downgraded (a file was there, whatever it answers).
 	before=""
-	replaced=no
+	change=none
 	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null | termsafe || true)"
 	warning=""
 	if [ "$before" = "$version" ]; then
@@ -308,16 +324,20 @@ main() {
 		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$version sh"
 		version="$before"
 	else
+		existed=no
+		[ ! -e "$bin" ] || existed=yes
 		download_and_verify
 		put_in_place
-		[ -z "$before" ] || replaced=yes
-		if [ -z "$before" ]; then
+		if [ "$existed" = no ]; then
+			change=installed
 			headline="installed tracepad $version at $bin"
 		elif newer "$before" "$version"; then
+			change=downgraded
 			headline="downgraded tracepad $before → $version at $bin, as TRACEPAD_VERSION asked"
 			warning="An older binary does not open a database a newer one migrated: restore the backup taken before that upgrade (https://tracepad.github.io/tracepad/install/#upgrading)."
 		else
-			headline="updated tracepad $before → $version at $bin"
+			change=updated
+			headline="updated tracepad ${before:-(a binary that gave no version)} → $version at $bin"
 		fi
 	fi
 
@@ -347,22 +367,35 @@ main() {
 		;;
 	esac
 
-	# A server started from the old binary keeps running it until restarted.
-	# Those found by their executable are named, with their command line, so
-	# whoever reads this can restart the right one.
-	servers=""
-	[ "$replaced" = no ] || servers="$(old_servers)"
-	if [ -n "$servers" ]; then
+	# A server started from the binary this replaced keeps running it until
+	# restarted. After an update it is named, with how to restart it; after a
+	# downgrade it is named too, and left running: the older binary would not
+	# open a database it migrated.
+	searched=no
+	: >"$tmp/servers"
+	if [ "$change" = updated ] || [ "$change" = downgraded ]; then
+		old_servers
+		if [ "$searched" = no ]; then
+			say ""
+			say "Could not check every process for the binary this replaced (no ps or lsof, or another user's process): a server started from it still runs ${before:-the old version}."
+		fi
+	fi
+	if [ -s "$tmp/servers" ]; then
 		say ""
-		say "tracepad $before is still running here, from the binary this replaced. Restart it to run $version:"
-		say "$servers" | sed 's/^\([0-9]*\) /  pid \1: /'
-		say "A service restarts with its manager (sudo systemctl restart tracepad); one started by hand, with kill <pid> and the same command."
+		if [ "$change" = updated ]; then
+			say "Still running the binary this replaced (${before:-its version unknown}); restart each to run $version:"
+		else
+			say "Still running the binary this replaced, $before, on data it may have migrated, which $version does not open; leave it running:"
+		fi
+		termsafe <"$tmp/servers" | sed 's/^\([0-9]*\) /  pid \1: /'
+		if [ "$change" = updated ]; then
+			say "A service restarts with its manager (sudo systemctl restart tracepad); one started by hand, with kill <pid> and the same command."
+		fi
 	else
 		# Otherwise the local default address only, whatever address the CLI
 		# is set to, and for three seconds at most: this is a hint, not a step
-		# that may hang. Whatever answers there is not this binary's process
-		# (that would have been found above), so restarting it changes nothing
-		# this script did: it is only named.
+		# that may hang. Whether what answers there is this binary's own is
+		# said only when the search above could tell.
 		"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
 		probe=$!
 		(sleep 3 && kill "$probe") >/dev/null 2>&1 &
@@ -372,14 +405,21 @@ main() {
 		running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health" | termsafe)"
 		if [ -n "$running" ] && [ "$running" != "$version" ]; then
 			say ""
-			say "Tracepad $running answers at localhost:4318, and it is not this binary: a container, or another install."
+			if [ "$searched" = yes ]; then
+				say "Tracepad $running answers at localhost:4318, and it is not this binary: a container, or another install."
+			elif [ "$change" = downgraded ]; then
+				say "Tracepad $running answers at localhost:4318."
+			else
+				say "Tracepad $running answers at localhost:4318; if it runs this binary, restart it to run $version."
+			fi
 		fi
 	fi
 
 	# After an update the agent's part is the upgrade: the server restarted on
-	# a backup, the skill's other copies, the project's package.
+	# a backup, the skill's other copies, the project's package. A downgrade is
+	# not an upgrade the agent can do (upgrade.md refuses one).
 	line="$AGENT_LINE"
-	[ "$replaced" = no ] || line="Update Tracepad to $version: follow $UPGRADE_PAGE"
+	[ "$change" != updated ] || line="Update Tracepad to $version: follow $UPGRADE_PAGE"
 	say ""
 	say "Next, paste this into your coding agent (Claude Code, Codex, Cursor, …):"
 	say ""

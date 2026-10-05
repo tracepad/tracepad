@@ -314,7 +314,11 @@ It backs the data directory up, installs the new binary with the install
 script, restarts the server and checks it against the backup, going back to
 the backup when the check fails; then it updates the skill and the project's
 `tracepad` package ([agent-upgrade.md](agent-upgrade.md)). A service like the
-one below it leaves to you, with the commands. By hand:
+one below it leaves to you, with the commands. Its backups, in
+`~/tracepad-backups/`, are full copies of the database that stay until you
+delete them, and an erasure ([retention.md](retention.md#what-this-means-for-a-data-subject-request))
+does not reach them: the agent says so, and offers to remove them once the
+upgrade has run for a week. By hand:
 
 Schema migrations run on start, forward only: a new binary opens the existing
 data directory and brings it up to date. **A downgrade is not supported** — an

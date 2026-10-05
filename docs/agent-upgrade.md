@@ -83,8 +83,12 @@ In outline:
 ## The report
 
 - **From and to**: the versions of the binary and of each server.
-- **The backup**: its directory, which holds the whole database and is as
-  private as the data directory.
+- **The backup, said plainly**: its directory in `~/tracepad-backups/` is a
+  full copy of the database, every prompt and completion, kept until someone
+  deletes it. Deleting traces or erasing a user's data never reaches it, nor
+  what a way back set aside. The agent offers to remove them once the upgrade
+  has run for a week, gives the commands, and leaves running them to the
+  person.
 - **The checks**: the log's first line, `health`, the trace counts before and
   after, the test span.
 - **What changed**: the skill's copies, the package's pin, and the result of
