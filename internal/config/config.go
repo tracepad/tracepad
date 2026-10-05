@@ -260,7 +260,37 @@ func IsDeprecatedEnv(name string) bool {
 }
 
 // Load resolves configuration from env and the given flag arguments.
-func Load(args []string) (*Config, error) {
+func Load(args []string) (*Config, error) { return LoadStarted(args, nil) }
+
+// LoadStarted is Load that calls started once the arguments have parsed as a
+// start — not a request for help, not a flag the server does not have — and
+// before anything reads the environment. It is how the server's first log line
+// comes before every line the environment can cause (spec 001 #25) without the
+// caller keeping a copy of the flag package's idea of what asks for help: the
+// FlagSet is asked first, and `--data-dir -h`, `--h` and `-help=true` are what
+// it says they are.
+func LoadStarted(args []string, started func()) (*Config, error) {
+	// The flags are parsed into variables of their own, and laid over the
+	// environment's values below: a flag that was given wins, one that was not
+	// leaves the environment's value (and its default) alone, as when the
+	// FlagSet held the environment's values as its defaults.
+	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
+	// The caller owns user-facing usage output; suppress the FlagSet's own
+	// printing and let the returned error (flag.ErrHelp included) drive it.
+	fs.SetOutput(io.Discard)
+	var listenFlag, dataDirFlag string
+	fs.StringVar(&listenFlag, "listen", "", "HTTP listen address")
+	fs.StringVar(&dataDirFlag, "data-dir", "", "data directory (database, payloads)")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if started != nil {
+		started()
+	}
+
 	storeRaw, err := parseOnOff("TRACEPAD_STORE_RAW", true)
 	if err != nil {
 		return nil, err
@@ -392,18 +422,14 @@ func Load(args []string) (*Config, error) {
 		TrustedProxies:          trusted,
 	}
 
-	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
-	// The caller owns user-facing usage output; suppress the FlagSet's own
-	// printing and let the returned error (flag.ErrHelp included) drive it.
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
-	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "data directory (database, payloads)")
-	if err := fs.Parse(args); err != nil {
-		return nil, err
-	}
-	if fs.NArg() > 0 {
-		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
-	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "listen":
+			cfg.Listen = listenFlag
+		case "data-dir":
+			cfg.DataDir = dataDirFlag
+		}
+	})
 
 	warnUnknownEnv()
 	return cfg, nil

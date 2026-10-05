@@ -9,7 +9,9 @@
 #
 # The image must have been built with VERSION set to what EXPECT_VERSION says,
 # which is how the run proves the build argument reached the binary rather than
-# merely reached the build. Both defaults are the Makefile's, so that
+# merely reached the build; EXPECT_REVISION, when set, is the REVISION the image
+# was built with, and its first seven characters must head the log in the same
+# way. Both defaults are the Makefile's, so that
 # `make image && scripts/image-check.sh` agrees with itself; `make image-check`
 # passes whatever VERSION is in force, and CI passes `ci`.
 #
@@ -20,6 +22,14 @@ set -euo pipefail
 
 image="${1:-tracepad:dev}"
 expect_version="${EXPECT_VERSION:-dev}"
+# The commit the image was built with (REVISION), if it was given one: the log's
+# first line must then say its first seven characters. Empty for a build that
+# was given none, as `make image` is.
+expect_revision="${EXPECT_REVISION:-}"
+if [ -n "$expect_revision" ] && ! [[ "$expect_revision" =~ ^[0-9a-f]{7,40}$ ]]; then
+    echo "EXPECT_REVISION must be a commit (7 to 40 hex digits), got '$expect_revision'" >&2
+    exit 2
+fi
 
 # Distroless has no shell, so nothing here may `docker exec sh`. Everything is
 # asked of the daemon (`inspect`, `top`, `cp`) or of the binary itself, which
@@ -87,15 +97,22 @@ case "$body" in
 esac
 echo "    $body"
 
-echo "==> the log opens with the version (spec 001 #25)"
+echo "==> the log opens with the version, and the commit the image was built from (spec 001 #25)"
 # `docker logs` is where a report starts. The whole log is captured before it
-# is cut, so a `head` closing the pipe cannot turn a good run into a SIGPIPE.
-logs="$(docker logs "$container" 2>&1)"
+# is cut, so a `head` closing the pipe cannot turn a good run into a SIGPIPE,
+# and a `docker logs` that fails says so rather than leaving `set -e` to end
+# the script without a word.
+logs="$(docker logs "$container" 2>&1)" || fail "docker logs $container failed, so the first line of the log could not be read"
 first="${logs%%$'\n'*}"
-case "$first" in
-    *"tracepad $expect_version"*) ;;
-    *) fail "the first line of the log is '$first', want it to name 'tracepad $expect_version'" ;;
-esac
+# The message is what follows the level, and it is compared whole: a check for
+# `tracepad 0.1.0` must not pass on a build that says `0.1.0-rc.1`.
+message="${first#* INFO }"
+want="tracepad $expect_version"
+# With a revision given the image must carry its first seven characters, which
+# is what dropping `-X main.commit` from the Dockerfile turns red; without one,
+# nothing may be claimed, and the line is the version alone (spec 020 #12).
+[ -z "$expect_revision" ] || want="$want (${expect_revision:0:7})"
+[ "$message" = "$want" ] || fail "the first line of the log is '$first', want its message to be exactly '$want'"
 echo "    $first"
 
 echo "==> the server runs as uid 65532"

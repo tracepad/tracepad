@@ -118,18 +118,6 @@ func main() {
 	}
 }
 
-// asksForHelp reports whether the arguments of serve are a request for its
-// usage, which prints the flags and starts nothing.
-func asksForHelp(args []string) bool {
-	for _, a := range args {
-		switch a {
-		case "-h", "-help", "--help":
-			return true
-		}
-	}
-	return false
-}
-
 // isTerminal reports whether output is going to a terminal rather than into a
 // pipe or a file. It is what makes agent-first the default: a pipe gets JSON
 // with no flags at all (spec 004 #12).
@@ -138,9 +126,9 @@ func isTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, helpText())
-}
+func usage() { usageTo(os.Stderr) }
+
+func usageTo(w io.Writer) { fmt.Fprint(w, helpText()) }
 
 // helpText is what `tracepad help` prints, a function of its own so the test
 // that holds it to the configuration can read it (spec 001 #24).
@@ -163,19 +151,21 @@ Flags of serve:
 ` + config.EnvHelp() + "\n" + cli.Usage
 }
 
-func serve(args []string) error {
-	// First, before the configuration is read, so that it heads the log even
-	// when what follows is a warning about the environment or a refusal to
-	// start: `docker logs` is where a report starts, and until this line the
-	// version was in `tracepad version` and the interface's footer only (spec
-	// 001 #25). A request for help is not a start.
-	if !asksForHelp(args) {
-		slog.Info(buildLabel(currentVersion(), commit))
-	}
-	cfg, err := config.Load(args)
+func serve(args []string) error { return serveAs(args, label(), os.Stderr) }
+
+// serveAs is serve told its first line and where `--help` prints, so a test
+// need not write to the build's stamps or to the process's stderr.
+func serveAs(args []string, first string, help io.Writer) error {
+	// The version heads the log, ahead of every line the environment can cause
+	// and of a refusal to start: `docker logs` is where a report starts, and
+	// until this line the version was in `tracepad version` and the
+	// interface's footer only (spec 001 #25). The configuration says when
+	// that is — once the flags have parsed as a start, which `--help` in any
+	// spelling the flag package has, and a flag it does not have, are not.
+	cfg, err := config.LoadStarted(args, func() { slog.Info(first) })
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			usage()
+			usageTo(help)
 			return nil
 		}
 		return err

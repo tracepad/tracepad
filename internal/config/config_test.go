@@ -690,3 +690,81 @@ func TestTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+// `started` is the server's first log line (spec 001 #25): it comes when the
+// arguments are a start, before the environment is read, and never for a
+// request for help — which is the FlagSet's to recognise, in every spelling it
+// has, and never a copy of its rules.
+func TestLoadStartedCallsBackOnlyForAStart(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		args    []string
+		started bool
+		help    bool
+		listen  string
+		dataDir string
+	}{
+		{"no arguments", nil, true, false, DefaultListen, ""},
+		{"flags", []string{"--listen", ":9", "--data-dir", "/d"}, true, false, ":9", "/d"},
+		{"-h", []string{"-h"}, false, true, "", ""},
+		{"--h", []string{"--h"}, false, true, "", ""},
+		{"-help", []string{"-help"}, false, true, "", ""},
+		{"--help", []string{"--help"}, false, true, "", ""},
+		{"-h=true", []string{"-h=true"}, false, true, "", ""},
+		{"-help=true", []string{"--help=true"}, false, true, "", ""},
+		{"-h after a flag", []string{"--listen", ":9", "-h"}, false, true, "", ""},
+		{"-h as the value of a flag that takes one", []string{"--data-dir", "-h"}, true, false, DefaultListen, "-h"},
+		{"--help as a listen address", []string{"--listen", "--help"}, true, false, "--help", ""},
+		{"a flag it does not have", []string{"--nope"}, false, false, "", ""},
+		{"a stray argument", []string{"serve-it"}, false, false, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TRACEPAD_DATA_DIR", "")
+			t.Setenv("TRACEPAD_LISTEN", "")
+			called := false
+			cfg, err := LoadStarted(c.args, func() { called = true })
+			if called != c.started {
+				t.Errorf("started called = %v, want %v", called, c.started)
+			}
+			if got := errors.Is(err, flag.ErrHelp); got != c.help {
+				t.Errorf("ErrHelp = %v (err %v), want %v", got, err, c.help)
+			}
+			if c.started {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Listen != c.listen {
+					t.Errorf("Listen = %q, want %q", cfg.Listen, c.listen)
+				}
+				if c.dataDir != "" && cfg.DataDir != c.dataDir {
+					t.Errorf("DataDir = %q, want %q", cfg.DataDir, c.dataDir)
+				}
+			}
+		})
+	}
+}
+
+// The line is first even when the environment is what stops the start, and a
+// flag still wins over the environment's value as it did before the flags
+// were read first.
+func TestLoadStartedPrecedesTheEnvironment(t *testing.T) {
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "not a size")
+	called := false
+	if _, err := LoadStarted(nil, func() { called = true }); err == nil {
+		t.Fatal("a bad TRACEPAD_MAX_BODY_BYTES was accepted")
+	}
+	if !called {
+		t.Error("the environment's refusal came without the first line")
+	}
+
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "")
+	t.Setenv("TRACEPAD_LISTEN", ":1111")
+	t.Setenv("TRACEPAD_DATA_DIR", "/from-env")
+	cfg, err := LoadStarted([]string{"--listen", ":2222"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Listen != ":2222" || cfg.DataDir != "/from-env" {
+		t.Errorf("Listen, DataDir = %q, %q; want the flag over the environment, the environment where there is no flag", cfg.Listen, cfg.DataDir)
+	}
+}

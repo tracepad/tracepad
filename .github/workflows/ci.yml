@@ -138,11 +138,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: make image VERSION=ci
+      # With the commit the run is for, so that the check below can hold the
+      # first line of the log to its first seven characters (spec 020 #34): an
+      # image built without the revision stamp says the version alone.
+      - run: make image VERSION=ci REVISION=${{ github.sha }}
       # Boots it on an ephemeral volume, waits for the container's own
-      # HEALTHCHECK, and asserts the version, the uid, the volume and the
-      # licence files. Single-arch, because a runner can only run its own.
-      - run: make image-check VERSION=ci
+      # HEALTHCHECK, and asserts the version, the commit, the uid, the volume and
+      # the licence files. Single-arch, because a runner can only run its own.
+      - run: make image-check VERSION=ci REVISION=${{ github.sha }}
 
   # Build-only, and once per merge: what can break the release's multi-arch
   # manifest is a stage that does not cross-compile, and building both
@@ -234,7 +237,9 @@ jobs:
   # exits 1 on the deprecated `brews` key the Homebrew formula is written with.
   # So a snapshot builds the six archives and the formula, and
   # `scripts/formula-check.sh` holds the formula to what `tap` will commit: valid
-  # Ruby, four downloads, each with the checksum the archive has. It runs only
+  # Ruby, four downloads, each with the checksum the archive has, and
+  # `scripts/archive-check.sh` starts the linux/amd64 archive and reads the
+  # first line of its log. It runs only
   # when what feeds it changes — the config, the release workflow (where the
   # GoReleaser pin lives), the checker — because it costs the interface's build.
   # The version is the pin's own: read from the workflow, so a bump of it is
@@ -291,13 +296,22 @@ jobs:
           else
             for f in $(git diff --name-only "$BASE" HEAD); do
               case "$f" in
-                .goreleaser.yaml|.github/workflows/release-server.yml|scripts/formula-check.sh) run=true ;;
+                .goreleaser.yaml|.github/workflows/release-server.yml|scripts/formula-check.sh|scripts/archive-check.sh) run=true ;;
               esac
             done
           fi
           pin="$(grep -m1 -oE 'version: "v[0-9]+\.[0-9]+\.[0-9]+"' .github/workflows/release-server.yml | grep -oE 'v[0-9.]+')"
           [ -n "$pin" ] || { echo "no GoReleaser pin in release-server.yml" >&2; exit 1; }
+          # The server's tag, named as the release names it (release-server.yml
+          # sets GORELEASER_CURRENT_TAG from the tag that triggered it). Left to
+          # itself GoReleaser takes whichever tag `git describe` finds, and on
+          # the commit that carries a release candidate that is as likely to be
+          # `sdk-js/v0.1.0-rc.1` as `v0.1.0-rc.1`: a version with a slash in
+          # it, an archive in a directory of its own, and a formula whose
+          # checksums `formula-check.sh` cannot find.
+          tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "goreleaser=$pin" >> "$GITHUB_OUTPUT"
           echo "rehearsing: $run (GoReleaser $pin)"
       - if: steps.scope.outputs.run == 'true'
@@ -316,8 +330,15 @@ jobs:
           distribution: goreleaser
           version: ${{ steps.scope.outputs.goreleaser }}
           args: release --snapshot --clean
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.scope.outputs.tag }}
       - if: steps.scope.outputs.run == 'true'
         run: scripts/formula-check.sh dist/homebrew/Formula/tracepad.rb dist/checksums.txt
+      # The archive this runner can run, started: its log must open with the
+      # version in its name and the first seven characters of this commit
+      # (spec 020 #34), which dropping `-X main.commit` from the config turns red.
+      - if: steps.scope.outputs.run == 'true'
+        run: scripts/archive-check.sh dist "$(git rev-parse HEAD)"
 
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so

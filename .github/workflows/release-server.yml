@@ -195,6 +195,11 @@ jobs:
           # itself. `check` has already refused any tag that is not vX.Y.Z or
           # vX.Y.Z-(alpha|beta|rc).N (scripts/release-tag.sh).
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+      # Started before anything is published: the archive this runner can run
+      # must open its log with the version of the tag and the first seven
+      # characters of the commit the tag is on (spec 020 #34).
+      - name: The archive says which release and commit it is
+        run: scripts/archive-check.sh dist "$GITHUB_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: archives

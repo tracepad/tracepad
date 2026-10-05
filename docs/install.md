@@ -145,8 +145,8 @@ gh attestation verify tracepad_0.1.0_linux_amd64.tar.gz --repo tracepad/tracepad
 ```
 
 The signer is the release workflow at the tag you meant, and the digest is the
-commit the archive was built from — the one the first line of the server's log
-shows in brackets. Under `set -e` the plain command is enough; `--format json`
+full commit the archive was built from; its first seven characters are the ones
+in brackets on the first line of the server's log. Under `set -e` the plain command is enough; `--format json`
 only changes what it prints, never whether it passes. The container image is
 attested the same way:
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -268,19 +269,35 @@ func TestServeRefusesADataDirectoryInUse(t *testing.T) {
 	}
 }
 
-// The version heads the log (spec 001 #25): ahead of the environment's
-// warnings and of a refusal to start, which is what a report is made of.
-func TestServeLogsTheVersionFirst(t *testing.T) {
+// cleanTracepadEnv removes every TRACEPAD_* variable for the test and puts
+// them back after it: a start's log depends on the environment, and a
+// developer's own server settings must not decide whether a test passes.
+func cleanTracepadEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "TRACEPAD_") {
+			t.Setenv(name, "") // registers the restore
+			os.Unsetenv(name)
+		}
+	}
+}
+
+// logsTo sends the default logger into a buffer for the test.
+func logsTo(t *testing.T) *bytes.Buffer {
+	t.Helper()
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	prevVersion, prevCommit := version, commit
-	version, commit = "0.1.0-rc.1", "b14b11e2a9c0"
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &logs
+}
+
+// The version heads the log (spec 001 #25): ahead of the environment's
+// warnings and of a refusal to start, which is what a report is made of.
+func TestServeLogsTheVersionFirst(t *testing.T) {
+	cleanTracepadEnv(t)
 	t.Setenv("TRACEPAD_NOT_A_SETTING", "1") // a warning that would otherwise come first
-	t.Cleanup(func() {
-		slog.SetDefault(previous)
-		version, commit = prevVersion, prevCommit
-	})
+	logs := logsTo(t)
 
 	dir := t.TempDir()
 	held, err := store.LockDatabase(filepath.Join(dir, "tracepad.db"))
@@ -288,7 +305,9 @@ func TestServeLogsTheVersionFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer held.Close()
-	if err := serve([]string{"--data-dir", dir, "--listen", "127.0.0.1:0"}); err == nil {
+	var help bytes.Buffer
+	args := []string{"--data-dir", dir, "--listen", "127.0.0.1:0"}
+	if err := serveAs(args, buildLabel("0.1.0-rc.1", "b14b11e2a9c0", nil), &help); err == nil {
 		t.Fatal("serve on a held data directory started")
 	}
 
@@ -299,18 +318,71 @@ func TestServeLogsTheVersionFirst(t *testing.T) {
 	if !strings.Contains(logs.String(), "TRACEPAD_NOT_A_SETTING") {
 		t.Errorf("the environment warning never logged, so this test proved nothing about order:\n%s", logs.String())
 	}
+	if help.Len() != 0 {
+		t.Errorf("a start printed usage: %s", help.String())
+	}
 }
 
-func TestServeHelpLogsNoVersion(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+// The version is first when the environment is what refuses the start, too.
+func TestServeLogsTheVersionBeforeAnEnvironmentRefusal(t *testing.T) {
+	cleanTracepadEnv(t)
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "not a size")
+	logs := logsTo(t)
 
-	if err := serve([]string{"-h"}); err != nil {
+	err := serveAs([]string{"--data-dir", t.TempDir()}, "tracepad test", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "TRACEPAD_MAX_BODY_BYTES") {
+		t.Fatalf("serve = %v, want the environment's refusal", err)
+	}
+	if first, _, _ := strings.Cut(logs.String(), "\n"); !strings.Contains(first, `msg="tracepad test"`) {
+		t.Errorf("first log line = %q, want the version", first)
+	}
+}
+
+// A request for help is not a start, in every spelling the flag package has
+// for it, and a value that happens to read `-h` is not a request.
+func TestServeHelpLogsNoVersion(t *testing.T) {
+	for _, args := range [][]string{{"-h"}, {"--h"}, {"-help"}, {"--help"}, {"-h=true"}, {"--help=true"}, {"--listen", "127.0.0.1:0", "-h"}} {
+		cleanTracepadEnv(t)
+		logs := logsTo(t)
+		var help bytes.Buffer
+		if err := serveAs(args, "tracepad test", &help); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if logs.Len() != 0 {
+			t.Errorf("%v: a request for help logged a start: %s", args, logs.String())
+		}
+		if !strings.Contains(help.String(), "Usage:") {
+			t.Errorf("%v: no usage was printed: %q", args, help.String())
+		}
+	}
+}
+
+func TestServeTakesHelpAsTheValueOfAFlag(t *testing.T) {
+	cleanTracepadEnv(t)
+	logs := logsTo(t)
+	// The data directory is literally named `-h`, relative to a directory of
+	// the test's own; the lock on it makes the start refuse, which is all this
+	// needs of it.
+	t.Chdir(t.TempDir())
+	dir := "-h"
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(logs.String(), "tracepad ") {
-		t.Errorf("a request for help logged a start: %s", logs.String())
+	held, err := store.LockDatabase(filepath.Join(dir, "tracepad.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	var help bytes.Buffer
+	err = serveAs([]string{"--data-dir", dir, "--listen", "127.0.0.1:0"}, "tracepad test", &help)
+	if err == nil || !strings.Contains(err.Error(), "another tracepad is already running") {
+		t.Fatalf("serve = %v, want the refusal of a start", err)
+	}
+	if first, _, _ := strings.Cut(logs.String(), "\n"); !strings.Contains(first, `msg="tracepad test"`) {
+		t.Errorf("first log line = %q, want the version", first)
+	}
+	if help.Len() != 0 {
+		t.Errorf("usage printed for a start: %s", help.String())
 	}
 }
