@@ -11,8 +11,10 @@ their own headings.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-05
+
 The first release, **0.1.0**, is the beta, and everything below ships in it.
-From the next release on, this section lists what changed since the previous
+From the next release on, each section lists what changed since the previous
 one.
 
 ### Added
@@ -116,4 +118,5 @@ one.
   script names what still runs an older version
   ([docs/cli.md](docs/cli.md#upgrade)).
 
-[Unreleased]: https://github.com/tracepad/tracepad/commits/main
+[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tracepad/tracepad/releases/tag/v0.1.0
