@@ -403,6 +403,9 @@ func TestTheFlags(t *testing.T) {
 		{"--back", "x", "--to", "0.2.0"},
 		{"--data-dir", "d", "--container", "c"},
 		{"extra"},
+		{"--back", ""},
+		{"--check", ""},
+		{"--to", ""},
 	} {
 		if _, err := parseFlags(args); err == nil {
 			t.Errorf("%q accepted", args)

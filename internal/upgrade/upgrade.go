@@ -150,6 +150,16 @@ func parseFlags(args []string) (flags, error) {
 	if fs.NArg() > 0 {
 		return f, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
+	var empty error
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Value.String() == "" {
+			// `--back "$run"` with nothing in $run must not become an upgrade.
+			empty = fmt.Errorf("--%s was given nothing", fl.Name)
+		}
+	})
+	if empty != nil {
+		return f, empty
+	}
 	modes := 0
 	for _, on := range []bool{f.plan, f.check != "", f.back != ""} {
 		if on {
