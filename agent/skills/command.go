@@ -45,8 +45,8 @@ behind, and it refuses a tracepad directory it did not install unless --force.
 Run it again after upgrading the binary.
 
 In a container (TRACEPAD_IN_CONTAINER set, as the image sets it) install writes
-only onto a mounted volume, and refuses anything else, because the container's
-own layer goes when the container does.
+only onto a mounted volume, not the container's own layer or a tmpfs, and
+refuses anything else, because those go when the container does.
 
 show prints SKILL.md, or one of its references (show debugging.md), to stdout.
 
