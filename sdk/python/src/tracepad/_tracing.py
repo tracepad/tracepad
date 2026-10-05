@@ -142,10 +142,12 @@ def _resource(config: Config) -> Any:
     if config.release:
         attributes[attrs.SERVICE_VERSION] = config.release
     resource = Resource.create(attributes)
-    if resource.attributes.get(attrs.SERVICE_NAME) == "unknown_service":
+    if str(resource.attributes.get(attrs.SERVICE_NAME, "")).startswith("unknown_service"):
         # `Resource.create` has already read OTEL_SERVICE_NAME and
         # OTEL_RESOURCE_ATTRIBUTES; the process name is the fallback for when
-        # neither of them named the service.
+        # neither of them named the service. The SDK's default is
+        # `unknown_service` up to 1.44 and `unknown_service:<executable>` from
+        # 1.45, as the Node and Go packages already read it (spec 017 #25).
         resource = resource.merge(Resource({attrs.SERVICE_NAME: _process_name()}))
     return resource
 
