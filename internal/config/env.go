@@ -17,6 +17,9 @@ const (
 	EnvClient
 	// EnvPackage: read by the Python, Node and Go packages, not by the server.
 	EnvPackage
+	// EnvInstaller: read by scripts/install.sh, and by nothing in the binary
+	// (spec 053 #10). Listed so that one left exported is not called a typo.
+	EnvInstaller
 )
 
 // EnvVar is one TRACEPAD_* variable.
@@ -70,6 +73,11 @@ var Env = []EnvVar{
 	{Name: "TRACEPAD_ENVIRONMENT", Kind: EnvPackage},
 	{Name: "TRACEPAD_RELEASE", Kind: EnvPackage},
 	{Name: "TRACEPAD_EXPORT_TIMEOUT", Kind: EnvPackage},
+
+	{Name: "TRACEPAD_VERSION", Kind: EnvInstaller},
+	{Name: "TRACEPAD_INSTALL_DIR", Kind: EnvInstaller},
+	{Name: "TRACEPAD_NO_SKILL", Kind: EnvInstaller},
+	{Name: "TRACEPAD_DOWNLOAD_URL", Kind: EnvInstaller},
 }
 
 // IsKnownEnv reports whether anything reads the variable — the server, the

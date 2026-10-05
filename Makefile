@@ -319,6 +319,18 @@ release-tag-test: ## Assert which tags the release workflow accepts, as stable, 
 release-notes-test: ## Assert how the release notes are cut from CHANGELOG.md, and that it keeps [Unreleased] (part of the gate)
 	scripts/release-notes.sh --self-test
 
+# The install script (spec 053 #10): shellcheck over it and its test — through
+# uvx at a pinned version, as `py-lint` runs ruff, so the gate needs nothing it
+# did not — then the script run against releases built in a temporary
+# directory, read through file:// addresses: no network.
+SHELLCHECK_VERSION := 0.11.0.1
+
+install-script-test: ## Shellcheck the install script and run it against a fake release, offline (part of the gate; needs uv)
+	@command -v uvx >/dev/null || { echo "install-script-test: uv is required (https://docs.astral.sh/uv/)"; exit 1; }
+	uvx --quiet --from shellcheck-py==$(SHELLCHECK_VERSION) shellcheck --shell=sh scripts/install.sh
+	uvx --quiet --from shellcheck-py==$(SHELLCHECK_VERSION) shellcheck scripts/install-test.sh
+	scripts/install-test.sh
+
 mirror-step-test: ## Run mirror-image.yml's Docker Hub mirror step, as committed, against stand-ins for skopeo and gh (part of the gate)
 	scripts/mirror-step-test.sh
 
@@ -353,7 +365,7 @@ sdk-release-check: ## Assert the SDK tag checks against the versions in the tree
 gate: ## Full gate: what CI runs, and the git pre-push hook
 	@scripts/gate-guard.sh $(MAKE) gate-checks
 
-gate-checks: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check
+gate-checks: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test install-script-test gate-guard-test archive-check-test rehearsal-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -402,5 +414,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \
-	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test docs-build docs-site-test docs-site docs-site-clean gate gate-checks precommit \
+	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test install-script-test gate-guard-test archive-check-test rehearsal-tag-test docs-build docs-site-test docs-site docs-site-clean gate gate-checks precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks
