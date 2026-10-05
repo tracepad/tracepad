@@ -4,6 +4,13 @@
 # newest tag, and a clone with SDK tags alone.
 set -euo pipefail
 
+# This runs inside the pre-push hook, whose environment points git at the
+# repository being pushed (GIT_DIR and the like), and on machines whose own
+# configuration installs hooks everywhere (core.hooksPath): neither may reach
+# the repositories made here, or their commits run the checks of this one.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+
 script="$(cd "$(dirname "$0")" && pwd)/rehearsal-tag.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
