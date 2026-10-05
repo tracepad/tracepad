@@ -8,6 +8,7 @@
 # compared whole with `tracepad <version> (<first 7 of the commit>)`.
 #
 #   scripts/archive-check.sh <dist-dir> <commit>
+#   scripts/archive-check.sh --target        (prints <os>_<arch>, as GoReleaser names it)
 #
 # The version is read from the archive's own name (`tracepad_<version>_<os>_
 # <arch>.tar.gz`, spec 020 #25), so a stamp that disagrees with the name is
@@ -15,16 +16,22 @@
 # target alone, which the stamp is not.
 set -euo pipefail
 
-[ "$#" -eq 2 ] || { echo "usage: $0 <dist-dir> <commit>" >&2; exit 2; }
+fail() { echo "archive-check: $*" >&2; exit 1; }
+
+# The GoReleaser name of the machine the check runs on, the one place the
+# mapping is written: `--target` prints it for scripts/archive-check-test.sh.
+case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) fail "no archive of this system is built" ;; esac
+case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) fail "no archive of this architecture is built" ;; esac
+if [ "${1:-}" = "--target" ]; then
+    echo "${os}_${arch}"
+    exit 0
+fi
+
+[ "$#" -eq 2 ] || { echo "usage: $0 <dist-dir> <commit> | $0 --target" >&2; exit 2; }
 dist="$1"
 commit="$2"
 
-fail() { echo "archive-check: $*" >&2; exit 1; }
-
 [[ "$commit" =~ ^[0-9a-f]{7,40}$ ]] || fail "the commit must be 7 to 40 hex digits, got '$commit'"
-
-case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) fail "no archive of this system is built" ;; esac
-case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) fail "no archive of this architecture is built" ;; esac
 
 archives=("$dist"/tracepad_*_"${os}_${arch}".tar.gz)
 [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ] || fail "want exactly one tracepad_*_${os}_${arch}.tar.gz in $dist, found: ${archives[*]}"

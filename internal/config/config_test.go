@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -691,80 +692,109 @@ func TestTrustedProxies(t *testing.T) {
 	}
 }
 
-// `started` is the server's first log line (spec 001 #25): it comes when the
-// arguments are a start, before the environment is read, and never for a
-// request for help — which is the FlagSet's to recognise, in every spelling it
-// has, and never a copy of its rules.
-func TestLoadStartedCallsBackOnlyForAStart(t *testing.T) {
+// cleanTracepadEnv removes every TRACEPAD_* variable for the test and puts
+// them back after it: what a loader returns depends on the environment, and a
+// developer's own server settings must not decide whether a test passes.
+func cleanTracepadEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "TRACEPAD_") {
+			t.Setenv(name, "") // registers the restore
+			os.Unsetenv(name)
+		}
+	}
+}
+
+// ParseFlags is the first of two steps so that the server's first log line can
+// come between them (spec 001 #25): it must say what a request for help is the
+// way the flag package does, in every spelling it has, and never mistake a
+// flag's value for one.
+func TestParseFlags(t *testing.T) {
 	for _, c := range []struct {
-		name    string
-		args    []string
-		started bool
-		help    bool
-		listen  string
-		dataDir string
+		name  string
+		args  []string
+		help  bool
+		fail  bool
+		given map[string]string
 	}{
-		{"no arguments", nil, true, false, DefaultListen, ""},
-		{"flags", []string{"--listen", ":9", "--data-dir", "/d"}, true, false, ":9", "/d"},
-		{"-h", []string{"-h"}, false, true, "", ""},
-		{"--h", []string{"--h"}, false, true, "", ""},
-		{"-help", []string{"-help"}, false, true, "", ""},
-		{"--help", []string{"--help"}, false, true, "", ""},
-		{"-h=true", []string{"-h=true"}, false, true, "", ""},
-		{"-help=true", []string{"--help=true"}, false, true, "", ""},
-		{"-h after a flag", []string{"--listen", ":9", "-h"}, false, true, "", ""},
-		{"-h as the value of a flag that takes one", []string{"--data-dir", "-h"}, true, false, DefaultListen, "-h"},
-		{"--help as a listen address", []string{"--listen", "--help"}, true, false, "--help", ""},
-		{"a flag it does not have", []string{"--nope"}, false, false, "", ""},
-		{"a stray argument", []string{"serve-it"}, false, false, "", ""},
+		{"no arguments", nil, false, false, map[string]string{}},
+		{"flags", []string{"--listen", ":9", "--data-dir", "/d"}, false, false, map[string]string{"listen": ":9", "data-dir": "/d"}},
+		{"-h", []string{"-h"}, true, false, nil},
+		{"--h", []string{"--h"}, true, false, nil},
+		{"-help", []string{"-help"}, true, false, nil},
+		{"--help", []string{"--help"}, true, false, nil},
+		{"-h=true", []string{"-h=true"}, true, false, nil},
+		{"--help=true", []string{"--help=true"}, true, false, nil},
+		{"-h after a flag", []string{"--listen", ":9", "-h"}, true, false, nil},
+		{"-h as the value of a flag that takes one", []string{"--data-dir", "-h"}, false, false, map[string]string{"data-dir": "-h"}},
+		{"--help as a listen address", []string{"--listen", "--help"}, false, false, map[string]string{"listen": "--help"}},
+		{"a flag it does not have", []string{"--nope"}, false, true, nil},
+		{"a stray argument", []string{"serve-it"}, false, true, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("TRACEPAD_DATA_DIR", "")
-			t.Setenv("TRACEPAD_LISTEN", "")
-			called := false
-			cfg, err := LoadStarted(c.args, func() { called = true })
-			if called != c.started {
-				t.Errorf("started called = %v, want %v", called, c.started)
-			}
+			flags, err := ParseFlags(c.args)
 			if got := errors.Is(err, flag.ErrHelp); got != c.help {
 				t.Errorf("ErrHelp = %v (err %v), want %v", got, err, c.help)
 			}
-			if c.started {
+			if c.fail && (err == nil || errors.Is(err, flag.ErrHelp)) {
+				t.Errorf("err = %v, want a refusal", err)
+			}
+			if c.given != nil {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if cfg.Listen != c.listen {
-					t.Errorf("Listen = %q, want %q", cfg.Listen, c.listen)
-				}
-				if c.dataDir != "" && cfg.DataDir != c.dataDir {
-					t.Errorf("DataDir = %q, want %q", cfg.DataDir, c.dataDir)
+				if !reflect.DeepEqual(flags.given, c.given) {
+					t.Errorf("given = %v, want %v", flags.given, c.given)
 				}
 			}
 		})
 	}
 }
 
-// The line is first even when the environment is what stops the start, and a
-// flag still wins over the environment's value as it did before the flags
-// were read first.
-func TestLoadStartedPrecedesTheEnvironment(t *testing.T) {
-	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "not a size")
-	called := false
-	if _, err := LoadStarted(nil, func() { called = true }); err == nil {
-		t.Fatal("a bad TRACEPAD_MAX_BODY_BYTES was accepted")
-	}
-	if !called {
-		t.Error("the environment's refusal came without the first line")
-	}
-
-	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "")
+// A flag still wins over the environment, the environment over the default,
+// and the environment's refusals come from FromEnv, after the flags.
+func TestFromEnvLaysTheFlagsOverTheEnvironment(t *testing.T) {
+	cleanTracepadEnv(t)
 	t.Setenv("TRACEPAD_LISTEN", ":1111")
 	t.Setenv("TRACEPAD_DATA_DIR", "/from-env")
-	cfg, err := LoadStarted([]string{"--listen", ":2222"}, nil)
+	flags, err := ParseFlags([]string{"--listen", ":2222"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := FromEnv(flags)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Listen != ":2222" || cfg.DataDir != "/from-env" {
 		t.Errorf("Listen, DataDir = %q, %q; want the flag over the environment, the environment where there is no flag", cfg.Listen, cfg.DataDir)
+	}
+
+	t.Setenv("TRACEPAD_MAX_BODY_BYTES", "not a size")
+	if _, err := FromEnv(flags); err == nil || !strings.Contains(err.Error(), "TRACEPAD_MAX_BODY_BYTES") {
+		t.Errorf("FromEnv = %v, want the environment's refusal", err)
+	}
+}
+
+// A flag is a row of flagTargets, registered and applied from the one table;
+// this holds every row to doing something, so a flag cannot be accepted by the
+// command line and then ignored.
+func TestEveryFlagChangesTheConfiguration(t *testing.T) {
+	cleanTracepadEnv(t)
+	base, err := FromEnv(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range flagTargets {
+		flags, err := ParseFlags([]string{"--" + target.name + "=sentinel-value"})
+		if err != nil {
+			t.Fatalf("--%s: %v", target.name, err)
+		}
+		cfg, err := FromEnv(flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reflect.DeepEqual(cfg, base) {
+			t.Errorf("--%s was accepted and changed nothing", target.name)
+		}
 	}
 }
