@@ -3,9 +3,9 @@
 # — against releases built here, in a temporary directory, and read through
 # `file://` addresses: no network and no server. The archives are real
 # tar.gz files with a stand-in `tracepad` inside and a real checksums.txt
-# beside them; `uname`, `sysctl` and `gh` are stand-ins too, and the PATH the
-# script sees holds nothing else of this machine's but the tools it needs, so
-# a `gh` installed here cannot answer for the stand-in.
+# beside them; `uname`, `sysctl`, `gh`, `ps` and `lsof` are stand-ins too, and
+# the PATH the script sees holds nothing else of this machine's but the tools
+# it needs, so a `gh` installed here cannot answer for the stand-in.
 #
 #   scripts/install-test.sh        (part of the gate: make install-script-test)
 set -euo pipefail
@@ -13,6 +13,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$root/scripts/install.sh"
 agent_line='  Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md'
+upgrade_line() { echo "  Update Tracepad to $1: follow https://tracepad.github.io/tracepad/agent-upgrade.md"; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -59,6 +60,19 @@ case "$1 ${FAKE_GH:-loggedout}" in
 "attestation fail") echo "no attestation matched" >&2; exit 1 ;;
 esac
 exit 2
+EOF
+# ps lists $FAKE_PS's lines ("PID COMMAND…"); lsof answers for a PID with
+# the executable $FAKE_EXES names for it ("PID=PATH" lines), and with nothing
+# for any other, as for another user's process.
+cat >"$fake/ps" <<'EOF'
+#!/bin/sh
+[ -z "${FAKE_PS:-}" ] || printf '%s\n' "$FAKE_PS"
+EOF
+cat >"$fake/lsof" <<'EOF'
+#!/bin/sh
+exe="$(printf '%s\n' "${FAKE_EXES:-}" | sed -n "s|^$3=||p")"
+[ -n "$exe" ] || exit 1
+printf 'p%s\nftxt\nn%s\n' "$3" "$exe"
 EOF
 chmod +x "$fake"/*
 
@@ -126,6 +140,7 @@ run() {
 has() { grep -qF -- "$2" "$1" || fail "$3: $(basename "$1") lacks: $2"; }
 lacks() { if grep -qF -- "$2" "$1"; then fail "$3: $(basename "$1") has: $2"; fi; }
 ends_with_agent_line() { [ "$(tail -n 1 "$out")" = "$agent_line" ] || fail "$1: the last line is not the agent line"; }
+ends_with_upgrade_line() { [ "$(tail -n 1 "$out")" = "$(upgrade_line "$2")" ] || fail "$1: the last line is not the upgrade line for $2"; }
 fresh_home() {
 	rm -rf "$home"
 	mkdir -p "$home" "$@"
@@ -164,7 +179,7 @@ release 0.3.0 stable
 run upgrade 0 FAKE_RUNNING=0.2.0
 has "$out" "updated tracepad 0.2.0 → 0.3.0 at $bin" upgrade
 has "$out" "The server at localhost:4318 is still running 0.2.0; restart it to run 0.3.0" upgrade
-ends_with_agent_line upgrade
+ends_with_upgrade_line upgrade 0.3.0
 
 # --- A pinned candidate, with or without its v.
 release 0.4.0-rc.1
@@ -270,6 +285,41 @@ run windows 1 FAKE_UNAME_S=MINGW64_NT-10.0
 has "$err" "is not a system this script installs for" windows
 run riscv 1 FAKE_UNAME_M=riscv64
 has "$err" "is not an architecture Tracepad is built for" riscv
+
+# --- After an update, each `tracepad serve` running the replaced binary is
+# named, found by its executable whatever started it (a bare `tracepad` on the
+# PATH, or the path itself when lsof cannot say), and nothing else is: not a
+# server from another binary, not a command that only mentions one.
+fresh_home
+run servers-before 0 TRACEPAD_VERSION=0.2.0
+realbin="$(cd "$home/.local/bin" && pwd -P)/tracepad"
+servers="4100001 tracepad serve --listen localhost:4319 --data-dir /data/a
+4100002 $bin serve --data-dir /data/b
+4100003 /usr/local/bin/tracepad serve
+4100004 tail -f /data/a/server.log
+4100005 sh -c echo tracepad serve"
+run servers 0 TRACEPAD_VERSION=0.3.0 FAKE_RUNNING=0.2.0 FAKE_PS="$servers" \
+	FAKE_EXES="4100001=$realbin
+4100003=/usr/local/bin/tracepad
+4100005=/bin/sh"
+has "$out" "tracepad 0.2.0 is still running here, from the binary this replaced. Restart it to run 0.3.0:" servers
+has "$out" "  pid 4100001: tracepad serve --listen localhost:4319 --data-dir /data/a" servers
+has "$out" "  pid 4100002: $bin serve --data-dir /data/b" servers
+has "$out" "kill <pid> and the same command" servers
+lacks "$out" "4100003" servers
+lacks "$out" "4100004" servers
+lacks "$out" "4100005" servers
+lacks "$out" "The server at localhost:4318" servers
+ends_with_upgrade_line servers 0.3.0
+# Nothing replaced, nothing named: the setup line, as on a first install.
+run servers-again 0 TRACEPAD_VERSION=0.3.0 FAKE_PS="$servers" FAKE_EXES="4100001=$realbin"
+lacks "$out" "is still running here" servers-again
+ends_with_agent_line servers-again
+# A server from another binary only: the probe of localhost:4318 still says it.
+run servers-other 0 TRACEPAD_VERSION=0.4.0-rc.1 FAKE_RUNNING=0.3.0 \
+	FAKE_PS="4100003 /usr/local/bin/tracepad serve" FAKE_EXES="4100003=/usr/local/bin/tracepad"
+lacks "$out" "is still running here" servers-other
+has "$out" "The server at localhost:4318 is still running 0.3.0; restart it to run 0.4.0-rc.1" servers-other
 
 # --- A mirror over plain HTTP is refused, not trusted.
 run plain-http 1 TRACEPAD_DOWNLOAD_URL=http://127.0.0.1:9/releases

@@ -19,6 +19,7 @@ set -eu
 REPO=tracepad/tracepad
 SCRIPT_URL=https://tracepad.github.io/tracepad/install.sh
 AGENT_LINE='Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md'
+UPGRADE_PAGE=https://tracepad.github.io/tracepad/agent-upgrade.md
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -156,6 +157,24 @@ put_in_place() {
 	}
 }
 
+# old_servers prints "PID COMMAND" for every `tracepad serve` still running
+# the binary this run replaced, found by the path of its executable, whatever
+# name started it and on whatever port: /proc on Linux, lsof on macOS, and the
+# command's first word when neither can say (another user's process).
+old_servers() {
+	real="$(cd "$dir" && pwd -P)/tracepad"
+	ps -A -o pid= -o args= 2>/dev/null | while read -r pid args; do
+		case "$args" in *tracepad*" serve"*) ;; *) continue ;; esac
+		exe="$(readlink "/proc/$pid/exe" 2>/dev/null ||
+			lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" || true
+		exe="${exe% (deleted)}"
+		[ -n "$exe" ] || exe="${args%% *}"
+		if [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; then
+			say "$pid $args"
+		fi
+	done
+}
+
 # newer A B: whether version A is later than B, by semver's order — a release
 # is later than its candidates, and alpha < beta < rc. A version that is not
 # X.Y.Z[-pre.N] (a development build's `dev`) is later than nothing.
@@ -235,6 +254,7 @@ main() {
 	resolve_version
 
 	before=""
+	replaced=no
 	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null || true)"
 	warning=""
 	if [ "$before" = "$version" ]; then
@@ -250,6 +270,7 @@ main() {
 	else
 		download_and_verify
 		put_in_place
+		[ -z "$before" ] || replaced=yes
 		if [ -z "$before" ]; then
 			headline="installed tracepad $version at $bin"
 		elif newer "$before" "$version"; then
@@ -287,24 +308,40 @@ main() {
 	esac
 
 	# A server started from the old binary keeps running it until restarted.
-	# The local default address only, whatever address the CLI is set to, and for
-	# three seconds at most: this is a hint, not a step that may hang.
-	"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
-	probe=$!
-	(sleep 3 && kill "$probe") >/dev/null 2>&1 &
-	watchdog=$!
-	wait "$probe" 2>/dev/null || true
-	kill "$watchdog" 2>/dev/null || true
-	running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
-	if [ -n "$running" ] && [ "$running" != "$version" ]; then
+	# Those found by their executable are named, with their command line, so
+	# whoever reads this can restart the right one.
+	servers=""
+	[ "$replaced" = no ] || servers="$(old_servers)"
+	if [ -n "$servers" ]; then
 		say ""
-		say "The server at localhost:4318 is still running $running; restart it to run $version."
+		say "tracepad $before is still running here, from the binary this replaced. Restart it to run $version:"
+		say "$servers" | sed 's/^\([0-9]*\) /  pid \1: /'
+		say "A service restarts with its manager (sudo systemctl restart tracepad); one started by hand, with kill <pid> and the same command."
+	else
+		# Otherwise the local default address only, whatever address the CLI
+		# is set to, and for three seconds at most: this is a hint, not a step
+		# that may hang.
+		"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
+		probe=$!
+		(sleep 3 && kill "$probe") >/dev/null 2>&1 &
+		watchdog=$!
+		wait "$probe" 2>/dev/null || true
+		kill "$watchdog" 2>/dev/null || true
+		running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
+		if [ -n "$running" ] && [ "$running" != "$version" ]; then
+			say ""
+			say "The server at localhost:4318 is still running $running; restart it to run $version."
+		fi
 	fi
 
+	# After an update the agent's part is the upgrade: the server restarted on
+	# a backup, the skill's other copies, the project's package.
+	line="$AGENT_LINE"
+	[ "$replaced" = no ] || line="Update Tracepad to $version: follow $UPGRADE_PAGE"
 	say ""
 	say "Next, paste this into your coding agent (Claude Code, Codex, Cursor, …):"
 	say ""
-	say "  $AGENT_LINE"
+	say "  $line"
 }
 
 main "$@"
