@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // isMountPoint says whether dir is on another device than its parent: a
@@ -33,7 +35,7 @@ func freeBytes(dir string) (int64, error) {
 // lock file is locked (spec 001 #20). A lock taken here to ask is released at
 // once.
 func lockHeld(dataDir string) bool {
-	f, err := os.OpenFile(filepath.Join(dataDir, "tracepad.db.lock"), os.O_RDWR, 0)
+	f, err := os.OpenFile(filepath.Join(dataDir, dataDBName+store.LockSuffix), os.O_RDWR, 0)
 	if err != nil {
 		return false
 	}

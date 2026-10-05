@@ -152,7 +152,7 @@ func parseFlags(args []string) (flags, error) {
 	}
 	var empty error
 	fs.Visit(func(fl *flag.Flag) {
-		if fl.Value.String() == "" {
+		if strings.TrimSpace(fl.Value.String()) == "" {
 			// `--back "$run"` with nothing in $run must not become an upgrade.
 			empty = fmt.Errorf("--%s was given nothing", fl.Name)
 		}

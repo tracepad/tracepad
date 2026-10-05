@@ -24,6 +24,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 // The integration tests run `tracepad upgrade` against real servers: the
@@ -284,8 +286,13 @@ func (w *world) deps() Deps {
 // upgrade runs the command and decodes its --json report.
 func (w *world) run(deps Deps, args ...string) (Report, int) {
 	w.t.Helper()
+	return w.runCtx(context.Background(), deps, args...)
+}
+
+func (w *world) runCtx(ctx context.Context, deps Deps, args ...string) (Report, int) {
+	w.t.Helper()
 	var out, errOut bytes.Buffer
-	code := run(context.Background(), Options{Args: append(args, "--json"), Version: vOld, Stdout: &out, Stderr: &errOut, Getenv: deps.Getenv}, deps)
+	code := run(ctx, Options{Args: append(args, "--json"), Version: vOld, Stdout: &out, Stderr: &errOut, Getenv: deps.Getenv}, deps)
 	var rep Report
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		w.t.Fatalf("the report is not JSON (%v): %s %s", err, out.String(), errOut.String())
@@ -477,7 +484,7 @@ func TestALockThatRecordsAnotherProcessIsThePersons(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
-	lock := filepath.Join(w.data, "tracepad.db.lock")
+	lock := filepath.Join(w.data, "tracepad.db"+store.LockSuffix)
 	if err := os.WriteFile(lock, []byte(strconv.Itoa(other.Process.Pid)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +511,7 @@ func TestTheWayBackStopsOnlyThisServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
-	lock := filepath.Join(w.data, "tracepad.db.lock")
+	lock := filepath.Join(w.data, "tracepad.db"+store.LockSuffix)
 	_ = os.WriteFile(lock, []byte(strconv.Itoa(other.Process.Pid)+"\n"), 0o600)
 	back, code := w.run(w.deps(), "--back", rep.Run.ID)
 	if code != exitStuck || !strings.Contains(back.Summary, "no longer this server") {
@@ -549,5 +556,80 @@ func TestWithoutAKeyTheCountsAreNotCompared(t *testing.T) {
 	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
 	if code != exitOK || rep.Check == nil || rep.Check.CountNote == "" {
 		t.Fatalf("exit %d, %+v", code, rep)
+	}
+}
+
+// An interrupt after the stop (Ctrl-C, an agent's timeout) must not leave the
+// server down: the swap and its way back finish on a context of their own
+// (the review of #1).
+func TestAnInterruptAfterTheStopStillBringsTheServerBack(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.waitCount(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterArchive = func(path string) {
+		cancel()
+		fi, _ := os.Stat(path)
+		_ = os.Truncate(path, fi.Size()/2)
+	}
+	t.Cleanup(func() { afterArchive = func(string) {} })
+	rep, code := w.runCtx(ctx, w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitWentBack {
+		t.Fatalf("exit %d, %s", code, rep.Summary)
+	}
+	w.waitVersion(vOld)
+	if got := w.count(); got != 1 {
+		t.Errorf("traces: %d", got)
+	}
+}
+
+// The install script already put the target in place and the server still
+// runs the old version: nothing is downloaded but the old version's copy.
+func TestAnInstalledTargetIsNotDownloadedAgain(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	next := filepath.Join(filepath.Dir(w.install), ".next")
+	if err := copyFile(filepath.Join(builtBinaries(t), vNew), next, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(next, w.install); err != nil {
+		t.Fatal(err)
+	}
+	archives, _ := filepath.Glob(filepath.Join(w.mirror, "download", "v"+vNew, "*.tar.gz"))
+	for _, a := range archives {
+		_ = os.Remove(a)
+	}
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("exit %d, %s", code, rep.Summary)
+	}
+	w.waitVersion(vNew)
+	if _, err := os.Stat(filepath.Join(rep.Run.Dir, "tracepad-"+vNew)); err == nil {
+		t.Error("the target was downloaded again")
+	}
+}
+
+// A run refused before anything stopped leaves no directory behind.
+func TestARefusedRunLeavesNoDirectory(t *testing.T) {
+	w := newWorld(t)
+	pid := w.start()
+	archives, _ := filepath.Glob(filepath.Join(w.mirror, "download", "v"+vNew, "*.tar.gz"))
+	for _, a := range archives {
+		_ = os.Remove(a)
+	}
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitRefused || rep.Run != nil {
+		t.Fatalf("exit %d, run %+v: %s", code, rep.Run, rep.Summary)
+	}
+	entries, _ := os.ReadDir(filepath.Join(w.home, "tracepad-backups"))
+	for _, e := range entries {
+		if e.Name() != ".lock" {
+			t.Errorf("left behind: %s", e.Name())
+		}
+	}
+	if !alive(pid) {
+		t.Error("the server was stopped")
 	}
 }

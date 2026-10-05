@@ -95,10 +95,12 @@ type inspectContainer struct {
 	Name  string `json:"Name"`
 	Image string `json:"Image"`
 	State struct {
-		Running bool `json:"Running"`
+		Running    bool `json:"Running"`
+		Restarting bool `json:"Restarting"`
 	} `json:"State"`
-	Config     inspectConfig `json:"Config"`
-	HostConfig struct {
+	RestartCount int           `json:"RestartCount"`
+	Config       inspectConfig `json:"Config"`
+	HostConfig   struct {
 		RestartPolicy struct {
 			Name              string `json:"Name"`
 			MaximumRetryCount int    `json:"MaximumRetryCount"`

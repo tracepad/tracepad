@@ -106,18 +106,25 @@ func downgrade(to, what, running string) string {
 // pickTarget chooses the server or container this run upgrades: the one the
 // flags name, or the only one that is the command's.
 func (r *runner) pickTarget(p *plan) error {
+	// Only what runs older than the target is a choice: two servers already
+	// at it would otherwise keep a plan pending that the upgrade refuses (the
+	// review of #1). A flag still names any of the command's.
+	behind := func(v string) bool {
+		order, ok := Compare(p.to, v)
+		return ok && order > 0
+	}
 	var ours []string
 	for i, s := range p.f.Servers {
-		if s.Ours {
-			ours = append(ours, "--data-dir "+s.DataDir)
+		if s.Ours && behind(s.Version) {
+			ours = append(ours, "--data-dir "+shq(s.DataDir))
 			if r.flags.dataDir == "" && r.flags.container == "" {
 				p.server = &p.f.Servers[i]
 			}
 		}
 	}
 	for i, c := range p.f.Containers {
-		if c.Ours {
-			ours = append(ours, "--container "+c.Name)
+		if c.Ours && behind(c.Version) {
+			ours = append(ours, "--container "+shq(c.Name))
 			if r.flags.dataDir == "" && r.flags.container == "" {
 				p.container = &p.f.Containers[i]
 			}
@@ -179,7 +186,7 @@ func (r *runner) othersBehind(p *plan) {
 		switch {
 		case s == p.server || !older(s.Version):
 		case s.Ours:
-			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): tracepad upgrade --data-dir %s", s.Proc.PID, s.Version, s.DataDir))
+			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): tracepad upgrade --data-dir %s", s.Proc.PID, s.Version, shq(s.DataDir)))
 		default:
 			p.person = append(p.person, fmt.Sprintf("server pid %d runs %s; %s. %s", s.Proc.PID, s.Version, s.Reason, serverAdvice(*s)))
 		}
@@ -189,7 +196,7 @@ func (r *runner) othersBehind(p *plan) {
 		switch {
 		case c == p.container || !older(c.Version):
 		case c.Ours:
-			p.later = append(p.later, fmt.Sprintf("container %s (%s): tracepad upgrade --container %s", c.Name, c.Version, c.Name))
+			p.later = append(p.later, fmt.Sprintf("container %s (%s): tracepad upgrade --container %s", c.Name, c.Version, shq(c.Name)))
 		default:
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(*c, p.to)))
 		}
@@ -319,10 +326,10 @@ func (r *runner) describe(p *plan, rep *Report) {
 			next += " --to " + p.to
 		}
 		if p.server != nil && r.flags.dataDir != "" {
-			next += " --data-dir " + p.server.DataDir
+			next += " --data-dir " + shq(p.server.DataDir)
 		}
 		if p.container != nil && r.flags.container != "" {
-			next += " --container " + p.container.Name
+			next += " --container " + shq(p.container.Name)
 		}
 		rep.Next = append(rep.Next, next)
 	}

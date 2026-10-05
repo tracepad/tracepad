@@ -11,8 +11,11 @@ import (
 
 // wentBack is how a way back ended.
 type wentBack struct {
-	ok  bool
-	why string
+	ok bool
+	// unconfirmed: the steps are done, but the old version has not shown it
+	// is healthy (its check said decide); why says what it showed.
+	unconfirmed bool
+	why         string
 }
 
 // wayBack undoes what the run did, from the steps its state records, in
@@ -23,9 +26,8 @@ type wentBack struct {
 func (j *job) wayBack(ctx context.Context) wentBack {
 	st := j.st
 	if st.has(stepBackDone) {
-		return wentBack{false, "this run's way back already ran"}
+		return wentBack{ok: false, why: "this run's way back already ran"}
 	}
-	_ = j.step(stepBackBegun)
 	var out wentBack
 	switch st.Kind {
 	case kindProcess:
@@ -41,7 +43,25 @@ func (j *job) wayBack(ctx context.Context) wentBack {
 	return out
 }
 
-func (j *job) fail(why string) wentBack { return wentBack{false, why} }
+func (j *job) fail(why string) wentBack { return wentBack{ok: false, why: why} }
+
+// begin records that the way back is about to change what runs. A way back
+// refused before this point touched nothing, and `--check` still works for
+// the run (the review of #1).
+func (j *job) begin() {
+	if !j.st.has(stepBackBegun) {
+		_ = j.step(stepBackBegun)
+	}
+}
+
+// checked is the end of a way back that started the old version: done, and
+// confirmed only when its check says healthy.
+func checked(c Checked) wentBack {
+	if c.Verdict == verdictNotHealthy {
+		return wentBack{ok: false, why: c.Why}
+	}
+	return wentBack{ok: true, unconfirmed: c.Verdict != verdictHealthy, why: c.Why}
+}
 
 // restoreBinary puts the version want back at the install path when it is
 // not there, from the copy in the run directory.
@@ -62,6 +82,7 @@ func (j *job) backBinary(ctx context.Context) wentBack {
 	if !j.st.has(stepBinaryReplaced) {
 		return wentBack{ok: true}
 	}
+	j.begin()
 	if err := j.restoreBinary(ctx, b.Old, b.From); err != nil {
 		return j.fail(fmt.Sprintf("%s could not be put back at %s: %v", b.From, b.Path, err))
 	}
@@ -124,7 +145,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		after, restore := ps.DataDir+".after-"+st.Run, ps.DataDir+".restore-"+st.Run
 		for _, p := range []string{after, restore} {
 			if _, err := os.Lstat(p); err == nil {
-				return j.fail(p + " exists already: this way back ran before, or something else is there; nothing was touched")
+				return j.fail(p + " exists already: this way back ran before, or one stopped half way and left it (then remove it: rm -r " + shq(p) + "), or something else is there; nothing was touched")
 			}
 		}
 		info, err := os.Stat(ps.DataDir)
@@ -132,7 +153,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 			return j.fail(err.Error())
 		}
 		if err := extractArchive(archive, restore, info.Mode().Perm()); err != nil {
-			return j.fail(fmt.Sprintf("the restore into %s failed (%v); the server and %s are as they were", restore, err, ps.DataDir))
+			return j.fail(fmt.Sprintf("the restore into %s failed (%v); the server and %s are as they were. Remove what it left before going back again: rm -r %s", restore, err, ps.DataDir, shq(restore)))
 		}
 		if err := quickCheck(ctx, filepath.Join(restore, dataDBName)); err != nil {
 			return j.fail(fmt.Sprintf("the restored database fails its check (%v); it is in %s, and the server and %s are as they were", err, restore, ps.DataDir))
@@ -141,6 +162,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 
 		// Only now is the server stopped: a bad archive is found while it
 		// still runs.
+		j.begin()
 		if holder > 0 {
 			if ok, err := r.isServer(holder, ps.DataDir, j.spec); !ok {
 				why := "it is gone"
@@ -174,6 +196,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		j.done("set %s aside as %s, and put the restore in its place", ps.DataDir, after)
 	}
 
+	j.begin()
 	if err := j.restoreBinary(ctx, ps.Old, st.From); err != nil {
 		return j.fail(fmt.Sprintf("%s could not be put back at %s (%v); nothing was started", st.From, st.Binary.Path, err))
 	}
@@ -197,7 +220,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	if c.Verdict == verdictNotHealthy {
 		return j.fail(st.From + " started again but is not healthy: " + c.Why)
 	}
-	return wentBack{ok: true}
+	return checked(c)
 }
 
 func (j *job) backContainer(ctx context.Context) wentBack {
@@ -223,12 +246,14 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	}
 	switch {
 	case !st.has(stepRenamedOld):
+		j.begin()
 		if _, err := docker.Run(ctx, "start", cs.Name); err != nil {
 			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()))
 		}
 		j.done("started %s again", cs.Name)
-		return j.checkContainer(ctx, cs.ID)
+		return j.checkContainer(ctx, cs.ID, false)
 	case !st.has(stepStarted):
+		j.begin()
 		if r.exists(ctx, "container", cs.Name) {
 			if _, err := docker.Run(ctx, "rename", cs.Name, j.failed()); err != nil {
 				return j.fail("the container the failed run left as " + cs.Name + " could not be set aside: " + firstLine(err.Error()))
@@ -249,7 +274,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 		_ = st.save(j.dir)
 		j.done("renamed %s back to %s, with its restart policy, and started it", j.before(), cs.Name)
-		return j.checkContainer(ctx, cs.ID)
+		return j.checkContainer(ctx, cs.ID, false)
 	}
 
 	// The new version ran on the volume: restore the archive into a new one.
@@ -260,7 +285,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	}
 	switch {
 	case r.exists(ctx, "volume", vol):
-		return j.fail("the volume " + vol + " exists already: this way back ran before, or something else is there; nothing was touched")
+		return j.fail("the volume " + vol + " exists already: this way back ran before, or one failed half way and left it (then remove it: docker volume rm " + shq(vol) + "); nothing was touched")
 	case r.exists(ctx, "container", j.after()):
 		return j.fail("the container " + j.after() + " exists already; nothing was touched")
 	case !r.exists(ctx, "container", j.before()):
@@ -286,18 +311,22 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	if _, err := docker.Run(ctx, "volume", "create", vol); err != nil {
 		return j.fail("the volume " + vol + " could not be made: " + firstLine(err.Error()))
 	}
-	st.SetAside = append(st.SetAside, "volume "+cs.Volume)
-	_ = st.save(j.dir)
 	_, err = docker.Run(ctx, "run", "--rm",
 		"--mount", csvField("type=volume", "src="+vol, "dst=/data"),
 		"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/old", "readonly"),
 		"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup", "readonly"),
 		busybox, "sh", "-c", `tar xzf /backup/data.tar.gz -C /data && chown -R "$(stat -c %u:%g /old)" /data && test -s /data/tracepad.db`)
 	if err != nil {
-		return j.fail("the restore into the volume " + vol + " failed (" + firstLine(err.Error()) + "); the new container still runs, untouched")
+		return j.fail("the restore into the new volume " + vol + " failed (" + firstLine(err.Error()) + "); the new container still runs on " + cs.Volume + ", untouched. " +
+			"Remove the half-made volume before going back again: docker volume rm " + shq(vol))
 	}
+	// Only now does the old volume become what the way back sets aside: a
+	// failed restore leaves it the live one (the review of #1).
+	st.SetAside = append(st.SetAside, "volume "+cs.Volume)
+	_ = st.save(j.dir)
 	j.done("restored the archive into a new volume, %s, owned as %s is", vol, cs.Volume)
 
+	j.begin()
 	if r.exists(ctx, "container", cs.Name) {
 		if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
 			return j.fail(cs.Name + " did not stop: " + firstLine(err.Error()))
@@ -328,18 +357,18 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 			j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not put back: "+err.Error())
 		}
 	}
-	return j.checkContainer(ctx, cs.NewID)
+	return j.checkContainer(ctx, cs.NewID, true)
 }
 
-func (j *job) checkContainer(ctx context.Context, id string) wentBack {
+func (j *job) checkContainer(ctx context.Context, id string, fresh bool) wentBack {
 	cs := j.st.Container
-	c := j.r.check(ctx, cs.URL, j.st.From, j.st.CountBefore, func() bool { return j.r.containerRunning(ctx, id) })
+	c := j.r.check(ctx, cs.URL, j.st.From, j.st.CountBefore, func() bool { return j.r.containerRunning(ctx, id, fresh) })
 	c.LogLine = j.r.containerFirstLog(ctx, id)
 	j.rep.BackCheck = &c
 	if c.Verdict == verdictNotHealthy {
 		return j.fail(j.st.From + " started again but is not healthy: " + c.Why)
 	}
-	return wentBack{ok: true}
+	return checked(c)
 }
 
 func removeItem(list []string, item string) []string {
@@ -386,11 +415,18 @@ func (r *runner) backMode(ctx context.Context) *Report {
 		return rep
 	}
 	defer release()
+	// Once it has begun, an interrupt must not leave the server down half way.
+	ctx, cancel := afterStop(ctx)
+	defer cancel()
 	out := j.wayBack(ctx)
-	if out.ok {
+	switch {
+	case out.ok && !out.unconfirmed:
 		rep.ExitCode = exitOK
-		rep.Summary = fmt.Sprintf("Went back: %s runs again.", j.st.From)
-	} else {
+		rep.Summary = fmt.Sprintf("Went back: %s runs again, healthy.", j.st.From)
+	case out.ok:
+		rep.ExitCode = exitStuck
+		rep.Summary = fmt.Sprintf("Went back and started %s again, but it has not shown it is healthy: %s.", j.st.From, out.why)
+	default:
 		rep.ExitCode = exitStuck
 		rep.Summary = "The way back did not finish: " + out.why
 	}
@@ -412,6 +448,12 @@ func (r *runner) checkMode(ctx context.Context) *Report {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
 		return rep
 	}
+	release, ok, err := lockFile(filepath.Join(r.deps.Backups, ".lock"))
+	if err != nil || !ok {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: another tracepad upgrade is running, or "+r.deps.Backups+" cannot be locked."
+		return rep
+	}
+	defer release()
 	st := j.st
 	if !st.has(stepStarted) || st.has(stepBackBegun) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run has no new version running to check."
@@ -433,7 +475,7 @@ func (r *runner) checkMode(ctx context.Context) *Report {
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	case kindContainer:
 		cs := st.Container
-		c = r.check(ctx, cs.URL, st.To, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID) })
+		c = r.check(ctx, cs.URL, st.To, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID, false) })
 		c.LogLine = r.containerFirstLog(ctx, cs.NewID)
 	default:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: a run of the binary alone has no server to check."

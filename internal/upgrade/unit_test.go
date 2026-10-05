@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/store"
 )
 
 func TestReleaseOrder(t *testing.T) {
@@ -187,7 +189,7 @@ func TestTheNewestCandidateIsNamedFromGitHubsAPI(t *testing.T) {
 func lockedDataDir(t *testing.T, pid int) string {
 	t.Helper()
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	if err := os.WriteFile(filepath.Join(dir, "tracepad.db.lock"), []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "tracepad.db"+store.LockSuffix), []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -230,7 +232,7 @@ func TestWhatServerIsTheCommands(t *testing.T) {
 	home, _ := filepath.EvalSymlinks(t.TempDir())
 	def := filepath.Join(home, ".local", "share", "tracepad")
 	_ = os.MkdirAll(def, 0o700)
-	_ = os.WriteFile(filepath.Join(def, "tracepad.db.lock"), []byte("7\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(def, "tracepad.db"+store.LockSuffix), []byte("7\n"), 0o600)
 	bare := Process{PID: 7, Exe: install, Argv: []string{"tracepad"}, Env: []string{"HOME=" + home, "TRACEPAD_LISTEN=127.0.0.1:5000"}}
 	s, ok = classifyServer(bare, install)
 	if !ok || !s.Ours || s.DataDir != def || s.Listen != "127.0.0.1:5000" {
@@ -266,6 +268,11 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		"[::1] for localhost": func(s *State) { s.Process.URL = "http://[::1]:4318" },
 		"a relative path":     func(s *State) { s.Process.DataDir = "d" },
 		"no kind":             func(s *State) { s.Kind = "shell" },
+		"a container's policy": func(s *State) {
+			s.Kind = kindContainer
+			s.Container = &ContainerState{Name: "tracepad-a", ID: strings.Repeat("a", 64), Volume: "v", URL: "http://127.0.0.1:4318",
+				OldRef: "ghcr.io/tracepad/tracepad:0.1.0", OldImage: "sha256:aa", NewRef: "ghcr.io/tracepad/tracepad:0.2.0", Restart: "always --privileged"}
+		},
 	} {
 		s := *good
 		p := *good.Process
@@ -449,6 +456,8 @@ func TestTheFlags(t *testing.T) {
 		{"--back", ""},
 		{"--check", ""},
 		{"--to", ""},
+		{"--to", " "},
+		{"--back", "  "},
 	} {
 		if _, err := parseFlags(args); err == nil {
 			t.Errorf("%q accepted", args)
@@ -457,5 +466,42 @@ func TestTheFlags(t *testing.T) {
 	f, err := parseFlags([]string{"--to", "v0.2.0", "--json"})
 	if err != nil || f.to != "0.2.0" || !f.json {
 		t.Errorf("%+v %v", f, err)
+	}
+}
+
+func TestCommandsArePastedAsTheyAreMeant(t *testing.T) {
+	for in, want := range map[string]string{
+		"/home/u/tracepad-backups/x":                     "/home/u/tracepad-backups/x",
+		"/Users/me/Library/Application Support/tracepad": "'/Users/me/Library/Application Support/tracepad'",
+		"it's":  `'it'\''s'`,
+		"$(id)": "'$(id)'",
+		"":      "''",
+	} {
+		if got := shq(in); got != want {
+			t.Errorf("shq(%q) = %s, want %s", in, got, want)
+		}
+	}
+	st := &State{SetAside: []string{"/Users/me/Library/Application Support/tracepad.after-r", "container c-after-r", "volume v", "container c-before-r"}}
+	got := backupsSentence("/Users/me/tracepad-backups/r", st)
+	if !strings.Contains(got, "rm -r '/Users/me/Library/Application Support/tracepad.after-r'") {
+		t.Errorf("an unquoted path: %s", got)
+	}
+	if strings.Index(got, "docker volume rm v") < strings.Index(got, "docker rm c-before-r") {
+		t.Errorf("a volume before a container: %s", got)
+	}
+}
+
+func TestOnlyWhatRunsOlderIsAChoice(t *testing.T) {
+	r := &runner{}
+	p := &plan{to: "0.2.0", f: Findings{Servers: []Server{
+		{Proc: Process{PID: 1}, DataDir: "/a", Ours: true, Version: "0.2.0"},
+		{Proc: Process{PID: 2}, DataDir: "/b", Ours: true, Version: "0.2.0"},
+	}}}
+	if err := r.pickTarget(p); err != nil || len(p.choose) != 0 || p.server != nil || p.pending() {
+		t.Errorf("two up to date: choose %q, server %v", p.choose, p.server)
+	}
+	p.f.Servers[1].Version = "0.1.0"
+	if err := r.pickTarget(p); err != nil || len(p.choose) != 0 || p.server == nil || p.server.Proc.PID != 2 {
+		t.Errorf("one behind: choose %q, server %+v", p.choose, p.server)
 	}
 }

@@ -225,9 +225,11 @@ func loadState(dir string) (*State, error) {
 }
 
 var (
-	dockerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-	imageRef   = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]*$`)
-	sha256Hex  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	restartPolicy = regexp.MustCompile(`^(no|always|unless-stopped|on-failure(:[1-9][0-9]*)?)$`)
+	containerID   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	dockerName    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+	imageRef      = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]*$`)
+	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func (s *State) validate(dirName string) error {
@@ -260,7 +262,8 @@ func (s *State) validate(dirName string) error {
 	case kindContainer:
 		c := s.Container
 		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
-			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) {
+			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
+			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.NewID != "" && !containerID.MatchString(c.NewID)) {
 			return errors.New("its container is not one a run records")
 		}
 		if !isLoopbackBase(c.URL) {

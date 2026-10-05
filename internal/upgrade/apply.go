@@ -93,6 +93,10 @@ func (r *runner) upgrade(ctx context.Context) *Report {
 
 	j, refusal := r.prepare(ctx, p, rep)
 	if j == nil {
+		if rep.Run != nil {
+			r.discard(rep.Run.Dir)
+			rep.Run = nil
+		}
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+refusal
 		return rep
 	}
@@ -156,7 +160,9 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		st.Binary.From = bin.Version
 	}
 	var newBin Fetched
-	if p.replaceBinary || p.server != nil {
+	if p.replaceBinary {
+		// The installed binary is already the target otherwise, and is what
+		// the server starts on: nothing to download (the review of #1).
 		var err error
 		newBin, err = r.deps.Releases.Fetch(ctx, p.to, dir, "tracepad-"+p.to)
 		if err != nil {
@@ -216,6 +222,25 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		return nil, err.Error()
 	}
 	return j, ""
+}
+
+// discard removes a run directory a refused run made and filled only with
+// what it fetched and wrote itself — copies of binaries, its own state — before
+// anything was stopped: left, it would hold secrets for nothing and eat into
+// the next run's room (the review of #1). Only a directory of a run's name,
+// directly under the backups directory, is ever removed.
+func (r *runner) discard(dir string) {
+	if filepath.Dir(dir) != r.deps.Backups || !runID.MatchString(filepath.Base(dir)) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
+
+// afterStop is the context the rest of a run takes once it has asked a server
+// to stop: an interrupt (Ctrl-C, an agent's timeout) must not leave it down
+// half way, so the swap and its way back finish on a deadline of their own.
+func afterStop(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
 }
 
 // keepCopy puts a verified copy of the binary at src into dst: a hard link
@@ -350,8 +375,12 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 			why = err.Error()
 		}
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: server pid "+strconv.Itoa(ps.PID)+" changed since the plan: "+why
+		r.discard(j.dir)
+		rep.Run = nil
 		return
 	}
+	ctx, cancel := afterStop(ctx)
+	defer cancel()
 	if err := j.step(stepStopSent); err != nil {
 		j.stuck("could not record the run's state: " + err.Error())
 		return
@@ -466,9 +495,14 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 func (j *job) goBack(ctx context.Context, why string) {
 	j.done("%s; the way back runs", why)
 	outcome := j.wayBack(ctx)
-	if outcome.ok {
+	switch {
+	case outcome.ok && !outcome.unconfirmed:
 		j.rep.ExitCode = exitWentBack
 		j.rep.Summary = fmt.Sprintf("Not upgraded: %s. The way back ran, and %s runs again, healthy.", why, j.st.From)
+		return
+	case outcome.ok:
+		j.rep.ExitCode = exitStuck
+		j.rep.Summary = fmt.Sprintf("Not upgraded: %s. The way back ran and started %s again, but it has not shown it is healthy: %s.", why, j.st.From, outcome.why)
 		return
 	}
 	j.rep.ExitCode = exitStuck
@@ -485,7 +519,7 @@ func (j *job) upgradeCmd(args string) string {
 			return "tracepad upgrade " + args
 		}
 	}
-	return filepath.Join(j.dir, "upgrader") + " upgrade " + args
+	return shq(filepath.Join(j.dir, "upgrader")) + " upgrade " + args
 }
 
 // refresh brings the report's lines for the binary and the target to what
@@ -526,6 +560,8 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 	r, st, rep := j.r, j.st, j.rep
 	if err := r.putInPlace(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.Binary.Path, st.To); err != nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+err.Error()
+		r.discard(j.dir)
+		rep.Run = nil
 		return
 	}
 	_ = j.step(stepBinaryReplaced)
@@ -592,20 +628,33 @@ func (j *job) privacy() {
 }
 
 func backupsSentence(dir string, st *State) string {
-	cmds := []string{"rm -r " + dir}
+	// Containers before volumes: docker refuses to remove a volume that any
+	// container, a stopped one too, still mounts (the review of #1).
+	dirs, containers, volumes := []string{"rm -r " + shq(dir)}, []string{}, []string{}
 	for _, s := range st.SetAside {
 		switch {
 		case strings.HasPrefix(s, "container "):
-			cmds = append(cmds, "docker rm "+strings.TrimPrefix(s, "container "))
+			containers = append(containers, "docker rm "+shq(strings.TrimPrefix(s, "container ")))
 		case strings.HasPrefix(s, "volume "):
-			cmds = append(cmds, "docker volume rm "+strings.TrimPrefix(s, "volume "))
+			volumes = append(volumes, "docker volume rm "+shq(strings.TrimPrefix(s, "volume ")))
 		default:
-			cmds = append(cmds, "rm -r "+s)
+			dirs = append(dirs, "rm -r "+shq(s))
 		}
 	}
+	cmds := append(append(dirs, containers...), volumes...)
 	return dir + " is a full copy of the database — every prompt and completion — and of the server's environment, secrets included. " +
 		"It stays until someone deletes it, and erasing traces or a user reaches neither it nor what a way back set aside. " +
 		"Once the new version has run for a while, remove it and what is set aside: " + strings.Join(cmds, "; ")
+}
+
+// shq quotes a word for a POSIX shell when it needs it: a command the report
+// hands on is pasted as written, and an unquoted path with a space (macOS's
+// "Application Support") would run against other paths.
+func shq(word string) string {
+	if word != "" && strings.Trim(word, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-") == "" {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 // readSpec reads server.json.

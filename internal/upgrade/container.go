@@ -123,18 +123,26 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepStarted)
 	j.done("ran %s as %s", cs.NewRef, cs.Name)
 
-	c := r.check(ctx, cs.URL, p.to, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID) })
+	c := r.check(ctx, cs.URL, p.to, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID, true) })
 	c.LogLine = r.containerFirstLog(ctx, cs.NewID)
 	j.verdict(ctx, c)
 }
 
-// containerRunning says whether the container with this id runs.
-func (r *runner) containerRunning(ctx context.Context, id string) bool {
+// containerRunning says whether the container with this id runs. Docker
+// keeps a crash-looping container Running under a restart policy, with
+// Restarting set and its count growing (the review of #1): that is not
+// running. fresh is a container this run just made, which has no business
+// having restarted at all.
+func (r *runner) containerRunning(ctx context.Context, id string, fresh bool) bool {
 	if id == "" {
 		return false
 	}
 	list, err := r.inspectContainers(ctx, id)
-	return err == nil && len(list) == 1 && list[0].State.Running
+	if err != nil || len(list) != 1 {
+		return false
+	}
+	c := list[0]
+	return c.State.Running && !c.State.Restarting && (!fresh || c.RestartCount == 0)
 }
 
 func (r *runner) containerFirstLog(ctx context.Context, id string) string {

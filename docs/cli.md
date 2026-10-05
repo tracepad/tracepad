@@ -79,7 +79,7 @@ escaping is the job of whatever reads it.
 | `2` | The command was typed wrong: unknown flag, missing argument, a `--limit` out of range. |
 | `3` | [`upgrade`](#upgrade) only: not upgraded — the way back ran, and the old version runs again. |
 | `4` | [`upgrade`](#upgrade) only: yours to decide (a check that needs you; with `--plan`, only what is yours is behind). |
-| `5` | [`upgrade`](#upgrade) only: stuck — a step failed and could not be undone; the report says what is where. |
+| `5` | [`upgrade`](#upgrade) only: stuck — a step failed and could not be undone, or the old version did not answer after a way back; the report says what is where. |
 | `10` | [`upgrade --plan`](#upgrade) only: the upgrade would change something (`0`: everything is up to date). |
 
 The split is what lets a script tell "there is no such trace" from "you
@@ -1121,8 +1121,8 @@ gives the commands to remove each. The command never deletes any of it.
 Exit `0` done, healthy, or nothing to do; `1` refused, with nothing changed;
 `2` a usage error; `3` not upgraded — the way back ran and the old version
 runs again; `4` yours to decide (the report says what and how); `5` stuck — a
-step failed and could not be undone, and the report says what runs and what is
-where. `--plan` exits `10` when the upgrade would change something, `4` when
+step failed and could not be undone, or the way back started the old version
+but could not see it answer — and the report says what runs and what is where. `--plan` exits `10` when the upgrade would change something, `4` when
 only what is yours is behind, and `0` when everything is up to date. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,

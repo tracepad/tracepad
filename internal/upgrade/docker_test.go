@@ -36,7 +36,12 @@ type fakeDocker struct {
 	// it, as a busy port does; brokenRef is an image whose server exits.
 	failRun   bool
 	brokenRef string
-	dbFile    []byte
+	// silentRef is an image whose server, on a volume a way back restored,
+	// runs and never answers;
+	// failRestore makes the way back's busybox restore fail.
+	silentRef   string
+	failRestore bool
+	dbFile      []byte
 }
 
 func newFakeDocker(t *testing.T) *fakeDocker {
@@ -160,7 +165,7 @@ func (d *fakeDocker) Run(_ context.Context, args ...string) ([]byte, error) {
 		if c == nil {
 			return nil, errors.New("No such container")
 		}
-		c.State.Running = c.Config.Image != d.brokenRef
+		d.boot(c)
 		return nil, nil
 	case args[0] == "rename":
 		c := d.find(args[1])
@@ -215,6 +220,9 @@ func (d *fakeDocker) busybox(args []string) ([]byte, error) {
 		d.archives[path] = d.volumes[mounts["/data"]["src"]]
 		return nil, nil
 	case strings.Contains(script, "tar xzf"):
+		if d.failRestore {
+			return nil, errors.New("tar: write error: No space left on device")
+		}
 		path := filepath.Join(mounts["/backup"]["src"], "data.tar.gz")
 		d.volumes[mounts["/data"]["src"]] = d.archives[path]
 		return nil, nil
@@ -305,15 +313,31 @@ func (d *fakeDocker) create(args []string) ([]byte, error) {
 	if d.failRun {
 		return nil, errors.New("Bind for 127.0.0.1:4318 failed: port is already allocated")
 	}
-	c.State.Running = ref != d.brokenRef
+	d.boot(c)
 	return []byte(c.ID + "\n"), nil
+}
+
+// boot starts a container as docker does: a broken image exits at once, and
+// under a restart policy docker starts it again and again, keeping it
+// Running with Restarting set (the review of #1).
+func (d *fakeDocker) boot(c *inspectContainer) {
+	if c.Config.Image != d.brokenRef {
+		c.State.Running, c.State.Restarting = true, false
+		return
+	}
+	if p := c.HostConfig.RestartPolicy.Name; p != "" && p != "no" {
+		c.State.Running, c.State.Restarting = true, true
+		c.RestartCount++
+		return
+	}
+	c.State.Running = false
 }
 
 // RoundTrip answers for whatever container publishes the asked port: its
 // image's version on /health, its volume's traces on /api/v1/system.
 func (d *fakeDocker) RoundTrip(req *http.Request) (*http.Response, error) {
 	for _, c := range d.byName {
-		if !c.State.Running {
+		if !c.State.Running || c.State.Restarting || c.Config.Image == d.silentRef && onRestoredVolume(c) {
 			continue
 		}
 		for _, b := range c.HostConfig.PortBindings["4318/tcp"] {
@@ -337,6 +361,16 @@ func (d *fakeDocker) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 	return nil, errors.New("connection refused")
+}
+
+// onRestoredVolume: a way back's container, on a volume it restored.
+func onRestoredVolume(c *inspectContainer) bool {
+	for _, m := range c.Mounts {
+		if m.Destination == "/data" && strings.HasPrefix(m.Name, "tracepad-app-") {
+			return true
+		}
+	}
+	return false
 }
 
 // setupContainer is the container setup.md starts, made as docker makes it,
@@ -669,5 +703,71 @@ func TestAWayBackLeavesALaterRunsContainerAlone(t *testing.T) {
 		return c[0] == "stop" || c[0] == "rename" || (c[0] == "volume" && c[1] == "create")
 	}) {
 		t.Errorf("it acted: %q", d.calls)
+	}
+}
+
+// A way back whose old version never answers is not reported as healthy.
+func TestAWayBackThatIsNotConfirmedSaysSo(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	d.brokenRef = "ghcr.io/tracepad/tracepad:0.2.1"
+	deps := containerDeps(t, d)
+	d.silentRef = "ghcr.io/tracepad/tracepad:0.1.0"
+	rep, code := runReport(t, deps, "--to", "0.2.1")
+	if code != exitStuck || !strings.Contains(rep.Summary, "has not shown it is healthy") || strings.Contains(rep.Summary, "runs again, healthy") {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+}
+
+// A restore that fails leaves the live volume the live one, says which
+// half-made volume to remove, and a second way back says so too.
+func TestAFailedRestoreNamesWhatItLeft(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	d.failRestore = true
+	vol := "tracepad-app-" + rep.Run.ID
+	back, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitStuck || !strings.Contains(back.Summary, "docker volume rm "+vol) {
+		t.Fatalf("%d %s", code, back.Summary)
+	}
+	all := strings.Join(append(back.Person, back.SetAside...), "\n")
+	if strings.Contains(all, "docker volume rm tracepad-app;") || strings.Contains(all, "docker volume rm tracepad-app\n") || strings.HasSuffix(all, "docker volume rm tracepad-app") || slices.Contains(back.SetAside, "volume tracepad-app") {
+		t.Errorf("the live volume is offered for removal: %q", all)
+	}
+	if !d.byName["tracepad-app"].State.Running {
+		t.Error("the new container was stopped")
+	}
+	// Nothing that runs was changed, so the run can still be checked.
+	if chk, code := runReport(t, deps, "--check", rep.Run.ID); code != exitOK {
+		t.Errorf("--check after a refused way back: %d %s", code, chk.Summary)
+	}
+	again, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitStuck || !strings.Contains(again.Summary, "docker volume rm "+vol) {
+		t.Errorf("second way back: %d %s", code, again.Summary)
+	}
+}
+
+func TestTheRemovalsRemoveContainersBeforeVolumes(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	back, code := runReport(t, deps, "--back", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, back.Summary)
+	}
+	sentence := back.Person[len(back.Person)-1]
+	last := strings.LastIndex(sentence, "docker rm ")
+	first := strings.Index(sentence, "docker volume rm ")
+	if last < 0 || first < 0 || last > first {
+		t.Errorf("a volume is removed before a container that mounts it: %s", sentence)
 	}
 }

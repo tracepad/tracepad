@@ -126,7 +126,7 @@ var errNotServer = errors.New("not a server")
 // writes its own after taking the lock (spec 001 #20), so a live process whose
 // PID is there holds the database.
 func lockedBy(dataDir string) (int, error) {
-	b, err := os.ReadFile(filepath.Join(dataDir, "tracepad.db"+store.LockSuffix))
+	b, err := os.ReadFile(filepath.Join(dataDir, dataDBName+store.LockSuffix))
 	if err != nil {
 		return 0, err
 	}
