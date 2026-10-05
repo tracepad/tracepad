@@ -37,3 +37,30 @@ func TestResolveVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLabel(t *testing.T) {
+	built := func(settings ...debug.BuildSetting) *debug.BuildInfo { return &debug.BuildInfo{Settings: settings} }
+	rev := debug.BuildSetting{Key: "vcs.revision", Value: "712c47b9a0e1d2c3b4a5968778695a4b3c2d1e0f"}
+	dirty := debug.BuildSetting{Key: "vcs.modified", Value: "true"}
+	clean := debug.BuildSetting{Key: "vcs.modified", Value: "false"}
+
+	for _, c := range []struct {
+		name         string
+		ver, stamped string
+		info         *debug.BuildInfo
+		want         string
+	}{
+		{"a release is its version and its stamp", "0.1.0-rc.1", "b14b11e", nil, "tracepad 0.1.0-rc.1 (b14b11e)"},
+		{"a long stamp is cut", "0.1.0", "b14b11e2a9c0d4f1e8a7b6c5d4e3f2a1b0c9d8e7", nil, "tracepad 0.1.0 (b14b11e)"},
+		{"a short stamp is kept", "0.1.0", "b14b", nil, "tracepad 0.1.0 (b14b)"},
+		{"a dev build with nothing says dev", "dev", "", nil, "tracepad dev"},
+		{"a stamp on a dev build", "dev", "b14b11e", built(rev), "tracepad dev (b14b11e)"},
+		{"a dev build made in a checkout says its revision", "dev", "", built(rev, clean), "tracepad dev (712c47b)"},
+		{"and says when the tree was not clean", "dev", "", built(rev, dirty), "tracepad dev (712c47b, dirty)"},
+		{"a release whose stamp was dropped does not borrow the checkout's", "0.1.0", "", built(rev, clean), "tracepad 0.1.0"},
+	} {
+		if got := buildLabel(c.ver, c.stamped, c.info); got != c.want {
+			t.Errorf("%s: buildLabel(%q, %q) = %q, want %q", c.name, c.ver, c.stamped, got, c.want)
+		}
+	}
+}

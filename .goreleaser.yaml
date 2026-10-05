@@ -28,7 +28,7 @@ builds:
     # stamp themselves into the binary).
     flags: [-trimpath]
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}}
 
 archives:
   - formats: [tar.gz]

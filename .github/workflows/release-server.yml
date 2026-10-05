@@ -195,6 +195,11 @@ jobs:
           # itself. `check` has already refused any tag that is not vX.Y.Z or
           # vX.Y.Z-(alpha|beta|rc).N (scripts/release-tag.sh).
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+      # Started before anything is published: the archive this runner can run
+      # must open its log with the version of the tag and the first seven
+      # characters of the commit the tag is on (spec 020 #34).
+      - name: The archive says which release and commit it is
+        run: scripts/archive-check.sh dist "$GITHUB_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: archives
@@ -240,6 +245,19 @@ jobs:
             REVISION=${{ github.sha }}
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
+      # The archive just built, started: the image that ships is this one, built
+      # with this step's own build-args, which CI's `docker` job (built through
+      # the Makefile) cannot vouch for. Its amd64 half is put in the local
+      # daemon and held to the contract of scripts/image-check.sh, the commit
+      # included: a release that drops REVISION from the build-args is red here,
+      # before anything is published (spec 020 #34).
+      - name: The image says which release and commit it is
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          skopeo copy --override-os linux --override-arch amd64 \
+            "oci-archive:$RUNNER_TEMP/image.tar" docker-daemon:tracepad:release-check
+          EXPECT_VERSION="$VERSION" EXPECT_REVISION="$GITHUB_SHA" scripts/image-check.sh tracepad:release-check
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image

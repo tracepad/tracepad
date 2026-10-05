@@ -209,6 +209,17 @@ name or by the digest you pulled.
 gh attestation verify oci://docker.io/tracepad/tracepad:0.1.0 --repo tracepad/tracepad
 ```
 
+Without a terminal (a script, CI) a verification that passes prints nothing:
+the exit code is the answer. When a log should carry the signer and the commit
+too, ask for them (the details are in
+[install.md](install.md#verify-what-you-downloaded)):
+
+```sh
+gh attestation verify oci://docker.io/tracepad/tracepad:0.1.0 --repo tracepad/tracepad \
+  --format json --jq '.[0].verificationResult.signature.certificate
+                      | {buildSignerURI, sourceRepositoryDigest}'
+```
+
 Do not add `--bundle-from-oci`: that reads the attestation from the registry
 you name, and Docker Hub does not hold it.
 

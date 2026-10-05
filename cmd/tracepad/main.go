@@ -30,6 +30,11 @@ import (
 // `go install` built it at a release tag.
 var version = ""
 
+// commit is stamped beside it (-X main.commit=): the commit the release was
+// built from, in full or short form. Empty for a build that was not given one,
+// and then the start's first line carries the version alone (spec 001 #25).
+var commit = ""
+
 // splitCommand separates the subcommand from its arguments. A leading flag
 // belongs to the default command, so `tracepad --listen :9999` serves
 // (spec 001 #1).
@@ -121,9 +126,9 @@ func isTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, helpText())
-}
+func usage() { usageTo(os.Stderr) }
+
+func usageTo(w io.Writer) { fmt.Fprint(w, helpText()) }
 
 // helpText is what `tracepad help` prints, a function of its own so the test
 // that holds it to the configuration can read it (spec 001 #24).
@@ -146,13 +151,27 @@ Flags of serve:
 ` + config.EnvHelp() + "\n" + cli.Usage
 }
 
-func serve(args []string) error {
-	cfg, err := config.Load(args)
+func serve(args []string) error { return serveAs(args, label(), os.Stderr) }
+
+// serveAs is serve told its first line and where `--help` prints, so a test
+// need not write to the build's stamps or to the process's stderr.
+func serveAs(args []string, first string, help io.Writer) error {
+	flags, err := config.ParseFlags(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			usage()
+			usageTo(help)
 			return nil
 		}
+		return err
+	}
+	// The version heads the log, ahead of every line the environment can cause
+	// and of a refusal to start: `docker logs` is where a report starts, and
+	// until this line the version was in `tracepad version` and the
+	// interface's footer only (spec 001 #25). The flags are parsed first
+	// because the flag set is what knows what a request for help is.
+	slog.Info(first)
+	cfg, err := config.FromEnv(flags)
+	if err != nil {
 		return err
 	}
 

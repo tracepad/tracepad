@@ -259,8 +259,62 @@ func IsDeprecatedEnv(name string) bool {
 	return ok
 }
 
-// Load resolves configuration from env and the given flag arguments.
+// flagTargets are the flags of the server and what each one sets, in one
+// table: ParseFlags registers them from it and FromEnv applies them from it, so
+// a new flag is a new row and cannot be registered and then left unapplied (a
+// test holds every row to changing the configuration).
+var flagTargets = []struct {
+	name, usage string
+	set         func(*Config, string)
+}{
+	{"listen", "HTTP listen address", func(c *Config, v string) { c.Listen = v }},
+	{"data-dir", "data directory (database, payloads)", func(c *Config, v string) { c.DataDir = v }},
+}
+
+// Flags are the command line's part of the configuration: the flags that were
+// given, and nothing else.
+type Flags struct{ given map[string]string }
+
+// ParseFlags reads the server's flags, and nothing from the environment. It is
+// the first of two steps (the second is FromEnv) so that the caller can write
+// the server's first log line between them (spec 001 #25): after the
+// arguments are known to be a start — not a request for help, in any spelling
+// the flag package has for one, not a flag the server does not have — and
+// before the environment can say anything. The FlagSet decides what is help,
+// so `--data-dir -h` is a data directory called `-h`.
+func ParseFlags(args []string) (*Flags, error) {
+	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
+	// The caller owns user-facing usage output; suppress the FlagSet's own
+	// printing and let the returned error (flag.ErrHelp included) drive it.
+	fs.SetOutput(io.Discard)
+	for _, t := range flagTargets {
+		fs.String(t.name, "", t.usage)
+	}
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	flags := &Flags{given: map[string]string{}}
+	fs.Visit(func(f *flag.Flag) { flags.given[f.Name] = f.Value.String() })
+	return flags, nil
+}
+
+// Load resolves configuration from the given flag arguments and the
+// environment.
 func Load(args []string) (*Config, error) {
+	flags, err := ParseFlags(args)
+	if err != nil {
+		return nil, err
+	}
+	return FromEnv(flags)
+}
+
+// FromEnv resolves the configuration from the environment, with the flags laid
+// over it: a flag that was given wins, one that was not leaves the
+// environment's value, and that the default, alone.
+func FromEnv(flags *Flags) (*Config, error) {
 	storeRaw, err := parseOnOff("TRACEPAD_STORE_RAW", true)
 	if err != nil {
 		return nil, err
@@ -392,17 +446,12 @@ func Load(args []string) (*Config, error) {
 		TrustedProxies:          trusted,
 	}
 
-	fs := flag.NewFlagSet("tracepad", flag.ContinueOnError)
-	// The caller owns user-facing usage output; suppress the FlagSet's own
-	// printing and let the returned error (flag.ErrHelp included) drive it.
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
-	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "data directory (database, payloads)")
-	if err := fs.Parse(args); err != nil {
-		return nil, err
-	}
-	if fs.NArg() > 0 {
-		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	if flags != nil {
+		for _, t := range flagTargets {
+			if v, ok := flags.given[t.name]; ok {
+				t.set(cfg, v)
+			}
+		}
 	}
 
 	warnUnknownEnv()

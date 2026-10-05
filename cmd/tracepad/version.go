@@ -39,6 +39,51 @@ func resolveVersion(stamped string, info *debug.BuildInfo) string {
 	return "dev"
 }
 
+// shortCommitLen is how much of a commit the start's first line shows: the
+// length `git rev-parse --short` settles on for a repository this size.
+const shortCommitLen = 7
+
+// buildLabel is the first line a server writes: `tracepad 0.1.0-rc.1 (b14b11e)`,
+// or `tracepad dev` when nothing says which commit the build is. The commit is
+// what the release build stamped (`-X main.commit=`), cut to its short form.
+// A `dev` build without a stamp says the revision Go itself recorded for it
+// (`vcs.revision`, with `, dirty` when the tree had changes), which is what a
+// local `go build` or `make build` has. A release never falls back to it: an
+// archive is built in a checkout and would keep saying a commit after the
+// stamp was dropped, which is the mistake the archive check exists to catch;
+// and an image build has no checkout at all (spec 020 #12).
+func buildLabel(ver, stamped string, info *debug.BuildInfo) string {
+	rev, dirty := stamped, false
+	if rev == "" && ver == "dev" && info != nil {
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+	}
+	label := "tracepad " + ver
+	if len(rev) > shortCommitLen {
+		rev = rev[:shortCommitLen]
+	}
+	switch {
+	case rev == "":
+	case dirty:
+		label += " (" + rev + ", dirty)"
+	default:
+		label += " (" + rev + ")"
+	}
+	return label
+}
+
+// label is buildLabel for this binary.
+func label() string {
+	info, _ := debug.ReadBuildInfo()
+	return buildLabel(resolveVersion(version, info), commit, info)
+}
+
 // currentVersion answers where the version is needed rather than rewriting the
 // stamped variable at start-up: `version` stays what the linker put there, and
 // nothing that runs before `main` can read a half-resolved one.

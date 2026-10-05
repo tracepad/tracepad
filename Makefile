@@ -152,13 +152,20 @@ ui-check: ui-deps ui-types-check ## Type-check the SPA and run its unit tests
 IMAGE     := tracepad
 IMAGE_TAG := dev
 
+# IMAGE_REVISION is the commit the image is built from, empty unless given on
+# the command line: `:=` ignores the caller's environment, where a shell or a CI
+# system may export a REVISION of its own (a deploy counter) that would be
+# stamped into the binary as its commit. A build context carries no commit, and
+# the log then says the version alone (spec 020 #12).
+IMAGE_REVISION :=
+
 image: ## Build the Docker image as tracepad:dev
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(IMAGE_TAG) .
+	docker build --build-arg VERSION=$(VERSION) --build-arg REVISION=$(IMAGE_REVISION) -t $(IMAGE):$(IMAGE_TAG) .
 
 # The version the check expects is the one `image` stamped, so the two targets
 # cannot disagree about what a passing run proves.
 image-check: ## Boot the image on an ephemeral volume and assert the contract
-	EXPECT_VERSION=$(VERSION) scripts/image-check.sh $(IMAGE):$(IMAGE_TAG)
+	EXPECT_VERSION=$(VERSION) EXPECT_REVISION=$(IMAGE_REVISION) scripts/image-check.sh $(IMAGE):$(IMAGE_TAG)
 
 e2e: build ## Boot the real binary on a temp database and run the Playwright smoke
 	cd $(UI) && npx playwright install chromium
@@ -315,6 +322,15 @@ release-notes-test: ## Assert how the release notes are cut from CHANGELOG.md, a
 mirror-step-test: ## Run mirror-image.yml's Docker Hub mirror step, as committed, against stand-ins for skopeo and gh (part of the gate)
 	scripts/mirror-step-test.sh
 
+rehearsal-tag-test: ## Hold scripts/rehearsal-tag.sh to the nearest server tag from HEAD, on repositories made for it (part of the gate)
+	scripts/rehearsal-tag-test.sh
+
+archive-check-test: ## Hold scripts/archive-check.sh to what it claims: a stamped build passes, one without its commit or with another one is red (part of the gate)
+	scripts/archive-check-test.sh
+
+gate-guard-test: ## Hold scripts/gate-guard.sh and scripts/lib/isolated-git.sh to what they claim, under a real pre-push hook in a linked worktree (part of the gate)
+	scripts/gate-guard-test.sh
+
 sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOTICE is not sdk/NOTICE
 	@for copy in sdk/js/LICENSE sdk/python/LICENSE; do \
 		cmp -s LICENSE "$$copy" || { echo "sdk-notices: $$copy differs from ./LICENSE; copy it again"; exit 1; }; \
@@ -329,7 +345,15 @@ sdk-notices: ## Fail if a package's copy of LICENSE is not the root's, or of NOT
 sdk-release-check: ## Assert the SDK tag checks against the versions in the tree
 	scripts/sdk-release-check-test.sh
 
-gate: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check ## Full gate: what CI runs, and the git pre-push hook
+# The gate is its checks run under scripts/gate-guard.sh, which fails the run if
+# it left the repository it ran in different (spec 020 #35): the checks make
+# git repositories of their own, the pre-push hook runs this with GIT_DIR naming
+# the real one, and a script that forgot scripts/lib/isolated-git.sh has twice
+# rewritten the shared `.git/config`.
+gate: ## Full gate: what CI runs, and the git pre-push hook
+	@scripts/gate-guard.sh $(MAKE) gate-checks
+
+gate-checks: ensure-hooks format-check vet test sdk-go-unit sdk-py-unit sdk-js-unit doc-anchors release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test sdk-release-check docs-build docs-site-test sdk-notices py-lint ui-check
 
 # The pre-commit hook runs this: the checks that are cheap and the tests of
 # what is actually staged. The full gate runs once per push instead of once
@@ -378,5 +402,5 @@ install-hooks: ## (Re)install both hooks
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \
-	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test docs-build docs-site-test docs-site docs-site-clean gate precommit \
+	doc-anchors doc-anchors-self-test release-tag-test release-notes-test mirror-step-test gate-guard-test archive-check-test rehearsal-tag-test docs-build docs-site-test docs-site docs-site-clean gate gate-checks precommit \
 	test-staged ui-check-staged ensure-hooks install-hooks

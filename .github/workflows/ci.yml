@@ -138,11 +138,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: make image VERSION=ci
+      # With the commit the run is for, so that the check below can hold the
+      # first line of the log to its first seven characters (spec 020 #34): an
+      # image built without the revision stamp says the version alone.
+      - run: make image VERSION=ci IMAGE_REVISION=${{ github.sha }}
       # Boots it on an ephemeral volume, waits for the container's own
-      # HEALTHCHECK, and asserts the version, the uid, the volume and the
-      # licence files. Single-arch, because a runner can only run its own.
-      - run: make image-check VERSION=ci
+      # HEALTHCHECK, and asserts the version, the commit, the uid, the volume and
+      # the licence files. Single-arch, because a runner can only run its own.
+      - run: make image-check VERSION=ci IMAGE_REVISION=${{ github.sha }}
 
   # Build-only, and once per merge: what can break the release's multi-arch
   # manifest is a stage that does not cross-compile, and building both
@@ -234,7 +237,9 @@ jobs:
   # exits 1 on the deprecated `brews` key the Homebrew formula is written with.
   # So a snapshot builds the six archives and the formula, and
   # `scripts/formula-check.sh` holds the formula to what `tap` will commit: valid
-  # Ruby, four downloads, each with the checksum the archive has. It runs only
+  # Ruby, four downloads, each with the checksum the archive has, and
+  # `scripts/archive-check.sh` starts the linux/amd64 archive and reads the
+  # first line of its log. It runs only
   # when what feeds it changes — the config, the release workflow (where the
   # GoReleaser pin lives), the checker — because it costs the interface's build.
   # The version is the pin's own: read from the workflow, so a bump of it is
@@ -291,7 +296,7 @@ jobs:
           else
             for f in $(git diff --name-only "$BASE" HEAD); do
               case "$f" in
-                .goreleaser.yaml|.github/workflows/release-server.yml|scripts/formula-check.sh) run=true ;;
+                .goreleaser.yaml|.github/workflows/release-server.yml|scripts/formula-check.sh|scripts/archive-check.sh|scripts/rehearsal-tag.sh) run=true ;;
               esac
             done
           fi
@@ -300,6 +305,18 @@ jobs:
           echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "goreleaser=$pin" >> "$GITHUB_OUTPUT"
           echo "rehearsing: $run (GoReleaser $pin)"
+      # The server's tag, named as the release names it (release-server.yml sets
+      # GORELEASER_CURRENT_TAG from the tag that triggered it): left to itself
+      # GoReleaser may take `sdk-js/v0.1.0-rc.1` over `v0.1.0-rc.1`, and a
+      # version with a slash in it breaks formula-check. The script fails when
+      # there is no such tag, rather than leave the variable empty (spec 020 #34).
+      - name: The server tag the snapshot is built under
+        id: tag
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          tag="$(scripts/rehearsal-tag.sh)"
+          echo "rehearsing under $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - if: steps.scope.outputs.run == 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -316,8 +333,15 @@ jobs:
           distribution: goreleaser
           version: ${{ steps.scope.outputs.goreleaser }}
           args: release --snapshot --clean
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.tag }}
       - if: steps.scope.outputs.run == 'true'
         run: scripts/formula-check.sh dist/homebrew/Formula/tracepad.rb dist/checksums.txt
+      # The archive this runner can run, started: its log must open with the
+      # version in its name and the first seven characters of this commit
+      # (spec 020 #34), which dropping `-X main.commit` from the config turns red.
+      - if: steps.scope.outputs.run == 'true'
+        run: scripts/archive-check.sh dist "$(git rev-parse HEAD)"
 
   # Real instrumentation against a real binary: the drift detector for SDK
   # attribute conventions (spec 002, Testing #3). Separate from the gate so

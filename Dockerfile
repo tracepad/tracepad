@@ -61,10 +61,11 @@ COPY --from=ui /src/ui/dist ./internal/ui/dist
 RUN mkdir -p /out && go run ./scripts/notices -ui internal/ui/dist/third-party-notices.txt -o /out/THIRD_PARTY_NOTICES
 
 ARG VERSION
+ARG REVISION
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -tags ui -ldflags "-s -w -X main.version=$VERSION" \
+    go build -trimpath -tags ui -ldflags "-s -w -X main.version=$VERSION -X main.commit=$REVISION" \
     -o /out/tracepad ./cmd/tracepad
 
 # /data is created here because the runtime stage has no shell to create it
