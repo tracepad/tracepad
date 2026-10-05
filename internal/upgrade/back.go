@@ -1,0 +1,419 @@
+package upgrade
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// wentBack is how a way back ended.
+type wentBack struct {
+	ok  bool
+	why string
+}
+
+// wayBack undoes what the run did, from the steps its state records, in
+// reverse, and deletes nothing: what the new version left is set aside and
+// the archive restored into a new place (Decision 11). It is the one path the
+// upgrade takes on a failure after the stop and on not healthy, and the one
+// `--back` takes.
+func (j *job) wayBack(ctx context.Context) wentBack {
+	st := j.st
+	if st.has(stepBackDone) {
+		return wentBack{false, "this run's way back already ran"}
+	}
+	_ = j.step(stepBackBegun)
+	var out wentBack
+	switch st.Kind {
+	case kindProcess:
+		out = j.backProcess(ctx)
+	case kindContainer:
+		out = j.backContainer(ctx)
+	default:
+		out = j.backBinary(ctx)
+	}
+	if out.ok {
+		_ = j.step(stepBackDone)
+	}
+	return out
+}
+
+func (j *job) fail(why string) wentBack { return wentBack{false, why} }
+
+// restoreBinary puts the version want back at the install path when it is
+// not there, from the copy in the run directory.
+func (j *job) restoreBinary(ctx context.Context, copyPath, want string) error {
+	path := j.st.Binary.Path
+	if v, err := j.r.deps.Version(ctx, path); err == nil && v == want {
+		return nil
+	}
+	if err := j.r.putInPlace(ctx, copyPath, path, want); err != nil {
+		return err
+	}
+	j.done("put tracepad %s back at %s", want, path)
+	return nil
+}
+
+func (j *job) backBinary(ctx context.Context) wentBack {
+	b := j.st.Binary
+	if !j.st.has(stepBinaryReplaced) {
+		return wentBack{ok: true}
+	}
+	if err := j.restoreBinary(ctx, b.Old, b.From); err != nil {
+		return j.fail(fmt.Sprintf("%s could not be put back at %s: %v", b.From, b.Path, err))
+	}
+	return wentBack{ok: true}
+}
+
+func (j *job) backProcess(ctx context.Context) wentBack {
+	r, st := j.r, j.st
+	ps := st.Process
+	if j.spec.Exe == "" {
+		spec, err := readSpec(j.dir)
+		if err != nil {
+			return j.fail("the run's server.json does not read: " + err.Error())
+		}
+		j.spec = spec
+	}
+	if v, err := r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
+		return j.fail(fmt.Sprintf("the copy %s does not answer %s; nothing was touched", ps.Old, st.From))
+	}
+	if !st.has(stepStopSent) {
+		return wentBack{ok: true}
+	}
+
+	// The old server may still run: its stop timed out.
+	if ok, _ := r.isServer(ps.PID, ps.DataDir, j.spec); ok {
+		j.done("server pid %d still runs %s; nothing to undo", ps.PID, st.From)
+		return wentBack{ok: true}
+	}
+
+	if st.has(stepStarted) {
+		if st.Archive == nil {
+			return j.fail("the run records no archive; nothing was touched")
+		}
+		archive := filepath.Join(j.dir, "data.tar.gz")
+		if err := verifyArchive(archive, *st.Archive); err != nil {
+			return j.fail(err.Error() + "; nothing was touched")
+		}
+		after, restore := ps.DataDir+".after-"+st.Run, ps.DataDir+".restore-"+st.Run
+		for _, p := range []string{after, restore} {
+			if _, err := os.Lstat(p); err == nil {
+				return j.fail(p + " exists already: this way back ran before, or something else is there; nothing was touched")
+			}
+		}
+		info, err := os.Stat(ps.DataDir)
+		if err != nil {
+			return j.fail(err.Error())
+		}
+		if err := extractArchive(archive, restore, info.Mode().Perm()); err != nil {
+			return j.fail(fmt.Sprintf("the restore into %s failed (%v); the server and %s are as they were", restore, err, ps.DataDir))
+		}
+		if err := quickCheck(ctx, filepath.Join(restore, dataDBName)); err != nil {
+			return j.fail(fmt.Sprintf("the restored database fails its check (%v); it is in %s, and the server and %s are as they were", err, restore, ps.DataDir))
+		}
+		j.done("restored the archive into %s, and its database passes quick_check", restore)
+
+		// Only now is the new server stopped: a bad archive is found while it
+		// still runs.
+		if ps.NewPID > 0 {
+			ok, err := r.isServer(ps.NewPID, ps.DataDir, j.spec)
+			switch {
+			case err != nil:
+				return j.fail(err.Error() + "; nothing was stopped, and the restore waits in " + restore)
+			case ok:
+				if !r.stop(ctx, ps.NewPID) {
+					return j.fail(fmt.Sprintf("pid %d, the new server, was asked to stop and has not; the restore waits in %s", ps.NewPID, restore))
+				}
+				j.done("stopped the new server, pid %d", ps.NewPID)
+			}
+		}
+		if err := os.Rename(ps.DataDir, after); err != nil {
+			return j.fail(fmt.Sprintf("%s could not be set aside (%v); nothing was started, and the restore waits in %s", ps.DataDir, err, restore))
+		}
+		st.SetAside = append(st.SetAside, after)
+		_ = st.save(j.dir)
+		if err := os.Rename(restore, ps.DataDir); err != nil {
+			if os.Rename(after, ps.DataDir) == nil {
+				st.SetAside = st.SetAside[:len(st.SetAside)-1]
+				_ = st.save(j.dir)
+			}
+			return j.fail(fmt.Sprintf("the restore could not take the place of %s (%v); nothing was started, and the restore waits in %s", ps.DataDir, err, restore))
+		}
+		j.done("set %s aside as %s, and put the restore in its place", ps.DataDir, after)
+	}
+
+	if err := j.restoreBinary(ctx, ps.Old, st.From); err != nil {
+		return j.fail(fmt.Sprintf("%s could not be put back at %s (%v); nothing was started", st.From, st.Binary.Path, err))
+	}
+	if err := j.startServer(); err != nil {
+		return j.fail(fmt.Sprintf("%s did not start: %v", st.From, err))
+	}
+	_ = st.save(j.dir)
+	j.done("started %s again as pid %d, with its arguments and environment", st.From, ps.NewPID)
+
+	exited := j.newProc.Exited()
+	c := r.check(ctx, ps.URL, st.From, nil, func() bool {
+		select {
+		case <-exited:
+			return false
+		default:
+			return true
+		}
+	})
+	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	j.rep.Check = &c
+	if c.Verdict == verdictNotHealthy {
+		return j.fail(st.From + " started again but is not healthy: " + c.Why)
+	}
+	return wentBack{ok: true}
+}
+
+func (j *job) backContainer(ctx context.Context) wentBack {
+	r, st := j.r, j.st
+	cs := st.Container
+	docker := r.deps.Docker
+	if docker == nil {
+		return j.fail("docker is not on PATH")
+	}
+	if j.inspect.ID == "" {
+		ic, img, err := readContainer(j.dir)
+		if err != nil {
+			return j.fail("the run's container.json does not read: " + err.Error())
+		}
+		j.inspect, j.image = ic, img
+	}
+	if !st.has(stepStopSent) {
+		return wentBack{ok: true}
+	}
+	restorePolicy := func(name string) error {
+		_, err := docker.Run(ctx, "update", "--restart", cs.Restart, name)
+		return err
+	}
+	switch {
+	case !st.has(stepRenamedOld):
+		if _, err := docker.Run(ctx, "start", cs.Name); err != nil {
+			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()))
+		}
+		j.done("started %s again", cs.Name)
+		return j.checkContainer(ctx, cs.ID)
+	case !st.has(stepStarted):
+		if r.exists(ctx, "container", cs.Name) {
+			if _, err := docker.Run(ctx, "rename", cs.Name, j.failed()); err != nil {
+				return j.fail("the container the failed run left as " + cs.Name + " could not be set aside: " + firstLine(err.Error()))
+			}
+			_, _ = docker.Run(ctx, "update", "--restart", "no", j.failed())
+			st.SetAside = append(st.SetAside, "container "+j.failed())
+			j.done("set the container the failed run made aside as %s, restart policy no", j.failed())
+		}
+		if _, err := docker.Run(ctx, "rename", j.before(), cs.Name); err != nil {
+			return j.fail(j.before() + " could not be renamed back: " + firstLine(err.Error()))
+		}
+		st.SetAside = removeItem(st.SetAside, "container "+j.before())
+		if err := restorePolicy(cs.Name); err != nil {
+			return j.fail("the restart policy of " + cs.Name + " could not be put back: " + firstLine(err.Error()))
+		}
+		if _, err := docker.Run(ctx, "start", cs.Name); err != nil {
+			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()))
+		}
+		_ = st.save(j.dir)
+		j.done("renamed %s back to %s, with its restart policy, and started it", j.before(), cs.Name)
+		return j.checkContainer(ctx, cs.ID)
+	}
+
+	// The new version ran on the volume: restore the archive into a new one.
+	vol := cs.Volume + "-" + st.Run
+	archive := filepath.Join(j.dir, "data.tar.gz")
+	if err := verifyArchive(archive, Archived{DBSize: -1}); err != nil {
+		return j.fail(err.Error() + "; nothing was touched")
+	}
+	switch {
+	case r.exists(ctx, "volume", vol):
+		return j.fail("the volume " + vol + " exists already: this way back ran before, or something else is there; nothing was touched")
+	case r.exists(ctx, "container", j.after()):
+		return j.fail("the container " + j.after() + " exists already; nothing was touched")
+	case !r.exists(ctx, "container", j.before()):
+		return j.fail("there is no " + j.before() + " to go back to; nothing was touched")
+	}
+	check := filepath.Join(j.dir, "check-"+strconv.Itoa(os.Getpid()))
+	if err := os.Mkdir(check, 0o700); err != nil {
+		return j.fail(err.Error())
+	}
+	err := extractDB(archive, check)
+	if err == nil {
+		err = quickCheck(ctx, filepath.Join(check, dataDBName))
+	}
+	// The copy was this command's own, made a moment ago to be checked.
+	os.RemoveAll(check)
+	if err != nil {
+		return j.fail("the archive's database fails its check (" + err.Error() + "); nothing was touched")
+	}
+	if _, err := docker.Run(ctx, "volume", "create", vol); err != nil {
+		return j.fail("the volume " + vol + " could not be made: " + firstLine(err.Error()))
+	}
+	st.SetAside = append(st.SetAside, "volume "+cs.Volume)
+	_ = st.save(j.dir)
+	_, err = docker.Run(ctx, "run", "--rm",
+		"--mount", csvField("type=volume", "src="+vol, "dst=/data"),
+		"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/old", "readonly"),
+		"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup", "readonly"),
+		busybox, "sh", "-c", `tar xzf /backup/data.tar.gz -C /data && chown -R "$(stat -c %u:%g /old)" /data && test -s /data/tracepad.db`)
+	if err != nil {
+		return j.fail("the restore into the volume " + vol + " failed (" + firstLine(err.Error()) + "); the new container still runs, untouched")
+	}
+	j.done("restored the archive into a new volume, %s, owned as %s is", vol, cs.Volume)
+
+	if r.exists(ctx, "container", cs.Name) {
+		if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
+			return j.fail(cs.Name + " did not stop: " + firstLine(err.Error()))
+		}
+		if _, err := docker.Run(ctx, "rename", cs.Name, j.after()); err != nil {
+			return j.fail(cs.Name + " could not be set aside: " + firstLine(err.Error()))
+		}
+		st.SetAside = append(st.SetAside, "container "+j.after())
+		_ = st.save(j.dir)
+		if _, err := docker.Run(ctx, "update", "--restart", "no", j.after()); err != nil {
+			return j.fail("the restart policy of " + j.after() + " could not be set to no: " + firstLine(err.Error()))
+		}
+		j.done("stopped the new container and set it aside as %s, restart policy no", j.after())
+	}
+	ref := cs.OldRef
+	if img, err := r.inspectImage(ctx, ref); err != nil || img.ID != cs.OldImage {
+		ref = cs.OldImage
+	}
+	out, err := docker.Run(ctx, runArgs(j.inspect, j.image, cs.Name, ref, filepath.Join(j.dir, "env"), vol)...)
+	if err != nil {
+		return j.fail(st.From + " did not start on " + vol + ": " + firstLine(err.Error()))
+	}
+	cs.NewID = strings.TrimSpace(string(out))
+	_ = st.save(j.dir)
+	j.done("ran %s as %s on %s; the volume %s keeps what the new version left", ref, cs.Name, vol, cs.Volume)
+	if st.has(stepBinaryReplaced) && st.Binary.Old != "" {
+		if err := j.restoreBinary(ctx, st.Binary.Old, st.Binary.From); err != nil {
+			j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not put back: "+err.Error())
+		}
+	}
+	return j.checkContainer(ctx, cs.NewID)
+}
+
+func (j *job) checkContainer(ctx context.Context, id string) wentBack {
+	cs := j.st.Container
+	c := j.r.check(ctx, cs.URL, j.st.From, nil, func() bool { return j.r.containerRunning(ctx, id) })
+	c.LogLine = j.r.containerFirstLog(ctx, id)
+	j.rep.Check = &c
+	if c.Verdict == verdictNotHealthy {
+		return j.fail(j.st.From + " started again but is not healthy: " + c.Why)
+	}
+	return wentBack{ok: true}
+}
+
+func removeItem(list []string, item string) []string {
+	out := list[:0]
+	for _, s := range list {
+		if s != item {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// openRun loads a run for --check or --back.
+func (r *runner) openRun(arg string, rep *Report) (*job, error) {
+	dir, err := resolveRun(r.deps.Backups, arg)
+	if err != nil {
+		return nil, err
+	}
+	st, err := loadState(dir)
+	if err != nil {
+		return nil, err
+	}
+	rep.Run = &RunRef{ID: st.Run, Dir: dir}
+	rep.From, rep.To = st.From, st.To
+	return &job{r: r, rep: rep, st: st, dir: dir}, nil
+}
+
+// backMode is `--back RUN`.
+func (r *runner) backMode(ctx context.Context) *Report {
+	rep := &Report{Mode: "back"}
+	j, err := r.openRun(r.flags.back, rep)
+	if err != nil {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
+		return rep
+	}
+	if j.st.has(stepBackDone) {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run's way back already ran; nothing changed."
+		j.privacy()
+		return rep
+	}
+	release, ok, err := lockFile(filepath.Join(r.deps.Backups, ".lock"))
+	if err != nil || !ok {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: another tracepad upgrade is running, or "+r.deps.Backups+" cannot be locked."
+		return rep
+	}
+	defer release()
+	out := j.wayBack(ctx)
+	if out.ok {
+		rep.ExitCode = exitOK
+		rep.Summary = fmt.Sprintf("Went back: %s runs again.", j.st.From)
+	} else {
+		rep.ExitCode = exitStuck
+		rep.Summary = "The way back did not finish: " + out.why
+	}
+	j.privacy()
+	return rep
+}
+
+// checkMode is `--check RUN`: the verdict again, for a server that was still
+// starting. It never takes the way back itself.
+func (r *runner) checkMode(ctx context.Context) *Report {
+	rep := &Report{Mode: "check"}
+	j, err := r.openRun(r.flags.check, rep)
+	if err != nil {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
+		return rep
+	}
+	st := j.st
+	if !st.has(stepStarted) || st.has(stepBackBegun) {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run has no new version running to check."
+		return rep
+	}
+	var c Checked
+	switch st.Kind {
+	case kindProcess:
+		ps := st.Process
+		spec, err := readSpec(j.dir)
+		if err != nil {
+			rep.ExitCode, rep.Summary = exitRefused, "Refused: the run's server.json does not read: "+err.Error()
+			return rep
+		}
+		c = r.check(ctx, ps.URL, st.To, st.CountBefore, func() bool {
+			ok, _ := r.isServer(ps.NewPID, ps.DataDir, spec)
+			return ok
+		})
+		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	case kindContainer:
+		cs := st.Container
+		c = r.check(ctx, cs.URL, st.To, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID) })
+		c.LogLine = r.containerFirstLog(ctx, cs.NewID)
+	default:
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: a run of the binary alone has no server to check."
+		return rep
+	}
+	rep.Check = &c
+	st.Verdict = c.Verdict
+	_ = st.save(j.dir)
+	if c.Verdict == verdictHealthy {
+		rep.ExitCode, rep.Summary = exitOK, fmt.Sprintf("%s is healthy.", st.To)
+		return rep
+	}
+	rep.ExitCode = exitDecide
+	rep.Summary = fmt.Sprintf("%s is not healthy: %s.", st.To, c.Why)
+	if c.Verdict == verdictDecide {
+		rep.Summary = fmt.Sprintf("%s runs, but %s.", st.To, c.Why)
+	}
+	rep.Person = append(rep.Person, "go back to "+st.From+", which drops what arrived since: tracepad upgrade --back "+st.Run)
+	return rep
+}

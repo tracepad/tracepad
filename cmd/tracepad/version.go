@@ -1,18 +1,19 @@
 package main
 
 import (
-	"regexp"
 	"runtime/debug"
 	"strings"
+
+	"github.com/tracepad/tracepad/internal/upgrade"
 )
 
-// canonicalVersion is the one spelling a release has, `release-tag.sh`'s own
-// without the `v`: three numbers without leading zeros, and a pre-release only
-// as -alpha.N, -beta.N or -rc.N. Anything else Go puts in a build's version
-// (`0.0.0-20261002120000-abcdef123456` for `go install …@main`, `+dirty`, a
-// `+incompatible`) is not a release and must not be reported as one: it would
-// sort below every real version in whatever compares them.
-var canonicalVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$`)
+// canonicalVersion is the one spelling a release has (spec 054 keeps the rule
+// in internal/upgrade, where the order between versions lives too). Anything
+// else Go puts in a build's version (`0.0.0-20261002120000-abcdef123456` for
+// `go install …@main`, `+dirty`, a `+incompatible`) is not a release and must
+// not be reported as one: it would sort below every real version in whatever
+// compares them.
+var canonicalVersion = upgrade.IsRelease
 
 // resolveVersion is what `tracepad version` and the server report. A stamped
 // version (the release build's `-X main.version=`, `make`'s `dev`) is taken as
@@ -33,7 +34,7 @@ func resolveVersion(stamped string, info *debug.BuildInfo) string {
 			return "dev"
 		}
 	}
-	if v := strings.TrimPrefix(info.Main.Version, "v"); canonicalVersion.MatchString(v) {
+	if v := strings.TrimPrefix(info.Main.Version, "v"); canonicalVersion(v) {
 		return v
 	}
 	return "dev"
