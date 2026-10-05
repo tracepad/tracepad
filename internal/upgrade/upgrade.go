@@ -56,6 +56,12 @@ type Deps struct {
 	// StopWait is how long a stopped server may take to exit; HealthWait how
 	// long a started one may take to answer; ProbeWait the default address's.
 	StopWait, HealthWait, ProbeWait time.Duration
+	// DiscoverWait bounds the plan's look at the machine as a whole.
+	DiscoverWait time.Duration
+	// Fault is a test's: called at every step of a swap and of a way back
+	// by name, an error from it is that step failing (spec 054 #26, the
+	// matrix). Nil in the binary.
+	Fault func(point string) error
 }
 
 type flags struct {
@@ -226,13 +232,14 @@ func realDeps(getenv func(string) string) (Deps, error) {
 			p, _ := exec.LookPath(name)
 			return p
 		},
-		Version:    binaryVersion,
-		Skills:     runSkills,
-		Now:        time.Now,
-		Sleep:      sleepCtx,
-		StopWait:   60 * time.Second,
-		HealthWait: 120 * time.Second,
-		ProbeWait:  3 * time.Second,
+		Version:      binaryVersion,
+		Skills:       runSkills,
+		Now:          time.Now,
+		Sleep:        sleepCtx,
+		StopWait:     60 * time.Second,
+		HealthWait:   120 * time.Second,
+		ProbeWait:    3 * time.Second,
+		DiscoverWait: discoverWait,
 	}, nil
 }
 
@@ -248,7 +255,7 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 func runSkills(ctx context.Context, bin, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, append([]string{"skills", "install"}, args...)...)
+	cmd := child(ctx, bin, append([]string{"skills", "install"}, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err

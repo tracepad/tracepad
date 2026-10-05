@@ -58,6 +58,16 @@ crash-test: ## SIGKILL the server in the middle of its writes CRASH_ROUNDS times
 fuzz: ## Run every Go fuzz target for FUZZTIME (default 10s) each (not in the gate)
 	scripts/fuzz.sh
 
+# `tracepad upgrade` against real servers (spec 054 #27): the binary built
+# twice with two versions stamped, servers started from it, upgraded, broken
+# and gone back from, and the fault matrix again on them. The gate runs the
+# same command on fakes in seconds; this is what a fake cannot stand for — a
+# real migration, a server's own lock and shutdown. Not in the gate: about two
+# minutes. CI runs it when a pull request touches what it tests and on every
+# merge; whoever changes those paths runs it before pushing (AGENTS.md).
+upgrade-integration: ## tracepad upgrade against real servers: two versions built, started, upgraded and gone back from (not in the gate)
+	go test -tags upgradeint -count=1 -timeout 20m ./internal/upgrade
+
 vet: ## Static checks
 	go vet ./...
 
@@ -410,7 +420,7 @@ install-hooks: ## (Re)install both hooks
 	printf '#!/bin/sh\nexec make gate\n' > "$(HOOKS_DIR)/pre-push"
 	chmod +x "$(HOOKS_DIR)/pre-push"
 
-.PHONY: help build build-server dev test vet smoke fixtures format format-check \
+.PHONY: upgrade-integration help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \

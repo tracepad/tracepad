@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
@@ -242,8 +244,30 @@ func health(ctx context.Context, client *http.Client, base string) (string, erro
 }
 
 // discover is the plan's look at the machine (Decision 5).
+// discoverWait bounds the plan's look at the machine as a whole: the install
+// script stops waiting for a plan after fifteen seconds, so a few servers
+// that take a connection and never answer must not run it past that (the
+// fourth review). The probes run side by side under it.
+const discoverWait = 10 * time.Second
+
 func (r *runner) discover(ctx context.Context) Findings {
-	f := Findings{Binary: r.installedBinary(ctx), complete: true}
+	wait := r.deps.DiscoverWait
+	if wait <= 0 {
+		wait = discoverWait
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	f := Findings{complete: true}
+	var (
+		wg         sync.WaitGroup
+		containers []Container
+		note       string
+		probe      Probe
+	)
+	wg.Add(3)
+	go func() { defer wg.Done(); f.Binary = r.installedBinary(ctx) }()
+	go func() { defer wg.Done(); containers, note = r.containers(ctx) }()
+	go func() { defer wg.Done(); probe = r.ask(ctx) }()
 	procs, unread, err := r.deps.Sys.Candidates()
 	switch {
 	case err != nil:
@@ -253,14 +277,26 @@ func (r *runner) discover(ctx context.Context) Findings {
 		f.complete = false
 		f.Notes = append(f.Notes, fmt.Sprintf("%d process(es) named tracepad could not be read", unread))
 	}
+	wg.Wait()
 	for _, p := range procs {
-		s, ok := classifyServer(p, f.Binary.Path)
-		if !ok {
+		if s, ok := classifyServer(p, f.Binary.Path); ok {
+			f.Servers = append(f.Servers, s)
+		}
+	}
+	var hw sync.WaitGroup
+	for i := range f.Servers {
+		if f.Servers[i].URL == "" {
 			continue
 		}
-		if s.URL != "" {
+		hw.Add(1)
+		go func(s *Server) {
+			defer hw.Done()
 			s.Version, _ = health(ctx, r.deps.HTTP, s.URL)
-		}
+		}(&f.Servers[i])
+	}
+	hw.Wait()
+	for i := range f.Servers {
+		s := &f.Servers[i]
 		if s.Ours && s.Version == "" {
 			s.Ours = false
 			s.Reason = "it does not answer at " + s.URL + "/health"
@@ -269,16 +305,13 @@ func (r *runner) discover(ctx context.Context) Findings {
 			s.Ours = false
 			s.Reason = fmt.Sprintf("it answers %q, a development build, which has no place in the order between releases", s.Version)
 		}
-		f.Servers = append(f.Servers, s)
 	}
 	sort.Slice(f.Servers, func(i, j int) bool { return f.Servers[i].Proc.PID < f.Servers[j].Proc.PID })
-
-	containers, note := r.containers(ctx)
 	f.Containers = containers
 	if note != "" {
 		f.Notes = append(f.Notes, note)
 	}
-	f.Probe = r.probe(ctx, f)
+	f.Probe = r.attribute(probe, f)
 	return f
 }
 
@@ -324,18 +357,24 @@ func writableDir(dir string) bool {
 	return os.Remove(name) == nil
 }
 
-// probe asks the default address what answers there, and says whose it is
-// only as far as the search could tell.
-func (r *runner) probe(ctx context.Context, f Findings) Probe {
+// ask asks the default address what answers there.
+func (r *runner) ask(ctx context.Context) Probe {
 	base, _ := loopbackURL(config.DefaultListen)
-	p := Probe{URL: base}
 	pctx, cancel := context.WithTimeout(ctx, r.deps.ProbeWait)
 	defer cancel()
-	v, err := health(pctx, r.deps.HTTP, p.URL)
+	v, err := health(pctx, r.deps.HTTP, base)
 	if err != nil {
 		return Probe{}
 	}
-	p.Version = v
+	return Probe{URL: base, Version: v}
+}
+
+// attribute says whose what answers at the default address is, only as far
+// as the search could tell.
+func (r *runner) attribute(p Probe, f Findings) Probe {
+	if p.Version == "" {
+		return p
+	}
 	for _, s := range f.Servers {
 		if s.URL != "" && listensOnDefault(s.Listen) {
 			p.Whose = fmt.Sprintf("server pid %d", s.Proc.PID)

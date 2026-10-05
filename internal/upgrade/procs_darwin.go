@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -140,7 +139,7 @@ func parseProcargs2(raw []byte) (exe string, argv, env []string, err error) {
 func lsofCwdStdout(pid int) (cwd, stdout string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd,1", "-Fftn").Output()
+	out, err := child(ctx, "lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd,1", "-Fftn").Output()
 	if err != nil && len(out) == 0 {
 		return "", ""
 	}

@@ -235,8 +235,11 @@ func (r *Releases) Fetch(ctx context.Context, v, dir, name string) (Fetched, err
 		return Fetched{}, fmt.Errorf("%s: %w", archive, err)
 	}
 	got, err := r.Version(ctx, path)
-	if err != nil || got != v {
-		return Fetched{}, fmt.Errorf("the binary in %s says it is %q, not %s (another architecture, or a noexec mount?)", archive, got, v)
+	switch {
+	case err != nil:
+		return Fetched{}, fmt.Errorf("the binary in %s does not run here (%v): another architecture, or a noexec mount?", archive, err)
+	case got != v:
+		return Fetched{}, fmt.Errorf("the binary in %s says it is %q, not %s", archive, got, v)
 	}
 	return Fetched{Path: path, Verified: verified}, nil
 }
@@ -284,7 +287,7 @@ func extractBinary(archive, path string) error {
 func binaryVersion(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "version")
+	cmd := child(ctx, path, "version")
 	cmd.Env = []string{}
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -301,10 +304,10 @@ func ghAttest(ctx context.Context, archive string) (string, error) {
 	if err != nil {
 		return "attestation not checked: gh is not installed", nil
 	}
-	if exec.CommandContext(ctx, gh, "auth", "status").Run() != nil {
+	if child(ctx, gh, "auth", "status").Run() != nil {
 		return "attestation not checked: gh is not logged in", nil
 	}
-	out, err := exec.CommandContext(ctx, gh, "attestation", "verify", archive, "--repo", repo).CombinedOutput()
+	out, err := child(ctx, gh, "attestation", "verify", archive, "--repo", repo).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
 	}

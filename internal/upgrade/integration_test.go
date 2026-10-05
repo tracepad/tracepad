@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && upgradeint
 
 package upgrade
 
@@ -187,6 +187,27 @@ func (w *world) startIn(dir string) int {
 	}
 	w.waitVersion(vOld)
 	return cmd.Process.Pid
+}
+
+// startAt starts the installed binary, which is version v.
+func (w *world) startAt(v string) {
+	w.t.Helper()
+	log, err := os.OpenFile(filepath.Join(w.data, "server.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer log.Close()
+	cmd := exec.Command(w.install, "serve", "--listen", w.listen, "--data-dir", w.data)
+	cmd.Args[0] = "tracepad"
+	cmd.Env = []string{"HOME=" + w.home, "PATH=/usr/bin:/bin", "TRACEPAD_PROJECTS=demo:" + testPK + ":" + testSK, "TRACEPAD_SETUP=off"}
+	cmd.Dir = w.home
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		w.t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	w.waitVersion(v)
 }
 
 func (w *world) waitVersion(v string) {
@@ -744,5 +765,27 @@ func TestAServerWhoseWorkingDirectoryIsGoneStartsInItsData(t *testing.T) {
 	w.waitVersion(vNew)
 	if !strings.Contains(strings.Join(rep.Notes, "\n"), "is gone; it starts again in its data directory") {
 		t.Errorf("notes: %q", rep.Notes)
+	}
+}
+
+// A way back of a binary-only run, after the person started a server on the
+// newer binary, would put an older binary under a migrated database: refused,
+// as every downgrade is (the fourth review).
+func TestAWayBackDoesNotPutAnOlderBinaryUnderANewerServer(t *testing.T) {
+	w := newWorld(t)
+	rep, code := w.run(w.deps(), "--to", vNew)
+	if code != exitOK || rep.Run == nil {
+		t.Fatalf("binary-only upgrade: %d %s", code, rep.Summary)
+	}
+	if w.installedVersion() != vNew {
+		t.Fatalf("installed %s", w.installedVersion())
+	}
+	w.startAt(vNew)
+	back, code := w.run(w.deps(), "--back", rep.Run.ID)
+	if code == exitOK || !strings.Contains(back.Summary, "its next restart would be "+vOld) {
+		t.Fatalf("--back: %d %s", code, back.Summary)
+	}
+	if w.installedVersion() != vNew {
+		t.Errorf("the binary was put back: %s", w.installedVersion())
 	}
 }

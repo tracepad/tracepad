@@ -1089,7 +1089,9 @@ server only at the server's own address. The design is spec 054.
   machine, another binary), and what the upgrade would do, step by step.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
-  on this machine only, and no service manager runs it. It is backed up with
+  on this machine only, and no service manager runs it — a systemd unit or a
+  launchd job it sits in counts as running it unless proven not to, and one
+  that cannot be asked counts too. It is backed up with
   the server stopped (the data directory archived into
   `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
   against the release's `checksums.txt`, and its attestation when `gh` is
@@ -1101,7 +1103,8 @@ server only at the server's own address. The design is spec 054.
   finds), and Docker is neither rootless nor remapping user namespaces; it is
   recreated from `docker inspect` with the same mounts,
   ports, restart policy, labels and the variables you set, the old one renamed
-  `<name>-before-<run>`.
+  `<name>-before-<run>`. No binary is ever put in place while a server runs
+  from it at a later version than the one put there.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -40,12 +41,27 @@ func lockHeld(dataDir string) bool {
 		return false
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return err == syscall.EWOULDBLOCK
+	for try := 0; ; try++ {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			return false
+		}
+		if err != syscall.EWOULDBLOCK || try == lockTries {
+			return err == syscall.EWOULDBLOCK
+		}
+		time.Sleep(lockRetry)
 	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	return false
 }
+
+// lockTries and lockRetry are how long a lock found held is asked again
+// before it counts as held: a child this process is starting holds a copy of
+// every descriptor between its fork and its exec, so a lock let go a moment
+// ago can look held for that moment.
+const (
+	lockTries = 10
+	lockRetry = 20 * time.Millisecond
+)
 
 // lockFile takes an exclusive lock on path without waiting; ok is false when
 // another process holds it.
@@ -54,12 +70,18 @@ func lockFile(path string) (release func(), ok bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if err == syscall.EWOULDBLOCK {
-			return nil, false, nil
+	for try := 0; ; try++ {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() { f.Close() }, true, nil
 		}
-		return nil, false, err
+		if err != syscall.EWOULDBLOCK || try == lockTries {
+			f.Close()
+			if err == syscall.EWOULDBLOCK {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		time.Sleep(lockRetry)
 	}
-	return func() { f.Close() }, true, nil
 }

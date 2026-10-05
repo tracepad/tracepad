@@ -3,8 +3,9 @@ name: CI
 # Pull requests carry the gate. A push to `main` is a squash-merge of a pull
 # request that already went green on the same tree, so running everything
 # again there paid a second time for the same answer — roughly half of every
-# month's minutes. The push trigger stays for one job only: the multi-arch
-# image build, which needs a run per merge, not per review (see `multiarch`).
+# month's minutes. The push trigger stays for the jobs that need a run per
+# merge, not per review: the multi-arch image build (see `multiarch`), the race
+# detector, and the upgrade against real servers (see `upgrade-integration`).
 on:
   push:
     branches: [main]
@@ -231,6 +232,46 @@ jobs:
           name: crash-evidence
           path: ${{ runner.temp }}/crash-evidence/
           retention-days: 7
+
+  # `tracepad upgrade` against real servers (spec 054 #27): two versions of the
+  # binary built, servers started, upgraded, broken and gone back from, and
+  # the fault matrix again on them. The gate runs the command on fakes; this
+  # is the minutes a fake saves, spent only when a pull request touches what
+  # it tests, and on every merge to main. On ubuntu-latest every process sits
+  # in the runner agent's systemd unit — exactly the unit the command must
+  # tell from one that runs a server (Decisions 22, 26).
+  upgrade-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: What this run is for
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=false
+          if [ "$EVENT" != pull_request ]; then
+            run=true
+          else
+            for f in $(git diff --name-only "$BASE" HEAD); do
+              case "$f" in
+                internal/upgrade/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|Dockerfile|.goreleaser.yaml) run=true ;;
+              esac
+            done
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "upgrade integration: $run"
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - if: steps.scope.outputs.run == 'true'
+        run: make upgrade-integration
 
   # The release, rehearsed (spec 020 #27). Nothing else exercises
   # `.goreleaser.yaml` before a tag does, and `goreleaser check` cannot: it

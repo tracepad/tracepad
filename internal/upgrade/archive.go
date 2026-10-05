@@ -143,29 +143,46 @@ func writeArchive(dataDir, path string) (Archived, error) {
 // ends, and tracepad.db is in it, at its size. A truncated archive fails here,
 // before anything trusts it (Decision 8).
 func verifyArchive(path string, want Archived) error {
+	_, err := readBack(path, want)
+	return err
+}
+
+// ReadBack is what an archive's read-back measured: the digest of its bytes,
+// and the size its files take extracted.
+type ReadBack struct {
+	SHA256 string
+	Bytes  int64
+}
+
+// readBack is verifyArchive, answering what it measured: the digest it
+// computes on the way (so the bytes are read once) and the room a restore
+// needs.
+func readBack(path string, want Archived) (ReadBack, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return ReadBack{}, err
 	}
 	defer f.Close()
 	hash := sha256.New()
 	gz, err := gzip.NewReader(bufio.NewReaderSize(io.TeeReader(f, hash), 1<<20))
 	if err != nil {
-		return fmt.Errorf("%s does not read as gzip: %w", path, err)
+		return ReadBack{}, fmt.Errorf("%s does not read as gzip: %w", path, err)
 	}
 	tr := tar.NewReader(gz)
 	found := int64(-1)
+	var total int64
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("%s does not read back whole: %w", path, err)
+			return ReadBack{}, fmt.Errorf("%s does not read back whole: %w", path, err)
 		}
 		n, err := io.Copy(io.Discard, tr)
+		total += n
 		if err != nil {
-			return fmt.Errorf("%s does not read back whole: %w", path, err)
+			return ReadBack{}, fmt.Errorf("%s does not read back whole: %w", path, err)
 		}
 		if cleanEntry(h.Name) == dataDBName && h.Typeflag == tar.TypeReg {
 			found = n
@@ -174,22 +191,23 @@ func verifyArchive(path string, want Archived) error {
 	// The gzip trailer is checked at the end of the stream; what follows the
 	// tar's end must be read for it.
 	if _, err := io.Copy(io.Discard, gz); err != nil {
-		return fmt.Errorf("%s does not read back whole: %w", path, err)
+		return ReadBack{}, fmt.Errorf("%s does not read back whole: %w", path, err)
 	}
 	if _, err := io.Copy(hash, f); err != nil {
-		return err
+		return ReadBack{}, err
 	}
+	sum := hex.EncodeToString(hash.Sum(nil))
 	switch {
 	case found < 0:
-		return fmt.Errorf("%s has no %s in it", path, dataDBName)
+		return ReadBack{}, fmt.Errorf("%s has no %s in it", path, dataDBName)
 	case found == 0:
-		return fmt.Errorf("the %s in %s is empty", dataDBName, path)
+		return ReadBack{}, fmt.Errorf("the %s in %s is empty", dataDBName, path)
 	case want.DBSize >= 0 && found != want.DBSize:
-		return fmt.Errorf("the %s in %s is %d bytes, not the %d it was", dataDBName, path, found, want.DBSize)
-	case want.SHA256 != "" && hex.EncodeToString(hash.Sum(nil)) != want.SHA256:
-		return fmt.Errorf("%s is not the archive that was written: its checksum changed", path)
+		return ReadBack{}, fmt.Errorf("the %s in %s is %d bytes, not the %d it was", dataDBName, path, found, want.DBSize)
+	case want.SHA256 != "" && sum != want.SHA256:
+		return ReadBack{}, fmt.Errorf("%s is not the archive that was written: its checksum changed", path)
 	}
-	return nil
+	return ReadBack{SHA256: sum, Bytes: total}, nil
 }
 
 // fileSHA256 is a file's SHA-256, in hex.

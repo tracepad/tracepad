@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ var jobPID = func(uid int, label string) (pid int, arguments string, err error) 
 func runQuiet(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).Output()
+	out, err := child(ctx, name, args...).Output()
 	return string(out), err
 }
 
@@ -102,9 +101,13 @@ func systemdManager(p Process, cgroup string) (managed, unasked string) {
 		if err != nil {
 			return "", fmt.Sprintf("it sits in the systemd unit %s, which could not be asked whether it runs it (%v): restart it yourself, or with sudo systemctl restart %s if the unit is what runs it", unit, firstLine(err.Error()), unit)
 		}
-		_, argv, _ := strings.Cut(execStart, "argv[]=")
-		argv, _, _ = strings.Cut(argv, " ;")
-		if mainPID == p.PID || startsThis(execStart, p) || (mainPID > 0 && mainPID == p.PPID && namesTracepad(argv)) {
+		// A unit is proven not to run the server only when its main process
+		// is neither the server nor its parent (a wrapper script without
+		// exec) and its command does not mention tracepad: a CI runner's
+		// agent, cron, a terminal's service. Anything less, and the unit is
+		// taken to run it (the fourth review: better to refuse wrongly than
+		// to fight a manager that restarts what the command stops).
+		if mainPID == p.PID || (mainPID > 0 && mainPID == p.PPID) || mentionsTracepad(execStart) {
 			return "the systemd unit " + unit, ""
 		}
 		return "", ""
@@ -112,39 +115,16 @@ func systemdManager(p Process, cgroup string) (managed, unasked string) {
 	return "", ""
 }
 
-// startsThis says whether a unit's ExecStart starts this binary with this
-// process's arguments: systemd writes it as `{ path=… ; argv[]=… ; … }`.
-func startsThis(execStart string, p Process) bool {
-	_, argv, ok := strings.Cut(execStart, "argv[]=")
-	if !ok || p.Exe == "" {
-		return false
-	}
-	argv, _, _ = strings.Cut(argv, " ;")
-	words := strings.Fields(argv)
-	if len(words) == 0 || !sameFile(words[0], p.Exe) {
-		return false
-	}
-	return strings.Join(words[1:], " ") == strings.Join(p.Argv[1:], " ")
-}
-
-// namesTracepad says whether a service's command runs the binary through a
-// wrapper — `sh -c 'tracepad serve …'` without exec, whose PID is the
-// server's parent's: a word of it is a path to a `tracepad`.
-func namesTracepad(command string) bool {
-	for _, word := range strings.FieldsFunc(command, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '\'' || r == '"' || r == ';' || r == '&' || r == '|'
-	}) {
-		if isTracepadName(word) {
-			return true
-		}
-	}
-	return false
+// mentionsTracepad says whether a service's command names tracepad anywhere:
+// the binary, a script named for it, an argument.
+func mentionsTracepad(command string) bool {
+	return strings.Contains(strings.ToLower(command), "tracepad")
 }
 
 // launchdManager decides which launchd job runs p: the job its
-// XPC_SERVICE_NAME names, when that job's PID is p's, or p's parent's and
-// the job's program runs a tracepad. A job that cannot be asked makes p the
-// person's.
+// XPC_SERVICE_NAME names runs it unless that job is proven not to — its PID
+// neither p's nor p's parent's, and its program not mentioning tracepad. A
+// job that cannot be asked makes p the person's.
 func launchdManager(p Process, uid int) (managed, unasked string) {
 	label := p.Getenv("XPC_SERVICE_NAME")
 	if label == "" || label == "0" || strings.HasPrefix(label, "application.") {
@@ -154,7 +134,7 @@ func launchdManager(p Process, uid int) (managed, unasked string) {
 	if err != nil {
 		return "", fmt.Sprintf("it sits in the launchd job %s, which could not be asked whether it runs it (%v): restart it yourself, or with launchctl kickstart -k gui/%d/%s if the job is what runs it", label, firstLine(err.Error()), uid, label)
 	}
-	if pid > 0 && (pid == p.PID || pid == p.PPID && namesTracepad(arguments)) {
+	if pid > 0 && (pid == p.PID || pid == p.PPID) || mentionsTracepad(arguments) {
 		return "the launchd job " + label, ""
 	}
 	return "", ""

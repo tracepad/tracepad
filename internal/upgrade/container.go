@@ -75,23 +75,38 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		j.stuck("could not record the run's state: " + err.Error())
 		return
 	}
-	if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
-		rep.ExitCode = exitStuck
-		rep.Summary = "Stuck: " + cs.Name + " did not stop: " + firstLine(err.Error())
-		rep.Next = append(rep.Next, j.upgradeCmd("--back "+st.Run))
+	err := j.at("swap.stop")
+	if err == nil {
+		_, err = docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name)
+	}
+	if err != nil {
+		if r.containerRunning(ctx, cs.ID, false) {
+			// It runs as it did: nothing changed.
+			j.unstep(stepStopSent)
+			rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+cs.Name+" could not be stopped: "+firstLine(err.Error())
+			r.discard(j.dir)
+			rep.Run = nil
+			return
+		}
+		j.goBack(ctx, cs.Name+" did not stop cleanly: "+firstLine(err.Error()))
 		return
 	}
 	_ = j.step(stepStopped)
 	j.done("stopped %s", cs.Name)
 
+	if err := j.at("swap.archive"); err != nil {
+		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+err.Error())
+		return
+	}
 	script := fmt.Sprintf("umask 077 && tar czf /backup/data.tar.gz -C /data . && chown %d:%d /backup/data.tar.gz", os.Getuid(), os.Getgid())
-	_, err := docker.Run(ctx, "run", "--rm",
+	_, err = docker.Run(ctx, "run", "--rm",
 		"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/data", "readonly"),
 		"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup"),
 		busybox, "sh", "-c", script)
 	archive := filepath.Join(j.dir, "data.tar.gz")
+	var rb ReadBack
 	if err == nil {
-		err = verifyArchive(archive, Archived{DBSize: -1})
+		rb, err = readBack(archive, Archived{DBSize: -1})
 	}
 	if err != nil {
 		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+firstLine(err.Error()))
@@ -100,16 +115,15 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	// The archive's bytes are pinned as the process archive's are: a file
 	// changed between the upgrade and a way back is not restored (the second
 	// review).
-	sum, err := fileSHA256(archive)
-	if err != nil {
-		j.goBack(ctx, "the archive of the volume "+cs.Volume+" does not read: "+err.Error())
-		return
-	}
-	st.Archive = &Archived{SHA256: sum, DBSize: -1}
+	st.Archive = &Archived{SHA256: rb.SHA256, DBSize: -1}
 	_ = j.step(stepArchived)
 	j.done("archived the volume %s into %s and read it back whole", cs.Volume, archive)
 
-	if _, err := docker.Run(ctx, "rename", cs.Name, j.before()); err != nil {
+	err = j.at("swap.rename")
+	if err == nil {
+		_, err = docker.Run(ctx, "rename", cs.Name, j.before())
+	}
+	if err != nil {
 		j.goBack(ctx, "the rename of "+cs.Name+" failed: "+firstLine(err.Error()))
 		return
 	}
@@ -122,7 +136,11 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	j.done("renamed %s to %s, restart policy no", cs.Name, j.before())
 
 	args := runArgs(j.inspect, j.image, cs.Name, cs.NewRef, filepath.Join(j.dir, "env"), "")
-	out, err := docker.Run(ctx, args...)
+	var out []byte
+	err = j.at("swap.run")
+	if err == nil {
+		out, err = docker.Run(ctx, args...)
+	}
 	if err != nil {
 		j.goBack(ctx, "the new container did not start: "+firstLine(err.Error()))
 		return
@@ -131,6 +149,10 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepStarted)
 	j.done("ran %s as %s", cs.NewRef, cs.Name)
 
+	if err := j.at("swap.check"); err != nil {
+		j.goBack(ctx, "not healthy: "+err.Error())
+		return
+	}
 	c := r.check(ctx, cs.URL, p.to, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID, true) })
 	c.LogLine = r.containerFirstLog(ctx, cs.NewID)
 	j.verdict(ctx, c)

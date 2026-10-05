@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Docker is the docker CLI. The real one runs `docker`; tests give a fake
@@ -36,7 +37,7 @@ func newDockerCLI() Docker {
 }
 
 func (d dockerCLI) Run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, d.path, args...)
+	cmd := child(ctx, d.path, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if args[0] == "logs" {
@@ -585,9 +586,23 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 			c.Ours = false
 			c.Reason = remapped + ", and the command cannot read back an archive written in a container there: back up its volume and recreate it yourself"
 		}
-		if c.URL != "" {
-			c.Version, _ = health(ctx, r.deps.HTTP, c.URL)
+		cs = append(cs, c)
+	}
+	// Every container's address is asked at once, under the plan's deadline.
+	var wg sync.WaitGroup
+	for i := range cs {
+		if cs[i].URL == "" {
+			continue
 		}
+		wg.Add(1)
+		go func(c *Container) {
+			defer wg.Done()
+			c.Version, _ = health(ctx, r.deps.HTTP, c.URL)
+		}(&cs[i])
+	}
+	wg.Wait()
+	for i := range cs {
+		c := &cs[i]
 		if c.Ours && !IsRelease(c.Version) {
 			c.Ours = false
 			if c.Version == "" {
@@ -596,7 +611,6 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 				c.Reason = fmt.Sprintf("it answers %q, not a release", c.Version)
 			}
 		}
-		cs = append(cs, c)
 	}
 	sort.Slice(cs, func(i, j int) bool { return cs[i].Name < cs[j].Name })
 	return cs, ""

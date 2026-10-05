@@ -27,6 +27,7 @@ const (
 	stepChecked        = "checked"         // the verdict is in `verdict`
 	stepSkill          = "skill"           // the skill's copies reinstalled
 	stepBackBegun      = "back_begun"      // the way back changed what runs
+	stepBackRestored   = "back_restored"   // the archive restored beside the data, and checked
 	stepBackAside      = "back_set_aside"  // what the new version left is set aside
 	stepBackMoved      = "back_moved"      // the restore is in the data's place
 	stepBackVolume     = "back_volume"     // container: the archive restored into <vol>-<run>
