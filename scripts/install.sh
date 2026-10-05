@@ -159,8 +159,10 @@ put_in_place() {
 
 # old_servers prints "PID COMMAND" for every `tracepad serve` still running
 # the binary this run replaced, found by the path of its executable, whatever
-# name started it and on whatever port: /proc on Linux, lsof on macOS, and the
-# command's first word when neither can say (another user's process).
+# name started it and on whatever port: /proc on Linux, lsof on macOS. A
+# command line is anyone's to write, so it never decides which process is
+# named — one whose executable cannot be read (another user's) is not — and it
+# is printed without its control characters, which could drive the terminal.
 old_servers() {
 	real="$(cd "$dir" && pwd -P)/tracepad"
 	ps -A -o pid= -o args= 2>/dev/null | while read -r pid args; do
@@ -168,9 +170,8 @@ old_servers() {
 		exe="$(readlink "/proc/$pid/exe" 2>/dev/null ||
 			lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" || true
 		exe="${exe% (deleted)}"
-		[ -n "$exe" ] || exe="${args%% *}"
-		if [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; then
-			say "$pid $args"
+		if [ -n "$exe" ] && { [ "$exe" = "$real" ] || [ "$exe" = "$bin" ]; }; then
+			say "$pid $(printf '%s' "$args" | tr -d '\000-\037\177')"
 		fi
 	done
 }

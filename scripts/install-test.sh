@@ -26,7 +26,7 @@ fail() {
 # The system tools the script uses, and only those, by symlink.
 sys="$tmp/sys"
 mkdir -p "$sys"
-for tool in sh curl tar gzip sed awk cut head mktemp rm mkdir cp chmod mv cat sleep sha256sum shasum; do
+for tool in sh curl tar gzip sed awk cut head tr mktemp rm mkdir cp chmod mv cat sleep sha256sum shasum; do
 	if path="$(command -v "$tool")"; then
 		ln -s "$path" "$sys/$tool"
 	fi
@@ -288,20 +288,26 @@ has "$err" "is not an architecture Tracepad is built for" riscv
 
 # --- After an update, each `tracepad serve` running the replaced binary is
 # named, found by its executable whatever started it (a bare `tracepad` on the
-# PATH, or the path itself when lsof cannot say), and nothing else is: not a
-# server from another binary, not a command that only mentions one.
+# PATH, or its path), and nothing else is: not a server from another binary,
+# not a command that only mentions one, not one whose executable cannot be read
+# however its command line reads, and no control character reaches the output.
 fresh_home
 run servers-before 0 TRACEPAD_VERSION=0.2.0
 realbin="$(cd "$home/.local/bin" && pwd -P)/tracepad"
+esc="$(printf '\033')"
 servers="4100001 tracepad serve --listen localhost:4319 --data-dir /data/a
 4100002 $bin serve --data-dir /data/b
 4100003 /usr/local/bin/tracepad serve
 4100004 tail -f /data/a/server.log
-4100005 sh -c echo tracepad serve"
+4100005 sh -c echo tracepad serve
+4100006 $bin serve --data-dir /data/spoofed
+4100007 tracepad serve --data-dir /data/c${esc}]0;title${esc}[2J"
 run servers 0 TRACEPAD_VERSION=0.3.0 FAKE_RUNNING=0.2.0 FAKE_PS="$servers" \
 	FAKE_EXES="4100001=$realbin
+4100002=$bin
 4100003=/usr/local/bin/tracepad
-4100005=/bin/sh"
+4100005=/bin/sh
+4100007=$realbin"
 has "$out" "tracepad 0.2.0 is still running here, from the binary this replaced. Restart it to run 0.3.0:" servers
 has "$out" "  pid 4100001: tracepad serve --listen localhost:4319 --data-dir /data/a" servers
 has "$out" "  pid 4100002: $bin serve --data-dir /data/b" servers
@@ -309,6 +315,9 @@ has "$out" "kill <pid> and the same command" servers
 lacks "$out" "4100003" servers
 lacks "$out" "4100004" servers
 lacks "$out" "4100005" servers
+lacks "$out" "4100006" servers
+has "$out" "  pid 4100007: tracepad serve --data-dir /data/c]0;title[2J" servers
+lacks "$out" "$esc" servers
 lacks "$out" "The server at localhost:4318" servers
 ends_with_upgrade_line servers 0.3.0
 # Nothing replaced, nothing named: the setup line, as on a first install.
