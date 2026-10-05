@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -36,8 +37,8 @@ import (
 // skill says it deletes is the author's rule in AGENTS.md, not this file's.
 
 // The line budgets of #1: the loaded part is paid for in every conversation
-// the skill triggers in.
-var shipped = budgets{skill: 200, total: 900}
+// the skill triggers in. The total was 900 until spec 053 #20.
+var shipped = budgets{skill: 200, total: 910}
 
 type budgets struct{ skill, total int }
 
@@ -58,6 +59,24 @@ func TestHeadingSlugsFollowTheDocAnchorsRule(t *testing.T) {
 	want := []string{"foo--bar", "traces-ls", "setup", "setup-1", "setup-2", "a", "a-1", "a-1-1"}
 	if got := headingSlugs(content); !slices.Equal(got, want) {
 		t.Errorf("slugs = %q, want %q", got, want)
+	}
+}
+
+// TestRedirectionsAreTheShells: an operator, a descriptor before it and its
+// target are no word of the command, in every spelling (spec 053 #19).
+func TestRedirectionsAreTheShells(t *testing.T) {
+	for line, want := range map[string]string{
+		`tracepad serve --listen x >> "$data/log" 2>&1 &`: "serve --listen x",
+		`tracepad serve --listen x >>log 2>&1`:            "serve --listen x",
+		`tracepad traces ls > out.json`:                   "traces ls",
+		`tracepad traces ls 2>/dev/null --limit 5`:        "traces ls --limit 5",
+		`tracepad prompts push p --file x <in`:            "prompts push p --file x",
+		`tracepad traces show <trace-id> --full`:          "traces show <trace-id> --full",
+	} {
+		got := invocations(line)
+		if len(got) != 1 || strings.Join(got[0], " ") != want {
+			t.Errorf("invocations(%q) = %q, want [%q]", line, got, want)
+		}
 	}
 }
 
@@ -288,15 +307,8 @@ func (s *surface) command(words []string) []string {
 	case "serve":
 		// The setup reference starts a server (spec 053 #13, #19): its words
 		// go through config.ParseFlags, which is how `serve` reads its
-		// arguments — the flags of the one table, and no positional word. A
-		// redirection (`>>log`, `2>`) is the shell's, not the command's.
-		var words []string
-		for _, word := range rest {
-			if !strings.ContainsAny(word, "<>") {
-				words = append(words, word)
-			}
-		}
-		if _, err := config.ParseFlags(words); err != nil {
+		// arguments — the flags of the one table, and no positional word.
+		if _, err := config.ParseFlags(rest); err != nil {
 			if name, ok := strings.CutPrefix(err.Error(), "flag provided but not defined: -"); ok {
 				return []string{fmt.Sprintf("`tracepad serve` has no --%s", name)}
 			}
@@ -476,16 +488,23 @@ func checkFile(files fs.FS, name, content string, s *surface) []string {
 
 // invocations finds the `tracepad …` commands in one shell line: split on
 // pipes, `&&`, `;` and command substitution, skip `VAR=value` prefixes, and
-// keep the words after `tracepad`. Quotes group words and hide separators.
+// keep the words after `tracepad`. Quotes group words and hide separators. A
+// redirection — `>file`, `>> file`, `2>&1`, `<in` — is the shell's: its
+// operator, a descriptor number before it and its target are no word of the
+// command's.
 func invocations(line string) [][]string {
 	var segments [][]string
 	var words []string
 	var word strings.Builder
 	quote := rune(0)
+	target := false
 	flush := func() {
 		if word.Len() > 0 {
-			words = append(words, word.String())
+			if !target {
+				words = append(words, word.String())
+			}
 			word.Reset()
+			target = false
 		}
 	}
 	boundary := func() {
@@ -493,7 +512,9 @@ func invocations(line string) [][]string {
 		segments = append(segments, words)
 		words = nil
 	}
-	for _, r := range line {
+	runes := []rune(line)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
 		case quote != 0:
 			if r == quote {
@@ -506,6 +527,21 @@ func invocations(line string) [][]string {
 		case r == '#' && word.Len() == 0:
 			boundary()
 			return commands(segments)
+		case r == '<' && placeholder(runes[i:]) > 0:
+			// `<trace-id>` stands for a word; it redirects nothing.
+			n := placeholder(runes[i:])
+			word.WriteString(string(runes[i : i+n]))
+			i += n - 1
+		case r == '>' || r == '<':
+			if strings.Trim(word.String(), "0123456789") == "" {
+				word.Reset() // the descriptor of `2>`
+			} else {
+				flush()
+			}
+			for i+1 < len(runes) && strings.ContainsRune("<>&", runes[i+1]) {
+				i++
+			}
+			target = true
 		case strings.ContainsRune("|;&()", r):
 			boundary()
 		case r == ' ' || r == '\t':
@@ -516,6 +552,24 @@ func invocations(line string) [][]string {
 	}
 	boundary()
 	return commands(segments)
+}
+
+// placeholder is the length of the `<name>` at the start of runes, or 0.
+func placeholder(runes []rune) int {
+	for j := 1; j < len(runes); j++ {
+		r := runes[j]
+		switch {
+		case r == '>':
+			if j > 1 {
+				return j + 1
+			}
+			return 0
+		case unicode.IsLetter(r), unicode.IsDigit(r), r == '-', r == '_', r == '.':
+		default:
+			return 0
+		}
+	}
+	return 0
 }
 
 func commands(segments [][]string) [][]string {

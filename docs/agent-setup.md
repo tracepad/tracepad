@@ -18,9 +18,10 @@ tracepad version
 ```
 
 A release (`0.1.0`) or a release candidate (`0.1.0-rc.1`) means it is
-installed: go to step 2. *command not found*, or a commit hash (a development
-build), means installing the binary and the agent skill, together, verified,
-with no `sudo`:
+installed: go to step 2. `dev` is a build from a checkout, which serves but has
+no container image: keep it for the binary path, or install a release. *command
+not found* means installing the binary and the agent skill, together,
+verified, with no `sudo`:
 
 ```sh
 curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh
@@ -106,32 +107,14 @@ and 2):
 
 ## With Docker instead of the binary
 
-When the person asks for Docker, or the binary cannot run here, run the
-server as a container. You still install the binary for its CLI and its
-skill. The conditions of step 3 apply the same way: "fresh" means the volume
-does not exist yet (`docker volume inspect tracepad` fails), and the port is
-published on loopback only. This command takes the place of step 3's start
-command, with the same `port` and `declare`. The image is named by the
-binary's version, because before 0.1.0 an untagged image does not exist:
-
-```sh
-port=4318; declare=yes
-umask 077; put() { { grep -v "^$1=" .env 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } >.env.new && mv .env.new .env; }
-project="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" | tr -c 'A-Za-z0-9._\n-' '-' | sed 's/^[^A-Za-z0-9]*//')"
-decl=""; [ "$declare" = yes ] && sk="tp-sk-$(openssl rand -hex 32)" && decl="${project:-app}:tp-pk-$(openssl rand -hex 16):$sk"
-docker run -d --name tracepad -v tracepad:/data -p "127.0.0.1:$port:4318" -e TRACEPAD_PROJECTS="$decl" \
-  "ghcr.io/tracepad/tracepad:$(tracepad version)" >/dev/null \
-  || { echo "docker run failed: port $port is taken, or a container named tracepad exists"; exit 1; }
-sleep 3; tracepad health --url "http://localhost:$port" || { docker logs tracepad 2>&1 | tail -n 5; exit 1; }
-[ "$declare" = yes ] || sk="$(docker logs tracepad 2>&1 | sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' | tail -n 1)"
-put TRACEPAD_URL "http://localhost:$port"; put TRACEPAD_API_KEY "$sk"
-```
-
-After it, the log, with the setup link and the public key, is
-`docker logs tracepad 2>&1`: read the Langfuse public key from there in the
-block that writes the path's lines. `docker stop tracepad` stops the server.
-A declared key is part of the container's configuration, so whoever can run
-`docker inspect` on this machine can read it. Say so in the report.
+When the person asks for Docker, the server runs as a container and the binary
+is still installed, for its CLI and its skill. It is the same procedure with
+`how=docker` in step 3's start command (`tracepad skills show setup.md`): a
+container and a volume named after the project, the port published on
+loopback alone, and the image of the binary's own release. A development
+build (`tracepad version` says `dev`) has no image, so install a release
+first. A declared key is part of the container's configuration, so whoever
+can run `docker inspect` on this machine can read it: say so in the report.
 [docker.md](docker.md) covers the volume and upgrades.
 
 ## What needs the person

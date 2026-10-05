@@ -133,7 +133,12 @@ def on_post_build(config):
 
     pages = []
     for section, title, path in nav_pages(config["nav"]):
-        markdown = BUILT[path]
+        markdown = BUILT.get(path)
+        if markdown is None:
+            # A dirty build (`mkdocs serve --dirty`) hands only the pages it
+            # rebuilt to on_page_markdown; the rest are read as the build would.
+            with open(os.path.join(config["docs_dir"], path), encoding="utf-8") as f:
+                markdown = on_page_markdown(f.read(), None, config, None)
         target = os.path.join(site, path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:

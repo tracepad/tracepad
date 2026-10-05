@@ -72,14 +72,18 @@ index="$(mktemp)"
 trap 'rm -f "$index"' EXIT
 export GIT_INDEX_FILE="$index"
 git read-tree "$branch"
-git ls-files | awk '!/\// && (/\.md$/ || $0 == "install.sh" || $0 == "llms.txt" || $0 == "llms-full.txt")' |
-	while IFS= read -r file; do git update-index --force-remove -- "$file"; done
-git ls-tree "$branch" "$source/" | awk -F '\t' '
-	{ split($1, meta, " "); name = substr($2, index($2, "/") + 1) }
-	meta[2] == "blob" && (name ~ /\.md$/ || name == "install.sh" || name == "llms.txt" || name == "llms-full.txt") {
-		print meta[1] "," meta[3] "," name
-	}' |
-	while IFS= read -r entry; do git update-index --add --cacheinfo "$entry"; done
+# One `git update-index --index-info`, not a process per file: every root file
+# of those kinds is removed (mode 0), then the version's are added by blob.
+{
+	git ls-files | awk '!/\// && (/\.md$/ || $0 == "install.sh" || $0 == "llms.txt" || $0 == "llms-full.txt") {
+		print "0 0000000000000000000000000000000000000000\t" $0
+	}'
+	git ls-tree "$branch" "$source/" | awk -F '\t' '
+		{ split($1, meta, " "); name = substr($2, index($2, "/") + 1) }
+		meta[2] == "blob" && (name ~ /\.md$/ || name == "install.sh" || name == "llms.txt" || name == "llms-full.txt") {
+			print meta[1] " " meta[3] "\t" name
+		}'
+} | git update-index --index-info
 tree="$(git write-tree)"
 unset GIT_INDEX_FILE
 if [ "$tree" != "$(git rev-parse "$branch^{tree}")" ]; then

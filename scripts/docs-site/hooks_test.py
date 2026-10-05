@@ -160,6 +160,31 @@ class AgentSiteTest(unittest.TestCase):
         # on_page_markdown returned to MkDocs, in the one pass.
         self.assertIn("From [nothing](install.md)", self.read(self.build(), "quickstart.md"))
 
+    def test_a_dirty_build_reads_the_pages_it_did_not_rebuild(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        docs, site = os.path.join(tmp.name, "docs"), os.path.join(tmp.name, "site")
+        os.makedirs(docs)
+        os.makedirs(site)
+        for name, text in AGENT_PAGES.items():
+            with open(os.path.join(docs, name), "w") as f:
+                f.write(text)
+        hooks.on_pre_build(CONFIG)
+        hooks.on_page_markdown(AGENT_PAGES["index.md"], FakePage("index.md"), CONFIG, None)
+        hooks.on_post_build(
+            {
+                **CONFIG,
+                "docs_dir": docs,
+                "site_dir": site,
+                "site_url": "https://example.org/docs",
+                "site_name": "Tracepad",
+                "site_description": "One line about it.",
+                "nav": AGENT_NAV,
+            }
+        )
+        page = self.read(site, "quickstart.md")
+        self.assertIn(f"[the README]({GITHUB}/blob/main/README.md#getting-it)", page)
+
     def test_a_new_build_starts_empty(self):
         hooks.on_page_markdown("# Q\n", FakePage("q.md"), CONFIG, None)
         hooks.on_pre_build(CONFIG)

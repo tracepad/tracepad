@@ -25,7 +25,7 @@ fail() {
 # The system tools the script uses, and only those, by symlink.
 sys="$tmp/sys"
 mkdir -p "$sys"
-for tool in sh curl tar gzip sed awk cut head mktemp rm mkdir cp chmod mv cat sha256sum shasum; do
+for tool in sh curl tar gzip sed awk cut head mktemp rm mkdir cp chmod mv cat sleep sha256sum shasum; do
 	if path="$(command -v "$tool")"; then
 		ln -s "$path" "$sys/$tool"
 	fi
