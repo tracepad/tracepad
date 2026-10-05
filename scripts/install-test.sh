@@ -83,10 +83,13 @@ release() {
 case "\$1" in
 version) echo "$says" ;;
 __arch) echo "$os/$arch" ;;
-health)
-	[ -z "\${FAKE_HANG:-}" ] || sleep 30
-	[ -n "\${FAKE_RUNNING:-}" ] || exit 1
-	printf '{"version":"%s","ok":true}\n' "\$FAKE_RUNNING" ;;
+upgrade)
+	# The plan (spec 054): from the case's environment; a binary from before
+	# the command does not know the word.
+	[ -n "\${FAKE_PLAN:-}" ] || { echo "tracepad: unknown command" >&2; exit 2; }
+	[ -z "\${FAKE_PLAN_HANG:-}" ] || sleep 60
+	echo "\$*: \$FAKE_PLAN"
+	exit "\${FAKE_PLAN_EXIT:-0}" ;;
 skills)
 	if [ "\${3:-}" = --dir ]; then d="\$4"; else d="\$HOME/.claude/skills"; fi
 	mkdir -p "\$d/tracepad" && echo "$version" >"\$d/tracepad/.version"
@@ -126,6 +129,10 @@ run() {
 has() { grep -qF -- "$2" "$1" || fail "$3: $(basename "$1") lacks: $2"; }
 lacks() { if grep -qF -- "$2" "$1"; then fail "$3: $(basename "$1") has: $2"; fi; }
 ends_with_agent_line() { [ "$(tail -n 1 "$out")" = "$agent_line" ] || fail "$1: the last line is not the agent line"; }
+ends_with_upgrade_line() {
+	[ "$(tail -n 1 "$out")" = "  Update Tracepad to $2: follow https://tracepad.github.io/tracepad/agent-upgrade.md" ] ||
+		fail "$1: the last line is not the upgrade line to $2"
+}
 fresh_home() {
 	rm -rf "$home"
 	mkdir -p "$home" "$@"
@@ -159,12 +166,30 @@ has "$out" "tracepad 0.2.0 is already installed at $bin" again
 has "$out" "verified  unchanged" again
 ends_with_agent_line again
 
-# --- A newer stable release: an upgrade, and the running server named.
+# --- Nothing runs older: the plan adds nothing, and the setup line stays.
+run again-plan-quiet 0 FAKE_PLAN="nothing" FAKE_PLAN_EXIT=0
+lacks "$out" "Still running an older version" again-plan-quiet
+lacks "$out" "upgrade --plan" again-plan-quiet
+ends_with_agent_line again-plan-quiet
+
+# --- A newer stable release: an update, and what still runs the old one is
+# the binary's plan to name (spec 054 #15).
 release 0.3.0 stable
-run upgrade 0 FAKE_RUNNING=0.2.0
+run upgrade 0 FAKE_PLAN="server pid 41000 runs 0.2.0" FAKE_PLAN_EXIT=10
 has "$out" "updated tracepad 0.2.0 → 0.3.0 at $bin" upgrade
-has "$out" "The server at localhost:4318 is still running 0.2.0; restart it to run 0.3.0" upgrade
-ends_with_agent_line upgrade
+has "$out" "Still running an older version:" upgrade
+has "$out" "  upgrade --plan --to 0.3.0: server pid 41000 runs 0.2.0" upgrade
+ends_with_upgrade_line upgrade 0.3.0
+
+# --- Run again, the output lost: what runs older is still named, and the
+# last line is still the upgrade line (the third review of #222).
+run again-older 0 FAKE_PLAN="server pid 41000 runs 0.2.0" FAKE_PLAN_EXIT=10
+has "$out" "tracepad 0.3.0 is already installed" again-older
+has "$out" "server pid 41000 runs 0.2.0" again-older
+ends_with_upgrade_line again-older 0.3.0
+run again-theirs 0 FAKE_PLAN="a systemd unit runs 0.2.0" FAKE_PLAN_EXIT=4
+has "$out" "a systemd unit runs 0.2.0" again-theirs
+ends_with_upgrade_line again-theirs 0.3.0
 
 # --- A pinned candidate, with or without its v.
 release 0.4.0-rc.1
@@ -179,11 +204,25 @@ has "$out" "tracepad 0.4.0-rc.1 is installed at $bin, newer than the newest stab
 has "$out" "| TRACEPAD_VERSION=0.3.0 sh" no-downgrade
 [ "$("$bin" version)" = 0.4.0-rc.1 ] || fail "no-downgrade: the binary was replaced"
 
-# --- Pinned, it may, and says what that means.
-run downgrade 0 TRACEPAD_VERSION=0.3.0
+# --- Pinned, it may, and says what that means. What runs the newer version
+# is left running, with no advice to restart it onto the older one, and the
+# last line is not an upgrade the procedure would refuse.
+run downgrade 0 TRACEPAD_VERSION=0.3.0 FAKE_PLAN="Refused: 0.3.0 is older than 0.4.0-rc.1, which server pid 41000 runs" FAKE_PLAN_EXIT=1
 has "$out" "downgraded tracepad 0.4.0-rc.1 → 0.3.0" downgrade
 has "$out" "does not open a database a newer one migrated" downgrade
+has "$out" "which server pid 41000 runs" downgrade
+lacks "$out" "Still running an older version" downgrade
+lacks "$out" "Update Tracepad to" downgrade
+ends_with_agent_line downgrade
 [ "$("$bin" version)" = 0.3.0 ] || fail "downgrade: the binary is not 0.3.0"
+
+# --- A binary from before the command: the update says nothing of what runs.
+release 0.3.1
+run no-command 0 TRACEPAD_VERSION=0.3.1
+has "$out" "updated tracepad 0.3.0 → 0.3.1" no-command
+lacks "$out" "Still running" no-command
+ends_with_upgrade_line no-command 0.3.1
+run back-to-030 0 TRACEPAD_VERSION=0.3.0
 
 # --- A binary that does not run as itself is never put in place.
 release 0.6.0
@@ -195,11 +234,18 @@ for left in "$home"/.local/bin/.tracepad.*; do
 	[ ! -e "$left" ] || fail "broken: the temporary file $left was left behind"
 done
 
-# --- The hint about a running server never holds the install up.
+# --- The plan never holds the install up.
 started="$(date +%s)"
-run hanging-server 0 FAKE_HANG=1
-[ $(($(date +%s) - started)) -lt 10 ] || fail "hanging-server: the probe of the running server held the install up"
-ends_with_agent_line hanging-server
+run hanging-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG=1
+[ $(($(date +%s) - started)) -lt 30 ] || fail "hanging-plan: the plan held the install up"
+lacks "$out" "Still running" hanging-plan
+ends_with_agent_line hanging-plan
+
+# --- A binary whose answer is not a version is not quoted.
+printf '#!/bin/sh\nprintf "1.0\\033]52;c;eA==\\007\\n"\n' >"$bin"
+run weird-before 0 TRACEPAD_VERSION=0.3.0
+has "$out" "updated tracepad (a binary that gave no version) → 0.3.0" weird-before
+if grep -q "$(printf '\033')" "$out"; then fail "weird-before: an escape reached the output"; fi
 
 # --- A version that does not exist.
 run missing-version 1 TRACEPAD_VERSION=9.9.9

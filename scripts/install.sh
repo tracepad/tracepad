@@ -19,6 +19,7 @@ set -eu
 REPO=tracepad/tracepad
 SCRIPT_URL=https://tracepad.github.io/tracepad/install.sh
 AGENT_LINE='Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md'
+UPGRADE_PAGE=https://tracepad.github.io/tracepad/agent-upgrade.md
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -59,6 +60,8 @@ no_stable() {
 	if [ -z "${TRACEPAD_DOWNLOAD_URL:-}" ]; then
 		candidate="$(curl --proto '=https' -fsSL "https://api.github.com/repos/$REPO/releases?per_page=10" 2>/dev/null |
 			sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1 || true)"
+		# Printed below, so a version's characters only (spec 054 #15).
+		case "$candidate" in *[!0-9A-Za-z.-]*) candidate="" ;; esac
 	fi
 	{
 		say "tracepad install: there is no stable release of Tracepad yet, and this script installs a release candidate only when you name it."
@@ -146,6 +149,7 @@ put_in_place() {
 	cp "$tmp/tracepad" "$new" || fail "could not write to $dir"
 	chmod 0755 "$new"
 	now="$("$new" version 2>/dev/null || true)"
+	case "$now" in *[!0-9A-Za-z.-]*) now="something else" ;; esac
 	if [ "$now" != "$version" ]; then
 		rm -f "$new"
 		fail "the new binary says it is '$now', not $version (is $dir mounted noexec?); $bin is unchanged"
@@ -184,6 +188,30 @@ newer() {
 	}'
 }
 
+# skill_into runs `tracepad skills install ARGS…` and adds what it said to
+# skill_lines, or fails with it.
+skill_into() {
+	out="$("$bin" skills install "$@" 2>&1)" || fail "tracepad skills install $*: $out"
+	skill_lines="${skill_lines:+$skill_lines
+}$out"
+}
+
+# plan asks the binary just put in place what still runs an older version
+# (spec 054 #15): each server and container, whose it is, and what to do. Its
+# report escapes what other programs supplied. Fifteen seconds at most: this is
+# advice, not a step that may hang. plan_status is its exit status: 10 or 4
+# when something runs older, 0 when nothing does; anything else (a binary from
+# before the command, the watchdog) adds nothing.
+plan() {
+	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
+	planner=$!
+	(sleep 15 && kill "$planner") >/dev/null 2>&1 &
+	watchdog=$!
+	plan_status=0
+	wait "$planner" || plan_status=$?
+	kill "$watchdog" 2>/dev/null || true
+}
+
 # install_skill installs the skill where an agent on this machine reads
 # skills: Claude Code's directory, and the shared one Codex reads. A directory
 # no agent has made is not made here.
@@ -194,14 +222,10 @@ install_skill() {
 	fi
 	skill_lines=""
 	if [ -d "$HOME/.claude" ]; then
-		out="$("$bin" skills install 2>&1)" || fail "tracepad skills install: $out"
-		skill_lines="$out"
+		skill_into
 	fi
 	if [ -d "$HOME/.agents" ] || [ -d "$HOME/.codex" ]; then
-		out="$("$bin" skills install --dir "$HOME/.agents/skills" 2>&1)" ||
-			fail "tracepad skills install --dir $HOME/.agents/skills: $out"
-		skill_lines="${skill_lines:+$skill_lines
-}$out"
+		skill_into --dir "$HOME/.agents/skills"
 	fi
 	if [ -z "$skill_lines" ]; then
 		skill_lines="not installed: no ~/.claude, ~/.agents or ~/.codex here. For your agent, one of:
@@ -234,8 +258,14 @@ main() {
 
 	resolve_version
 
+	# change is what this run did to $bin: none, installed (nothing was
+	# there), updated or downgraded (a file was there, whatever it answers).
 	before=""
+	change=none
 	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null || true)"
+	# Printed below: a version's characters only, never whatever another
+	# binary says (spec 054 #15).
+	case "$before" in *[!0-9A-Za-z.-]*) before="" ;; esac
 	warning=""
 	if [ "$before" = "$version" ]; then
 		headline="tracepad $version is already installed at $bin"
@@ -248,15 +278,20 @@ main() {
 		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$version sh"
 		version="$before"
 	else
+		existed=no
+		[ ! -e "$bin" ] || existed=yes
 		download_and_verify
 		put_in_place
-		if [ -z "$before" ]; then
+		if [ "$existed" = no ]; then
+			change=installed
 			headline="installed tracepad $version at $bin"
 		elif newer "$before" "$version"; then
+			change=downgraded
 			headline="downgraded tracepad $before → $version at $bin, as TRACEPAD_VERSION asked"
 			warning="An older binary does not open a database a newer one migrated: restore the backup taken before that upgrade (https://tracepad.github.io/tracepad/install/#upgrading)."
 		else
-			headline="updated tracepad $before → $version at $bin"
+			change=updated
+			headline="updated tracepad ${before:-(a binary that gave no version)} → $version at $bin"
 		fi
 	fi
 
@@ -286,25 +321,37 @@ main() {
 		;;
 	esac
 
-	# A server started from the old binary keeps running it until restarted.
-	# The local default address only, whatever address the CLI is set to, and for
-	# three seconds at most: this is a hint, not a step that may hang.
-	"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
-	probe=$!
-	(sleep 3 && kill "$probe") >/dev/null 2>&1 &
-	watchdog=$!
-	wait "$probe" 2>/dev/null || true
-	kill "$watchdog" 2>/dev/null || true
-	running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
-	if [ -n "$running" ] && [ "$running" != "$version" ]; then
-		say ""
-		say "The server at localhost:4318 is still running $running; restart it to run $version."
+	# A server or container started from an older version keeps running it
+	# until it is restarted: the binary's plan names each, whose it is, and
+	# what to do. After a downgrade, what runs is newer, and the plan says to
+	# leave it. Not after a first install: nothing of this binary's runs yet.
+	plan_status=none
+	if [ "$change" != installed ]; then
+		plan
+		case "$plan_status/$change" in
+		10/* | 4/*)
+			say ""
+			say "Still running an older version:"
+			sed 's/^/  /' "$tmp/plan"
+			;;
+		1/downgraded)
+			say ""
+			sed 's/^/  /' "$tmp/plan"
+			;;
+		esac
 	fi
 
+	# After an update, or while something runs older, the agent's part is the
+	# upgrade: the server restarted on a backup, the skill's other copies, the
+	# project's package. A downgrade is not an upgrade the agent can do.
+	line="$AGENT_LINE"
+	case "$change/$plan_status" in
+	updated/* | */10 | */4) line="Update Tracepad to $version: follow $UPGRADE_PAGE" ;;
+	esac
 	say ""
 	say "Next, paste this into your coding agent (Claude Code, Codex, Cursor, …):"
 	say ""
-	say "  $AGENT_LINE"
+	say "  $line"
 }
 
 main "$@"

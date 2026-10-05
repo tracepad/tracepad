@@ -188,7 +188,9 @@ func realDeps(getenv func(string) string) (Deps, error) {
 		base, mirror = githubReleases, false
 	}
 	goos, arch := runtime.GOOS, nativeArch()
-	local := &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext}}
+	// A server that takes a connection and never answers must not hold the
+	// plan: every local request has its own deadline.
+	local := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext}}
 	network := &http.Client{Timeout: 10 * time.Minute, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
 	return Deps{
 		Sys:    newSystem(),

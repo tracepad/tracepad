@@ -17,8 +17,10 @@ const (
 	EnvClient
 	// EnvPackage: read by the Python, Node and Go packages, not by the server.
 	EnvPackage
-	// EnvInstaller: read by scripts/install.sh, and by nothing in the binary
-	// (spec 053 #10). Listed so that one left exported is not called a typo.
+	// EnvInstaller: read by scripts/install.sh (spec 053 #10), and two of them,
+	// TRACEPAD_INSTALL_DIR and TRACEPAD_DOWNLOAD_URL, by `tracepad upgrade`,
+	// which installs as the script does (spec 054 #3). Listed so that one left
+	// exported is not called a typo.
 	EnvInstaller
 )
 
