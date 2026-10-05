@@ -74,22 +74,27 @@ AGENT_PAGES = {
 }
 
 
+class FakePage:
+    """What the hook reads of MkDocs' page: the file's path under docs/."""
+
+    def __init__(self, src_uri):
+        self.file = type("File", (), {"src_uri": src_uri})()
+
+
 class AgentSiteTest(unittest.TestCase):
     """What the build writes for agents (spec 053 #14)."""
 
     def build(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        docs, site = os.path.join(tmp.name, "docs"), os.path.join(tmp.name, "site")
-        os.makedirs(docs)
+        site = os.path.join(tmp.name, "site")
         os.makedirs(site)
+        hooks.on_pre_build(CONFIG)
         for name, text in AGENT_PAGES.items():
-            with open(os.path.join(docs, name), "w") as f:
-                f.write(text)
+            hooks.on_page_markdown(text, FakePage(name), CONFIG, None)
         hooks.on_post_build(
             {
                 **CONFIG,
-                "docs_dir": docs,
                 "site_dir": site,
                 "site_url": "https://example.org/docs",
                 "site_name": "Tracepad",
@@ -149,6 +154,16 @@ class AgentSiteTest(unittest.TestCase):
     def test_the_install_script_is_in_the_site(self):
         with open(os.path.join(ROOT, "scripts", "install.sh")) as f:
             self.assertEqual(self.read(self.build(), "install.sh"), f.read())
+
+    def test_the_copies_come_from_the_build_not_the_disk(self):
+        # build() writes no page to disk: what is copied is what
+        # on_page_markdown returned to MkDocs, in the one pass.
+        self.assertIn("From [nothing](install.md)", self.read(self.build(), "quickstart.md"))
+
+    def test_a_new_build_starts_empty(self):
+        hooks.on_page_markdown("# Q\n", FakePage("q.md"), CONFIG, None)
+        hooks.on_pre_build(CONFIG)
+        self.assertEqual(hooks.BUILT, {})
 
     def test_a_long_first_sentence_is_cut(self):
         self.assertEqual(len(hooks.description("# T\n\n" + "word " * 100)), 198)

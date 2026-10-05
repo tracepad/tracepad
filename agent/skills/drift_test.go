@@ -71,24 +71,25 @@ func TestTheDriftCheckCatchesDrift(t *testing.T) {
 
 	got := check(fixture, surface, shipped)
 	want := []string{
-		"`tracepad tracez`",                  // an unknown command
-		"`tracepad traces lst`",              // an unknown subcommand
-		"--sinse",                            // an unknown flag
-		"--global",                           // an unknown flag of the binary's own command
-		"`tracepad serve` has no --port",     // an unknown flag of the server
-		"`tracepad mcp`",                     // a word this test cannot check
-		"`get_trcae`",                        // an unknown MCP tool
-		"/api/v1/tracez",                     // an unknown route
-		"DELETE /api/v1/system",              // a route under the wrong method
-		"../../../docs/cli.md",               // a link into docs/
-		"references/nowhere.md",              // a relative link that does not resolve
-		"docs/nowhere.md",                    // a repository link to no file
-		"docs/cli.md#no-such-heading",        // a repository link to no heading
-		"--fulll",                            // an inline command, wrapped, checked like a fenced one
-		"`tracepad skills show debuging.md`", // a file the skill does not have
-		"`tracepad traces lsx`",              // behind a prompt
-		"`tracepad trace`",                   // behind sudo, a path to the binary
-		"`tracepad skills instal`",           // behind `docker run` and the image
+		"`tracepad tracez`",                     // an unknown command
+		"`tracepad traces lst`",                 // an unknown subcommand
+		"--sinse",                               // an unknown flag
+		"--global",                              // an unknown flag of the binary's own command
+		"`tracepad serve` has no --port",        // an unknown flag of the server
+		"`tracepad serve`: unexpected argument", // a positional word after it
+		"`tracepad mcp`",                        // a word this test cannot check
+		"`get_trcae`",                           // an unknown MCP tool
+		"/api/v1/tracez",                        // an unknown route
+		"DELETE /api/v1/system",                 // a route under the wrong method
+		"../../../docs/cli.md",                  // a link into docs/
+		"references/nowhere.md",                 // a relative link that does not resolve
+		"docs/nowhere.md",                       // a repository link to no file
+		"docs/cli.md#no-such-heading",           // a repository link to no heading
+		"--fulll",                               // an inline command, wrapped, checked like a fenced one
+		"`tracepad skills show debuging.md`",    // a file the skill does not have
+		"`tracepad traces lsx`",                 // behind a prompt
+		"`tracepad trace`",                      // behind sudo, a path to the binary
+		"`tracepad skills instal`",              // behind `docker run` and the image
 	}
 	for _, needle := range want {
 		found := 0
@@ -285,16 +286,23 @@ func (s *surface) command(words []string) []string {
 		}
 		return problems
 	case "serve":
-		// The setup reference starts a server (spec 053 #13). Its two flags
-		// are the ones config.Env pairs with a variable, which is where
-		// `tracepad help` prints them from too.
-		var problems []string
-		for _, flag := range flags(rest) {
-			if !slices.ContainsFunc(config.Env, func(v config.EnvVar) bool { return v.Flag == "--"+flag }) {
-				problems = append(problems, fmt.Sprintf("`tracepad serve` has no --%s", flag))
+		// The setup reference starts a server (spec 053 #13, #19): its words
+		// go through config.ParseFlags, which is how `serve` reads its
+		// arguments — the flags of the one table, and no positional word. A
+		// redirection (`>>log`, `2>`) is the shell's, not the command's.
+		var words []string
+		for _, word := range rest {
+			if !strings.ContainsAny(word, "<>") {
+				words = append(words, word)
 			}
 		}
-		return problems
+		if _, err := config.ParseFlags(words); err != nil {
+			if name, ok := strings.CutPrefix(err.Error(), "flag provided but not defined: -"); ok {
+				return []string{fmt.Sprintf("`tracepad serve` has no --%s", name)}
+			}
+			return []string{fmt.Sprintf("`tracepad serve`: %v", err)}
+		}
+		return nil
 	case "mcp":
 		// Its flags are parsed in package main, out of this test's reach.
 		// The skill has no reason to run it; if it grows one, this test grows

@@ -11,10 +11,9 @@ tracepad version
 tracepad health
 ```
 
-- `version` prints one, such as `0.1.0`. *command not found* means the binary is
-  missing, or `~/.local/bin` is not on `PATH` (try `~/.local/bin/tracepad`). A
-  commit hash, or a version older than `0.1.0`, is another build. In both cases
-  install, then call the new binary by its full path:
+- `version` prints a release (`0.1.0`) or a candidate (`0.1.0-rc.1`): installed.
+  *command not found* (try `~/.local/bin/tracepad` first, often off `PATH`) or
+  a commit hash (a development build): install with
   `curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh`.
 - `health` prints `{"version":"…","ok":true}`: a server is running and you did
   not start it. Ask the human for its URL and a key (`ingest` for the
@@ -53,42 +52,43 @@ git check-ignore -q .env || echo "NOT IGNORED"
 - `NOT IGNORED`: add `.env` to `.gitignore`, creating it if missing, before
   writing `.env`, and say so in the report. (Outside a git repository it prints too.)
 
-Then run one command, so that the secret goes from the generator into `.env`
-and the server and is never printed. Of the two `printf` lines marked *only*,
-keep the one for step 2's path; the `tracepad` package needs neither:
+Then one command starts it with `port` from step 1, and writes `TRACEPAD_URL`
+and `TRACEPAD_API_KEY` into `.env`: each line replaced where it is, never
+repeated, and the secret never printed. `declare=yes` declares the key;
+`declare=no` is for a human who would rather you did not, and moves the
+`ingest` key the first start prints instead. That key sends but cannot read,
+so step 6 waits for a `read` key the human mints (Settings → Project → API
+keys), and until then the report says step 4's `200` is the only check.
 
 ```sh
-port=4318
-data="${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}"
+port=4318; declare=yes
+export PATH="$HOME/.local/bin:$PATH"; umask 077
+data="${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}"; mkdir -p "$data"
+put() { { grep -v "^$1=" .env 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } >.env.new && mv .env.new .env; }
 project="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" | tr -c 'A-Za-z0-9._\n-' '-' | sed 's/^[^A-Za-z0-9]*//')"
-pk="tp-pk-$(openssl rand -hex 16)"; sk="tp-sk-$(openssl rand -hex 32)"
-mkdir -p "$data" && chmod 700 "$data"
-printf 'TRACEPAD_URL=http://localhost:%s\nTRACEPAD_API_KEY=%s\n' "$port" "$sk" >>.env
-# only on the OpenTelemetry path:
-printf 'OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\nOTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:%s/v1/traces\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer %s"\n' "$port" "$sk" >>.env
-# only on the Langfuse path:
-printf 'LANGFUSE_BASE_URL=http://localhost:%s\nLANGFUSE_HOST=http://localhost:%s\nLANGFUSE_PUBLIC_KEY=%s\nLANGFUSE_SECRET_KEY=%s\n' "$port" "$port" "$pk" "$sk" >>.env
-TRACEPAD_PROJECTS="${project:-app}:$pk:$sk" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
-echo $! >"$data/server.pid"
+decl=""; [ "$declare" = yes ] && sk="tp-sk-$(openssl rand -hex 32)" && decl="${project:-app}:tp-pk-$(openssl rand -hex 16):$sk"
+TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
+echo $! >"$data/server.pid.new"; sleep 3
+kill -0 "$(cat "$data/server.pid.new")" && tracepad health --url "http://localhost:$port" || { rm "$data/server.pid.new"; tail -n 5 "$data/server.log"; exit 1; }
+mv "$data/server.pid.new" "$data/server.pid"; [ "$declare" = yes ] || sk="$(sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' "$data/server.log" | tail -n 1)"
+put TRACEPAD_URL "http://localhost:$port"; put TRACEPAD_API_KEY "$sk"
 ```
 
-A few seconds later, `tracepad health --url "http://localhost:$port"` prints
-`{"version":"…","ok":true}`. Without `--url` it asks `localhost:4318`, which on
-another port is someone else. The project is named after the repository. The
-key holds all three scopes, and its secret is in no log (the public key is).
-The log holds the setup link for the human (step 7).
+Healthy: `{"version":"…","ok":true}`. Otherwise the log's last lines say why
+(*address already in use*: another port), and `.env` is untouched. The project
+is named after the repository; the log has its public key and the setup link.
 
-**Fallback**, when the human would rather you created no key: start the same
-server without `TRACEPAD_PROJECTS`. The first start prints an `ingest` key;
-move it into `.env` unseen:
+Then the lines of step 2's path, from `.env` (the `tracepad` package needs
+none: keep only the line of yours). On a server you did not start, the human
+puts `TRACEPAD_URL` and the key into `.env`, and this block does the rest:
 
 ```sh
-sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/TRACEPAD_API_KEY=\1/p' "$data/server.log" >>.env
+put() { { grep -v "^$1=" .env 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } >.env.new && mv .env.new .env; }
+url="$(sed -n 's/^TRACEPAD_URL=//p' .env)"; sk="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env)"; umask 077
+pk="$(sed -n 's/^ *LANGFUSE_PUBLIC_KEY=\(tp-pk-[^ ]*\)$/\1/p' "${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}/server.log" | tail -n 1)"
+put OTEL_EXPORTER_OTLP_PROTOCOL http/protobuf; put OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$url/v1/traces"; put OTEL_EXPORTER_OTLP_HEADERS "\"authorization=Bearer $sk\""
+put LANGFUSE_BASE_URL "$url"; put LANGFUSE_HOST "$url"; put LANGFUSE_PUBLIC_KEY "$pk"; put LANGFUSE_SECRET_KEY "$sk"
 ```
-
-That key sends but cannot read. Step 6 waits for a `read` key the human mints
-(Settings → Project → API keys) and hands you; until then step 4's `200` is
-the only check, and the report says so.
 
 ## 4. A test span
 
@@ -96,7 +96,7 @@ The CLI and `curl` take the two variables from `.env`, in every new shell (a
 shell without them asks `localhost:4318` with no key), never typed out:
 
 ```sh
-export TRACEPAD_URL="$(sed -n 's/^TRACEPAD_URL=//p' .env)" TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env)"
+export PATH="$HOME/.local/bin:$PATH" TRACEPAD_URL="$(sed -n 's/^TRACEPAD_URL=//p' .env)" TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env)"
 now="$(date +%s)000000000"
 curl -sS -o /dev/null -w '%{http_code}\n' "$TRACEPAD_URL/v1/traces" \
   -H "Authorization: Bearer $TRACEPAD_API_KEY" -H 'Content-Type: application/json' \

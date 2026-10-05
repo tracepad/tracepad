@@ -32,6 +32,15 @@ INLINE = re.compile(r"\]\(\.\./([^)#\s]+)(#[^)\s]*)?\)")
 DEFINITION = re.compile(r"^(\s{0,3}\[[^\]]+\]:\s*)\.\./([^#\s]+)(#\S*)?(?=\s|$)")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
+# Each page's Markdown as this hook handed it to the build, by its path under
+# docs/: the agents' copy is that text, not a second pass over the file
+# (spec 053 #19). Emptied at the start of every build, `mkdocs serve`'s too.
+BUILT = {}
+
+
+def on_pre_build(config):
+    BUILT.clear()
+
 
 def on_page_markdown(markdown, page, config, files):
     root = os.path.dirname(os.path.abspath(config["config_file_path"]))
@@ -64,7 +73,10 @@ def on_page_markdown(markdown, page, config, files):
             continue
         line = INLINE.sub(inline, line)
         lines[i] = DEFINITION.sub(definition, line)
-    return "\n".join(lines)
+    markdown = "\n".join(lines)
+    if page is not None:
+        BUILT[page.file.src_uri] = markdown
+    return markdown
 
 
 # --- The site for agents (spec 053 #14) -------------------------------------
@@ -114,7 +126,6 @@ def description(markdown):
 
 def on_post_build(config):
     root = os.path.dirname(os.path.abspath(config["config_file_path"]))
-    docs = config["docs_dir"]
     site = config["site_dir"]
     base = config["site_url"] or ""
     if base and not base.endswith("/"):
@@ -122,8 +133,7 @@ def on_post_build(config):
 
     pages = []
     for section, title, path in nav_pages(config["nav"]):
-        with open(os.path.join(docs, path), encoding="utf-8") as f:
-            markdown = on_page_markdown(f.read(), None, config, None)
+        markdown = BUILT[path]
         target = os.path.join(site, path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:

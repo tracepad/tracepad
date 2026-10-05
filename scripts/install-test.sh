@@ -75,12 +75,16 @@ release() {
 			[ "$version/$os/$arch" = "0.4.0-rc.1/linux/arm64" ] && continue
 			work="$tmp/build/$version-$os-$arch"
 			mkdir -p "$work"
+			# 0.6.0 is a broken build: it does not say the version it is.
+			says="$version"
+			[ "$version" = 0.6.0 ] && says="0.0.0-broken"
 			cat >"$work/tracepad" <<EOF
 #!/bin/sh
 case "\$1" in
-version) echo "$version" ;;
+version) echo "$says" ;;
 __arch) echo "$os/$arch" ;;
 health)
+	[ -z "\${FAKE_HANG:-}" ] || sleep 30
 	[ -n "\${FAKE_RUNNING:-}" ] || exit 1
 	printf '{"version":"%s","ok":true}\n' "\$FAKE_RUNNING" ;;
 skills)
@@ -159,7 +163,7 @@ ends_with_agent_line again
 release 0.3.0 stable
 run upgrade 0 FAKE_RUNNING=0.2.0
 has "$out" "updated tracepad 0.2.0 → 0.3.0 at $bin" upgrade
-has "$out" "is still running 0.2.0; restart it to run 0.3.0" upgrade
+has "$out" "The server at localhost:4318 is still running 0.2.0; restart it to run 0.3.0" upgrade
 ends_with_agent_line upgrade
 
 # --- A pinned candidate, with or without its v.
@@ -168,6 +172,34 @@ run pinned 0 TRACEPAD_VERSION=v0.4.0-rc.1
 has "$out" "updated tracepad 0.3.0 → 0.4.0-rc.1" pinned
 run pinned-bare 0 TRACEPAD_VERSION=0.4.0-rc.1
 has "$out" "already installed" pinned-bare
+
+# --- Unpinned never steps back: 0.4.0-rc.1 is later than the stable 0.3.0.
+run no-downgrade 0
+has "$out" "tracepad 0.4.0-rc.1 is installed at $bin, newer than the newest stable release, 0.3.0: nothing changed" no-downgrade
+has "$out" "| TRACEPAD_VERSION=0.3.0 sh" no-downgrade
+[ "$("$bin" version)" = 0.4.0-rc.1 ] || fail "no-downgrade: the binary was replaced"
+
+# --- Pinned, it may, and says what that means.
+run downgrade 0 TRACEPAD_VERSION=0.3.0
+has "$out" "downgraded tracepad 0.4.0-rc.1 → 0.3.0" downgrade
+has "$out" "does not open a database a newer one migrated" downgrade
+[ "$("$bin" version)" = 0.3.0 ] || fail "downgrade: the binary is not 0.3.0"
+
+# --- A binary that does not run as itself is never put in place.
+release 0.6.0
+run broken 1 TRACEPAD_VERSION=0.6.0
+has "$err" "the new binary says it is '0.0.0-broken', not 0.6.0" broken
+has "$err" "$bin is unchanged" broken
+[ "$("$bin" version)" = 0.3.0 ] || fail "broken: the old binary was replaced"
+for left in "$home"/.local/bin/.tracepad.*; do
+	[ ! -e "$left" ] || fail "broken: the temporary file $left was left behind"
+done
+
+# --- The hint about a running server never holds the install up.
+started="$(date +%s)"
+run hanging-server 0 FAKE_HANG=1
+[ $(($(date +%s) - started)) -lt 10 ] || fail "hanging-server: the probe of the running server held the install up"
+ends_with_agent_line hanging-server
 
 # --- A version that does not exist.
 run missing-version 1 TRACEPAD_VERSION=9.9.9

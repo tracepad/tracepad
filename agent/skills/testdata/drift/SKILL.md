@@ -42,6 +42,7 @@ tracepad traces lst
 tracepad traces ls --sinse 1h
 tracepad skills install --global
 tracepad serve --port 9999
+tracepad serve --listen localhost:9999 extra
 tracepad mcp --url http://localhost:9999
 tracepad skills show debuging.md
 $ tracepad traces lsx

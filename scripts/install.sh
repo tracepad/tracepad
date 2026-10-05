@@ -135,19 +135,53 @@ download_and_verify() {
 	fi
 }
 
-# put_in_place copies the binary beside its destination and renames it over
-# it: a running server keeps the file it has, and a failure leaves the old one.
+# put_in_place copies the binary beside its destination, runs it there, and
+# only then renames it over the old one: a running server keeps the file it
+# has, and a binary that does not run here (a noexec mount, another
+# architecture) leaves the old one as it was.
 put_in_place() {
 	tar -xzf "$tmp/$archive" -C "$tmp" tracepad || fail "$archive has no tracepad in it"
 	mkdir -p "$dir" || fail "could not create $dir"
-	cp "$tmp/tracepad" "$dir/.tracepad.$$" || fail "could not write to $dir"
-	chmod 0755 "$dir/.tracepad.$$"
-	mv -f "$dir/.tracepad.$$" "$bin" || {
-		rm -f "$dir/.tracepad.$$"
+	new="$dir/.tracepad.$$"
+	cp "$tmp/tracepad" "$new" || fail "could not write to $dir"
+	chmod 0755 "$new"
+	now="$("$new" version 2>/dev/null || true)"
+	if [ "$now" != "$version" ]; then
+		rm -f "$new"
+		fail "the new binary says it is '$now', not $version (is $dir mounted noexec?); $bin is unchanged"
+	fi
+	mv -f "$new" "$bin" || {
+		rm -f "$new"
 		fail "could not replace $bin"
 	}
-	now="$("$bin" version 2>/dev/null || true)"
-	[ "$now" = "$version" ] || fail "$bin says it is '$now', not $version"
+}
+
+# newer A B: whether version A is later than B, by semver's order — a release
+# is later than its candidates, and alpha < beta < rc. A version that is not
+# X.Y.Z[-pre.N] (a development build's `dev`) is later than nothing.
+newer() {
+	awk -v a="$1" -v b="$2" '
+	function parse(v, out,   i, n, parts) {
+		out[4] = ""
+		i = index(v, "-")
+		if (i) { out[4] = substr(v, i + 1); v = substr(v, 1, i - 1) }
+		n = split(v, parts, ".")
+		if (n != 3) return 0
+		for (i = 1; i <= 3; i++) {
+			if (parts[i] !~ /^[0-9]+$/) return 0
+			out[i] = parts[i] + 0
+		}
+		return 1
+	}
+	BEGIN {
+		if (!parse(a, x) || !parse(b, y)) exit 1
+		for (i = 1; i <= 3; i++) if (x[i] != y[i]) exit !(x[i] > y[i])
+		if (x[4] == y[4] || y[4] == "") exit 1
+		if (x[4] == "") exit 0
+		split(x[4], p, "."); split(y[4], q, ".")
+		if (p[1] != q[1]) exit !(p[1] > q[1])
+		exit !(p[2] + 0 > q[2] + 0)
+	}'
 }
 
 # install_skill installs the skill where an agent on this machine reads
@@ -202,16 +236,27 @@ main() {
 
 	before=""
 	[ -x "$bin" ] && before="$("$bin" version 2>/dev/null || true)"
+	warning=""
 	if [ "$before" = "$version" ]; then
 		headline="tracepad $version is already installed at $bin"
 		verified="unchanged"
+	elif [ -z "${TRACEPAD_VERSION:-}" ] && newer "$before" "$version"; then
+		# Unpinned is "the newest stable release", never a step back: the
+		# database the newer binary ran on may be migrated past this one.
+		headline="tracepad $before is installed at $bin, newer than the newest stable release, $version: nothing changed"
+		verified="unchanged"
+		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$version sh"
+		version="$before"
 	else
 		download_and_verify
 		put_in_place
-		if [ -n "$before" ]; then
-			headline="updated tracepad $before → $version at $bin"
-		else
+		if [ -z "$before" ]; then
 			headline="installed tracepad $version at $bin"
+		elif newer "$before" "$version"; then
+			headline="downgraded tracepad $before → $version at $bin, as TRACEPAD_VERSION asked"
+			warning="An older binary does not open a database a newer one migrated: restore the backup taken before that upgrade (https://tracepad.github.io/tracepad/install/#upgrading)."
+		else
+			headline="updated tracepad $before → $version at $bin"
 		fi
 	fi
 
@@ -221,6 +266,10 @@ main() {
 	say "$headline"
 	say "  verified  $verified"
 	say "$skill_lines" | sed '1s/^/  skill     /; 2,$s/^/            /'
+	if [ -n "$warning" ]; then
+		say ""
+		say "$warning"
+	fi
 
 	case ":$PATH:" in
 	*":$dir:"*)
@@ -238,10 +287,18 @@ main() {
 	esac
 
 	# A server started from the old binary keeps running it until restarted.
-	running="$("$bin" health 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
+	# The local default address only, whatever address the CLI is set to, and for
+	# three seconds at most: this is a hint, not a step that may hang.
+	"$bin" health --url http://localhost:4318 >"$tmp/health" 2>/dev/null &
+	probe=$!
+	(sleep 3 && kill "$probe") >/dev/null 2>&1 &
+	watchdog=$!
+	wait "$probe" 2>/dev/null || true
+	kill "$watchdog" 2>/dev/null || true
+	running="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$tmp/health")"
 	if [ -n "$running" ] && [ "$running" != "$version" ]; then
 		say ""
-		say "The server tracepad health reaches is still running $running; restart it to run $version."
+		say "The server at localhost:4318 is still running $running; restart it to run $version."
 	fi
 
 	say ""
