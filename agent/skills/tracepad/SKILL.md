@@ -1,6 +1,6 @@
 ---
 name: tracepad
-description: Work with Tracepad, LLM observability and evals in a single binary — a self-hosted store for the traces and spans of LLM and agent applications, with their prompts, datasets and scores. Use it to debug from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to run evals and read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
+description: Work with Tracepad, LLM observability and evals in a single binary — a self-hosted store for the traces and spans of LLM and agent applications, with their prompts, datasets and scores. Use it to debug from traces — what a call cost, why it was slow, why a generation failed and what it was sent, token usage, which prompt version produced an answer — and to run evals and read or write scores, prompts, datasets, eval runs and annotation queues; to instrument an application so its traces reach Tracepad, directly over OpenTelemetry or through the Langfuse SDK bridge; to set Tracepad up for a project from nothing — install it, start a local server, connect the application and confirm the first trace; and to administer a Tracepad server (keys, retention, deleting traces). Use it whenever the user mentions Tracepad, the `tracepad` command, a trace id from it, or asks about the LLM traffic of an application that reports to Tracepad.
 metadata:
   version: dev
 ---
@@ -16,19 +16,19 @@ fields, because the binary describes itself and is always in step with the
 server you are talking to. Look there instead of guessing a name:
 
 - `tracepad help` — every command and every flag (printed to stderr).
-- `GET /api/v1` — every route with one line on what it does, and
-  `GET /api/v1/openapi.json` — every parameter and every response shape.
-  Neither needs a key.
+- `GET /api/v1` — every route, one line each — and `GET /api/v1/openapi.json`
+  — every parameter and response shape. Neither needs a key.
 - The MCP server's tool list — each tool's description and input schema.
 
-Each reference is a worked sequence for one kind of task, with the traps the
-short version below leaves out. Read the one that fits **before** the first
-command of that task, and only that one:
+Each reference is a worked sequence for one task, with the traps this page
+leaves out. Read the one that fits **before** the task's first command, and only it:
 
 - Investigating cost, latency, a failure or a prompt version:
   [references/debugging.md](references/debugging.md).
 - Changing an application so its traces reach Tracepad:
   [references/instrumenting.md](references/instrumenting.md).
+- Setting Tracepad up for a project that has no server or key yet:
+  [references/setup.md](references/setup.md).
 - Score configs, datasets, eval runs, review queues:
   [references/evals.md](references/evals.md).
 - Any deletion, a key, retention, erasing a user:
@@ -38,9 +38,8 @@ command of that task, and only that one:
 
 The CLI reads `TRACEPAD_URL` (default `http://localhost:4318`) and
 `TRACEPAD_API_KEY` (a project's secret key, `tp-sk-…`). Start by asking the
-server for its version — `health` needs no key, and says why when it cannot
-reach the server. A command that needs the key and has none exits `2` with
-*no API key*.
+server for its version: `health` needs no key and says why it cannot reach
+the server. A command that needs the key and has none exits `2`, *no API key*.
 
 ```sh
 tracepad health
@@ -49,7 +48,8 @@ tracepad health
 - If the key is not set and no Tracepad MCP server is connected, **ask the
   human** for the URL and a key: scope `read` to look, all three to run evals or
   change anything (a `403` *… needs X* asks for X). Do not look for one in
-  `.env` files, shell history, config or the database, nor mint one yourself.
+  `.env` files, shell history, config or the database, nor mint one yourself —
+  the one exception is a server you start in a setup, under `setup.md`'s rules.
 - Never print, echo, log or commit a secret key — not in a command you show,
   not in a file you write. Refer to it as `$TRACEPAD_API_KEY`.
 - A key belongs to one project; everything you read and write is that

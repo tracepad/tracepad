@@ -75,7 +75,8 @@ func TestTheDriftCheckCatchesDrift(t *testing.T) {
 		"`tracepad traces lst`",              // an unknown subcommand
 		"--sinse",                            // an unknown flag
 		"--global",                           // an unknown flag of the binary's own command
-		"`tracepad serve`",                   // a word this test cannot check
+		"`tracepad serve` has no --port",     // an unknown flag of the server
+		"`tracepad mcp`",                     // a word this test cannot check
 		"`get_trcae`",                        // an unknown MCP tool
 		"/api/v1/tracez",                     // an unknown route
 		"DELETE /api/v1/system",              // a route under the wrong method
@@ -283,10 +284,21 @@ func (s *surface) command(words []string) []string {
 			}
 		}
 		return problems
-	case "serve", "mcp":
-		// Their flags are parsed in package main, out of this test's reach.
-		// The skill has no reason to start a server; if it grows one, this
-		// test grows the check first.
+	case "serve":
+		// The setup reference starts a server (spec 053 #13). Its two flags
+		// are the ones config.Env pairs with a variable, which is where
+		// `tracepad help` prints them from too.
+		var problems []string
+		for _, flag := range flags(rest) {
+			if !slices.ContainsFunc(config.Env, func(v config.EnvVar) bool { return v.Flag == "--"+flag }) {
+				problems = append(problems, fmt.Sprintf("`tracepad serve` has no --%s", flag))
+			}
+		}
+		return problems
+	case "mcp":
+		// Its flags are parsed in package main, out of this test's reach.
+		// The skill has no reason to run it; if it grows one, this test grows
+		// the check first.
 		return []string{fmt.Sprintf("`tracepad %s` cannot be checked by the drift test", name)}
 	}
 	if !slices.Contains(cli.Commands(), name) {
@@ -502,8 +514,8 @@ func commands(segments [][]string) [][]string {
 	var out [][]string
 	for _, words := range segments {
 		// What stands in front of the binary without being it: a prompt,
-		// `sudo`, `VAR=value`.
-		for len(words) > 0 && (words[0] == "$" || words[0] == "sudo" ||
+		// `sudo`, `nohup`, `VAR=value`.
+		for len(words) > 0 && (words[0] == "$" || words[0] == "sudo" || words[0] == "nohup" ||
 			strings.Contains(words[0], "=") && !strings.HasPrefix(words[0], "-")) {
 			words = words[1:]
 		}
