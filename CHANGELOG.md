@@ -89,5 +89,9 @@ one.
   on `ghcr.io/tracepad/tracepad`, mirrored to Docker Hub as
   `tracepad/tracepad` at the same digest for stable releases. See
   [docs/install.md](docs/install.md) and [docs/docker.md](docs/docker.md).
+- The server's log opens with its version and commit
+  (`tracepad 0.1.0-rc.1 (b14b11e)`), in a container as on a host, and
+  [docs/install.md](docs/install.md#what-a-version-is-called-where) lists what
+  one version is called in each registry and how to install a candidate.
 
 [Unreleased]: https://github.com/tracepad/tracepad/commits/main

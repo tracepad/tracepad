@@ -267,3 +267,50 @@ func TestServeRefusesADataDirectoryInUse(t *testing.T) {
 		t.Error("the refused server had already created the database")
 	}
 }
+
+// The version heads the log (spec 001 #25): ahead of the environment's
+// warnings and of a refusal to start, which is what a report is made of.
+func TestServeLogsTheVersionFirst(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	prevVersion, prevCommit := version, commit
+	version, commit = "0.1.0-rc.1", "b14b11e2a9c0"
+	t.Setenv("TRACEPAD_NOT_A_SETTING", "1") // a warning that would otherwise come first
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		version, commit = prevVersion, prevCommit
+	})
+
+	dir := t.TempDir()
+	held, err := store.LockDatabase(filepath.Join(dir, "tracepad.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := serve([]string{"--data-dir", dir, "--listen", "127.0.0.1:0"}); err == nil {
+		t.Fatal("serve on a held data directory started")
+	}
+
+	first, _, _ := strings.Cut(logs.String(), "\n")
+	if !strings.Contains(first, `msg="tracepad 0.1.0-rc.1 (b14b11e)"`) {
+		t.Errorf("first log line = %q, want the version and the short commit", first)
+	}
+	if !strings.Contains(logs.String(), "TRACEPAD_NOT_A_SETTING") {
+		t.Errorf("the environment warning never logged, so this test proved nothing about order:\n%s", logs.String())
+	}
+}
+
+func TestServeHelpLogsNoVersion(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	if err := serve([]string{"-h"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "tracepad ") {
+		t.Errorf("a request for help logged a start: %s", logs.String())
+	}
+}

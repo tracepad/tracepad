@@ -87,6 +87,17 @@ case "$body" in
 esac
 echo "    $body"
 
+echo "==> the log opens with the version (spec 001 #25)"
+# `docker logs` is where a report starts. The whole log is captured before it
+# is cut, so a `head` closing the pipe cannot turn a good run into a SIGPIPE.
+logs="$(docker logs "$container" 2>&1)"
+first="${logs%%$'\n'*}"
+case "$first" in
+    *"tracepad $expect_version"*) ;;
+    *) fail "the first line of the log is '$first', want it to name 'tracepad $expect_version'" ;;
+esac
+echo "    $first"
+
 echo "==> the server runs as uid 65532"
 # `docker top` asks the daemon, which is the only party that can see the
 # process: there is no shell in the image to ask `id` of. The column is found

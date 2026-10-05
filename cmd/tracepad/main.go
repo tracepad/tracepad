@@ -30,6 +30,11 @@ import (
 // `go install` built it at a release tag.
 var version = ""
 
+// commit is stamped beside it (-X main.commit=): the commit the release was
+// built from, in full or short form. Empty for a build that was not given one,
+// and then the start's first line carries the version alone (spec 001 #25).
+var commit = ""
+
 // splitCommand separates the subcommand from its arguments. A leading flag
 // belongs to the default command, so `tracepad --listen :9999` serves
 // (spec 001 #1).
@@ -113,6 +118,18 @@ func main() {
 	}
 }
 
+// asksForHelp reports whether the arguments of serve are a request for its
+// usage, which prints the flags and starts nothing.
+func asksForHelp(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "-h", "-help", "--help":
+			return true
+		}
+	}
+	return false
+}
+
 // isTerminal reports whether output is going to a terminal rather than into a
 // pipe or a file. It is what makes agent-first the default: a pipe gets JSON
 // with no flags at all (spec 004 #12).
@@ -147,6 +164,14 @@ Flags of serve:
 }
 
 func serve(args []string) error {
+	// First, before the configuration is read, so that it heads the log even
+	// when what follows is a warning about the environment or a refusal to
+	// start: `docker logs` is where a report starts, and until this line the
+	// version was in `tracepad version` and the interface's footer only (spec
+	// 001 #25). A request for help is not a start.
+	if !asksForHelp(args) {
+		slog.Info(buildLabel(currentVersion(), commit))
+	}
 	cfg, err := config.Load(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {

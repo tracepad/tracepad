@@ -40,6 +40,45 @@ under its own tag and moves nothing that says "latest".
 which leaves a stub page where the web interface should be. Use an archive, or
 `make build` in a checkout ([the README](../README.md#getting-it)).
 
+## What a version is called, where
+
+One release has one version and several names for it, because each registry has
+its own rule for what a version may look like. For the candidate `0.1.0-rc.1` and
+for the release `0.1.0` that follows it:
+
+| Where | Name | Candidate | Release |
+|---|---|---|---|
+| Git tag, server | `v<version>` | `v0.1.0-rc.1` | `v0.1.0` |
+| Git tags, packages | `sdk-py/v…`, `sdk-js/v…`, `sdk/go/v…` | `sdk-py/v0.1.0-rc.1` | `sdk-py/v0.1.0` |
+| Release archives | `tracepad_<version>_<os>_<arch>` | `tracepad_0.1.0-rc.1_linux_amd64.tar.gz` | `tracepad_0.1.0_linux_amd64.tar.gz` |
+| Container image | tag | `ghcr.io/tracepad/tracepad:0.1.0-rc.1` | `…:0.1.0`, and also `…:0.1` and `…:latest` |
+| PyPI | PEP 440 | `0.1.0rc1` | `0.1.0` |
+| npm | semver, under a dist-tag | `0.1.0-rc.1`, dist-tag `next` | `0.1.0`, dist-tag `latest` |
+| Go module | tag of the nested module | `sdk/go/v0.1.0-rc.1` | `sdk/go/v0.1.0` |
+| `tracepad version`, the first line of the server's log | semver, without the `v` | `0.1.0-rc.1` | `0.1.0` |
+
+Python's spelling is the only one that differs from the tag's, and it is derived
+from it (`-rc.N` is `rcN`, `-beta.N` is `bN`, `-alpha.N` is `aN`). A candidate
+moves nothing that says "latest" — not the image's `latest` or `X.Y`, not npm's
+`latest` dist-tag, not Homebrew, not Docker Hub — so the unqualified commands in
+the README and the quickstart do not reach one. To install a candidate, name it:
+
+```sh
+docker run -d --name tracepad -v tracepad:/data -p 127.0.0.1:4318:4318 \
+  ghcr.io/tracepad/tracepad:0.1.0-rc.1      # the exact tag; a candidate has no `latest`
+pip install tracepad==0.1.0rc1              # without `==`, pip skips pre-releases
+npm install tracepad@next
+go get github.com/tracepad/tracepad/sdk/go@v0.1.0-rc.1
+```
+
+**Until 0.1.0 is released, the unqualified commands do not install the
+candidate.** `docker run … ghcr.io/tracepad/tracepad` with no tag asks for
+`latest`, which does not exist yet and answers `manifest unknown`; `pip install
+tracepad` finds only the placeholder `0.0.1`, which is not the SDK; and `npm
+install tracepad` resolves `latest`, the same placeholder. They become the right
+commands with the first stable release, and the README and the quickstart say
+what they will be then.
+
 ## With Homebrew
 
 On macOS:
@@ -89,9 +128,27 @@ checks against GitHub, offline of the release page:
 gh attestation verify tracepad_0.1.0_linux_amd64.tar.gz --repo tracepad/tracepad
 ```
 
-It exits `0` and names the workflow and the commit the archive was built from,
-or exits non-zero and says why not. The container image is attested the same
-way:
+**The answer is the exit code.** At a terminal the command prints what it
+checked; with no terminal — in a script, in CI, behind a pipe — a verification
+that succeeds prints *nothing*, and that silence is the pass. A failure exits
+non-zero and says why on stderr. In a script, test the status and ask for the
+details explicitly when you want them logged:
+
+```sh
+gh attestation verify tracepad_0.1.0_linux_amd64.tar.gz --repo tracepad/tracepad \
+  --format json --jq '.[0].verificationResult.signature.certificate
+                      | {buildSignerURI, sourceRepositoryDigest}'
+```
+
+```
+{"buildSignerURI":"https://github.com/tracepad/tracepad/.github/workflows/release-server.yml@refs/tags/v0.1.0","sourceRepositoryDigest":"…"}
+```
+
+The signer is the release workflow at the tag you meant, and the digest is the
+commit the archive was built from — the one the first line of the server's log
+shows in brackets. Under `set -e` the plain command is enough; `--format json`
+only changes what it prints, never whether it passes. The container image is
+attested the same way:
 
 ```sh
 gh attestation verify oci://ghcr.io/tracepad/tracepad:0.1.0 --repo tracepad/tracepad

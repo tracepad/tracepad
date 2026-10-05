@@ -39,6 +39,26 @@ func resolveVersion(stamped string, info *debug.BuildInfo) string {
 	return "dev"
 }
 
+// shortCommitLen is how much of a commit the start's first line shows: the
+// length `git rev-parse --short` settles on for a repository this size.
+const shortCommitLen = 7
+
+// buildLabel is the first line a server writes: `tracepad 0.1.0-rc.1 (b14b11e)`,
+// or `tracepad dev` when the build was given no commit. The commit is whatever
+// the release build stamped (`-X main.commit=`), cut to its short form; a build
+// that stamped none says only the version, because a build context carries no
+// commit and only the workflow that has one should claim it (spec 020 #12).
+func buildLabel(version, commit string) string {
+	label := "tracepad " + version
+	if len(commit) > shortCommitLen {
+		commit = commit[:shortCommitLen]
+	}
+	if commit != "" {
+		label += " (" + commit + ")"
+	}
+	return label
+}
+
 // currentVersion answers where the version is needed rather than rewriting the
 // stamped variable at start-up: `version` stays what the linker put there, and
 // nothing that runs before `main` can read a half-resolved one.

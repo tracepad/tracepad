@@ -37,3 +37,19 @@ func TestResolveVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLabel(t *testing.T) {
+	for _, c := range []struct {
+		version, commit, want string
+	}{
+		{"0.1.0-rc.1", "b14b11e", "tracepad 0.1.0-rc.1 (b14b11e)"},
+		{"0.1.0", "b14b11e2a9c0d4f1e8a7b6c5d4e3f2a1b0c9d8e7", "tracepad 0.1.0 (b14b11e)"},
+		{"0.1.0", "b14b", "tracepad 0.1.0 (b14b)"},
+		{"dev", "", "tracepad dev"},
+		{"dev", "b14b11e", "tracepad dev (b14b11e)"},
+	} {
+		if got := buildLabel(c.version, c.commit); got != c.want {
+			t.Errorf("buildLabel(%q, %q) = %q, want %q", c.version, c.commit, got, c.want)
+		}
+	}
+}
