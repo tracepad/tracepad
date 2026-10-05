@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any
 
 import pytest
@@ -113,10 +114,13 @@ def test_no_host_and_no_key_raise() -> None:
     assert not _tracing._initialized
 
 
-def test_the_service_name_falls_back_to_the_process() -> None:
+def test_the_service_name_falls_back_to_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The SDK's own default is `unknown_service` up to 1.44 and
+    # `unknown_service:<executable>` from 1.45 (spec 017 #25): both mean "not
+    # named", so the name has to be the process's and nothing else.
+    monkeypatch.setattr(sys, "argv", ["/srv/support-bot.py"])
     tracepad.init(HOST, KEY)
-    name = otel_api.get_tracer_provider().resource.attributes["service.name"]
-    assert name and name != "unknown_service"
+    assert otel_api.get_tracer_provider().resource.attributes["service.name"] == "support-bot"
 
 
 def test_the_service_name_of_the_environment_wins(monkeypatch: pytest.MonkeyPatch) -> None:
