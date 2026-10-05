@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -251,8 +252,10 @@ func (s *State) validate(dirName string) error {
 		if p == nil || p.PID <= 0 || !filepath.IsAbs(p.DataDir) || !filepath.IsAbs(p.Log) || !filepath.IsAbs(p.Old) {
 			return errors.New("its server is not one a run records")
 		}
-		if _, ok := loopbackURL(p.Listen); !ok {
-			return fmt.Errorf("its server's address %q is not this machine's", p.Listen)
+		// The address asked, with the key, is the one the listen address
+		// gives, never a field of its own (the security review of #1).
+		if url, ok := loopbackURL(p.Listen); !ok || p.URL != url {
+			return fmt.Errorf("its server's address %q is not this machine's %q", p.URL, p.Listen)
 		}
 	case kindContainer:
 		c := s.Container
@@ -260,7 +263,7 @@ func (s *State) validate(dirName string) error {
 			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) {
 			return errors.New("its container is not one a run records")
 		}
-		if !strings.HasPrefix(c.URL, "http://127.") && !strings.HasPrefix(c.URL, "http://[::1]") && !strings.HasPrefix(c.URL, "http://localhost:") {
+		if !isLoopbackBase(c.URL) {
 			return fmt.Errorf("its container's address %q is not this machine's", c.URL)
 		}
 	case kindBinary:
@@ -271,4 +274,19 @@ func (s *State) validate(dirName string) error {
 		return fmt.Errorf("its kind %q is not one", s.Kind)
 	}
 	return nil
+}
+
+// isLoopbackBase says whether u is exactly what loopbackBase makes: http, a
+// loopback IP and a port, and nothing else — no name, no user, no path.
+func isLoopbackBase(u string) bool {
+	rest, ok := strings.CutPrefix(u, "http://")
+	if !ok {
+		return false
+	}
+	host, port, err := net.SplitHostPort(rest)
+	if err != nil {
+		return false
+	}
+	want, ok := loopbackBase(host, port)
+	return ok && want == u
 }

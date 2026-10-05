@@ -141,7 +141,24 @@ func loopbackURL(listen string) (string, bool) {
 	if err != nil || config.PlainHTTPBeyondLoopback(listen) {
 		return "", false
 	}
-	return "http://" + net.JoinHostPort(host, port), true
+	return loopbackBase(host, port)
+}
+
+// loopbackBase is the address to ask at host:port, by its IP. `localhost`
+// is asked at 127.0.0.1, the address a Go server listening on `localhost`
+// binds: a client that resolved the name could reach [::1] instead, where
+// any other user of the machine may listen, and the key the count is read
+// with would go there.
+func loopbackBase(host, port string) (string, bool) {
+	if strings.EqualFold(host, "localhost") {
+		host = "127.0.0.1"
+	}
+	ip := net.ParseIP(host)
+	n, err := strconv.Atoi(port)
+	if ip == nil || !ip.IsLoopback() || err != nil || n <= 0 || n > 65535 || strconv.Itoa(n) != port {
+		return "", false
+	}
+	return "http://" + net.JoinHostPort(ip.String(), port), true
 }
 
 // sameFile says whether two paths name one file, comparing the paths with
@@ -308,7 +325,8 @@ func writableDir(dir string) bool {
 // probe asks the default address what answers there, and says whose it is
 // only as far as the search could tell.
 func (r *runner) probe(ctx context.Context, f Findings) Probe {
-	p := Probe{URL: "http://" + config.DefaultListen}
+	base, _ := loopbackURL(config.DefaultListen)
+	p := Probe{URL: base}
 	pctx, cancel := context.WithTimeout(ctx, r.deps.ProbeWait)
 	defer cancel()
 	v, err := health(pctx, r.deps.HTTP, p.URL)

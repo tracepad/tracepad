@@ -205,7 +205,7 @@ func classifyContainer(ic inspectContainer, img inspectImage, named string) Cont
 	}
 	for _, b := range ic.HostConfig.PortBindings["4318/tcp"] {
 		if isLoopbackHost(b.HostIP) {
-			c.URL = "http://" + net.JoinHostPort(b.HostIP, b.HostPort)
+			c.URL, _ = loopbackBase(b.HostIP, b.HostPort)
 		}
 	}
 	c.Reason = containerRefusal(ic, img, named)

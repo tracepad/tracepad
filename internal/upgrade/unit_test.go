@@ -179,7 +179,7 @@ func TestWhatServerIsTheCommands(t *testing.T) {
 	ours := Process{PID: 42, Exe: install, Cwd: "/", Argv: []string{"tracepad", "serve", "--listen", "localhost:4318", "--data-dir", data}}
 
 	s, ok := classifyServer(ours, install)
-	if !ok || !s.Ours || s.URL != "http://localhost:4318" || s.DataDir != data {
+	if !ok || !s.Ours || s.URL != "http://127.0.0.1:4318" || s.DataDir != data {
 		t.Fatalf("ours: %+v", s)
 	}
 	for _, tc := range []struct {
@@ -228,7 +228,7 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 	dir := filepath.Join(root, id)
 	_ = os.Mkdir(dir, 0o700)
 	good := &State{Run: id, Kind: kindProcess, From: "0.1.0", To: "0.2.0",
-		Process: &ProcessState{PID: 10, DataDir: "/d", Listen: "localhost:4318", URL: "http://localhost:4318", Log: "/d/server.log", Old: dir + "/tracepad-0.1.0"}}
+		Process: &ProcessState{PID: 10, DataDir: "/d", Listen: "localhost:4318", URL: "http://127.0.0.1:4318", Log: "/d/server.log", Old: dir + "/tracepad-0.1.0"}}
 	if err := good.save(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +241,8 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		"a substitution":      func(s *State) { s.To = "$(id)" },
 		"backquotes":          func(s *State) { s.To = "`id`" },
 		"beyond this machine": func(s *State) { s.Process.Listen = "0.0.0.0:4318" },
+		"a URL of its own":    func(s *State) { s.Process.URL = "http://attacker.example:4318" },
+		"[::1] for localhost": func(s *State) { s.Process.URL = "http://[::1]:4318" },
 		"a relative path":     func(s *State) { s.Process.DataDir = "d" },
 		"no kind":             func(s *State) { s.Kind = "shell" },
 	} {
