@@ -149,7 +149,12 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 	}
 
 	bin := p.f.Binary
-	st.Binary = &BinaryState{Path: bin.Path, From: bin.Version}
+	st.Binary = &BinaryState{Path: bin.Path}
+	if IsRelease(bin.Version) {
+		// A development build's `dev` is no version a state may hold; such a
+		// binary is the person's and this run never replaces it.
+		st.Binary.From = bin.Version
+	}
 	var newBin Fetched
 	if p.replaceBinary || p.server != nil {
 		var err error
