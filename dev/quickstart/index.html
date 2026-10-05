@@ -16,7 +16,7 @@
         <link rel="prev" href="..">
       
       
-        <link rel="next" href="../install/">
+        <link rel="next" href="../agent-setup/">
       
       
         
@@ -407,6 +407,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#with-your-coding-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With your coding agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-run-the-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -454,6 +465,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1456,6 +1495,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#with-your-coding-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With your coding agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-run-the-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1527,13 +1577,32 @@
 <h1 id="quickstart">Quickstart</h1>
 <p>From nothing to a trace on screen. Everything below runs on one machine and
 needs no configuration.</p>
-<h2 id="1-run-the-server">1. Run the server</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>tracepad
+<h2 id="with-your-coding-agent">With your coding agent</h2>
+<p>Two lines. The first goes into a terminal. It installs the binary and its
+agent skill into <code>~/.local/bin</code>, checked against the release's checksums, with
+no <code>sudo</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://tracepad.github.io/tracepad/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh
 </code></pre></div>
+<p>Until 0.1.0 is out the newest release is a candidate, which the script installs
+only when you name it: <code>curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.1.0-rc.1 sh</code>.</p>
+<p>The second goes into your coding agent (Claude Code, Codex, Cursor):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md
+</code></pre></div>
+<p>The agent starts a server on this machine and connects your application. It
+sends a test trace and reads it back. Then it tells you where the key is, what
+it changed, and gives you the link that creates your account.
+<a href="../agent-setup/">agent-setup.md</a> is what it follows, and lists what it will
+ask you for. The rest of this page is the same by hand.</p>
+<h2 id="1-run-the-server">1. Run the server</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tracepad
+</code></pre></div>
+<p>It runs in the foreground until Ctrl-C. Started in the background instead, it
+is up once <code>tracepad health</code> exits <code>0</code>; piped, that prints
+<code>{"version":"0.1.0","ok":true}</code>.</p>
 <p>Or in Docker, which needs nothing installed but Docker:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>docker<span class="w"> </span>logs<span class="w"> </span>tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span>logs<span class="w"> </span>tracepad
 </code></pre></div>
 <p>Everything below is the same either way; the container prints to its log what
 the binary prints to your terminal. See <a href="../docker/">docker.md</a> for the volume,
@@ -1546,23 +1615,23 @@ note); <a href="../docker/#serving-over-tls">docker.md</a> says how to put TLS i
 before you open it up.</p>
 <p>The first run creates the database, a project called <code>default</code>, and a key for
 your application — then prints it, once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Project "default" created. Connect your app with either:
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  # OpenTelemetry SDK (Tracepad has no gRPC: the protocol line is required if your SDK defaults to it)
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  # Langfuse SDK (the JavaScript SDK reads LANGFUSE_BASE_URL alone; older SDKs read LANGFUSE_HOST)
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  LANGFUSE_BASE_URL=http://localhost:4318
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  LANGFUSE_HOST=http://localhost:4318
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  LANGFUSE_PUBLIC_KEY=tp-pk-…
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  LANGFUSE_SECRET_KEY=tp-sk-…
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>This key holds the ingest scope alone: it sends spans and scores and fetches
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>prompts, and cannot read what was sent. For the CLI, an agent or the eval
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>harness, mint a key that reads in Settings → Project → API keys once you are
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>signed in.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Project "default" created. Connect your app with either:
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  # OpenTelemetry SDK (Tracepad has no gRPC: the protocol line is required if your SDK defaults to it)
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  # Langfuse SDK (the JavaScript SDK reads LANGFUSE_BASE_URL alone; older SDKs read LANGFUSE_HOST)
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>  LANGFUSE_BASE_URL=http://localhost:4318
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>  LANGFUSE_HOST=http://localhost:4318
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>  LANGFUSE_PUBLIC_KEY=tp-pk-…
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>  LANGFUSE_SECRET_KEY=tp-sk-…
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>This key holds the ingest scope alone: it sends spans and scores and fetches
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>prompts, and cannot read what was sent. For the CLI, an agent or the eval
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>harness, mint a key that reads in Settings → Project → API keys once you are
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>signed in.
 </code></pre></div>
 <p>(With an admin token configured the note names <code>tracepad keys create</code> too, and
 on a server nobody can sign in to, how to configure the token.)</p>
@@ -1577,13 +1646,13 @@ whoever reads that log. To look with the CLI or an agent you mint a key that
 holds <code>read</code>, in <a href="#3-look-at-them">step 3</a>, once you have signed in.</p>
 <p>Underneath it is a second link, which is how you get into the browser
 interface:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>This server has no owner yet. Create the first one — it takes an email and a
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>password, and nothing is written down anywhere but this database:
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  http://localhost:4318/setup#token=…
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>The link is good for 24 hours, or until this process stops. Restart to have a
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>new one printed.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>This server has no owner yet. Create the first one — it takes an email and a
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>password, and nothing is written down anywhere but this database:
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  http://localhost:4318/setup#token=…
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>The link is good for 24 hours, or until this process stops. Restart to have a
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>new one printed.
 </code></pre></div>
 <p>The key is for your application; the account is for you. Open the link, pick a
 password, and that is the last credential you type into a browser here — see
@@ -1600,10 +1669,10 @@ receiver, and an exporter left to choose for itself may pick gRPC — the
 application runs, reports nothing, and the trace list stays empty. In Python,
 with the OpenTelemetry distro's automatic configuration (<code>pip install
 opentelemetry-distro opentelemetry-exporter-otlp-proto-http</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</span><span class="o">=</span>http://localhost:4318/v1/traces
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"authorization=Bearer tp-sk-…"</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>opentelemetry-instrument<span class="w"> </span>python<span class="w"> </span>your_app.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</span><span class="o">=</span>http://localhost:4318/v1/traces
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"authorization=Bearer tp-sk-…"</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>opentelemetry-instrument<span class="w"> </span>python<span class="w"> </span>your_app.py
 </code></pre></div>
 <p>A plain <code>python your_app.py</code> configures nothing; the distro's launcher (or
 your own code) is what reads these variables.</p>
@@ -1616,22 +1685,22 @@ for what is mapped and how.</p>
 <p><strong>In Python, with a decorator instead.</strong> The <code>tracepad</code> package is a thin
 layer over the same OpenTelemetry SDK — one call to point the process at the
 store, and the shapes a person writes every time:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracepad</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nd">@tracepad</span><span class="o">.</span><span class="n">observe</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">answer</span><span class="p">(</span><span class="n">question</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">tracepad</span><span class="o">.</span><span class="n">update_trace</span><span class="p">(</span><span class="n">user_id</span><span class="o">=</span><span class="s2">"u-42"</span><span class="p">,</span> <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">"support"</span><span class="p">])</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">generation</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="nb">input</span><span class="o">=</span><span class="n">question</span><span class="p">)</span> <span class="k">as</span> <span class="n">call</span><span class="p">:</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="err">…</span><span class="p">)</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="n">call</span><span class="o">.</span><span class="n">end</span><span class="p">(</span><span class="n">response</span><span class="o">=</span><span class="n">response</span><span class="p">)</span>          <span class="c1"># model, usage, and the cost as charged</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="n">tracepad</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"helpful"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>             <span class="c1"># against the trace in flight</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="k">return</span> <span class="n">response</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">content</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracepad</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nd">@tracepad</span><span class="o">.</span><span class="n">observe</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">answer</span><span class="p">(</span><span class="n">question</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">tracepad</span><span class="o">.</span><span class="n">update_trace</span><span class="p">(</span><span class="n">user_id</span><span class="o">=</span><span class="s2">"u-42"</span><span class="p">,</span> <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">"support"</span><span class="p">])</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">generation</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="nb">input</span><span class="o">=</span><span class="n">question</span><span class="p">)</span> <span class="k">as</span> <span class="n">call</span><span class="p">:</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>        <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="err">…</span><span class="p">)</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>        <span class="n">call</span><span class="o">.</span><span class="n">end</span><span class="p">(</span><span class="n">response</span><span class="o">=</span><span class="n">response</span><span class="p">)</span>          <span class="c1"># model, usage, and the cost as charged</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">tracepad</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"helpful"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>             <span class="c1"># against the trace in flight</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="k">return</span> <span class="n">response</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">content</span>
 </code></pre></div>
 <p>It adds an exporter to a <code>TracerProvider</code> your application already has rather
 than replacing it, so it sits beside FastAPI instrumentation and the Langfuse
@@ -1639,56 +1708,56 @@ SDK instead of competing with them. See <a href="../sdk-python/">sdk-python.md</
 <p><strong>In Node, the same package.</strong> <code>tracepad</code> on npm is the same surface with
 promises where Python has context managers — the same names on the wire, the
 same rules about what throws — for Node 22 and newer:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>npm<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w"> </span>@opentelemetry/api
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>npm<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w"> </span>@opentelemetry/api
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">import</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">tracepad</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">'tracepad'</span><span class="p">;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">init</span><span class="p">();</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="kd">const</span><span class="w"> </span><span class="nx">answer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">observe</span><span class="p">(</span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">question</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">updateTrace</span><span class="p">({</span><span class="w"> </span><span class="nx">userId</span><span class="o">:</span><span class="w"> </span><span class="s1">'u-42'</span><span class="p">,</span><span class="w"> </span><span class="nx">tags</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">'support'</span><span class="p">]</span><span class="w"> </span><span class="p">});</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">reply</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">generation</span><span class="p">(</span><span class="s1">'chat'</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="s1">'gpt-4o-mini'</span><span class="p">,</span><span class="w"> </span><span class="nx">input</span><span class="o">:</span><span class="w"> </span><span class="kt">question</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">call</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">client</span><span class="p">.</span><span class="nx">chat</span><span class="p">.</span><span class="nx">completions</span><span class="p">.</span><span class="nx">create</span><span class="p">({</span><span class="w"> </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="s1">'gpt-4o-mini'</span><span class="p">,</span><span class="w"> </span><span class="nx">messages</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="err">…</span><span class="p">]</span><span class="w"> </span><span class="p">});</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="nx">call</span><span class="p">.</span><span class="nx">end</span><span class="p">(</span><span class="nx">response</span><span class="p">);</span><span class="w">                    </span><span class="c1">// model, usage, and the cost as charged</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">choices</span><span class="p">[</span><span class="mf">0</span><span class="p">].</span><span class="nx">message</span><span class="p">.</span><span class="nx">content</span><span class="p">;</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">  </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">score</span><span class="p">(</span><span class="s1">'helpful'</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="p">);</span><span class="w">            </span><span class="c1">// against the trace in flight</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">reply</span><span class="p">;</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="p">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">import</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">tracepad</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">'tracepad'</span><span class="p">;</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">init</span><span class="p">();</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="kd">const</span><span class="w"> </span><span class="nx">answer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">observe</span><span class="p">(</span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">question</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">updateTrace</span><span class="p">({</span><span class="w"> </span><span class="nx">userId</span><span class="o">:</span><span class="w"> </span><span class="s1">'u-42'</span><span class="p">,</span><span class="w"> </span><span class="nx">tags</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">'support'</span><span class="p">]</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">reply</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">generation</span><span class="p">(</span><span class="s1">'chat'</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="s1">'gpt-4o-mini'</span><span class="p">,</span><span class="w"> </span><span class="nx">input</span><span class="o">:</span><span class="w"> </span><span class="kt">question</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">call</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">client</span><span class="p">.</span><span class="nx">chat</span><span class="p">.</span><span class="nx">completions</span><span class="p">.</span><span class="nx">create</span><span class="p">({</span><span class="w"> </span><span class="nx">model</span><span class="o">:</span><span class="w"> </span><span class="s1">'gpt-4o-mini'</span><span class="p">,</span><span class="w"> </span><span class="nx">messages</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="err">…</span><span class="p">]</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="nx">call</span><span class="p">.</span><span class="nx">end</span><span class="p">(</span><span class="nx">response</span><span class="p">);</span><span class="w">                    </span><span class="c1">// model, usage, and the cost as charged</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">choices</span><span class="p">[</span><span class="mf">0</span><span class="p">].</span><span class="nx">message</span><span class="p">.</span><span class="nx">content</span><span class="p">;</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">  </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">score</span><span class="p">(</span><span class="s1">'helpful'</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="p">);</span><span class="w">            </span><span class="c1">// against the trace in flight</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">reply</span><span class="p">;</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="p">});</span>
 </code></pre></div>
 <p>See <a href="../sdk-js/">sdk-js.md</a>.</p>
 <p><strong>In Go, the same shape as the OTel API.</strong> The <code>tracepad</code> module is the same
 thin layer over the OpenTelemetry Go SDK — a context in, a context out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>go<span class="w"> </span>get<span class="w"> </span>github.com/tracepad/tracepad/sdk/go
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>go<span class="w"> </span>get<span class="w"> </span>github.com/tracepad/tracepad/sdk/go
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nx">tracepad</span><span class="w"> </span><span class="s">"github.com/tracepad/tracepad/sdk/go"</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nx">shutdown</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Init</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span><span class="w">      </span><span class="c1">// TRACEPAD_URL, TRACEPAD_API_KEY</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">        </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">shutdown</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="p">...</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="p">}</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="kd">func</span><span class="w"> </span><span class="nx">answer</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">question</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">    </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">step</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Span</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"answer"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithInput</span><span class="p">(</span><span class="nx">question</span><span class="p">))</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">step</span><span class="p">.</span><span class="nx">End</span><span class="p">()</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">    </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">UpdateTrace</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithUserID</span><span class="p">(</span><span class="s">"u-42"</span><span class="p">),</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithTags</span><span class="p">(</span><span class="s">"support"</span><span class="p">))</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">    </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">call</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Generation</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"chat"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithModel</span><span class="p">(</span><span class="s">"gpt-4o-mini"</span><span class="p">))</span>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">    </span><span class="nx">response</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">client</span><span class="p">.</span><span class="nx">Chat</span><span class="p">.</span><span class="nx">Completions</span><span class="p">.</span><span class="nx">New</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">params</span><span class="p">)</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">        </span><span class="nx">call</span><span class="p">.</span><span class="nx">Fail</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="s">""</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span>
-<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a><span class="w">    </span><span class="nx">call</span><span class="p">.</span><span class="nx">End</span><span class="p">(</span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Result</span><span class="p">{</span><span class="nx">Model</span><span class="p">:</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">Model</span><span class="p">,</span><span class="w"> </span><span class="nx">Usage</span><span class="p">:</span><span class="w"> </span><span class="nx">usage</span><span class="p">(</span><span class="nx">response</span><span class="p">),</span><span class="w"> </span><span class="nx">Output</span><span class="p">:</span><span class="w"> </span><span class="nx">text</span><span class="p">(</span><span class="nx">response</span><span class="p">)})</span>
-<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a><span class="w">    </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Score</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"helpful"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithValue</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="w">   </span><span class="c1">// against the trace in flight</span>
-<a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">text</span><span class="p">(</span><span class="nx">response</span><span class="p">),</span><span class="w"> </span><span class="kc">nil</span>
-<a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nx">tracepad</span><span class="w"> </span><span class="s">"github.com/tracepad/tracepad/sdk/go"</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nx">shutdown</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Init</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span><span class="w">      </span><span class="c1">// TRACEPAD_URL, TRACEPAD_API_KEY</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">        </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">shutdown</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">    </span><span class="p">...</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="p">}</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="kd">func</span><span class="w"> </span><span class="nx">answer</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">question</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">step</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Span</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"answer"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithInput</span><span class="p">(</span><span class="nx">question</span><span class="p">))</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">step</span><span class="p">.</span><span class="nx">End</span><span class="p">()</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">    </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">UpdateTrace</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithUserID</span><span class="p">(</span><span class="s">"u-42"</span><span class="p">),</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithTags</span><span class="p">(</span><span class="s">"support"</span><span class="p">))</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">    </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">call</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Generation</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"chat"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithModel</span><span class="p">(</span><span class="s">"gpt-4o-mini"</span><span class="p">))</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">    </span><span class="nx">response</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">client</span><span class="p">.</span><span class="nx">Chat</span><span class="p">.</span><span class="nx">Completions</span><span class="p">.</span><span class="nx">New</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">params</span><span class="p">)</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="w">        </span><span class="nx">call</span><span class="p">.</span><span class="nx">Fail</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="s">""</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a><span class="w">    </span><span class="nx">call</span><span class="p">.</span><span class="nx">End</span><span class="p">(</span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Result</span><span class="p">{</span><span class="nx">Model</span><span class="p">:</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">Model</span><span class="p">,</span><span class="w"> </span><span class="nx">Usage</span><span class="p">:</span><span class="w"> </span><span class="nx">usage</span><span class="p">(</span><span class="nx">response</span><span class="p">),</span><span class="w"> </span><span class="nx">Output</span><span class="p">:</span><span class="w"> </span><span class="nx">text</span><span class="p">(</span><span class="nx">response</span><span class="p">)})</span>
+<a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a><span class="w">    </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Score</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"helpful"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithValue</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="w">   </span><span class="c1">// against the trace in flight</span>
+<a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">text</span><span class="p">(</span><span class="nx">response</span><span class="p">),</span><span class="w"> </span><span class="kc">nil</span>
+<a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a><span class="p">}</span>
 </code></pre></div>
 <p>It registers an exporter on the <code>TracerProvider</code> your application already has
 — <code>otelhttp</code>, <code>otelgrpc</code> — rather than replacing it. See <a href="../sdk-go/">sdk-go.md</a>.</p>
@@ -1702,9 +1771,9 @@ has been in a log since the first run, and one key per program is what lets you
 revoke one without stopping the others. In the interface it is Settings →
 Project → API keys → mint, where <code>ingest</code> is ticked by default; from a
 terminal, with the admin token:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span>
 </code></pre></div>
-<p>It prints the lines to paste: <code>TRACEPAD_API_KEY</code> for the <code>tracepad</code> packages,
+<p>It prints the lines to paste (piped, the API's JSON, with the secret in <code>secret_key</code>): <code>TRACEPAD_API_KEY</code> for the <code>tracepad</code> packages,
 and the <code>LANGFUSE_*</code> pair for a Langfuse SDK; an OpenTelemetry exporter takes
 the same secret as <code>authorization=Bearer …</code>. See <a href="../admin/#keys">admin.md</a>.</p>
 <h2 id="3-look-at-them">3. Look at them</h2>
@@ -1724,19 +1793,19 @@ tick <code>read</code> — and <code>write</code> too if the CLI should also del
 prompt labels or run evals — and copy the <code>TRACEPAD_API_KEY</code> line the dialog
 shows. It is shown once, in your browser, and never printed to a log. Without
 the interface, the admin token mints one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span>read,write<span class="w"> </span>--name<span class="w"> </span><span class="s2">"my terminal"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span>read,write<span class="w"> </span>--name<span class="w"> </span><span class="s2">"my terminal"</span>
 </code></pre></div>
 <p><strong>The terminal.</strong> The CLI is the same binary:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…<span class="w">       </span><span class="c1"># the key that reads</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>tracepad<span class="w"> </span>traces<span class="w">                  </span><span class="c1"># the newest traces</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>last<span class="w"> </span>--error<span class="w"> </span>--full<span class="w">   </span><span class="c1"># the last failure, payloads included</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…<span class="w">       </span><span class="c1"># the key that reads</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w">               </span><span class="c1"># the newest traces</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>last<span class="w"> </span>--error<span class="w"> </span>--full<span class="w">   </span><span class="c1"># the last failure, payloads included</span>
 </code></pre></div>
 <p>See <a href="../cli/">cli.md</a>.</p>
 <p><strong>An agent.</strong> Point an MCP client at <code>http://localhost:4318/mcp</code> with a key
 that holds <code>read</code> alone, which can look at everything and change nothing — or
 <code>curl</code> the API directly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/traces?status=error&amp;limit=5"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/traces?status=error&amp;limit=5"</span>
 </code></pre></div>
 <p><code>GET /api/v1</code> lists every endpoint with a one-line description; see
 <a href="../api/">api.md</a> and <a href="../mcp/">mcp.md</a>.</p>

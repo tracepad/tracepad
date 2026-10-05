@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1773,11 +1801,12 @@ any combination — so the key's column is three:</p>
 </tr>
 </tbody>
 </table>
-<p>A key that holds <code>write</code> is still the administrator of its own project. That
-is what keeps "retention changes without a restart" true in the default
-install, which has no admin token at all — the key it starts with holds all
-three scopes. A key minted for an application holds <code>ingest</code> alone and can
-change none of this; one minted for an agent holds <code>read</code> and can look at it.</p>
+<p>A key that holds <code>write</code> is still the administrator of its own project, so
+retention changes without a restart and without the admin token. The key the
+first start prints holds <code>ingest</code> alone and can change none of this, like any
+key minted for an application; one minted for an agent holds <code>read</code> and can
+look at it. A key with <code>write</code> is minted by an owner or editor signed in, or
+with the admin token (<a href="#keys">Keys</a>).</p>
 <p>Its keys are the exception: <strong>no project key lists, mints or revokes keys</strong>,
 and it is answered <code>403</code> on those three routes. A key that could mint keys
 would turn one lost key into as many credentials as its finder wanted, each of

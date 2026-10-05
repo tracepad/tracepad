@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1796,7 +1824,7 @@ its 24 hours have passed, restarting prints a new one. It rides in the URL fragm
 send to the server, so it stays out of the access log and out of the history of
 whoever opens it.</p>
 <p>Opening the link asks for an email, a password and an optional display name.
-The same thing over the API:</p>
+The same thing over the API, with <code>token</code> the part of the printed link after <code>#token=</code>. It answers <code>201</code> with <code>{"account": {…}}</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:4318/api/v1/setup<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"token":"…","email":"you@example.com","password":"a long enough one"}'</span>

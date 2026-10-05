@@ -375,6 +375,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -517,6 +545,17 @@
     <span class="md-ellipsis">
       
         The Python, Node and Go packages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-install-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install script
       
     </span>
   </a>
@@ -1489,6 +1528,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-install-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The install script
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sending-from-any-opentelemetry-sdk" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1671,7 +1721,7 @@ does not know is logged as a warning at start, which catches a typo.</p>
 <tr>
 <td><code>TRACEPAD_API_KEY</code></td>
 <td>unset</td>
-<td>The key, or the admin token where a command says so. Prefer it to <code>--key</code>, which shows in the process list.</td>
+<td>The key, or the admin token where a command says so. Prefer it to <code>--key</code>, which shows in the process list. With it unset, a command that takes the admin token reads <code>TRACEPAD_ADMIN_TOKEN</code> or <code>TRACEPAD_ADMIN_TOKEN_FILE</code> instead, for a server on this machine only.</td>
 </tr>
 </tbody>
 </table>
@@ -1725,6 +1775,42 @@ explicitly or keep a separate <code>.env</code> for it.</p>
 processor's own) are the OpenTelemetry SDK's business, and it honours them as
 they are. <a href="../sdk-python/">sdk-python.md</a>, <a href="../sdk-js/">sdk-js.md</a> and
 <a href="../sdk-go/">sdk-go.md</a> have the details.</p>
+<h2 id="the-install-script">The install script</h2>
+<p>Read by <code>scripts/install.sh</code> — the <code>curl … | sh</code> line of the
+<a href="../quickstart/#with-your-coding-agent">quickstart</a> — and by nothing in the
+binary; the server does not warn about one left exported.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_VERSION</code></td>
+<td>the newest stable release</td>
+<td>The release to install, <code>0.1.0-rc.1</code> or <code>v0.1.0-rc.1</code>. A release candidate is installed only when named here.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_INSTALL_DIR</code></td>
+<td><code>~/.local/bin</code></td>
+<td>Where the binary goes. Never needs <code>sudo</code> unless you point it somewhere that does.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_NO_SKILL</code></td>
+<td>unset</td>
+<td><code>1</code> installs the binary alone, without the agent skill.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_DOWNLOAD_URL</code></td>
+<td><code>https://github.com/tracepad/tracepad/releases</code></td>
+<td>A mirror with the same layout (<code>download/v&lt;version&gt;/…</code>, <code>latest/download/checksums.txt</code>), over <code>https://</code> or <code>file://</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../install/#with-the-install-script">install.md</a>.</p>
 <h2 id="sending-from-any-opentelemetry-sdk">Sending from any OpenTelemetry SDK</h2>
 <p>These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:</p>
 <table>

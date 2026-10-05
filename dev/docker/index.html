@@ -375,6 +375,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -2103,7 +2131,7 @@ move the server, but only the variable moves the health check with it: the
 probe reads <code>TRACEPAD_LISTEN</code> (and <code>TRACEPAD_URL</code> ahead of it) and cannot see a
 flag you appended to the command line, so a container started with <code>--listen
 :8080</code> runs correctly and is marked <code>unhealthy</code> for ever.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-e<span class="w"> </span><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-e<span class="w"> </span><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:8080:8080<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad
 </code></pre></div>
 <h3 id="ingest-under-load">Ingest under load</h3>
 <p>Two settings size what one export may cost everything else. Neither needs
@@ -2272,7 +2300,7 @@ CLI takes the same address as <code>--url</code>. The server believes
 loopback publish: only the proxy should be able to.</p>
 <h2 id="health">Health</h2>
 <p>The image declares a <code>HEALTHCHECK</code>, so Docker knows whether the server is up:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{.State.Health.Status}}'</span><span class="w"> </span>tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{.State.Health.Status}}'</span><span class="w"> </span>tracepad<span class="w">   </span><span class="c1"># healthy; starting until the first check passes</span>
 </code></pre></div>
 <p>It runs <a href="../cli/#health"><code>tracepad health</code></a>, which needs no key — the same
 command works from a load balancer, a systemd unit or your own script:</p>

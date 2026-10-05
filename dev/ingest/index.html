@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1889,15 +1917,19 @@ newer OTLP version keeps working.</p>
 <a href="../export/"><code>tracepad export --otlp</code></a> replays it as JSON. The archive is what
 arrived; converting at ingest would make it the converter's output instead, and
 a bug in that conversion would be unfixable because the original would be gone.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:4318/v1/traces<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--data<span class="w"> </span>@export.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">now</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>date<span class="w"> </span>+%s<span class="k">)</span><span class="s2">000000000"</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-sS<span class="w"> </span>http://localhost:4318/v1/traces<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"'</span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">16</span><span class="k">)</span><span class="s2">"</span><span class="s1">'","spanId":"'</span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">8</span><span class="k">)</span><span class="s2">"</span><span class="s1">'","name":"hello","kind":1,"startTimeUnixNano":"'</span><span class="s2">"</span><span class="nv">$now</span><span class="s2">"</span><span class="s1">'","endTimeUnixNano":"'</span><span class="s2">"</span><span class="nv">$now</span><span class="s2">"</span><span class="s1">'"}]}]}]}'</span>
 </code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{}
+</code></pre></div>
+<p>A <code>200</code> with <code>{}</code> means every span was accepted.</p>
 <h2 id="authentication">Authentication</h2>
 <p>Either scheme works on either route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Authorization: Bearer &lt;secret key&gt;
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Authorization: Basic base64(&lt;public key&gt;:&lt;secret key&gt;)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Authorization: Bearer &lt;secret key&gt;
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Authorization: Basic base64(&lt;public key&gt;:&lt;secret key&gt;)
 </code></pre></div>
 <p>Keys are printed when a project is created (see the server's startup output).
 Unknown credentials get <code>401 {"error": "unauthorized"}</code>.</p>
@@ -1919,28 +1951,29 @@ gets <code>503</code> with <code>Retry-After: 1</code> instead, which an exporte
 would make it drop the batch.</p>
 <h2 id="connecting-an-application">Connecting an application</h2>
 <p><strong>OpenTelemetry SDK</strong> — nothing but environment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</span><span class="o">=</span>http://localhost:4318/v1/traces
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"authorization=Bearer tp-sk-…"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</span><span class="o">=</span>http://localhost:4318/v1/traces
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"authorization=Bearer tp-sk-…"</span>
 </code></pre></div>
 <p>The protocol line is required wherever an SDK defaults to gRPC: Tracepad has no
 gRPC receiver, and an SDK left to its own default may choose it — the application reports nothing and
 the trace list stays empty. <code>http/json</code> works too (<a href="#the-json-encoding">below</a>).</p>
 <p><strong>Langfuse SDK</strong> — point it at Tracepad instead of Langfuse:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_BASE_URL</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_HOST</span><span class="o">=</span>http://localhost:4318<span class="w">   </span><span class="c1"># the older name, for older SDKs</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>tp-pk-…
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>tp-sk-…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_BASE_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_HOST</span><span class="o">=</span>http://localhost:4318<span class="w">   </span><span class="c1"># the older name, for older SDKs</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>tp-pk-…
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
 <p>The JavaScript SDK 5.x reads <code>LANGFUSE_BASE_URL</code> alone, and with only
 <code>LANGFUSE_HOST</code> set it keeps sending to Langfuse's cloud. What else changes,
 and what does not carry over, is in
 <a href="../langfuse-sdk/">Coming from the Langfuse SDK</a>.</p>
 <p><strong>The <code>tracepad</code> package</strong> — the same exporter with the ergonomics on top, in
-Python (<a href="../sdk-python/">sdk-python.md</a>) and in Node (<a href="../sdk-js/">sdk-js.md</a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># or: npm install tracepad @opentelemetry/api</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
+Python (<a href="../sdk-python/">sdk-python.md</a>), in Node (<a href="../sdk-js/">sdk-js.md</a>) and in
+Go (<a href="../sdk-go/">sdk-go.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># or: npm install tracepad @opentelemetry/api, go get github.com/tracepad/tracepad/sdk/go</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
 <p>Working examples of all of them live in <a href="https://github.com/tracepad/tracepad/tree/main/scripts/smoke"><code>scripts/smoke</code></a>,
 which is also the test that keeps them working.</p>
@@ -1951,25 +1984,25 @@ sessions, and needs only environment too.</p>
 <code>claude_code.interaction</code> per prompt, one <code>claude_code.llm_request</code> per API
 call, one <code>claude_code.tool</code> per tool call — and Tracepad is an OTLP endpoint,
 so connecting the two is environment and nothing else:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENABLE_TELEMETRY</span><span class="o">=</span><span class="m">1</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</span><span class="o">=</span><span class="m">1</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_TRACES_EXPORTER</span><span class="o">=</span>otlp
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>http://localhost:4318
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENABLE_TELEMETRY</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_TRACES_EXPORTER</span><span class="o">=</span>otlp
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
 </code></pre></div>
 <p>The same six as the <code>env</code> object of <code>~/.claude/settings.json</code>, which is how they
 outlive the shell that set them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENABLE_TELEMETRY"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">"OTEL_TRACES_EXPORTER"</span><span class="p">:</span><span class="w"> </span><span class="s2">"otlp"</span><span class="p">,</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_PROTOCOL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http/protobuf"</span><span class="p">,</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_ENDPOINT"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:4318"</span><span class="p">,</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_HEADERS"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENABLE_TELEMETRY"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">"OTEL_TRACES_EXPORTER"</span><span class="p">:</span><span class="w"> </span><span class="s2">"otlp"</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_PROTOCOL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http/protobuf"</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_ENDPOINT"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:4318"</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_HEADERS"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">}</span>
 </code></pre></div>
 <p>Two of those lines are the ones people lose an afternoon to:</p>
 <ul>
@@ -1984,7 +2017,7 @@ outlive the shell that set them:</p>
 <p>A day of prompts is a lot of traces to have arrive beside your application's,
 so give them an environment of their own — the filter and the statistics are
 per environment (retention is per project):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_RESOURCE_ATTRIBUTES</span><span class="o">=</span>deployment.environment<span class="o">=</span>claude-code
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_RESOURCE_ATTRIBUTES</span><span class="o">=</span>deployment.environment<span class="o">=</span>claude-code
 </code></pre></div>
 <p><strong>What arrives.</strong> One trace per prompt, named <code>claude_code.interaction</code>, with
 the API calls and the tool calls under it: a <code>claude_code.tool</code> span carries a
@@ -2014,7 +2047,7 @@ everywhere: none was sent, and Tracepad does not estimate one.</p>
 <tbody>
 <tr>
 <td><code>200</code></td>
-<td>Committed to disk. An empty body means everything was accepted; a body carries <code>partial_success</code> with the number of skipped spans.</td>
+<td>Committed to disk. An empty body (<code>{}</code> for a JSON export) means everything was accepted; otherwise the body carries <code>partial_success</code> (<code>partialSuccess</code> in JSON) with the number of skipped spans.</td>
 </tr>
 <tr>
 <td><code>400</code></td>
@@ -2077,10 +2110,10 @@ the database and the server its memory:</p>
   Collector with no <code>send_batch_max_size</code> can pass one incoming request through
   whole, whatever its size, after a burst. An exporter treats <code>413</code> as final
   and drops the batch, so bound the Collector's batches explicitly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">processors</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">batch</span><span class="p">:</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">send_batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">send_batch_max_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span><span class="w">   </span><span class="c1"># never more than this in one export</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">processors</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">batch</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">send_batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">send_batch_max_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span><span class="w">   </span><span class="c1"># never more than this in one export</span>
 </code></pre></div>
 <p>Batching in the exporter instead, as newer Collectors can, the same bound is
 the OTLP/HTTP exporter's <code>sending_queue::batch::max_size</code> (counted in items,
@@ -2133,14 +2166,14 @@ raw retention window (<code>TRACEPAD_STORE_RAW</code>, <code>raw_retention_days<
 <a href="../export/"><code>tracepad export --otlp</code></a> replays, and it is readable through
 <code>GET /api/v1/raw</code> (<a href="../api/#the-raw-archive">api.md</a>).</p>
 <p><code>GET /api/v1/system</code> reports its size and its reach:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>traces_before_window</code> is the honest edge of the promise: those traces still
 have rows, but no body to replay. <code>tracepad system</code> prints the same block.</p>
@@ -2423,8 +2456,8 @@ says which SDK sent the span.</p>
 <h3 id="the-run-link">The run link</h3>
 <p>An eval harness ties each trace to the run it belongs to and the dataset item
 it answered with two attributes (<a href="../datasets/">datasets.md</a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tracepad.run_id  = 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>tracepad.item_id = a1b2c3d4e5f60718293a4b5c6d7e8f90
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>tracepad.run_id  = 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>tracepad.item_id = a1b2c3d4e5f60718293a4b5c6d7e8f90
 </code></pre></div>
 <p>They are trace-level, resolved like <code>session.id</code>: any span may carry them and
 the root span is the convention, at any of the three levels. Both must be the
@@ -2479,11 +2512,11 @@ a number or a number beyond that, is kept on the observation as it was sent and
 counted as no cost, the same as an observation that carried none.</p>
 <p><strong>Your own OpenTelemetry spans</strong> carry it as <code>gen_ai.usage.cost</code>, a number,
 set on the span before it ends:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">with</span> <span class="n">tracer</span><span class="o">.</span><span class="n">start_as_current_span</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">)</span> <span class="k">as</span> <span class="n">span</span><span class="p">:</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.request.model"</span><span class="p">,</span> <span class="s2">"gpt-4o-mini"</span><span class="p">)</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="n">messages</span><span class="p">)</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.input_tokens"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">prompt_tokens</span><span class="p">)</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.cost"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">cost</span><span class="p">)</span>  <span class="c1"># OpenRouter reports it</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">with</span> <span class="n">tracer</span><span class="o">.</span><span class="n">start_as_current_span</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">)</span> <span class="k">as</span> <span class="n">span</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.request.model"</span><span class="p">,</span> <span class="s2">"gpt-4o-mini"</span><span class="p">)</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="n">messages</span><span class="p">)</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.input_tokens"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">prompt_tokens</span><span class="p">)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.cost"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">cost</span><span class="p">)</span>  <span class="c1"># OpenRouter reports it</span>
 </code></pre></div>
 <p><strong>A third-party auto-instrumentation</strong> — OpenLLMetry, the OpenTelemetry GenAI
 instrumentations — opens and closes the span around the provider call itself,

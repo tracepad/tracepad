@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1431,6 +1459,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2069,6 +2108,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2133,6 +2183,12 @@ need a workaround, that is an API gap, and the gap gets fixed in the API.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
 </code></pre></div>
 <p><code>--url</code> and <code>--key</code> override the environment on any command.</p>
+<p>The key the server prints on its first start holds <code>ingest</code> alone: it sends
+spans and cannot read them, so <code>tracepad traces ls</code> with it is a <code>403</code>. A key
+that reads is minted by an owner or editor in the web interface (<em>Settings →
+Project → API keys</em>), or with the admin token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span><span class="nb">read</span><span class="w"> </span>--name<span class="w"> </span>agent
+</code></pre></div>
 <p>What a command may do is the key's <a href="../api/#scopes">scopes</a>. Everything that
 reads — <code>traces</code>, <code>tail</code>, <code>sessions</code>, <code>users</code>, <code>scores ls</code>, <code>scores trend</code>,
 <code>stats</code>, <code>facets</code>, <code>system</code>, the listings and <code>show</code>s of prompts, datasets,
@@ -2143,8 +2199,8 @@ and queues, <code>queues next</code> among them (it claims an item), <code>reten
 <code>users rm-data</code>, <code>users erasure</code> and <code>users erasures</code> — needs <code>write</code>. <code>projects ls</code>, <code>projects show</code>,
 <code>retention show</code> and <code>prompts get</code> work with any key. A key without the scope
 a command needs prints the server's <code>403</code> and exits 1:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$ tracepad traces ls
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>tracepad: this key's scopes are ingest; GET /api/v1/traces needs read
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ tracepad traces ls
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tracepad: this key's scopes are ingest; GET /api/v1/traces needs read
 </code></pre></div>
 <p>A key with <code>read</code> alone is the one for an agent that only looks; <code>projects
 show</code> says what the key in hand holds (<a href="#administration">Administration</a>).</p>
@@ -2152,8 +2208,8 @@ show</code> says what the key in hand holds (<a href="#administration">Administr
 <p>On a terminal you get a table. Anywhere else — a pipe, a file, a subprocess —
 you get the API's JSON, byte for byte, with no flags at all. <code>--json</code> forces
 JSON on a terminal too.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w">                </span><span class="c1"># a table, if you are looking at it</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.traces'</span><span class="w"> </span><span class="c1"># JSON, because you are not</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w">                </span><span class="c1"># a table, if you are looking at it</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.traces'</span><span class="w"> </span><span class="c1"># JSON, because you are not</span>
 </code></pre></div>
 <p>That is the whole reason for the TTY check: an agent shelling out to
 <code>tracepad</code> should not have to know a flag to get machine output.</p>
@@ -2193,7 +2249,7 @@ escaping is the job of whatever reads it.</p>
 typoed a flag".</p>
 <h2 id="commands">Commands</h2>
 <h3 id="traces-ls"><code>traces ls</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error<span class="w"> </span>--since<span class="w"> </span>1h
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error<span class="w"> </span>--since<span class="w"> </span>1h
 </code></pre></div>
 <table>
 <thead>
@@ -2287,8 +2343,8 @@ typoed a flag".</p>
 </table>
 <p>The table ends with the commands that continue the walk, in whichever
 direction there is one left:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>older: --cursor MTc4ODIy…
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>newer: --newer --cursor MTc4ODIx…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>older: --cursor MTc4ODIy…
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>newer: --newer --cursor MTc4ODIx…
 </code></pre></div>
 <p><code>--oldest</code> costs what any other page costs: pagination is a keyset, so "the
 end" is a direction to read the index in and not a count of rows to skip.
@@ -2304,7 +2360,7 @@ instead of continuing it — a loop that never ends.</p>
 <h3 id="lists">Lists</h3>
 <p><code>--env</code>, <code>--release</code> and <code>--name</code> take one value or a comma-separated list, and
 a trace matches when its column equals any item:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production,staging
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production,staging
 </code></pre></div>
 <p>The flag passes its string through to the query parameter untouched, so what it
 accepts is exactly what the <a href="../api/#lists">API</a> accepts: items are trimmed,
@@ -2318,11 +2374,11 @@ was meant. The same three flags mean the same thing on <code>traces last</code>,
 trace must carry every tag given.</p>
 <p><a href="#facets"><code>facets</code></a> prints what the three can be set to.</p>
 <h3 id="searching">Searching</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--search<span class="w"> </span><span class="s2">"refund failed"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--search<span class="w"> </span><span class="s2">"refund failed"</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST       TOKENS
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000  169
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST       TOKENS
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000  169
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
 </code></pre></div>
 <p>The second line under a row says where the trace matched — the observation and
 the field — and what the text says around the hit. It is dimmed on a terminal
@@ -2337,15 +2393,15 @@ table.</p>
 matching trace and its whole tree. <code>tail</code> does not take it: it follows the
 newest page, which is not a question about text.</p>
 <h3 id="traces-show"><code>traces show</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f<span class="w"> </span>--full
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f<span class="w"> </span>--full
 </code></pre></div>
 <p>The observation tree. <code>--full</code> adds every payload, asking for the largest
 budget the API allows; a payload still too large for it prints its preview and
 the URL that returns the rest.</p>
 <p>Each observation's line names its kind, and — where the client sent them —
 <code>ttft</code> and the prompt it ran:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>· generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>· generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
 </code></pre></div>
 <p><code>N tokens</code> is that observation's input plus output, read under the spellings
 every listing reads (<a href="../api/#tokens">api.md</a>), or the <code>total</code> it sent when
@@ -2354,14 +2410,14 @@ that is larger or there is nothing else to add up.</p>
 named them, beside its latency, TTFT and cost. <code>ttft</code> is the wait before the
 first token; the trace's is the earliest one among its observations.</p>
 <h3 id="traces-last"><code>traces last</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>last<span class="w"> </span>--error<span class="w"> </span>--full
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>last<span class="w"> </span>--error<span class="w"> </span>--full
 </code></pre></div>
 <p>"Why did the last run fail" — every filter of <code>traces ls</code>, <code>--search</code>
 included, the newest match, the whole tree. One request.</p>
 <h3 id="traces-rm"><code>traces rm</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span><span class="m">2026</span>-09-17T14:02:17Z<span class="w"> </span>--env<span class="w"> </span>loadtest<span class="w"> </span>--since<span class="w"> </span>24h
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span>1h<span class="w"> </span>--search<span class="w"> </span><span class="s2">"api key"</span><span class="w"> </span>--yes
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span><span class="m">2026</span>-09-17T14:02:17Z<span class="w"> </span>--env<span class="w"> </span>loadtest<span class="w"> </span>--since<span class="w"> </span>24h
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span>1h<span class="w"> </span>--search<span class="w"> </span><span class="s2">"api key"</span><span class="w"> </span>--yes
 </code></pre></div>
 <p>Deletes one trace by id, or every trace the listing's filters match before
 <code>--to</code> — the trace with its observations, scores, payloads and queue items,
@@ -2371,16 +2427,16 @@ forms are destructive commands like the ones under
 <a href="#administration">Administration</a>: the server's preview is printed, the echo
 is typed back — the trace id for one trace, the project's name for a filter
 — and <code>--yes</code> answers that for a script without skipping the check.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$ tracepad traces rm --to 1h --env loadtest
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>this would delete every trace matching these filters that started before 2026-09-17 13:02:17:
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  matched        12000
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  annotation_items 0
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  observations   36000
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  scores         0
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  traces         12000
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  oldest arrival 2026-09-16 09:12:40
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>raw OTLP bodies are not deleted; they expire on the raw retention window
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>type "checkout-service" to confirm:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>$ tracepad traces rm --to 1h --env loadtest
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>this would delete every trace matching these filters that started before 2026-09-17 13:02:17:
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>  matched        12000
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  annotation_items 0
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  observations   36000
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  scores         0
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  traces         12000
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>  oldest arrival 2026-09-16 09:12:40
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>raw OTLP bodies are not deleted; they expire on the raw retention window
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>type "checkout-service" to confirm:
 </code></pre></div>
 <p>The bulk form takes the filters of <code>traces ls</code> — <code>--search</code> included — but
 <code>--to</code> in place of <code>--until</code>, and <strong>requires</strong> it: it closes the set, so that
@@ -2394,7 +2450,7 @@ once at the end; <code>--json</code> sums the rounds into one answer with a <cod
 count. A run cut off between rounds has lost nothing but the tally: what
 committed is gone, and re-running the same command continues.</p>
 <h3 id="tail"><code>tail</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>tracepad<span class="w"> </span>tail<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>tracepad<span class="w"> </span>tail<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error
 </code></pre></div>
 <p>Follows the trace listing, printing each new trace on one line. It polls the
 public API (every 2 s, <code>--interval</code> to change it), so it needs no new server
@@ -2415,7 +2471,7 @@ per interval you see the newest page of each poll rather than everything.
 Raise <code>--limit</code>, or shorten <code>--interval</code>.</p>
 <p>In a pipe it prints one JSON row per line. Ctrl-C stops it.</p>
 <h3 id="sessions-ls"><code>sessions ls</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>ls<span class="w"> </span>--since<span class="w"> </span>24h<span class="w"> </span>--env<span class="w"> </span>production
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>ls<span class="w"> </span>--since<span class="w"> </span>24h<span class="w"> </span>--env<span class="w"> </span>production
 </code></pre></div>
 <p>One row per session, most recent activity first: last seen, id, how many
 traces, how many of those failed, cost, tokens and when the session started.</p>
@@ -2427,16 +2483,16 @@ its traces falls in the window and its totals then describe those traces.
 Paging works like <code>traces ls</code>: the last line prints the <code>--cursor</code> for the
 next page.</p>
 <h3 id="sessions-show"><code>sessions show</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>show<span class="w"> </span>session-77
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>show<span class="w"> </span>session-77
 </code></pre></div>
 <p>The session's totals — traces, how many failed, cost, tokens, the window it
 spans — and its traces. The tokens line is input plus output, with every
 other class that was reported beside it: <code>2052 (cache read 1024, reasoning 128)</code>.</p>
 <h3 id="users-ls"><code>users ls</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>cost<span class="w"> </span>--limit<span class="w"> </span><span class="m">20</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>tokens
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--prefix<span class="w"> </span>acme:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>cost<span class="w"> </span>--limit<span class="w"> </span><span class="m">20</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>tokens
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--prefix<span class="w"> </span>acme:
 </code></pre></div>
 <p>One row per end user: id, traces, sessions, how many of those traces failed,
 cost, tokens, first and last seen. <code>--sort</code> is <code>last_seen</code> (the default),
@@ -2450,7 +2506,7 @@ starting with it, case-sensitively; it is a prefix, not a search.</p>
 minutes, so a user first seen just now is not on it yet — <code>users show</code> is
 exact for any id. Both are explained in <a href="../users/">users.md</a>.</p>
 <h3 id="users-show"><code>users show</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>show<span class="w"> </span>user-4821
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>show<span class="w"> </span>user-4821
 </code></pre></div>
 <p>That user's totals — traces, sessions, cost, tokens, p50/p95 latency and the
 window they span — merged with the traffic too recent for the roll-up. An id nothing
@@ -2458,7 +2514,7 @@ was ever filed under exits 1 with the server's <code>404</code>.</p>
 <p>For their activity over time, or a split by model or environment, use
 <code>tracepad stats --user</code>.</p>
 <h3 id="scores-ls"><code>scores ls</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>ls<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--since<span class="w"> </span>24h
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>ls<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--since<span class="w"> </span>24h
 </code></pre></div>
 <p>Filters: <code>--trace</code>, <code>--observation</code>, <code>--session</code>, <code>--name</code>, <code>--type</code>,
 <code>--author</code>, <code>--since</code>.</p>
@@ -2470,18 +2526,18 @@ the scores the key you run with wrote; <code>--author</code> also takes an accou
 a public key, as <code>--json</code> prints them.</p>
 <p>Newest first, and it pages: <code>--limit</code> (1–500, default 50) and <code>--cursor</code>, with
 the last line printing the command that continues the walk.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>older: --cursor MTc4ODEyOTQ5ODQ0…
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>older: --cursor MTc4ODEyOTQ5ODQ0…
 </code></pre></div>
 <p>One direction only — there is no <code>--oldest</code> or <code>--newer</code> here, because the
 endpoint has no other end to jump to.</p>
 <h3 id="scores-add-scores-rm"><code>scores add</code>, <code>scores rm</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--value<span class="w"> </span><span class="m">0</span>.9<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span>--comment<span class="w"> </span><span class="s2">"answered the question"</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span><span class="m">0011</span>…<span class="w"> </span>--name<span class="w"> </span>step-ok<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">  </span>--type<span class="w"> </span>boolean<span class="w"> </span>--value<span class="w"> </span><span class="m">1</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--session<span class="w"> </span>support-42<span class="w"> </span>--name<span class="w"> </span>csat<span class="w"> </span>--value<span class="w"> </span><span class="m">5</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>tone<span class="w"> </span>--type<span class="w"> </span>categorical<span class="w"> </span>--string<span class="w"> </span>friendly
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>rm<span class="w"> </span>8673743e8ca15b9213d541a703786e86
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--value<span class="w"> </span><span class="m">0</span>.9<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>--comment<span class="w"> </span><span class="s2">"answered the question"</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span><span class="m">0011</span>…<span class="w"> </span>--name<span class="w"> </span>step-ok<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span>--type<span class="w"> </span>boolean<span class="w"> </span>--value<span class="w"> </span><span class="m">1</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--session<span class="w"> </span>support-42<span class="w"> </span>--name<span class="w"> </span>csat<span class="w"> </span>--value<span class="w"> </span><span class="m">5</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>tone<span class="w"> </span>--type<span class="w"> </span>categorical<span class="w"> </span>--string<span class="w"> </span>friendly
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>rm<span class="w"> </span>8673743e8ca15b9213d541a703786e86
 </code></pre></div>
 <p><code>add</code> posts one score and prints the id it was written under; with <code>--json</code> it
 prints the endpoint's answer whole. The target is <code>--trace</code> (with an optional
@@ -2497,22 +2553,22 @@ made: the same id posted again replaces the row whole. See
 server's <code>404</code> when there is no such score in this project. There is no echo
 to type: a score is one row that <code>add --id</code> puts straight back.</p>
 <h3 id="scores-trend"><code>scores trend</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w">                                    </span><span class="c1"># every name, by day</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--since<span class="w"> </span>168h
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--group-by<span class="w"> </span>release
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--group-by<span class="w"> </span>model<span class="w"> </span>--env<span class="w"> </span>production
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w">                                    </span><span class="c1"># every name, by day</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--since<span class="w"> </span>168h
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--group-by<span class="w"> </span>release
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--group-by<span class="w"> </span>model<span class="w"> </span>--env<span class="w"> </span>production
 </code></pre></div>
 <p><code>GET /api/v1/stats/scores</code>: how a score has moved, in the buckets <code>stats</code>
 groups the traffic into. One block per score name, headed by the name, its
 data type and what was counted, and one table under it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>hallucination (numeric, any scores)
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>DAY         SCORES  MEAN (MIN..MAX)
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>2026-09-01  412     0.18 (0..0.9)
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>2026-09-02  389     0.14 (0..0.7)
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>verdict (categorical, any scores)
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>DAY         SCORES  CATEGORIES
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>2026-09-01  412     pass 380 · fail 32
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>hallucination (numeric, any scores)
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>DAY         SCORES  MEAN (MIN..MAX)
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>2026-09-01  412     0.18 (0..0.9)
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>2026-09-02  389     0.14 (0..0.7)
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>verdict (categorical, any scores)
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>DAY         SCORES  CATEGORIES
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>2026-09-01  412     pass 380 · fail 32
 </code></pre></div>
 <p>The third column is what the type says: a mean with its extremes, a rate as a
 percentage, or the distribution. <code>--group-by</code> is <code>hour</code>, <code>day</code>, <code>environment</code>,
@@ -2529,17 +2585,17 @@ none prints <em>no score names a trace in this range</em> — a score that grade
 session, and a <code>text</code> score, are never on a timeline. See
 <a href="../quality/">quality.md</a>.</p>
 <h3 id="prompts"><code>prompts</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>ls
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>get<span class="w"> </span>support<span class="w"> </span>--label<span class="w"> </span>production
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>push<span class="w"> </span>support<span class="w"> </span>--file<span class="w"> </span>prompt.json<span class="w"> </span>--label<span class="w"> </span>staging
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>diff<span class="w"> </span>support<span class="w"> </span>--from<span class="w"> </span><span class="m">1</span><span class="w"> </span>--to<span class="w"> </span><span class="m">3</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--version<span class="w"> </span><span class="m">4</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--rm
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>rm<span class="w"> </span>support<span class="w"> </span>--yes
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>ls
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>get<span class="w"> </span>support<span class="w"> </span>--label<span class="w"> </span>production
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>push<span class="w"> </span>support<span class="w"> </span>--file<span class="w"> </span>prompt.json<span class="w"> </span>--label<span class="w"> </span>staging
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>diff<span class="w"> </span>support<span class="w"> </span>--from<span class="w"> </span><span class="m">1</span><span class="w"> </span>--to<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--version<span class="w"> </span><span class="m">4</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--rm
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>rm<span class="w"> </span>support<span class="w"> </span>--yes
 </code></pre></div>
 <p><code>push</code> sends the file as the version's request body, so the prompt stays JSON
 and out of shell quoting:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w"> </span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"You are a support agent."</span><span class="p">,</span><span class="w"> </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">}}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w"> </span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"You are a support agent."</span><span class="p">,</span><span class="w"> </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">}}</span>
 </code></pre></div>
 <p><code>--label</code>, <code>--message</code> and <code>--expect</code> fill in <code>labels</code>, <code>commit_message</code> and
 <code>expect_version</code> when the file does not already set them — the file wins, so a
@@ -2551,7 +2607,7 @@ else's work — see
 <a href="../prompts/#appending-to-the-version-you-meant">prompts.md</a>.</p>
 <p><code>ls</code> pages: <code>--limit</code> (1–500, default 50) and <code>--cursor</code>, with the last line
 printing the command that continues the walk.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>more: --cursor c3VwcG9ydA
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>more: --cursor c3VwcG9ydA
 </code></pre></div>
 <p>It says <code>more</code> rather than <code>older</code> because this listing is alphabetical by
 name, not newest-first. The command walks that way only: the endpoint does page
@@ -2567,11 +2623,11 @@ same ceremony as the administrative commands: without <code>--yes</code> it prin
 would go and asks you to type the name back, and off a terminal it refuses
 outright. Traces that ran the prompt keep the name and version they recorded.</p>
 <h3 id="stats"><code>stats</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--since<span class="w"> </span>168h
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>model
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>release
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--user<span class="w"> </span>user-4821
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>total<span class="w"> </span>--since<span class="w"> </span>168h
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--since<span class="w"> </span>168h
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>model
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>release
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--user<span class="w"> </span>user-4821
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>total<span class="w"> </span>--since<span class="w"> </span>168h
 </code></pre></div>
 <p><code>--since</code> takes Go durations (<code>1h</code>, <code>30m</code>, <code>168h</code>) or an RFC 3339 instant.
 There is no day unit — <code>7d</code> is a usage error, not a week. <code>--until</code> closes the
@@ -2601,21 +2657,21 @@ counts unchanged. On an <code>hour</code> or <code>day</code> timeline, and on t
 also adds a SESSIONS column: how many of that user's sessions began in the
 bucket, counted where they start so a sum is exact (<a href="../users/">users.md</a>).</p>
 <h3 id="facets"><code>facets</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>tracepad<span class="w"> </span>facets
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>tracepad<span class="w"> </span>facets<span class="w"> </span>--since<span class="w"> </span>168h
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>tracepad<span class="w"> </span>facets
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>tracepad<span class="w"> </span>facets<span class="w"> </span>--since<span class="w"> </span>168h
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>2026-09-02 12:00:00 .. 2026-09-09 12:00:00
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>ENV         TRACES
-<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>production  4656
-<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>staging     218
-<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>prod        1
-<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>
-<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>RELEASE   TRACES
-<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>2026.9.1  3120
-<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>
-<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a>NAME          TRACES
-<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a>support-chat  2984
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>2026-09-02 12:00:00 .. 2026-09-09 12:00:00
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>ENV         TRACES
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>production  4656
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>staging     218
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>prod        1
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>RELEASE   TRACES
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>2026.9.1  3120
+<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a>
+<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a>NAME          TRACES
+<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>support-chat  2984
 </code></pre></div>
 <p>What <code>--env</code>, <code>--release</code> and <code>--name</code> can be set to over a range, busiest
 first, with how many traces carry each. The counts are the point as much as the
@@ -2633,23 +2689,23 @@ cannot be spelled as a filter — one with a comma in it, one padded with spaces
 <h3 id="datasets-runs-score-configs"><code>datasets</code>, <code>runs</code>, <code>score-configs</code></h3>
 <p>The eval commands. The loop they make — declare, push, run, close, compare —
 is written out end to end in <a href="../datasets/#the-same-loop-from-a-shell">datasets.md</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>ls
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>show<span class="w"> </span>support-golden<span class="w"> </span>--version<span class="w"> </span><span class="m">12</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>push<span class="w"> </span>support-golden<span class="w"> </span>--file<span class="w"> </span>cases.jsonl<span class="w"> </span>--description<span class="w"> </span><span class="s2">"the golden set"</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm-item<span class="w"> </span>support-golden<span class="w"> </span>a1b2c3d4e5f60718293a4b5c6d7e8f90
-<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm<span class="w"> </span>support-golden<span class="w"> </span>--yes
-<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>
-<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w">                                   </span><span class="c1"># every dataset's runs, newest first</span>
-<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w"> </span>support-golden
-<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--name<span class="w"> </span><span class="s2">"prompt v8"</span><span class="w"> </span>--metadata-file<span class="w"> </span>run.json
-<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>show<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--items
-<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>finish<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--failed<span class="w"> </span><span class="s2">"judge timed out"</span>
-<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>compare<span class="w"> </span>0e5a…<span class="w"> </span>1f6b…<span class="w"> </span>--all
-<a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>rm<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
-<a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a>
-<a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>ls
-<a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>accuracy<span class="w"> </span>--file<span class="w"> </span>accuracy.json
-<a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>rm<span class="w"> </span>accuracy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>ls
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>show<span class="w"> </span>support-golden<span class="w"> </span>--version<span class="w"> </span><span class="m">12</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>push<span class="w"> </span>support-golden<span class="w"> </span>--file<span class="w"> </span>cases.jsonl<span class="w"> </span>--description<span class="w"> </span><span class="s2">"the golden set"</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm-item<span class="w"> </span>support-golden<span class="w"> </span>a1b2c3d4e5f60718293a4b5c6d7e8f90
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm<span class="w"> </span>support-golden<span class="w"> </span>--yes
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w">                                   </span><span class="c1"># every dataset's runs, newest first</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w"> </span>support-golden
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--name<span class="w"> </span><span class="s2">"prompt v8"</span><span class="w"> </span>--metadata-file<span class="w"> </span>run.json
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>show<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--items
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>finish<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--failed<span class="w"> </span><span class="s2">"judge timed out"</span>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>compare<span class="w"> </span>0e5a…<span class="w"> </span>1f6b…<span class="w"> </span>--all
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>rm<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>ls
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>accuracy<span class="w"> </span>--file<span class="w"> </span>accuracy.json
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>rm<span class="w"> </span>accuracy
 </code></pre></div>
 <p><code>datasets push</code> takes a <code>.jsonl</code> — one case per line, which is the shape a
 dataset is edited by hand in — or a <code>.json</code> array, which is the shape a script
@@ -2658,8 +2714,8 @@ one request takes; a longer file is several writes, below — because the
 dataset's version advances once per write: a file sent case by case would leave
 a version per case and no number that names the file. It prints where it
 landed:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>version 12: 3 items changed, 200 in the batch
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>unchanged at version 12
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>version 12: 3 items changed, 200 in the batch
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>unchanged at version 12
 </code></pre></div>
 <p>A file of more than 10,000 cases — the most one request takes — goes as the
 fewest writes of up to 10,000 that carry it — a write that changes something
@@ -2678,7 +2734,7 @@ runs, newest first, with a dataset column the per-dataset table has no need
 of. With one it reads that dataset's own listing.</p>
 <p><code>runs create --json</code> answers with the whole run, so a script reads the id and
 the version it pinned from one call:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--json<span class="k">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--json<span class="k">)</span>
 </code></pre></div>
 <p><code>datasets show --json</code> walks every page rather than printing the first: it is
 the dataset's export, and an export that looks complete and is not would be
@@ -2702,22 +2758,22 @@ released, not deleted.</p>
 <p>The annotation commands. The loop they make — declare the queue, fill it, take
 the next item, post the scores, complete — is written out end to end in
 <a href="../annotation/#the-same-loop-from-the-command-line">annotation.md</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>ls
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>put<span class="w"> </span>weekly-review<span class="w"> </span>--config<span class="w"> </span>accuracy<span class="w"> </span>--config<span class="w"> </span>tone<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Did support answer the question?"</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span>2b3c4d5e6f7a8b9c
-<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--from-traces<span class="w"> </span>--error<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--limit<span class="w"> </span><span class="m">200</span>
-<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a>
-<a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>next<span class="w">     </span>weekly-review<span class="w"> </span>--annotator<span class="w"> </span>ada
-<a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a>tracepad<span class="w"> </span>queues<span class="w"> </span><span class="nb">complete</span><span class="w"> </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
-<a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>skip<span class="w">     </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">"not a support conversation"</span>
-<a id="__codelineno-32-13" name="__codelineno-32-13" href="#__codelineno-32-13"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>reopen<span class="w">   </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
-<a id="__codelineno-32-14" name="__codelineno-32-14" href="#__codelineno-32-14"></a>
-<a id="__codelineno-32-15" name="__codelineno-32-15" href="#__codelineno-32-15"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>items<span class="w"> </span>weekly-review<span class="w"> </span>--status<span class="w"> </span>completed<span class="w"> </span>--annotator<span class="w"> </span>ada
-<a id="__codelineno-32-16" name="__codelineno-32-16" href="#__codelineno-32-16"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>rm<span class="w">    </span>weekly-review<span class="w"> </span>--yes
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>ls
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>put<span class="w"> </span>weekly-review<span class="w"> </span>--config<span class="w"> </span>accuracy<span class="w"> </span>--config<span class="w"> </span>tone<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Did support answer the question?"</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span>2b3c4d5e6f7a8b9c
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--from-traces<span class="w"> </span>--error<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--limit<span class="w"> </span><span class="m">200</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>next<span class="w">     </span>weekly-review<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a>tracepad<span class="w"> </span>queues<span class="w"> </span><span class="nb">complete</span><span class="w"> </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>skip<span class="w">     </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">"not a support conversation"</span>
+<a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>reopen<span class="w">   </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a>
+<a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>items<span class="w"> </span>weekly-review<span class="w"> </span>--status<span class="w"> </span>completed<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>rm<span class="w">    </span>weekly-review<span class="w"> </span>--yes
 </code></pre></div>
 <p><code>queues put</code> is declarative: the whole queue in one call, and the same call
 twice writes nothing. Every <code>--config</code> must be a declared score config, in the
@@ -2745,7 +2801,7 @@ what they completed or skipped, plus the pending items they are holding, so
 queue's items — so it shows the preview and asks you to type the name back,
 and needs <code>--yes</code> off a terminal. The scores written while annotating stay.</p>
 <h3 id="system"><code>system</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>tracepad<span class="w"> </span>system
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>tracepad<span class="w"> </span>system
 </code></pre></div>
 <p>Version and uptime, then what your credential is given
 (<a href="../api/#system">api.md</a>). With a project key: the project's row counts, the
@@ -2759,16 +2815,16 @@ run when something looks wrong, and the thing to paste into a bug report.</p>
 sweep — <code>compaction pending since …</code> after an erasure or a deletion — or when
 one last finished (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).</p>
 <p>The <code>raw archive</code> block is what an export can carry out, and how far back:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>raw archive in this project
-<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a>  storage       on
-<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a>  batches       12400
-<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a>  on disk       3.1 GiB
-<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a>  covering      2026-08-06 04:12:19 .. 2026-09-05 09:44:02
-<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a>  not covered   214 traces started before it begins
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>raw archive in this project
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>  storage       on
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>  batches       12400
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a>  on disk       3.1 GiB
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>  covering      2026-08-06 04:12:19 .. 2026-09-05 09:44:02
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a>  not covered   214 traces started before it begins
 </code></pre></div>
 <h3 id="export"><code>export</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--to<span class="w"> </span>http://collector:4318/v1/traces
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--dir<span class="w"> </span>./tracepad-export
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--to<span class="w"> </span>http://collector:4318/v1/traces
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--dir<span class="w"> </span>./tracepad-export
 </code></pre></div>
 <p>Replays the archive — every export body as it arrived — into any OTLP receiver
 or onto disk, in arrival order, resumably. <code>--dry-run</code> prints what would go and
@@ -2787,11 +2843,11 @@ server itself; <a href="#traces-rm"><code>traces rm</code></a> is the same cerem
 plane. They are clients of the same API as everything else, and they
 are covered in <a href="../admin/">admin.md</a>, <a href="../retention/">retention.md</a> and
 <a href="../accounts/">accounts.md</a>; what matters here is how they behave at a terminal.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
-<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span><span class="w">   </span><span class="c1"># admin token</span>
-<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span>
-<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--media<span class="w"> </span>placeholder
-<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span><span class="w">   </span><span class="c1"># admin token</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--media<span class="w"> </span>placeholder
+<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711
 </code></pre></div>
 <p><code>users rm-data</code> prints what went, then the raw archive's line — <code>removed 252
 spans from 41 raw batches, 3 deleted</code> — the date the freed bytes are
@@ -2805,10 +2861,10 @@ printing where it is to stderr as that changes — <code>erasing: parsed 5123/20
 traces</code> — and the lines above once it ends. A failed erasure prints why and
 exits 1. <code>--no-wait</code> prints the erasure's id and how to look at it, and
 exits 0 at once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711<span class="w"> </span>--yes<span class="w"> </span>--no-wait
-<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="c1"># erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5</span>
-<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasure<span class="w"> </span>4f0c9d3e8a1b2c3d4e5f60718293a4b5
-<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasures<span class="w">        </span><span class="c1"># the project's hundred, those under way first</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711<span class="w"> </span>--yes<span class="w"> </span>--no-wait
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="c1"># erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasure<span class="w"> </span>4f0c9d3e8a1b2c3d4e5f60718293a4b5
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasures<span class="w">        </span><span class="c1"># the project's hundred, those under way first</span>
 </code></pre></div>
 <p>Leaving the command stops the watching, not the erasure. If the connection
 is lost after the request went out, the command cannot know whether the
@@ -2836,7 +2892,7 @@ scopes never change; to change what a program may do, mint a new key and
 revoke the old.</p>
 <p><code>projects show</code> run with a project key ends with the key itself — its public
 key, its name and its scopes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>  key         tp-pk-81c0… (checkout api): ingest
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>  key         tp-pk-81c0… (checkout api): ingest
 </code></pre></div>
 <p><code>retention show</code> prints the project's media setting beside the three windows,
 and <code>retention set --media store|placeholder</code> changes it
@@ -2844,15 +2900,15 @@ and <code>retention set --media store|placeholder</code> changes it
 nothing, so it asks for no confirmation.</p>
 <p>Every destructive command asks the server what it would do, prints that, and
 asks you to type the name of what is being destroyed:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>$ tracepad projects rm 9f2c…
-<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>this would delete project 9f2c…:
-<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>  api_keys       2
-<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a>  observations   180114
-<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>  raw_batches    812
-<a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a>  traces         41203
-<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a>  oldest arrival 2026-03-14 08:21:00
-<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a>the keys stop working immediately; the data is restorable for seven days
-<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a>type "checkout-service" to confirm:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>$ tracepad projects rm 9f2c…
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>this would delete project 9f2c…:
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>  api_keys       2
+<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>  observations   180114
+<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>  raw_batches    812
+<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>  traces         41203
+<a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a>  oldest arrival 2026-03-14 08:21:00
+<a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a>the keys stop working immediately; the data is restorable for seven days
+<a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a>type "checkout-service" to confirm:
 </code></pre></div>
 <p><code>--yes</code> answers that for a script. It is not a bypass: the command still asks
 the server first and still sends back the confirm value the server named — what
@@ -2878,22 +2934,22 @@ a key gets its project's); no other command reads the admin token this way.</p>
 help of that command (<code>keys --help</code> of the group), not the whole text; <code>tracepad
 --help</code> lists every command.</p>
 <h3 id="accounts"><code>accounts</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>ls
-<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>show<span class="w">   </span>&lt;id<span class="p">|</span>email&gt;
-<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>create<span class="w"> </span>&lt;email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="o">]</span>
-<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a><span class="w">                         </span><span class="o">[</span>--project<span class="w"> </span>&lt;project-id&gt;:viewer<span class="p">|</span>editor<span class="o">]</span>...
-<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;
-<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span><span class="nb">set</span><span class="w">    </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="w"> </span><span class="p">|</span><span class="w"> </span>--no-owner<span class="o">]</span>
-<a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a><span class="w">                         </span><span class="o">[</span>--disable<span class="w"> </span><span class="p">|</span><span class="w"> </span>--enable<span class="o">]</span>
-<a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>grant<span class="w">  </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;<span class="w"> </span>viewer<span class="p">|</span>editor
-<a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>revoke<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;
-<a id="__codelineno-40-10" name="__codelineno-40-10" href="#__codelineno-40-10"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>rm<span class="w">     </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--confirm<span class="w"> </span>&lt;email&gt;<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>ls
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>show<span class="w">   </span>&lt;id<span class="p">|</span>email&gt;
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>create<span class="w"> </span>&lt;email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="o">]</span>
+<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a><span class="w">                         </span><span class="o">[</span>--project<span class="w"> </span>&lt;project-id&gt;:viewer<span class="p">|</span>editor<span class="o">]</span>...
+<a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;
+<a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span><span class="nb">set</span><span class="w">    </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="w"> </span><span class="p">|</span><span class="w"> </span>--no-owner<span class="o">]</span>
+<a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a><span class="w">                         </span><span class="o">[</span>--disable<span class="w"> </span><span class="p">|</span><span class="w"> </span>--enable<span class="o">]</span>
+<a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>grant<span class="w">  </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;<span class="w"> </span>viewer<span class="p">|</span>editor
+<a id="__codelineno-41-9" name="__codelineno-41-9" href="#__codelineno-41-9"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>revoke<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;
+<a id="__codelineno-41-10" name="__codelineno-41-10" href="#__codelineno-41-10"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>rm<span class="w">     </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--confirm<span class="w"> </span>&lt;email&gt;<span class="o">]</span>
 </code></pre></div>
 <p>People sign in and programs use keys; <a href="../accounts/">accounts.md</a> is the whole
 of it, and this is that from a terminal. Every command here needs the <strong>admin
 token</strong> — the routes take an owner's session or the token, and a terminal has
 no cookie:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span>
 </code></pre></div>
 <p>Each takes the account as an <strong>id or an email</strong>, whichever you have. An email
 is what you know about somebody, so it is what you type; the <code>@</code> is what tells
@@ -2901,15 +2957,15 @@ the two apart.</p>
 <p>Inviting somebody prints the link once, and only its hash is stored — carry it
 to them, and the link is what sets their password, so the password never passes
 through your hands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>$ tracepad accounts create helper@example.com --name "The Helper" \
-<a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>    --project 9f2c…:viewer
-<a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a>account helper@example.com created (4b1e…)
-<a id="__codelineno-42-4" name="__codelineno-42-4" href="#__codelineno-42-4"></a>
-<a id="__codelineno-42-5" name="__codelineno-42-5" href="#__codelineno-42-5"></a>  http://localhost:4318/invite#token=…
-<a id="__codelineno-42-6" name="__codelineno-42-6" href="#__codelineno-42-6"></a>
-<a id="__codelineno-42-7" name="__codelineno-42-7" href="#__codelineno-42-7"></a>the invitation link is shown only here; only its hash is stored.
-<a id="__codelineno-42-8" name="__codelineno-42-8" href="#__codelineno-42-8"></a>It is good until 2026-09-17 10:00:00, and it is what sets their password —
-<a id="__codelineno-42-9" name="__codelineno-42-9" href="#__codelineno-42-9"></a>which is why the password never passes through your hands.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>$ tracepad accounts create helper@example.com --name "The Helper" \
+<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>    --project 9f2c…:viewer
+<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>account helper@example.com created (4b1e…)
+<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a>
+<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>  http://localhost:4318/invite#token=…
+<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>
+<a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a>the invitation link is shown only here; only its hash is stored.
+<a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a>It is good until 2026-09-17 10:00:00, and it is what sets their password —
+<a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a>which is why the password never passes through your hands.
 </code></pre></div>
 <p><code>accounts invite</code> mints a fresh link for an account that already exists, which
 is also the <strong>password reset</strong>: it ends that account's sessions, and the old
@@ -2918,9 +2974,9 @@ arrives leaves nobody locked out.</p>
 <p><code>accounts ls</code> answers "who can see what" in one table — the projects and roles
 are on the row, and an owner reads as <em>every project</em> because an owner has no
 membership rows:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>EMAIL                NAME        STANDING         LAST LOGIN           PROJECTS
-<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>helper@example.com   The Helper  member           2026-09-09 11:04:12  checkout (viewer)
-<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>partner@example.com  Partner     owner, invited   never                every project
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>EMAIL                NAME        STANDING         LAST LOGIN           PROJECTS
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a>helper@example.com   The Helper  member           2026-09-09 11:04:12  checkout (viewer)
+<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a>partner@example.com  Partner     owner, invited   never                every project
 </code></pre></div>
 <p><em>invited</em> is an account that has not used its link yet, and it is said next to
 <code>owner</code> rather than instead of it: an owner counts only once they can actually
@@ -2935,13 +2991,13 @@ and invitations and nothing else, and it wears the same ceremony as the rest of
 the destructive commands — except that the echo is the <strong>email</strong>. The keys the
 account minted are not deleted with it; the preview lists them, so you can
 decide whether to rotate them first:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>$ tracepad accounts rm helper@example.com
-<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a>this would delete the account helper@example.com:
-<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a>  memberships    1
-<a id="__codelineno-44-4" name="__codelineno-44-4" href="#__codelineno-44-4"></a>  sessions       2
-<a id="__codelineno-44-5" name="__codelineno-44-5" href="#__codelineno-44-5"></a>  keeps key      tp-pk-81c0… in checkout (nightly eval), last used 2026-09-26 17:41:12
-<a id="__codelineno-44-6" name="__codelineno-44-6" href="#__codelineno-44-6"></a>disabling the account instead takes access away without losing its roles; the keys it minted keep working until they are revoked
-<a id="__codelineno-44-7" name="__codelineno-44-7" href="#__codelineno-44-7"></a>type "helper@example.com" to confirm:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>$ tracepad accounts rm helper@example.com
+<a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a>this would delete the account helper@example.com:
+<a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a>  memberships    1
+<a id="__codelineno-45-4" name="__codelineno-45-4" href="#__codelineno-45-4"></a>  sessions       2
+<a id="__codelineno-45-5" name="__codelineno-45-5" href="#__codelineno-45-5"></a>  keeps key      tp-pk-81c0… in checkout (nightly eval), last used 2026-09-26 17:41:12
+<a id="__codelineno-45-6" name="__codelineno-45-6" href="#__codelineno-45-6"></a>disabling the account instead takes access away without losing its roles; the keys it minted keep working until they are revoked
+<a id="__codelineno-45-7" name="__codelineno-45-7" href="#__codelineno-45-7"></a>type "helper@example.com" to confirm:
 </code></pre></div>
 <p><code>--confirm helper@example.com</code> is that echo typed in advance, which is what a
 script has instead of a terminal. It is deliberately not a <code>--yes</code>: naming the
@@ -2950,23 +3006,23 @@ happened to resolve to. Any case will do — an email is a case-insensitively
 unique identifier, and what you have to get right is which account.</p>
 <p><strong>When every owner's password is lost</strong>, this is the way back in — which is why
 the admin token is worth keeping somewhere:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>you@example.com
+<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>you@example.com
 </code></pre></div>
 <p>Open the link it prints and set a new password.</p>
 <h3 id="health"><code>health</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>tracepad<span class="w"> </span>health<span class="w"> </span><span class="o">[</span>--url<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>tracepad<span class="w"> </span>health<span class="w"> </span><span class="o">[</span>--url<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 </code></pre></div>
-<p>Is the server up, and which build is it? Exit <code>0</code> and the version on stdout;
+<p>Is the server up, and which build is it? Exit <code>0</code> and the version on stdout — on a terminal; piped, like every command, <code>{"version":"0.1.0","ok":true}</code>;
 exit <code>1</code> and the reason on stderr for anything else — a refused connection, a
 non-200, or a 200 whose body carries no version, which is what a proxy's splash
 page on the wrong port looks like.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health
-<a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="m">0</span>.1.0
-<a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--json
-<a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="o">{</span><span class="s2">"version"</span>:<span class="s2">"0.1.0"</span>,<span class="s2">"ok"</span>:true<span class="o">}</span>
-<a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://localhost:9999<span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
-<a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a>tracepad:<span class="w"> </span>cannot<span class="w"> </span>reach<span class="w"> </span>http://localhost:9999:<span class="w"> </span>…<span class="w"> </span>connection<span class="w"> </span>refused
-<a id="__codelineno-47-7" name="__codelineno-47-7" href="#__codelineno-47-7"></a><span class="m">1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health
+<a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a><span class="m">0</span>.1.0
+<a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--json
+<a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a><span class="o">{</span><span class="s2">"version"</span>:<span class="s2">"0.1.0"</span>,<span class="s2">"ok"</span>:true<span class="o">}</span>
+<a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://localhost:9999<span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+<a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a>tracepad:<span class="w"> </span>cannot<span class="w"> </span>reach<span class="w"> </span>http://localhost:9999:<span class="w"> </span>…<span class="w"> </span>connection<span class="w"> </span>refused
+<a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a><span class="m">1</span>
 </code></pre></div>
 <p><strong>It is the one command that needs no key</strong>, because <code>/health</code> is the one route
 that needs none. That is the point of it: a container's health check, a systemd
@@ -2979,17 +3035,24 @@ variable that told the server where to bind — and probes that, treating a
 wildcard bind as <code>127.0.0.1</code>; only with neither of those does it fall back to
 <code>http://localhost:4318</code>. A probe usually runs beside the process it is asking
 about, and on a server moved to another port it should move too.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w">     </span><span class="c1"># probes http://127.0.0.1:8080</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w">     </span><span class="c1"># probes http://127.0.0.1:8080</span>
 </code></pre></div>
 <p>The <code>--listen</code> <strong>flag</strong> is not consulted, because a flag on the server's command
 line is not visible to a second process. Where both a server and its probe read
 the configuration, put the port in the environment.</p>
+<h3 id="mcp"><code>mcp</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>tracepad<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>--url<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--key<span class="w"> </span>KEY<span class="o">]</span>
+</code></pre></div>
+<p>Serves the MCP tools over stdio against the server <code>--url</code> or <code>TRACEPAD_URL</code>
+names, with <code>--key</code> or <code>TRACEPAD_API_KEY</code>, which needs the <code>read</code> scope. It is
+what an MCP client that cannot speak remote HTTP runs; the tools and the
+client configuration are in <a href="../mcp/">mcp.md</a>.</p>
 <h3 id="skills"><code>skills</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install
-<a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--project
-<a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--dir<span class="w"> </span>~/.agents/skills
-<a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show
-<a id="__codelineno-49-5" name="__codelineno-49-5" href="#__codelineno-49-5"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show<span class="w"> </span>debugging.md
+<div class="highlight"><pre><span></span><code><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install
+<a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--project
+<a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--dir<span class="w"> </span>~/.agents/skills
+<a id="__codelineno-51-4" name="__codelineno-51-4" href="#__codelineno-51-4"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show
+<a id="__codelineno-51-5" name="__codelineno-51-5" href="#__codelineno-51-5"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show<span class="w"> </span>debugging.md
 </code></pre></div>
 <p>The agent skill this binary carries: <code>install</code> writes it where a coding agent
 finds it — <code>~/.claude/skills/tracepad</code> by default, <code>./.claude/skills/tracepad</code>

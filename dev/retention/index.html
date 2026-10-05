@@ -371,6 +371,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1767,14 +1795,16 @@ hours are computed from them on the fly, exactly as they were before the
 rollup existed — slower, and correct. Once both windows have passed there is
 nothing left to compute from, and the charts are empty because the data is.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>tracepad<span class="w"> </span>retention<span class="w"> </span>show
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span><span class="w">               </span><span class="c1"># traces: 90 days</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span><span class="w"> </span>--yes<span class="w">         </span><span class="c1"># traces: 90 days</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--raw-days<span class="w"> </span><span class="m">14</span><span class="w"> </span>--yes<span class="w">     </span><span class="c1"># raw bodies: 14 days</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--stats-days<span class="w"> </span><span class="m">730</span><span class="w"> </span>--yes<span class="w">  </span><span class="c1"># statistics: two years</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--forever<span class="w">               </span><span class="c1"># traces: keep them all again (the other two windows stay as set)</span>
 </code></pre></div>
 <p><code>retention show</code> reads the project, which any key may do. <code>retention set</code> is
 <code>PATCH /api/v1/projects/{id}</code>, and a key needs the <code>write</code>
-<a href="../api/#scopes">scope</a> for it, as a person needs the <code>editor</code> role.</p>
+<a href="../api/#scopes">scope</a> for it, as a person needs the <code>editor</code> role. A window
+that shrinks prints the dry run first; off a terminal it needs <code>--yes</code>, or it
+stops there with exit <code>1</code>.</p>
 <p>"Keep it essentially forever" is spelled <code>--forever</code>, not a very large number
 of days: a window is turned into a nanosecond cutoff, so the day count is
 capped at 36500 rather than allowed to overflow into a date in the future —

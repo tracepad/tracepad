@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1625,9 +1653,13 @@ that user reads. Two other places:</p>
 repository can commit so that everyone who clones it has the skill. <code>--dir</code>
 is for any agent that reads the same layout — a <code>SKILL.md</code> with a
 <code>references/</code> directory beside it — from another place.</p>
-<p>The skill is plain files: <code>SKILL.md</code>, which the agent loads when a task
-matches its description, and four references it reads only when the task
-needs one — debugging, instrumenting a service, evals, administration.
+<p>The <a href="../install/#with-the-install-script">install script</a> runs this command
+for you, in each skills directory an agent on the machine has made.</p>
+<p>The skill is plain files. <code>SKILL.md</code> is what the agent loads when a task
+matches its description. Five references are read only when the task needs
+one: debugging, instrumenting a service, evals, administration, and setting
+Tracepad up for a project from nothing, which
+<a href="../agent-setup/">agent-setup.md</a> hands an agent.
 <code>tracepad skills show</code> prints <code>SKILL.md</code> and <code>tracepad skills show
 debugging.md</code> a reference, for reading it without installing it.</p>
 <p>Neither command talks to a server or needs a key.</p>

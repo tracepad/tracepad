@@ -373,6 +373,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -2323,6 +2351,7 @@ reaches what <a href="../admin/#who-may-ask">admin.md</a> says it does.</p>
 <p>returns every endpoint with a one-line description. The machine-readable
 version is <a href="#self-description"><code>/api/v1/openapi.json</code></a>, an OpenAPI 3.1
 document served without authentication.</p>
+<p>In the examples below, <code>curl …</code> stands for <code>curl -H "Authorization: Bearer $TRACEPAD_API_KEY"</code>.</p>
 <table>
 <thead>
 <tr>
@@ -2415,6 +2444,36 @@ document served without authentication.</p>
 <td><code>GET</code></td>
 <td><code>/api/v1/stats</code></td>
 <td>Counts, errors, cost, latency percentiles</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/stats/scores</code></td>
+<td>Score means, rates and category shares per bucket</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/facets</code></td>
+<td>The environments, releases and trace names in a range, with counts</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/raw</code></td>
+<td>The archived export bodies, oldest first</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/raw/{id}</code></td>
+<td>One archived export body, as received</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/media/{sha256}</code></td>
+<td>One image or file a payload references</td>
 <td><code>read</code></td>
 </tr>
 <tr>
