@@ -681,6 +681,17 @@ func envOr(key, def string) string {
 // parseOnOff reads a boolean-ish switch. Spelled on/off in the docs, but the
 // usual true/false/1/0 are accepted too — an operator should never have to
 // look up which spelling this particular flag wanted.
+// IsOn reads a value as parseOnOff reads an on/off variable's, for the callers
+// outside this package that read one of the variables (TRACEPAD_IN_CONTAINER):
+// the same four words, in any case, and anything else is off.
+func IsOn(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "true", "1", "yes":
+		return true
+	}
+	return false
+}
+
 func parseOnOff(key string, def bool) (bool, error) {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
 	switch v {

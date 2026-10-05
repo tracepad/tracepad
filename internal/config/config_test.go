@@ -690,3 +690,18 @@ func TestTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+// IsOn is parseOnOff's reading of a value, for the callers that read one of
+// its variables themselves: the two must not drift.
+func TestIsOnAgreesWithParseOnOff(t *testing.T) {
+	for _, v := range []string{"", "1", "0", "on", "ON", " true ", "yes", "no", "off", "False", "2", "maybe"} {
+		t.Setenv("TRACEPAD_IS_ON_TEST", v)
+		want, err := parseOnOff("TRACEPAD_IS_ON_TEST", false)
+		if err != nil {
+			want = false // a word it refuses is not on
+		}
+		if got := IsOn(v); got != want {
+			t.Errorf("IsOn(%q) = %v, parseOnOff says %v", v, got, want)
+		}
+	}
+}
