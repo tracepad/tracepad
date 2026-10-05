@@ -77,6 +77,10 @@ escaping is the job of whatever reads it.
 | `0` | It worked. |
 | `1` | The request failed: no such trace, bad key, server unreachable. |
 | `2` | The command was typed wrong: unknown flag, missing argument, a `--limit` out of range. |
+| `3` | [`upgrade`](#upgrade) only: not upgraded — the way back ran, and the old version runs again. |
+| `4` | [`upgrade`](#upgrade) only: yours to decide (a check that needs you; with `--plan`, only what is yours is behind). |
+| `5` | [`upgrade`](#upgrade) only: stuck — a step failed and could not be undone; the report says what is where. |
+| `10` | [`upgrade --plan`](#upgrade) only: the upgrade would change something (`0`: everything is up to date). |
 
 The split is what lets a script tell "there is no such trace" from "you
 typoed a flag".
