@@ -2999,8 +2999,12 @@ the directory whole, and a <code>tracepad</code> directory the command did not i
 refused unless <code>--force</code>. A <code>tracepad</code> symlink in your own skills directory is
 followed only into a skill the command installed, or with <code>--force</code> into an
 empty directory; with <code>--project</code> no link on the way is followed at all.
-Either refusal holds with <code>--force</code> too.
-Exit <code>1</code> for that refusal, <code>2</code> for a usage error.
+Either refusal holds with <code>--force</code> too. Inside a container (the image sets
+<code>TRACEPAD_IN_CONTAINER</code>) it writes only onto a mounted volume — not the
+container's own layer, not a <code>tmpfs</code> — and otherwise refuses, printing the
+<code>docker run … -v DIR:/skills … skills install --dir /skills</code> that works, so
+<code>docker exec … skills install</code> is refused (<a href="../agents/#from-the-docker-image">agents.md</a>).
+Exit <code>1</code> for any of these refusals, <code>2</code> for a usage error.
 The whole of it is <a href="../agents/">agents.md</a>.</p>
 <h2 id="version-skew">Version skew</h2>
 <p>Every API response carries the server's build. When it differs from the CLI's,

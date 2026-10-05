@@ -1854,6 +1854,12 @@ file <code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, and the commands the CLI's he
 machine, which inside the container it is) — so
 <code>docker exec tracepad /tracepad keys ls --url http://localhost:4318</code> needs no
 <code>-e</code> and no paste. No other command takes it that way; they ask for a key.</p>
+<p><strong><code>docker exec</code> is for commands that talk to the server, and <code>skills install</code>
+does not.</strong> It writes files, and in the running container they would land in the
+container's own layer — gone with the container, and the image has no shell to
+look for them with. Inside a container <code>skills install</code> refuses a target that
+is not on a mounted volume; run it in a container of its own, onto a directory
+you mount, as <a href="../agents/#from-the-docker-image">agents.md</a> shows.</p>
 <p>A key minted this way is shown in your browser or printed to your terminal,
 never to the container's log. A deployment that declares its keys in <code>TRACEPAD_PROJECTS</code>
 from the start never has one printed: the server names the variable where the

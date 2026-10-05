@@ -1663,6 +1663,11 @@ point Docker creates for you is owned by root:</p>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$HOME</span><span class="s2">/.claude/skills:/skills"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>ghcr.io/tracepad/tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--dir<span class="w"> </span>/skills
 </code></pre></div>
+<p>Not <code>docker exec</code> into the running server: the files would be written to that
+container's own layer and vanish with it. The image sets <code>TRACEPAD_IN_CONTAINER</code>,
+and with it set <code>skills install</code> refuses a target that is not on a mounted
+volume, naming the command above, rather than printing <em>installed</em> for a copy
+nobody can reach.</p>
 <p><code>docker run --rm ghcr.io/tracepad/tracepad skills show</code> prints the skill
 without writing anything.</p>
 <h3 id="by-copying">By copying</h3>
