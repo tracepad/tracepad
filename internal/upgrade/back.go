@@ -903,7 +903,11 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 	st := j.st
 	// A way back begun — its restore into a new volume too, which changes
 	// nothing that runs — is the way back's to finish: --back.
-	if !st.has(stepStarted) || st.has(stepBackBegun) || st.has(stepBackVolume) || (st.Pending != nil && st.Pending.Step == stepBackVolume) {
+	switch {
+	case st.has(stepBackBegun) || st.has(stepBackVolume) || (st.Pending != nil && st.Pending.Step == stepBackVolume):
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run's way back has begun; "+j.upgradeCmd("--back "+st.Run)+" finishes it."
+		return rep
+	case !st.has(stepStarted):
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run has no new version running to check."
 		return rep
 	}

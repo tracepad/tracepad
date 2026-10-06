@@ -286,7 +286,11 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		p := *good.Process
 		s.Process = &p
 		mutate(&s)
-		if err := s.save(dir); err != nil {
+		// One rule for both: what does not load is not written either.
+		if err := s.save(dir); err == nil {
+			t.Errorf("%s: written", name)
+		}
+		if err := writeJSON(filepath.Join(dir, stateFile), &s); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := loadState(dir); err == nil {
@@ -320,11 +324,43 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		c := *ctr.Container
 		s.Container = &c
 		mutate(&c)
-		if err := s.save(dir); err != nil {
+		if err := s.save(dir); err == nil {
+			t.Errorf("a container's %s: written", name)
+		}
+		if err := writeJSON(filepath.Join(dir, stateFile), &s); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := loadState(dir); err == nil {
 			t.Errorf("a container's %s: accepted", name)
+		}
+	}
+	// Values docker gives, as it gives them, save and load back (the review
+	// of #226: a plugin's log driver made every later --back refuse).
+	for _, real := range []func(*ContainerState){
+		func(c *ContainerState) { c.LogDriver = "grafana/loki-docker-driver:latest" },
+		func(c *ContainerState) { c.LogDriver = "json-file" },
+		func(c *ContainerState) {
+			c.LogDriver = "registry.local:5000/logs/driver@sha256:" + strings.Repeat("c", 64)
+		},
+		func(c *ContainerState) { c.Name, c.Volume = "tracepad-my_app.2", strings.Repeat("d", 64) },
+		func(c *ContainerState) {
+			c.OldRef = "ghcr.io/tracepad/tracepad:0.1.0-rc.2@sha256:" + strings.Repeat("e", 64)
+			c.NewRef = "docker.io/tracepad/tracepad:0.1.0-rc.3"
+		},
+		func(c *ContainerState) { c.URL, c.Restart = "http://[::1]:4318", "unless-stopped" },
+		func(c *ContainerState) { c.Restart = "no" },
+		func(c *ContainerState) { c.OldRef = "ghcr.io/tracepad/tracepad:Build_7" },
+	} {
+		s := *ctr
+		c := *ctr.Container
+		s.Container = &c
+		real(&c)
+		if err := s.save(dir); err != nil {
+			t.Errorf("%+v: not written: %v", c, err)
+			continue
+		}
+		if back, err := loadState(dir); err != nil || *back.Container != c {
+			t.Errorf("%+v: does not load back: %v", c, err)
 		}
 	}
 	_ = os.WriteFile(filepath.Join(dir, stateFile), []byte(`{"run":"`+id+`","exec":"rm -rf /"}`), 0o600)

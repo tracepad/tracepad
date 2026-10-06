@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A container's run (spec 054 #47): the swap and the way back of Decision
@@ -284,32 +285,46 @@ func (r *runner) askToStop(ctx context.Context, name string) error {
 	if err := r.setPolicy(ctx, name, "no"); err != nil {
 		return err
 	}
-	var err error
-	r.waitUntil(ctx, func() bool {
-		if _, err = r.deps.Docker.Run(ctx, "kill", "--signal", "TERM", name); err == nil {
-			return true
-		}
-		c, ierr := r.inspectOne(ctx, name)
-		if ierr == nil && c != nil && !c.State.Running {
-			err = nil
-			return true
-		}
-		return false
+	err := r.transient(ctx, func() error {
+		_, err := r.deps.Docker.Run(ctx, "kill", "--signal", "TERM", name)
+		return err
 	})
+	if err != nil {
+		if c, ierr := r.inspectOne(ctx, name); ierr == nil && c != nil && !c.State.Running {
+			return nil
+		}
+	}
 	return err
 }
 
-// setPolicy sets a container's restart policy, asking again for as long as a
-// stop may take: docker refuses it now and then while its restart manager
-// moves a crash-looping container between two of its states ("cannot update
-// a stopped container", the real docker of the integration tests).
+// setPolicy sets a container's restart policy.
 func (r *runner) setPolicy(ctx context.Context, ref, policy string) error {
-	var err error
-	r.waitUntil(ctx, func() bool {
-		_, err = r.deps.Docker.Run(ctx, "update", "--restart", policy, ref)
-		return err == nil
+	return r.transient(ctx, func() error {
+		_, err := r.deps.Docker.Run(ctx, "update", "--restart", policy, ref)
+		return err
 	})
-	return err
+}
+
+// dockerRaces are what docker answers while its restart manager moves a
+// crash-looping container between two of its states, and not a moment
+// later: "cannot update a stopped container" to an update (the real docker
+// of the integration tests), "is restarting" to a kill.
+var dockerRaces = []string{"cannot update a stopped container", "is restarting"}
+
+// transient runs a docker call, and again — a few times, a quarter of a
+// second apart — only while it answers one of dockerRaces (the review of
+// #226): a container that is gone or a daemon that does not answer is said
+// at once.
+func (r *runner) transient(ctx context.Context, call func() error) error {
+	for try := 0; ; try++ {
+		err := call()
+		if err == nil || try == 20 || !slices.ContainsFunc(dockerRaces, func(race string) bool { return strings.Contains(err.Error(), race) }) {
+			return err
+		}
+		if r.deps.Sleep(ctx, 250*time.Millisecond) != nil {
+			return err
+		}
+	}
 }
 
 // waitStopped waits, as a server's stop does, for a container asked to stop.
@@ -636,7 +651,7 @@ func (j *job) renameBack(ctx context.Context) wentBack {
 			if _, err := r.deps.Docker.Run(ctx, "rename", j.before(), cs.Name); err != nil {
 				return err
 			}
-			st.SetAside = removeItem(st.SetAside, "container "+j.before())
+			st.SetAside = slices.DeleteFunc(st.SetAside, func(s string) bool { return s == "container "+j.before() })
 		}
 		if err := r.setPolicy(ctx, cs.ID, cs.Restart); err != nil {
 			return err
@@ -844,11 +859,8 @@ func (j *job) clearName(ctx context.Context, keep string) (wentBack, bool) {
 // copy of its database files the command makes and removes itself.
 func checkArchiveDB(ctx context.Context, archive, runDir string) error {
 	check := filepath.Join(runDir, "check-"+strconv.Itoa(os.Getpid()))
-	if err := os.Mkdir(check, 0o700); err != nil {
-		return err
-	}
 	defer os.RemoveAll(check) // ignored: the command's own copy in the run's directory; a leftover is named for this pid and removed by none
-	if err := extractDB(archive, check); err != nil {
+	if err := extractOnly(archive, check, 0o700, databaseFiles); err != nil {
 		return err
 	}
 	return quickCheck(ctx, filepath.Join(check, dataDBName))
@@ -864,16 +876,6 @@ func (j *job) checkBackContainer(ctx context.Context, id string, fresh bool) wen
 	c := j.r.checkContainer(ctx, cs.URL, j.st.From, j.st.CountBefore, id, fresh)
 	j.rep.BackCheck = &c
 	return checked(j.st.From+" started again but is not healthy", c)
-}
-
-func removeItem(list []string, item string) []string {
-	out := list[:0]
-	for _, s := range list {
-		if s != item {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // everStarted: a container docker has started at least once.

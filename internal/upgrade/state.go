@@ -164,8 +164,14 @@ func newRunID(now time.Time, from string) string {
 // stateFile is a run's state on disk.
 const stateFile = "state.json"
 
-// save writes the state by rename, so a crash leaves the last whole one.
+// save writes the state by rename, so a crash leaves the last whole one. A
+// state is written only when it loads back by the one rule loadState holds
+// it to (the review of #226: a value docker gave, of a shape the load
+// refuses, made every later --back refuse the run).
 func (s *State) save(dir string) error {
+	if err := s.validate(dir); err != nil {
+		return fmt.Errorf("it would not load back: %w", err)
+	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
@@ -289,8 +295,12 @@ var (
 	restartPolicy = regexp.MustCompile(`^(no|always|unless-stopped|on-failure(:[1-9][0-9]*)?)$`)
 	containerID   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	dockerName    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-	imageRef      = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]*$`)
-	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// imageRef is an image's reference or ID; a tag may hold capitals.
+	imageRef = regexp.MustCompile(`^[a-z0-9][a-zA-Z0-9._/:@-]*$`)
+	// logDriver is a log driver's name: a built-in one, or a plugin's,
+	// which names an image (grafana/loki-docker-driver:latest).
+	logDriver = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$`)
+	sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func (s *State) validate(dir string) error {
@@ -351,7 +361,7 @@ func (s *State) validate(dir string) error {
 		// security review of #1).
 		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
 			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
-			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.LogDriver != "" && !dockerName.MatchString(c.LogDriver)) ||
+			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.LogDriver != "" && !logDriver.MatchString(c.LogDriver)) ||
 			(c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
 			return errors.New("its container is not one a run records")
 		}

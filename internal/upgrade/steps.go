@@ -83,8 +83,10 @@ var machines = func() map[string]machine {
 	// failed is a note, and the skill, which follows the binary, waits for a
 	// --check that puts it there. Its way back restores the
 	// archive into a new volume before it changes anything that runs
-	// (back_volume, before back_begun: --check still works after a restore
-	// that failed), sets the new container aside, and runs the old image on
+	// (back_volume, before back_begun: a restore that failed leaves the new
+	// container running, and --back fills the volume again; --check refuses
+	// from there, the way back's to finish), sets the new container aside,
+	// and runs the old image on
 	// the restored volume; a run stopped before its rename starts the old
 	// container again. Each edge is one a walk takes.
 	container := machine{

@@ -88,7 +88,9 @@ type mount struct {
 	Source      string `json:"Source"`
 	Destination string `json:"Destination"`
 	Driver      string `json:"Driver"`
+	Mode        string `json:"Mode"`
 	RW          bool   `json:"RW"`
+	Propagation string `json:"Propagation"`
 }
 
 // inspectContainer is the part of `docker inspect` the command reads. The
@@ -378,13 +380,13 @@ func runArgs(c Container, name, ref, envFile, volume string) []string {
 // setting the recreate would silently drop (the third review).
 var hostKept = map[string]bool{
 	// reproduced
-	"RestartPolicy": true, "PortBindings": true, "PublishAllPorts": true, "NetworkMode": true, "LogConfig": true, "Binds": true, "Mounts": true,
+	"RestartPolicy": true, "PortBindings": true, "NetworkMode": true, "LogConfig": true, "Binds": true, "Mounts": true,
 	// refused by name
 	"AutoRemove": true, "Privileged": true, "ReadonlyRootfs": true, "CapAdd": true, "CapDrop": true, "Devices": true,
 	"DeviceRequests": true, "ExtraHosts": true, "Links": true, "VolumesFrom": true, "GroupAdd": true, "Dns": true,
 	"DnsSearch": true, "SecurityOpt": true, "Tmpfs": true, "Sysctls": true, "Ulimits": true, "Memory": true,
 	"NanoCpus": true, "CpuShares": true, "CpuQuota": true, "PidMode": true, "IpcMode": true, "UTSMode": true,
-	"UsernsMode": true, "Init": true,
+	"UsernsMode": true, "Init": true, "PublishAllPorts": true,
 	// the daemon's own, the same on a recreate
 	"MaskedPaths": true, "ReadonlyPaths": true, "ConsoleSize": true, "Isolation": true, "ContainerIDFile": true, "CgroupnsMode": true,
 }
@@ -437,6 +439,7 @@ func unreproduced(ic inspectContainer, img imageConfig) []string {
 	if len(ic.HostConfig.LogConfig.Config) > 0 {
 		out = append(out, "HostConfig.LogConfig.Config")
 	}
+	out = append(out, mountLosses(ic)...)
 	if h := ic.Config.Hostname; h != "" && (len(ic.ID) < 12 || h != ic.ID[:12]) {
 		out = append(out, "Config.Hostname")
 	}
@@ -451,6 +454,47 @@ func unreproduced(ic inspectContainer, img imageConfig) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// mountLosses names what a mount has that --mount type,src,dst[,readonly]
+// does not carry (the review of #226): a bind's relabel (z, Z) or
+// propagation, a volume's mode beyond docker's own "z", and every option of
+// a --mount the container was created with — nocopy, a subpath, a bind's
+// recursion, a tmpfs's size. As docker shows them: a volume's mode is "z"
+// and a bind's propagation "rprivate" unless told otherwise.
+func mountLosses(ic inspectContainer) []string {
+	var out []string
+	for _, m := range ic.Mounts {
+		for _, opt := range strings.Split(m.Mode, ",") {
+			switch {
+			case opt == "", opt == "rw", opt == "ro":
+			case opt == "z" && m.Type == "volume":
+			default:
+				out = append(out, fmt.Sprintf("Mounts[%s].Mode=%s", m.Destination, m.Mode))
+			}
+		}
+		if p := m.Propagation; p != "" && p != "rprivate" {
+			out = append(out, fmt.Sprintf("Mounts[%s].Propagation=%s", m.Destination, p))
+		}
+	}
+	var hc struct {
+		Mounts []map[string]json.RawMessage `json:"Mounts"`
+	}
+	_ = json.Unmarshal(ic.raw["HostConfig"], &hc) // ignored: a section that does not read names nothing here; Mounts above are read all the same
+	for _, m := range hc.Mounts {
+		var target string
+		_ = json.Unmarshal(m["Target"], &target) // ignored: the name's only; an empty one still names the option
+		for _, k := range []string{"BindOptions", "VolumeOptions", "TmpfsOptions", "ImageOptions", "ClusterOptions"} {
+			if v, ok := m[k]; ok && !unset(v) {
+				out = append(out, fmt.Sprintf("HostConfig.Mounts[%s].%s", target, k))
+			}
+		}
+		if v, ok := m["Consistency"]; ok && !unset(v) && string(compactJSON(v)) != `"default"` {
+			out = append(out, fmt.Sprintf("HostConfig.Mounts[%s].Consistency", target))
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
 }
 
 func compactJSON(raw json.RawMessage) []byte {
@@ -482,10 +526,8 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 	switch {
 	case c.Compose != "":
 		return "Compose runs it (project " + c.Compose + "): its file is yours"
-	case named == "" && !strings.HasPrefix(c.Name, "tracepad-"):
+	case named != c.Name && !strings.HasPrefix(c.Name, "tracepad-"):
 		return "its name is not tracepad-<project>, as setup names one: name it with --container to upgrade it"
-	case named != "" && named != c.Name:
-		return "it is not the container --container names"
 	case !ic.State.Running || ic.State.Restarting:
 		return "it is not running"
 	case c.Run == nil:
@@ -514,6 +556,12 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 	}
 	for port, binds := range hc.PortBindings {
 		for _, b := range binds {
+			if b.HostPort == "" || b.HostPort == "0" {
+				// A recreate, or a start of it again, would publish it on
+				// another port than the one it answers on now (the review of
+				// #226).
+				return fmt.Sprintf("it publishes %s on a port docker chooses at each start, which a recreate would move: publish it on a fixed port", port)
+			}
 			if _, ok := loopbackBase(b.HostIP, "1"); !ok {
 				ip := b.HostIP
 				if ip == "" {
@@ -532,37 +580,11 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 	if n := hc.NetworkMode; n != "" && n != "default" && n != "bridge" {
 		return "it is on the network " + n
 	}
-	refused := []struct {
-		set  bool
-		what string
-	}{
-		{hc.AutoRemove, "it was started with --rm, so stopping it removes it"},
-		{hc.Privileged, "it is privileged"},
-		{hc.ReadonlyRootfs, "its root file system is read-only"},
-		{len(hc.CapAdd)+len(hc.CapDrop) > 0, "it has capabilities of its own"},
-		{len(hc.Devices)+len(hc.DeviceRequests) > 0, "it has devices"},
-		{len(hc.ExtraHosts) > 0, "it has extra hosts"},
-		{len(hc.Links)+len(hc.VolumesFrom) > 0, "it is linked to other containers"},
-		{len(hc.GroupAdd) > 0, "it has groups of its own"},
-		{len(hc.DNS)+len(hc.DNSSearch) > 0, "it has DNS settings of its own"},
-		{len(hc.SecurityOpt) > 0, "it has security options"},
-		{len(hc.Tmpfs) > 0, "it has tmpfs mounts"},
-		{len(hc.Sysctls)+len(hc.Ulimits) > 0, "it has kernel settings or limits of its own"},
-		{hc.Memory+hc.NanoCpus+hc.CPUShares+hc.CPUQuota > 0, "it has resource limits"},
-		{strings.HasPrefix(hc.PidMode, "host") || strings.HasPrefix(hc.PidMode, "container:"), "it shares a PID namespace"},
-		{strings.HasPrefix(hc.IpcMode, "host") || strings.HasPrefix(hc.IpcMode, "container:"), "it shares an IPC namespace"},
-		{hc.UTSMode != "", "it shares a UTS namespace"},
-		{hc.UsernsMode != "", "it has a user namespace of its own"},
-		{hc.Init != nil && *hc.Init, "it runs an init"},
-		{!slices.Equal(ic.Config.Entrypoint, c.image.Config.Entrypoint), "its entrypoint is not the image's, and a recreate on the next image would pin this one's"},
-		{ic.Config.WorkingDir != c.image.Config.WorkingDir, "its working directory is not the image's"},
-		{!bytes.Equal(compactJSON(ic.Config.Healthcheck), compactJSON(c.image.Config.Healthcheck)), "its health check is not the image's"},
-		{ic.Config.StopSignal != c.image.Config.StopSignal, "its stop signal is not the image's"},
+	if rs := refusedSettings(ic, c.image); len(rs) > 0 {
+		return rs[0].what
 	}
-	for _, r := range refused {
-		if r.set {
-			return r.what
-		}
+	if !slices.Equal(ic.Config.Entrypoint, c.image.Config.Entrypoint) {
+		return "its entrypoint is not the image's, and a recreate on the next image would pin this one's"
 	}
 	if len(c.Unreproduced) > 0 {
 		return "it has settings the command does not reproduce (" + strings.Join(c.Unreproduced, ", ") + "): back up its volume and recreate it yourself"
@@ -574,6 +596,50 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 		}
 	}
 	return ""
+}
+
+// setting is a setting a container has that its run does not carry: the
+// field of the inspect, and why that makes it the person's.
+type setting struct{ field, what string }
+
+// refusedSettings are the settings a container has that its run does not
+// carry and that make it the person's by name: the command refuses them,
+// and the person's commands name them (the review of #226).
+func refusedSettings(ic inspectContainer, img imageConfig) []setting {
+	hc := ic.HostConfig
+	all := []struct {
+		set bool
+		setting
+	}{
+		{hc.AutoRemove, setting{"HostConfig.AutoRemove", "it was started with --rm, so stopping it removes it"}},
+		{hc.Privileged, setting{"HostConfig.Privileged", "it is privileged"}},
+		{hc.ReadonlyRootfs, setting{"HostConfig.ReadonlyRootfs", "its root file system is read-only"}},
+		{len(hc.CapAdd)+len(hc.CapDrop) > 0, setting{"HostConfig.CapAdd/CapDrop", "it has capabilities of its own"}},
+		{len(hc.Devices)+len(hc.DeviceRequests) > 0, setting{"HostConfig.Devices", "it has devices"}},
+		{len(hc.ExtraHosts) > 0, setting{"HostConfig.ExtraHosts", "it has extra hosts"}},
+		{len(hc.Links)+len(hc.VolumesFrom) > 0, setting{"HostConfig.Links/VolumesFrom", "it is linked to other containers"}},
+		{len(hc.GroupAdd) > 0, setting{"HostConfig.GroupAdd", "it has groups of its own"}},
+		{len(hc.DNS)+len(hc.DNSSearch) > 0, setting{"HostConfig.Dns", "it has DNS settings of its own"}},
+		{len(hc.SecurityOpt) > 0, setting{"HostConfig.SecurityOpt", "it has security options"}},
+		{len(hc.Tmpfs) > 0, setting{"HostConfig.Tmpfs", "it has tmpfs mounts"}},
+		{len(hc.Sysctls)+len(hc.Ulimits) > 0, setting{"HostConfig.Sysctls/Ulimits", "it has kernel settings or limits of its own"}},
+		{hc.Memory+hc.NanoCpus+hc.CPUShares+hc.CPUQuota > 0, setting{"HostConfig.Memory/NanoCpus/CpuShares/CpuQuota", "it has resource limits"}},
+		{strings.HasPrefix(hc.PidMode, "host") || strings.HasPrefix(hc.PidMode, "container:"), setting{"HostConfig.PidMode", "it shares a PID namespace"}},
+		{strings.HasPrefix(hc.IpcMode, "host") || strings.HasPrefix(hc.IpcMode, "container:"), setting{"HostConfig.IpcMode", "it shares an IPC namespace"}},
+		{hc.UTSMode != "", setting{"HostConfig.UTSMode", "it shares a UTS namespace"}},
+		{hc.UsernsMode != "", setting{"HostConfig.UsernsMode", "it has a user namespace of its own"}},
+		{hc.Init != nil && *hc.Init, setting{"HostConfig.Init", "it runs an init"}},
+		{ic.Config.WorkingDir != img.Config.WorkingDir, setting{"Config.WorkingDir", "its working directory is not the image's"}},
+		{!bytes.Equal(compactJSON(ic.Config.Healthcheck), compactJSON(img.Config.Healthcheck)), setting{"Config.Healthcheck", "its health check is not the image's"}},
+		{ic.Config.StopSignal != img.Config.StopSignal, setting{"Config.StopSignal", "its stop signal is not the image's"}},
+	}
+	var out []setting
+	for _, s := range all {
+		if s.set {
+			out = append(out, s.setting)
+		}
+	}
+	return out
 }
 
 // containerAddress is where a container's server answers on this machine:
@@ -849,10 +915,21 @@ func containerAdvice(c Container, to string) string {
 	}
 	advice := fmt.Sprintf("Upgrade it yourself (%s), as one command — a step that fails stops the ones after it: %s. %s",
 		docsDocker, chain, strings.Join(after, ". "))
-	if len(c.Unreproduced) > 0 {
-		advice += fmt.Sprintf(". It has settings this run does not carry, which docker inspect %s shows: %s", old, strings.Join(c.Unreproduced, ", "))
+	if lost := notCarried(c); len(lost) > 0 {
+		advice += fmt.Sprintf(". It was also given what this docker run does not carry — %s — which docker inspect %s shows: add it to the run", strings.Join(lost, ", "), old)
 	}
 	return advice
+}
+
+// notCarried names every setting a container has that its run does not
+// carry: those refused by name, and those unreproduced names (the review of
+// #226: the person's commands said nothing of a privilege or a limit).
+func notCarried(c Container) []string {
+	var lost []string
+	for _, s := range refusedSettings(c.inspect, c.image) {
+		lost = append(lost, s.field)
+	}
+	return append(lost, c.Unreproduced...)
 }
 
 // containerSteps are a container's upgrade as the person runs it: one

@@ -1101,10 +1101,12 @@ release: it refuses there before it looks at anything. The design is spec 054.
   the setup names one, or with `--container NAME`, and a recreate of it is the
   same container: no Compose, Swarm or Kubernetes label; running; a local named
   volume at `/data`, without options of its own; every port published on a
-  loopback address only, its server's among them; the default network; the
-  image's entrypoint, health check and stop signal; no tmpfs; Docker neither
-  rootless nor remapping user namespaces; and nothing set in `docker inspect`
-  that its `docker run` does not carry — each such setting is named. It is
+  loopback address only, at a fixed port, its server's among them; the default
+  network; the image's entrypoint, health check and stop signal; no tmpfs; no
+  mount option beyond read-only (a relabel, a propagation, a `--mount`
+  option); Docker neither rootless nor remapping user namespaces; and nothing
+  set in `docker inspect` that its `docker run` does not carry — each such
+  setting is named, in the plan and in the commands it gives you. It is
   stopped with SIGTERM (its restart policy set to `no` for the stop, never
   `docker stop`'s kill), its volume archived from `busybox` into the run's
   directory and read back whole, renamed `<name>-before-<run>`, and the

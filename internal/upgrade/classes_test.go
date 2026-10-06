@@ -202,8 +202,8 @@ func TestLaunchHoldsTheDataOnEitherSideOfTheStart(t *testing.T) {
 	h := &startHost{fakeHost: w.host}
 	deps := w.deps()
 	deps.Sys = h
-	j := &job{r: &runner{deps: deps}, rep: &Report{}, dir: t.TempDir(),
-		st:   &State{Kind: kindProcess, Process: &ProcessState{DataDir: w.data, Log: filepath.Join(w.data, "server.log")}},
+	st := &State{Kind: kindProcess, Process: &ProcessState{DataDir: w.data, Log: filepath.Join(w.data, "server.log")}}
+	j := &job{r: &runner{deps: deps}, rep: &Report{}, dir: aRun(t, st), st: st,
 		spec: ServerSpec{Exe: w.install, Argv: []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}, Dir: w.home}}
 	if ok, _ := j.hold(w.data); !ok {
 		t.Fatal("the data could not be held")
@@ -235,6 +235,38 @@ func TestLaunchHoldsTheDataOnEitherSideOfTheStart(t *testing.T) {
 }
 
 // loadStateUnchecked reads a state.json as written, for a job made in a test.
+// aRun gives a state a run's directory and fills in what a run records and
+// the test does not care about, so it saves and loads as a run's (a state is
+// written only when it loads back, the review of #226).
+func aRun(t *testing.T, st *State) string {
+	t.Helper()
+	st.Run = newRunID(time.Now(), fOld)
+	dir := filepath.Join(t.TempDir(), st.Run)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if st.From == "" {
+		st.From, st.To = fOld, fNew
+	}
+	if ps := st.Process; ps != nil {
+		if ps.PID == 0 {
+			ps.PID = 1
+		}
+		if ps.Listen == "" {
+			ps.Listen = "127.0.0.1:1"
+		}
+		ps.URL, _ = loopbackURL(ps.Listen)
+		if ps.DataDir == "" {
+			ps.DataDir = filepath.Join(dir, "data")
+		}
+		if ps.Log == "" {
+			ps.Log = filepath.Join(ps.DataDir, "server.log")
+		}
+		ps.Old = filepath.Join(dir, "tracepad-"+st.From)
+	}
+	return dir
+}
+
 func loadStateUnchecked(dir string) (*State, error) {
 	b, err := os.ReadFile(filepath.Join(dir, stateFile))
 	if err != nil {
@@ -327,9 +359,12 @@ func TestAStepOffTheTableIsNeverWritten(t *testing.T) {
 	saved := badStep
 	badStep = func(string, string, string) {}
 	t.Cleanup(func() { badStep = saved })
-	dir := t.TempDir()
-	j := &job{r: &runner{deps: Deps{Now: time.Now}}, rep: &Report{}, dir: dir,
-		st: &State{Kind: kindProcess, Steps: []Step{{Name: stepPrepared}}}}
+	st := &State{Kind: kindProcess, Steps: []Step{{Name: stepPrepared}}, Process: &ProcessState{}}
+	dir := aRun(t, st)
+	if err := st.save(dir); err != nil {
+		t.Fatal(err)
+	}
+	j := &job{r: &runner{deps: Deps{Now: time.Now}}, rep: &Report{}, dir: dir, st: st}
 	_ = j.st.save(dir)
 	rep := &Report{}
 	func() {

@@ -767,6 +767,24 @@ func TestWhatThePlanSaysOfContainers(t *testing.T) {
 		t.Errorf("%d %s; the run's: %q", code, rep.Summary, target)
 	}
 
+	// Naming one of the command's leaves the others the command's: a later
+	// run's, as --data-dir leaves the other servers (the review of #226).
+	d.run(t, "--name", "tracepad-second", "-p", "127.0.0.1:18082:4318", "--mount", "type=volume,src=second,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0")
+	rep, code = runReport(t, containerDeps(t, d), "--plan")
+	if code != exitPending || !strings.Contains(rep.Summary, "name one") {
+		t.Errorf("two of the command's: %d %s", code, rep.Summary)
+	}
+	rep, code = runReport(t, containerDeps(t, d), "--plan", "--container", "tracepad-second")
+	next := strings.Join(rep.Next, "\n")
+	if code != exitPending || !strings.Contains(next, "--container tracepad-flag") || strings.Contains(strings.Join(rep.Person, "\n"), "tracepad-flag") {
+		t.Errorf("--container tracepad-second: %d %s\nnext %s\nperson %q", code, rep.Summary, next, rep.Person)
+	}
+	for _, c := range rep.Containers {
+		if c.Name == "tracepad-flag" && c.Whose != "command" {
+			t.Errorf("the other one is %s's: %s", c.Whose, c.Reason)
+		}
+	}
+
 	d.set(func() { d.down = true })
 	rep, code = runReport(t, containerDeps(t, d), "--plan")
 	if code != exitOK || !strings.Contains(strings.Join(rep.Notes, " "), "Docker did not answer") {
@@ -927,6 +945,22 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("run args\n got %q\nwant %q", got, want)
 	}
+	// What a mount has beyond type, source, destination and read-only is
+	// named, not dropped (the review of #226): a bind relabelled or shared,
+	// a volume's nocopy; docker's own "z" of a volume and "rprivate" of a
+	// bind are no setting.
+	mic := inspectContainer{Mounts: []mount{
+		{Type: "volume", Name: "v", Destination: "/a", Mode: "z", RW: true},
+		{Type: "bind", Source: "/s", Destination: "/b", Mode: "", RW: true, Propagation: "rprivate"},
+		{Type: "bind", Source: "/s", Destination: "/c", Mode: "ro", Propagation: "rprivate"},
+		{Type: "bind", Source: "/s", Destination: "/d", Mode: "Z", RW: true, Propagation: "rprivate"},
+		{Type: "bind", Source: "/s", Destination: "/e", Mode: "rshared", RW: true, Propagation: "rshared"},
+	}}
+	_ = json.Unmarshal([]byte(`{"HostConfig":{"Mounts":[{"Type":"volume","Source":"w","Target":"/f","VolumeOptions":{"NoCopy":true}},{"Type":"bind","Source":"/s","Target":"/g"}]}}`), &mic.raw)
+	wantLost := []string{"HostConfig.Mounts[/f].VolumeOptions", "Mounts[/d].Mode=Z", "Mounts[/e].Mode=rshared", "Mounts[/e].Propagation=rshared"}
+	if got := mountLosses(mic); !slices.Equal(got, wantLost) {
+		t.Errorf("mount losses %q, want %q", got, wantLost)
+	}
 	// Its log options are not carried — they can hold a credential — and
 	// are named as what the run does not carry.
 	if got := unreproduced(ic, img); !slices.Contains(got, "HostConfig.LogConfig.Config") {
@@ -988,6 +1022,10 @@ func TestWhatContainerIsTheCommands(t *testing.T) {
 			c.HostConfig.PortBindings = map[string][]portBinding{"4318/tcp": {{HostIP: "127.0.0.1", HostPort: "4318"}}, "4317/tcp": {{HostIP: "0.0.0.0", HostPort: "4317"}}}
 		}, "4317/tcp on 0.0.0.0"},
 		{"every port", func(c *inspectContainer) { c.HostConfig.PublishAllPorts = true }, "-P"},
+		{"a port docker chooses", func(c *inspectContainer) {
+			c.HostConfig.PortBindings = map[string][]portBinding{"4318/tcp": {{HostIP: "127.0.0.1", HostPort: ""}}}
+			c.NetworkSettings.Ports = map[string][]portBinding{"4318/tcp": {{HostIP: "127.0.0.1", HostPort: "55012"}}}
+		}, "a port docker chooses at each start"},
 		{"not published", func(c *inspectContainer) {
 			c.HostConfig.PortBindings, c.NetworkSettings.Ports = nil, nil
 		}, "does not publish"},
@@ -1073,8 +1111,15 @@ func TestThePersonsCommandsNameWhatTheyDoNotCarry(t *testing.T) {
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	all := strings.Join(rep.Person, "\n")
 	if code != exitDecide || !strings.Contains(all, "settings the command does not reproduce (HostConfig.PidsLimit)") ||
-		!strings.Contains(all, "It has settings this run does not carry, which docker inspect tracepad-app-old shows: HostConfig.PidsLimit") {
+		!strings.Contains(all, "It was also given what this docker run does not carry — HostConfig.PidsLimit — which docker inspect tracepad-app-old shows") {
 		t.Errorf("%d %s", code, all)
+	}
+	// One that is the person's because it is privileged, with limits, says
+	// so in its commands too (the review of #226).
+	d.set(func() { c.extra = nil; c.HostConfig.Privileged, c.HostConfig.Memory = true, 1<<30 })
+	rep, _ = runReport(t, containerDeps(t, d), "--plan")
+	if all = strings.Join(rep.Person, "\n"); !strings.Contains(all, "does not carry — HostConfig.Privileged, HostConfig.Memory/NanoCpus/CpuShares/CpuQuota —") {
+		t.Errorf("%s", all)
 	}
 }
 
@@ -1304,7 +1349,7 @@ func testAFailedRestoreNamesWhatItLeft(t *testing.T) {
 		t.Error("the new container was stopped")
 	}
 	// Its restore is a way back's: --back finishes it, --check refuses.
-	if chk, code := runReport(t, deps, "--check", rep.Run.ID); code != exitRefused {
+	if chk, code := runReport(t, deps, "--check", rep.Run.ID); code != exitRefused || !strings.Contains(chk.Summary, "way back has begun") {
 		t.Errorf("--check after a restore begun: %d %s", code, chk.Summary)
 	}
 	// The half-filled volume is the run's own (#34): the next way back fills
@@ -1717,4 +1762,81 @@ func (d *fakeDocker) stopLate() {
 			c.State.Running = false
 		}
 	}
+}
+
+// A docker call is asked again only while docker answers its restart
+// manager's race, and at most twenty times; a container that is gone, or a
+// daemon that does not answer, is said at once (the review of #226).
+func TestOnlyDockersRaceIsAskedAgain(t *testing.T) {
+	t.Parallel()
+	r := &runner{deps: Deps{Sleep: func(context.Context, time.Duration) error { return nil }}}
+	for _, tc := range []struct {
+		answers []string
+		calls   int
+		ok      bool
+	}{
+		{[]string{"Error: No such container: x"}, 1, false},
+		{[]string{"Cannot connect to the Docker daemon"}, 1, false},
+		{[]string{"cannot update a stopped container", "cannot update a stopped container", ""}, 3, true},
+		{[]string{"Container x is restarting, wait until the container is running", ""}, 2, true},
+		{[]string{"cannot update a stopped container"}, 21, false},
+	} {
+		calls := 0
+		err := r.transient(context.Background(), func() error {
+			a := tc.answers[min(calls, len(tc.answers)-1)]
+			calls++
+			if a == "" {
+				return nil
+			}
+			return errors.New(a)
+		})
+		if calls != tc.calls || (err == nil) != tc.ok {
+			t.Errorf("%q: %d calls, %v", tc.answers, calls, err)
+		}
+	}
+}
+
+// A process that may run from the host's binary, found only by the run's
+// own look — not by the plan's — keeps the binary, said, and the container
+// is upgraded all the same (the review of #226); the skill, which follows the
+// binary, is not installed and nothing is said of it.
+func testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	deps := containerDeps(t, d, "0.1.0")
+	install := filepath.Join(deps.InstallDir, "tracepad")
+	deps.Sys = &lateProcess{p: Process{PID: 4242, Exe: install, Argv: []string{"tracepad", "serve", "--data-dir"}}}
+	rep, code := runReport(t, deps)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	notes := strings.Join(rep.Notes, "\n")
+	if !strings.Contains(notes, install+" stays 0.1.0 after the container's upgrade: server pid 4242") || strings.Contains(notes, "skill") {
+		t.Errorf("notes: %s", notes)
+	}
+	if v, _ := scriptVersion(context.Background(), install); v != "0.1.0" {
+		t.Errorf("the binary is %s", v)
+	}
+	if cur := d.container("tracepad-app"); cur.Config.Image != "ghcr.io/tracepad/tracepad:0.2.0" {
+		t.Errorf("the container: %s", cur.Config.Image)
+	}
+}
+
+// lateProcess is a machine whose one process — a tracepad whose
+// configuration does not read — shows only from the second look on.
+type lateProcess struct {
+	noProcesses
+	mu    sync.Mutex
+	looks int
+	p     Process
+}
+
+func (l *lateProcess) Candidates(context.Context) ([]Process, int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.looks++
+	if l.looks == 1 {
+		return nil, 0, nil
+	}
+	return []Process{l.p}, 0, nil
 }

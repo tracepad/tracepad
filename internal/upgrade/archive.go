@@ -244,6 +244,18 @@ func safeJoin(dest, name string) (string, error) {
 // extractArchive restores an archive into dest, which must not exist. Only
 // directories and regular files are made, and no entry may leave dest.
 func extractArchive(path, dest string, mode os.FileMode) error {
+	return extractOnly(path, dest, mode, nil)
+}
+
+// databaseFiles are the entries a check of an archive's database needs.
+func databaseFiles(name string) bool {
+	return name == dataDBName || name == dataDBName+"-wal" || name == dataDBName+"-shm"
+}
+
+// extractOnly is extractArchive of the entries only keeps, every entry when
+// it is nil: a check of a container's archive on the host takes its
+// database's files alone, not a copy of the whole volume.
+func extractOnly(path, dest string, mode os.FileMode, only func(name string) bool) error {
 	if err := os.Mkdir(dest, 0o700); err != nil {
 		return err
 	}
@@ -274,7 +286,7 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 			return err
 		}
 		name := cleanEntry(h.Name)
-		if name == "" || name == "." {
+		if name == "" || name == "." || (only != nil && !only(name) && h.Typeflag != tar.TypeSymlink && h.Typeflag != tar.TypeLink) {
 			continue
 		}
 		target, err := safeJoin(dest, h.Name)
@@ -343,55 +355,4 @@ func quickCheck(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("%s fails its check: %s", dbPath, strings.Join(problems, "; "))
 	}
 	return nil
-}
-
-// extractDB writes the archive's database files (tracepad.db and its -wal and
-// -shm) into dir, for a check of a container's archive on the host.
-func extractDB(path, dir string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(bufio.NewReader(f))
-	if err != nil {
-		return err
-	}
-	tr := tar.NewReader(gz)
-	for {
-		h, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if h.Typeflag != tar.TypeReg {
-			continue
-		}
-		// The name written is one of three the command knows, never the
-		// archive's own.
-		var target string
-		switch cleanEntry(h.Name) {
-		case dataDBName:
-			target = filepath.Join(dir, dataDBName)
-		case dataDBName + "-wal":
-			target = filepath.Join(dir, dataDBName+"-wal")
-		case dataDBName + "-shm":
-			target = filepath.Join(dir, dataDBName+"-shm")
-		default:
-			continue
-		}
-		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(out, tr)
-		if cerr := out.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
-	}
 }

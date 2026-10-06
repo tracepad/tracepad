@@ -321,4 +321,5 @@ var containerScenarios = []struct {
 	{"AVolumeWithOptionsIsRefusedBeforeTheStop", testAVolumeWithOptionsIsRefusedBeforeTheStop},
 	{"AContainersStartsThatFailAreTakenUpAgain", testAContainersStartsThatFailAreTakenUpAgain},
 	{"AWayBackAsksDockerAgainForAPolicy", testAWayBackAsksDockerAgainForAPolicy},
+	{"AProcessOnTheBinaryKeepsItAndTheContainerGoesOn", testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn},
 }

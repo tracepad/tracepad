@@ -360,6 +360,16 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		// binary is the person's and this run never replaces it.
 		st.Binary.From = bin.Version
 	}
+	// A container's run brings the host's binary along only where no server
+	// runs from it (#47 (g)): asked here as the replacement asks, so a
+	// process the plan could not tell is no reason to refuse the container
+	// (the review of #226) — the binary stays, said.
+	if p.replaceBinary && p.container != nil {
+		if err := r.serversOn(ctx, bin.Path, p.to, true); err != nil {
+			p.replaceBinary = false
+			rep.Notes = append(rep.Notes, fmt.Sprintf("%s stays %s after the container's upgrade: %v", bin.Path, bin.Version, err))
+		}
+	}
 	var newBin Fetched
 	if p.replaceBinary {
 		// The installed binary is already the target otherwise, and is what
@@ -378,12 +388,14 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		// Before anything stops (the sixth review): a server running the
 		// installed binary refuses the run here, not after its server is
 		// down. The replacement checks again.
-		var own []int
-		if p.server != nil {
-			own = append(own, p.server.Proc.PID)
-		}
-		if err := r.serversOn(ctx, bin.Path, p.to, true, own...); err != nil {
-			return nil, err.Error()
+		if p.container == nil {
+			var own []int
+			if p.server != nil {
+				own = append(own, p.server.Proc.PID)
+			}
+			if err := r.serversOn(ctx, bin.Path, p.to, true, own...); err != nil {
+				return nil, err.Error()
+			}
 		}
 	}
 
@@ -1007,6 +1019,14 @@ func (j *job) finishHealthy(ctx context.Context) {
 		// that cannot be put there is a note: the container is upgraded.
 		if err := j.putNew(ctx); err != nil {
 			j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not replaced: "+err.Error())
+		}
+	}
+	// A container run that kept the host's binary on purpose — a server
+	// runs from it — installs no skill with it, and says nothing of it: the
+	// plan said why (the review of #226).
+	if st.Kind == kindContainer && st.Binary != nil && st.Binary.Old == "" {
+		if v, err := j.r.deps.Version(ctx, st.Binary.Path); err != nil || v != st.To {
+			return
 		}
 	}
 	if st.Binary != nil && st.Binary.Path != "" && j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, st.To) {
