@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -101,11 +102,16 @@ report); --plan: 10 when the upgrade would change something.
 // ~/.local/bin, the install script's default. A binary run from the system's
 // temporary directory is the agent's bridge (docs/agent-upgrade.md), which
 // upgrades the installed one, never itself.
-func installDirFor(named, home, self, tmp string) string {
+//
+// tmps are the temporary directories: os.TempDir(), and on macOS the user's
+// own (DARWIN_USER_TEMP_DIR), where mktemp makes its directories with no
+// TMPDIR in the environment while Go then names /tmp (the live run of rc.3).
+// A directory mktemp named (tmp.XXXXXXXXXX) is one too, wherever it is.
+func installDirFor(named, home, self string, tmps ...string) string {
 	dir := strings.TrimRight(named, "/")
 	if dir == "" {
 		dir = filepath.Join(home, ".local", "bin")
-		if filepath.Base(self) == "tracepad" && !within(canonicalPath(self), canonicalDir(tmp)) {
+		if filepath.Base(self) == "tracepad" && !temporary(canonicalPath(self), tmps) {
 			dir = filepath.Dir(self)
 		}
 	}
@@ -113,6 +119,39 @@ func installDirFor(named, home, self, tmp string) string {
 		dir = abs
 	}
 	return dir
+}
+
+// userTempDir is the system's own temporary directory of this user's: a
+// seam, so a test can count the asks.
+var userTempDir = systemUserTempDir
+
+// installTemps are the temporary directories installDirFor weighs: the
+// user's own is asked only when the answer can matter — no directory named,
+// a binary called tracepad, and not already found temporary — so a run that
+// does not need it starts no getconf (the review of #225).
+func installTemps(named, self string) []string {
+	tmps := []string{os.TempDir()}
+	if named == "" && filepath.Base(self) == "tracepad" && !temporary(canonicalPath(self), tmps) {
+		tmps = append(tmps, userTempDir())
+	}
+	return tmps
+}
+
+// mktempName is the name mktemp -d gives a directory by default, on macOS
+// and with GNU's.
+var mktempName = regexp.MustCompile(`^tmp\.[A-Za-z0-9]{6,}$`)
+
+// temporary says whether a binary at path runs from a temporary directory.
+func temporary(path string, tmps []string) bool {
+	if mktempName.MatchString(filepath.Base(filepath.Dir(path))) {
+		return true
+	}
+	for _, tmp := range tmps {
+		if tmp != "" && within(path, canonicalDir(tmp)) {
+			return true
+		}
+	}
+	return false
 }
 
 // within says whether path is under root.
@@ -233,7 +272,7 @@ func realDeps(getenv func(string) string) (Deps, error) {
 	if err != nil {
 		return Deps{}, err
 	}
-	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, os.TempDir())
+	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, installTemps(getenv("TRACEPAD_INSTALL_DIR"), self)...)
 	cwd, _ := os.Getwd() // ignored: none, and no project's copy of the skill is found there
 	base, mirror := getenv("TRACEPAD_DOWNLOAD_URL"), true
 	if base == "" {
@@ -243,7 +282,7 @@ func realDeps(getenv func(string) string) (Deps, error) {
 	// A server that takes a connection and never answers must not hold the
 	// plan: every local request has its own deadline.
 	local := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext}}
-	network := &http.Client{Timeout: 10 * time.Minute, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
+	network := networkClient(15*time.Second, 15*time.Second, 30*time.Second)
 	return Deps{
 		Sys:    newSystem(),
 		Docker: newDockerCLI(),

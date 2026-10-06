@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const docsUpgrading = "https://tracepad.github.io/tracepad/install/#upgrading"
@@ -51,13 +52,21 @@ func (p *plan) pending() bool {
 	return p.replaceBinary || p.server != nil || len(p.choose) > 0
 }
 
+// lookupWait is how long the plan's look at the releases may take.
+var lookupWait = 45 * time.Second
+
 // makePlan resolves the target version and works out the plan. A refusal is
 // its sentence; the plan is nil then.
 func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	to := r.flags.to
+	// The release is looked up under a deadline of its own (the live run of
+	// rc.3): a network or a firewall that holds the connection must not hold
+	// the plan, which an agent runs with no watchdog over it.
+	lctx, cancel := context.WithTimeout(ctx, lookupWait)
+	defer cancel()
 	switch {
 	case to == "":
-		latest, err := r.deps.Releases.Latest(ctx)
+		latest, err := r.deps.Releases.Latest(lctx)
 		if err != nil {
 			return nil, err.Error()
 		}
@@ -65,7 +74,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
 	default:
-		if err := r.deps.Releases.Exists(ctx, to); err != nil {
+		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
 		}
 	}
@@ -250,6 +259,10 @@ func (r *runner) othersBehind(p *plan) {
 		s := &p.f.Servers[i]
 		switch {
 		case s == p.server:
+		case s.Version == "" && s.Unchecked != "":
+			// Not asked, and said so: not called behind, as a container
+			// whose address cannot be told is not (#41 (e)).
+			p.notes = append(p.notes, fmt.Sprintf("server pid %d was not checked: %s. Whether it is behind %s is yours to look at: its /health, at its own address, answers its version", s.Proc.PID, s.Unchecked, p.to))
 		case s.Version == "":
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
@@ -288,15 +301,30 @@ func (r *runner) othersBehind(p *plan) {
 		if err != nil {
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
 		} else if older(v) {
-			advice := "its package manager upgrades it"
+			// What put it there upgrades it: a package manager's, or the
+			// install script's, which installs into any directory it is
+			// given (the live run of rc.3: a binary in ~/.local/bin was told
+			// its package manager upgrades it).
+			script := "the install script upgrades it: " + r.installLine(filepath.Dir(b.First), p.to)
+			advice := script
 			if pm := packageManager(canonicalPath(b.First)); pm != "" {
 				advice = pm
 			} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
-				advice = "brew upgrade tracepad, if Homebrew installed it"
+				advice = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
 			}
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
 		}
 	}
+}
+
+// installLine is the install script's command that puts version to into
+// dir: the directory named unless it is the script's own default.
+func (r *runner) installLine(dir, to string) string {
+	env := "TRACEPAD_VERSION=" + to
+	if dir != filepath.Join(r.deps.Home, ".local", "bin") {
+		env += " TRACEPAD_INSTALL_DIR=" + shq(dir)
+	}
+	return "curl -fsSL https://tracepad.github.io/tracepad/install.sh | " + env + " sh"
 }
 
 func serverAdvice(s Server) string {

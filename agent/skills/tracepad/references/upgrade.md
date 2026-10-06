@@ -17,16 +17,16 @@ tracepad upgrade --plan
 ```
 
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
-installed binary predates the command, so plan and upgrade with the newest
-release's, fetched into a directory of its own (it upgrades the installed one):
+binary predates the command; plan and upgrade with a release's, fetched into a
+directory of its own (it upgrades the installed one), `v` the version named:
 
 ```sh
-dir="$(mktemp -d)"; curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && "$dir/tracepad" upgrade --plan
+v=; dir="$(mktemp -d)"; curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && "$dir/tracepad" upgrade --plan ${v:+--to "$v"}
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
 is the human's is behind (a server behind an installed candidate too); `1`
-refused or interrupted — say why (*no stable release*: name the candidate, ask). Show the human what it will do, and what it says
+refused or interrupted — say why (*no stable release*, from the plan or the install script: name the candidate it gives, and ask). Show the human what it will do, and what it says
 is theirs: a service, a Compose project, a server open beyond this machine.
 More than one server that is the command's: ask which, and pass its
 `--data-dir` to the upgrade. A container is the human's: show them the

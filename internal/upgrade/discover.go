@@ -46,6 +46,11 @@ type Server struct {
 	Version string
 	Ours    bool
 	Reason  string
+	// Unchecked says why its version was not asked: it listens on an
+	// address of this machine's that is not a loopback one (a single
+	// interface's), which the command does not ask. Said as not checked,
+	// never as a version it does not say.
+	Unchecked string
 }
 
 // Findings is what the plan saw.
@@ -328,6 +333,12 @@ func (r *runner) discover(ctx context.Context) Findings {
 	for i := range f.Servers {
 		probe, ok := healthURL(f.Servers[i].Listen)
 		if !ok {
+			// Only an address read is one not asked: a server whose
+			// configuration could not be read keeps that reason, and is
+			// named as one that may be behind (the review of #225).
+			if f.Servers[i].Listen != "" {
+				f.Servers[i].Unchecked = fmt.Sprintf("it listens on %s only, an address the command does not ask", f.Servers[i].Listen)
+			}
 			continue
 		}
 		hw.Add(1)

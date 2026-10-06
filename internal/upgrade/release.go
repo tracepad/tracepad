@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -92,8 +93,13 @@ func (r *Releases) open(ctx context.Context, address string) (io.ReadCloser, err
 	// curl follows it, and the checksum is what the file is held to.
 	client := *r.HTTP
 	client.CheckRedirect = httpsOnly
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		if timedOut(err) {
+			return nil, fmt.Errorf("%s did not answer in %d s; a firewall (an application firewall, say) or the network holds the connection. Try again, or download the release yourself and set TRACEPAD_DOWNLOAD_URL=file://<its directory>, laid out as <directory>/download/v<version>/ (%v)",
+				u.Host, int(time.Since(start).Round(time.Second)/time.Second), err)
+		}
 		return nil, err
 	}
 	switch {
@@ -105,6 +111,27 @@ func (r *Releases) open(ctx context.Context, address string) (io.ReadCloser, err
 		return nil, fmt.Errorf("%s answered HTTP %d", address, resp.StatusCode)
 	}
 	return resp.Body, nil
+}
+
+// timedOut says whether a request failed by a deadline: a connection,
+// handshake or answer that did not come, or the plan's own deadline.
+func timedOut(err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
+}
+
+// networkClient is the client downloads go through: a connection, a TLS
+// handshake and the first byte of an answer each have a deadline (the live
+// run of rc.3: a connection held by a firewall kept the plan for minutes),
+// and a whole download has ten minutes, for an archive on a slow line.
+//
+// It is Go's default transport — HTTP/2, the proxy from the environment, its
+// limits on idle connections — with these deadlines (the review of #225).
+func networkClient(dial, handshake, header time.Duration) *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: dial, KeepAlive: 30 * time.Second}).DialContext
+	t.TLSHandshakeTimeout, t.ResponseHeaderTimeout = handshake, header
+	return &http.Client{Timeout: 10 * time.Minute, Transport: t}
 }
 
 // httpsOnly refuses a redirect to anything but https://, and stops after
