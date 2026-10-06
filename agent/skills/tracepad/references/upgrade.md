@@ -10,7 +10,8 @@ refusal: it says what is the human's.
 
 First `tracepad version` against the skill's `metadata.version`. Older, or a
 development build (`dev`, a commit), and the binary is replaced before anything
-else — ask the human, then `curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> sh`;
+else, where it is — ask the human, then
+`curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> TRACEPAD_INSTALL_DIR="$(dirname "$(command -v tracepad)")" sh`;
 a skill that says `dev` names no release: ask which.
 
 With the key in the environment (never on a command line), so the trace counts

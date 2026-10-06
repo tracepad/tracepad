@@ -109,10 +109,11 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 		sameArgs(t, "inspect", calls[4], []string{"docker", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", c.Name + "-old"})
 		sameArgs(t, "run", calls[5], []string{"docker", "run", "-d", "--name", c.Name, "--env-file", c.Name + ".upgrade.env",
 			"-p", "127.0.0.1:4318:4318", "--label", c.Run[3], "ghcr.io/tracepad/tracepad:0.2.0", "serve", c.Run[6]})
-		// A variable whose name is not a shell's is not written into a run.
+		// A variable whose name an env file cannot carry is not written into
+		// a run.
 		ic := inspectContainer{}
 		ic.Config.Env = []string{v("ENV") + "=x"}
-		if _, _, err := createdAs(ic, imageConfig{}, ""); err == nil || !strings.Contains(err.Error(), "not a shell variable's") {
+		if _, _, err := createdAs(ic, imageConfig{}, ""); err == nil || !strings.Contains(err.Error(), "has a name an env file cannot carry") {
 			t.Errorf("a variable named %q: %v", v("ENV"), err)
 		}
 		sameArgs(t, "the archive of a release's version", []string{backupStep(Container{Name: "n", Version: "0.1.0", DataMount: "type=volume,src=v"})},
@@ -175,5 +176,74 @@ func TestShqIsAWord(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "canary")); err == nil {
 		t.Errorf("shq let a value run")
+	}
+}
+
+// outsideQuotes is a command with each quoted word replaced by Q: what sh
+// reads as syntax.
+func outsideQuotes(cmd string) string {
+	var b strings.Builder
+	for i := 0; i < len(cmd); i++ {
+		switch c := cmd[i]; c {
+		case '\'':
+			j := strings.IndexByte(cmd[i+1:], '\'')
+			if j < 0 {
+				return b.String() + "<unclosed>"
+			}
+			b.WriteByte('Q')
+			i += j + 1
+		case '"':
+			j := i + 1
+			for ; j < len(cmd) && cmd[j] != '"'; j++ {
+				if cmd[j] == '\\' {
+					j++
+				}
+			}
+			if j >= len(cmd) {
+				return b.String() + "<unclosed>"
+			}
+			b.WriteByte('Q')
+			i = j
+		case '\\':
+			b.WriteByte('Q')
+			i++
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// No printed command has a placeholder the shell would read (the third
+// review of #228): outside quotes there is no `<` at all, and a `>` only
+// redirects into a name, quoted or of safe characters. Every command is built with its values
+// missing, where a placeholder stands in.
+func TestPrintedCommandsHaveNoBarePlaceholder(t *testing.T) {
+	t.Parallel()
+	bare := Container{Name: "tracepad-app", Repo: "ghcr.io/tracepad/tracepad", Compose: "obs",
+		Run: []string{"-p", "127.0.0.1:4318:4318", imageSlot}, EnvNames: []string{"TRACEPAD_URL"}}
+	chain, _ := containerSteps(bare, "0.2.0")
+	cchain, up, start := composeSteps(bare, "0.2.0")
+	commands := map[string]string{
+		"a container's chain": chain, "a Compose chain": cchain, "Compose's up": up, "Compose's start": start,
+		"a backup": backupStep(bare), "an install line": (&runner{deps: Deps{Home: "/home/u"}}).installLine("/opt/bin", "0.2.0"),
+		"a service's restart": serviceRestart("the launchd job dev.tracepad"),
+	}
+	for name, cmd := range commands {
+		syntax := outsideQuotes(cmd)
+		for i := strings.IndexAny(syntax, "<>"); i >= 0; i = strings.IndexAny(syntax, "<>") {
+			after := strings.TrimLeft(syntax[i+1:], " ")
+			if syntax[i] == '<' || after == "" || !strings.ContainsRune("Qabcdefghijklmnopqrstuvwxyz0123456789_./-", rune(after[0])) {
+				t.Errorf("%s: a bare %q in %s", name, syntax[i:], cmd)
+				break
+			}
+			syntax = syntax[i+1:]
+		}
+	}
+	if d := downgrade("0.1.0", "server pid 1", "0.2.0"); strings.ContainsAny(d, "<>") {
+		t.Errorf("the way back's command: %s", d)
+	}
+	if got := outsideQuotes(`a 'b<c' "d>e" f\<g`); got != "a Q Q fQg" {
+		t.Fatalf("outsideQuotes: %q", got)
 	}
 }

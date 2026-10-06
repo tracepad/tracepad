@@ -100,7 +100,7 @@ What does go out, and where:
 | The CLI and `tracepad mcp` | your server, at `TRACEPAD_URL` (or `--url`) | every command |
 | The Python, Node and Go packages | your server, at `TRACEPAD_URL` | when they export |
 | `tracepad export` | the address you give it, and only that one | when you run it |
-| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only, and not even that when the version asked for is the binary's own |
+| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the binary at the install path runs it with `--to` its own version, as the install script does |
 | The install script | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`) | when you run it |
 
 `tracepad upgrade` also asks servers and containers on this machine for their

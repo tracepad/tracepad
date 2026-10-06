@@ -16,32 +16,11 @@ base='tracepad\.github\.io/tracepad'
 
 # slugs: the ids the site gives the headings of one page — Python-Markdown's
 # toc rule, which mkdocs.yml leaves at its default, not GitHub's that
-# doc-anchors.sh holds docs/ to: a link's text stays, characters other than
-# letters, digits, `_`, `-` and spaces go, and a run of spaces and hyphens is
-# one hyphen (`A — B` is `a-b` here, `a--b` on GitHub); a repeat gets `_1`,
-# `_2`, …. Fenced code is no heading.
-slugs() {
-	awk '
-		function slugify(text, out) {
-			out = text
-			gsub(/\]\([^)]*\)/, "", out)
-			out = tolower(out)
-			gsub(/[^-_ \ta-z0-9]/, "", out)
-			gsub(/^[ \t]+|[ \t]+$/, "", out)
-			gsub(/[- \t]+/, "-", out)
-			return out
-		}
-		/^[ \t]*(```|~~~)/ { fence = !fence; next }
-		fence { next }
-		/^#{1,6}[ \t]/ {
-			text = $0
-			sub(/^#+[ \t]+/, "", text)
-			sub(/[ \t]+#+[ \t]*$/, "", text)
-			slug = slugify(text)
-			print (seen[slug]++ ? slug "_" (seen[slug] - 1) : slug)
-		}
-	' "$1"
-}
+# doc-anchors.sh holds docs/ to (`A — B` is `a-b` here, `a--b` on GitHub; a
+# repeat is `_1`). The parser is shared with doc-anchors.sh (scripts/lib).
+# shellcheck source=scripts/lib/heading-slugs.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/heading-slugs.sh"
+slugs() { heading_slugs "$1" site; }
 
 # bad_links: the offending URLs among the lines on stdin, each with why. A
 # page under latest/ or dev/ is a page of docs/ — `latest/docker/` is
@@ -72,7 +51,9 @@ bad_links() {
 		md="$docs/${page:-index}.md"
 		if [ ! -f "$md" ]; then
 			echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"
-		elif [ -n "$anchor" ] && ! slugs "$md" | grep -qxF -- "$anchor"; then
+		# Captured, not piped into grep -q: under pipefail, awk's SIGPIPE
+		# after an early match reads as no match (spec 026 #14).
+		elif [ -n "$anchor" ] && ! grep -qxF -- "$anchor" <<<"$(slugs "$md")"; then
 			echo "tracepad.github.io/tracepad/$rest: $md has no heading whose id is #$anchor"
 		fi
 	done

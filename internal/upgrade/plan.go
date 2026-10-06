@@ -236,7 +236,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 
 func downgrade(to, what, running string) string {
 	return fmt.Sprintf("%s is older than %s, which %s runs: migrations run forward only, and an older binary does not open a database a newer one migrated. "+
-		"The way back from an upgrade is that upgrade's: tracepad upgrade --back <run>", to, running, what)
+		"The way back from an upgrade is that upgrade's: tracepad upgrade --back RUN", to, running, what)
 }
 
 // pickTarget chooses the server or container this run upgrades: the one
@@ -393,7 +393,10 @@ func (r *runner) othersBehind(p *plan) {
 	switch b := p.f.Binary; {
 	case !b.Exists:
 	case b.Ours:
-		p.idleBinary = !p.replaceBinary
+		// Whether it is behind, never whether this run replaces it: a
+		// binary a container's run leaves is still behind (the third
+		// review of #228).
+		p.idleBinary = !older(b.Version)
 	case b.Dev && b.Link != "":
 		p.binaries = append(p.binaries, fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
 			b.Path, b.Link, b.Version, p.to, b.Link, r.installLine(filepath.Dir(b.Path), p.to)))

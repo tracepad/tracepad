@@ -1130,7 +1130,10 @@ release: it refuses there before it looks at anything. The design is spec 054.
   of the image is yours, and the plan gives the commands that upgrade it —
   the same `docker run`, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
-  ([docker.md](docker.md#upgrading-and-backing-up-first)). A Compose
+  ([docker.md](docker.md#upgrading-and-backing-up-first)). A container that
+  has something a `docker run` cannot carry — a variable whose value holds a
+  line break, or whose name has a space, a mount of another type — gets no
+  run written: the steps before it, and `docker inspect` to read. A Compose
   project's are run through its project, env files and file, as Compose
   labelled the container (`docker compose -p NAME --env-file ENV -f FILE`),
   from any directory: the

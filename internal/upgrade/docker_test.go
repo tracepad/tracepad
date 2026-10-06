@@ -833,7 +833,7 @@ func TestComposeAdvice(t *testing.T) {
 	}
 	// Compose's labels missing: its project and directory, and what to look up.
 	c.ComposeFiles, c.Service = nil, ""
-	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop <its service>") {
+	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop '<its service>'") {
 		t.Errorf("no file label: %s", got)
 	}
 }
@@ -1204,6 +1204,49 @@ func TestWhatContainerIsTheCommands(t *testing.T) {
 		if got := classify(c, ""); !strings.Contains(got.Reason, tc.reason) {
 			t.Errorf("%s: %q", tc.name, got.Reason)
 		}
+	}
+	// What a run cannot carry is decided in one place, createdAs, and leaves
+	// no run for the command or for the person: the advice prints no
+	// docker run that would drop or cut it (the third review of #228). A
+	// container that is the person's for whose it is — a name, an address
+	// — still gets its run.
+	for name, change := range map[string]func(*inspectContainer){
+		"a value with a line break": func(c *inspectContainer) { c.Config.Env = append(c.Config.Env, "PEM=-----BEGIN\nKEY") },
+		"a value with a return":     func(c *inspectContainer) { c.Config.Env = append(c.Config.Env, "NOTE=a\rb") },
+		"a name with a space":       func(c *inspectContainer) { c.Config.Env = append(c.Config.Env, "A B=x") },
+		"a mount it cannot write":   func(c *inspectContainer) { c.Mounts = append(c.Mounts, mount{Type: "npipe", Destination: "/pipe"}) },
+	} {
+		ic := base
+		ic.Config.Env = slices.Clone(base.Config.Env)
+		ic.Mounts = slices.Clone(base.Mounts)
+		change(&ic)
+		c := classify(ic, "")
+		advice := containerAdvice(c, "0.2.0")
+		if c.Run != nil || !strings.Contains(c.Reason, "its docker run could not be written: ") || strings.Contains(advice, "docker run -d") || !strings.Contains(advice, "which the command could not write") {
+			t.Errorf("%s: run %q, reason %q, advice %s", name, c.Run, c.Reason, advice)
+		}
+	}
+	for name, change := range map[string]func(*inspectContainer){
+		"another name": func(c *inspectContainer) { c.Name = "/myapp" },
+		"open beyond": func(c *inspectContainer) {
+			c.HostConfig.PortBindings = map[string][]portBinding{"4318/tcp": {{HostIP: "0.0.0.0", HostPort: "4318"}}}
+		},
+		"a name only docker takes": func(c *inspectContainer) { c.Config.Env = append(c.Config.Env, "my.var=x"); c.Name = "/myapp" },
+	} {
+		ic := base
+		ic.Config.Env = slices.Clone(base.Config.Env)
+		change(&ic)
+		c := classify(ic, "")
+		if advice := containerAdvice(c, "0.2.0"); c.Reason == "" || !strings.Contains(advice, "docker run -d") {
+			t.Errorf("%s: %q, %s", name, c.Reason, advice)
+		}
+	}
+	// A name the shell would not take is carried, quoted for grep and sh.
+	ic := base
+	ic.Config.Env = append(slices.Clone(base.Config.Env), "my.var=x")
+	ic.Name = "/myapp"
+	if advice := containerAdvice(classify(ic, ""), "0.2.0"); !strings.Contains(advice, `grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL|my\.var)='`) {
+		t.Errorf("my.var: %s", advice)
 	}
 	// A setting a recreate would drop: the person's, named.
 	c := classify(base, "")
@@ -2037,6 +2080,7 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 	type want struct {
 		idle bool
 		line string // in the person's list, "" for none of the binary's
+		note string // in the notes, when the case is about one
 	}
 	for name, c := range map[string]struct {
 		setup func(t *testing.T, bin string, deps *Deps)
@@ -2045,6 +2089,13 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 		"none":                   {func(*testing.T, string, *Deps) {}, want{}},
 		"the command's, current": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.2.0") }, want{idle: true}},
 		"the command's, behind":  {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.1.0") }, want{}},
+		// The container is upgraded and the binary kept back: still behind,
+		// whatever the run does with it (the third review of #228).
+		"the command's, behind, kept by a container's run": {func(t *testing.T, bin string, deps *Deps) {
+			scriptBinary(t, bin, "0.1.0")
+			deps.Sys = unreadableProcesses{}
+			deps.Docker.(*fakeDocker).add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "app", nil)
+		}, want{note: "stays 0.1.0 after the container's upgrade"}},
 		"a development build": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "97d6b79") },
 			want{line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
 		"a development build, linked": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "dev") },
@@ -2069,11 +2120,19 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 			c.setup(t, bin, &deps)
 			rep, _ := runReport(t, deps, "--plan")
 			person := strings.Join(rep.Person, "\n")
-			if rep.Binary.Idle != c.want.idle || (c.want.line == "") != (person == "") || !strings.Contains(person, c.want.line) {
+			if rep.Binary.Idle != c.want.idle || (c.want.line == "") != (person == "") || !strings.Contains(person, c.want.line) ||
+				!strings.Contains(strings.Join(rep.Notes, "\n"), c.want.note) {
 				t.Errorf("idle %v, person %q; want %+v", rep.Binary.Idle, person, c.want)
 			}
 		})
 	}
+}
+
+// unreadableProcesses is a machine whose processes cannot be listed.
+type unreadableProcesses struct{ noProcesses }
+
+func (unreadableProcesses) Candidates(context.Context) ([]Process, int, error) {
+	return nil, 0, errors.New("the listing is not allowed")
 }
 
 // linked puts a stand-in that says version elsewhere and links it at bin,

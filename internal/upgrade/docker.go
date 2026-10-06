@@ -229,8 +229,10 @@ type Container struct {
 	image   imageConfig
 }
 
-// envName is a variable's name as an env file and a shell take it.
-var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// envName is a variable's name as docker's env file takes it: no space, no
+// `=`. A name the shell would not take (`my.var`) is carried all the same;
+// the person's grep quotes it (regexp.QuoteMeta, then shq).
+var envName = regexp.MustCompile(`^[^\s=]+$`)
 
 // imageSlot stands for the image in Container.Run.
 const imageSlot = "\x00image"
@@ -346,11 +348,16 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	for _, kv := range ic.Config.Env {
 		if name, _, ok := strings.Cut(kv, "="); ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
 			// A variable goes through an env file, one line each, and the
-			// person's commands pick it by name with grep: a name that is
-			// not a shell's cannot be carried either way (the second review
-			// of #228).
+			// person's commands pick it by name with grep. What an env file
+			// cannot carry — a line break in its value, which grep would
+			// cut short; a name with a space, which docker refuses there —
+			// leaves no run written, for the command and the person alike:
+			// this is the one place that says so (the reviews of #228).
 			if !envName.MatchString(name) {
-				return nil, nil, fmt.Errorf("it was given a variable whose name is not a shell variable's, %q, which an env file cannot carry", name)
+				return nil, nil, fmt.Errorf("its variable %q has a name an env file cannot carry", name)
+			}
+			if strings.ContainsAny(kv, "\r\n") {
+				return nil, nil, fmt.Errorf("its variable %s holds a line break, which an env file cannot carry", name)
 			}
 			envNames = append(envNames, name)
 		}
@@ -694,12 +701,6 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 	}
 	if len(c.Unreproduced) > 0 {
 		return "it has settings the command does not reproduce (" + strings.Join(c.Unreproduced, ", ") + "): back up its volume and recreate it yourself"
-	}
-	for _, kv := range ic.Config.Env {
-		if strings.ContainsAny(kv, "\r\n") {
-			k, _, _ := strings.Cut(kv, "=")
-			return "its variable " + k + " holds a line break, which an env file cannot carry"
-		}
 	}
 	return ""
 }
@@ -1054,7 +1055,7 @@ func containerAdvice(c Container, to string) string {
 // nothing.
 func composeAdvice(c Container, to string) string {
 	image := c.Repo + ":" + to
-	service := "<its service>"
+	service := "its service"
 	if c.Service != "" {
 		service = c.Service
 	}
@@ -1081,7 +1082,10 @@ func composeAdvice(c Container, to string) string {
 // in them that Docker or Compose gave is quoted (the second review of #228).
 func composeSteps(c Container, to string) (chain, up, start string) {
 	compose := composeCommand(c)
-	service := "<its service>"
+	// With no service label, the placeholder is quoted: pasted, it is a
+	// service Compose does not have, never a redirection (the third review
+	// of #228).
+	service := shq("<its service>")
 	if c.Service != "" {
 		service = shq(c.Service)
 	}
