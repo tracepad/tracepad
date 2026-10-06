@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -61,14 +62,18 @@ type portBinding struct {
 type mount struct {
 	Type        string `json:"Type"`
 	Name        string `json:"Name"`
+	Source      string `json:"Source"`
 	Destination string `json:"Destination"`
+	RW          bool   `json:"RW"`
 }
 
 // inspectContainer is the part of `docker inspect` the plan reads: enough to
 // name a container, its image, its volume and its address.
 type inspectContainer struct {
-	ID     string `json:"Id"`
-	Name   string `json:"Name"`
+	ID   string `json:"Id"`
+	Name string `json:"Name"`
+	// Image is the image's ID, which `docker image inspect` reads.
+	Image  string `json:"Image"`
 	Config struct {
 		Image      string            `json:"Image"`
 		Labels     map[string]string `json:"Labels"`
@@ -77,7 +82,12 @@ type inspectContainer struct {
 		Cmd        []string          `json:"Cmd"`
 	} `json:"Config"`
 	HostConfig struct {
-		PortBindings map[string][]portBinding `json:"PortBindings"`
+		PortBindings  map[string][]portBinding `json:"PortBindings"`
+		RestartPolicy struct {
+			Name              string `json:"Name"`
+			MaximumRetryCount int    `json:"MaximumRetryCount"`
+		} `json:"RestartPolicy"`
+		NetworkMode string `json:"NetworkMode"`
 	} `json:"HostConfig"`
 	// NetworkSettings.Ports are the bindings as Docker made them: a port
 	// asked for as any (`-p 127.0.0.1::4318`) has its number only here.
@@ -107,6 +117,100 @@ type Container struct {
 	// could not: a container not checked is said, not called behind (the
 	// final review).
 	Unchecked string
+	// DataMount is its /data as busybox's --mount takes it, empty when it
+	// has none.
+	DataMount string
+	// Run is how it was created, as `docker run` takes it — the options,
+	// the image's place (imageSlot), its command — and EnvNames the
+	// variables it was given, whose values stay in Docker: the plan names
+	// them and never prints one. Run is nil when the image's own
+	// configuration could not be read.
+	Run      []string
+	EnvNames []string
+}
+
+// imageSlot stands for the image in Container.Run.
+const imageSlot = "\x00image"
+
+// imageConfig is the part of `docker image inspect` the plan reads.
+type imageConfig struct {
+	Config struct {
+		Env        []string `json:"Env"`
+		Entrypoint []string `json:"Entrypoint"`
+		Cmd        []string `json:"Cmd"`
+	} `json:"Config"`
+}
+
+// createdAs is how a container was created, read back from its inspect and its
+// image's (the live run of rc.3: "the options it was created with" left a
+// person to find them): its published ports, its mounts, its restart
+// policy, its network, and the command and variables it was given beyond
+// the image's own.
+func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string) {
+	keys := make([]string, 0, len(ic.HostConfig.PortBindings))
+	for k := range ic.HostConfig.PortBindings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		port, proto, _ := strings.Cut(k, "/")
+		for _, b := range ic.HostConfig.PortBindings[k] {
+			spec := b.HostPort + ":" + port
+			if b.HostIP != "" {
+				host := b.HostIP
+				if strings.Contains(host, ":") {
+					host = "[" + host + "]"
+				}
+				spec = host + ":" + spec
+			}
+			if proto != "" && proto != "tcp" {
+				spec += "/" + proto
+			}
+			run = append(run, "-p", spec)
+		}
+	}
+	for _, m := range ic.Mounts {
+		src := m.Name
+		switch m.Type {
+		case "volume":
+		case "bind":
+			src = m.Source
+		default:
+			run = append(run, "--tmpfs", m.Destination)
+			continue
+		}
+		spec := src + ":" + m.Destination
+		if !m.RW {
+			spec += ":ro"
+		}
+		run = append(run, "-v", spec)
+	}
+	if rp := ic.HostConfig.RestartPolicy; rp.Name != "" && rp.Name != "no" {
+		policy := rp.Name
+		if rp.Name == "on-failure" && rp.MaximumRetryCount > 0 {
+			policy += ":" + strconv.Itoa(rp.MaximumRetryCount)
+		}
+		run = append(run, "--restart", policy)
+	}
+	if n := ic.HostConfig.NetworkMode; n != "" && n != "default" && n != "bridge" {
+		run = append(run, "--network", n)
+	}
+	args := ic.Config.Cmd
+	if !slices.Equal(ic.Config.Entrypoint, img.Config.Entrypoint) && len(ic.Config.Entrypoint) > 0 {
+		run = append(run, "--entrypoint", ic.Config.Entrypoint[0])
+		args = append(slices.Clone(ic.Config.Entrypoint[1:]), args...)
+	} else if slices.Equal(args, img.Config.Cmd) {
+		args = nil
+	}
+	run = append(run, imageSlot)
+	run = append(run, args...)
+	for _, kv := range ic.Config.Env {
+		if name, _, ok := strings.Cut(kv, "="); ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
+			envNames = append(envNames, name)
+		}
+	}
+	sort.Strings(envNames)
+	return run, envNames
 }
 
 // containerAddress is where a container's server answers on this machine:
@@ -191,11 +295,20 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 		c := Container{Name: strings.TrimPrefix(ic.Name, "/"), Ref: ic.Config.Image, Repo: repo,
 			Compose: ic.Config.Labels["com.docker.compose.project"], Reason: containerReason}
 		for _, m := range ic.Mounts {
-			if m.Destination == "/data" && m.Type == "volume" {
-				c.Volume = m.Name
+			switch {
+			case m.Destination != "/data":
+			case m.Type == "volume":
+				c.Volume, c.DataMount = m.Name, "type=volume,src="+m.Name
+			case m.Type == "bind":
+				c.DataMount = "type=bind,src=" + m.Source
 			}
 		}
 		c.URL, c.Default, c.Unchecked = containerAddress(ic)
+		// Its image's own configuration tells what it was given beyond it;
+		// one that cannot be read leaves the run to the person, said.
+		if img, err := r.inspectImage(ctx, ic.Image); err == nil {
+			c.Run, c.EnvNames = createdAs(ic, img)
+		}
 		cs = append(cs, c)
 	}
 	// Every container's address is asked at once, under the plan's deadline.
@@ -229,6 +342,19 @@ func (r *runner) inspectContainers(ctx context.Context, refs ...string) ([]inspe
 	return list, nil
 }
 
+// inspectImage reads an image's own configuration.
+func (r *runner) inspectImage(ctx context.Context, id string) (imageConfig, error) {
+	out, err := r.deps.Docker.Run(ctx, "image", "inspect", id)
+	if err != nil {
+		return imageConfig{}, err
+	}
+	var list []imageConfig
+	if err := json.Unmarshal(out, &list); err != nil || len(list) != 1 {
+		return imageConfig{}, fmt.Errorf("docker image inspect %s: %v", id, err)
+	}
+	return list[0], nil
+}
+
 // containerAdvice is what upgrades a container, as docker.md does it: stop
 // it, back its volume up, pull the release, and run it again with the
 // options it was created with, the old one kept under another name until the
@@ -243,14 +369,44 @@ func containerAdvice(c Container, to string) string {
 	if version == "" {
 		version = "backup"
 	}
-	vol := c.Volume
-	if vol == "" {
-		vol = "<its /data volume>"
+	data := c.DataMount
+	if data == "" {
+		data = "type=volume,src=<its /data volume>"
 	}
-	return fmt.Sprintf("Upgrade it yourself (%s): docker stop %s; "+
-		"docker run --rm --mount type=volume,src=%s,dst=/data,readonly -v \"$PWD:/backup\" %s sh -c 'umask 077 && tar czf /backup/%s-%s.tar.gz -C /data .'; "+
-		"docker pull %s; docker rename %s %s-old; then run %s as %s with the options %s was created with, and remove %s-old once it is healthy",
-		docsDocker, shq(c.Name), shq(vol), busybox, c.Name, version, image, shq(c.Name), c.Name, image, shq(c.Name), shq(c.Name), shq(c.Name))
+	name, old := shq(c.Name), shq(c.Name+"-old")
+	steps := []string{
+		"docker stop " + name,
+		// set -C: an earlier backup of the same name is never written over.
+		fmt.Sprintf("docker run --rm --mount %s,dst=/data,readonly -v \"$PWD:/backup\" %s sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/%s-%s.tar.gz'", shq(data), busybox, c.Name, version),
+		"docker pull " + image,
+		fmt.Sprintf("docker rename %s %s", name, old),
+	}
+	if c.Run == nil {
+		steps = append(steps, fmt.Sprintf("then run %s as %s with the options %s was created with (docker inspect %s), and remove %s once it is healthy", image, name, name, old, old))
+		return fmt.Sprintf("Upgrade it yourself (%s): %s", docsDocker, strings.Join(steps, "; "))
+	}
+	// The variables it was given go into a file of their own, read from
+	// Docker and never printed (the live run of rc.3): they hold its keys.
+	run := []string{"docker run -d --name", name}
+	// A name of the upgrade's own, never overwritten (set -C): docs/docker.md
+	// keeps an admin token in tracepad.env, which this file must not take.
+	env := shq(c.Name + ".upgrade.env")
+	if len(c.EnvNames) > 0 {
+		steps = append(steps, fmt.Sprintf("(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s | grep -E '^(%s)=' > %s)", old, strings.Join(c.EnvNames, "|"), env))
+		run = append(run, "--env-file", env)
+	}
+	for _, a := range c.Run {
+		if a == imageSlot {
+			a = image
+		}
+		run = append(run, shq(a))
+	}
+	steps = append(steps, strings.Join(run, " "))
+	if len(c.EnvNames) > 0 {
+		steps = append(steps, "rm "+env)
+	}
+	steps = append(steps, fmt.Sprintf("docker rm %s once the new one is healthy", old))
+	return fmt.Sprintf("Upgrade it yourself (%s): %s. Any other option it was given — a user, limits, labels — is in docker inspect %s", docsDocker, strings.Join(steps, "; "), old)
 }
 
 func firstLine(s string) string {

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -556,6 +557,33 @@ func TestTheInstallDirectoryIsWhereTheBinaryRuns(t *testing.T) {
 		if got := installDirFor(tc.named, "/home/u", tc.self, tmp); got != tc.want {
 			t.Errorf("%q, %s: %s, want %s", tc.named, tc.self, got, tc.want)
 		}
+	}
+}
+
+// The bridge is found in a temporary directory however the shell was
+// started (the live run of rc.3): with no TMPDIR — env -i, cron, an agent's
+// bare shell — Go names /tmp while macOS's mktemp still makes its directory
+// under the user's own, and a directory mktemp named is temporary wherever
+// it is. A real `env -i mktemp -d` is asked.
+func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
+	t.Parallel()
+	for _, self := range []string{"/var/folders/ab/cdef/T/tmp.a0qjbaFU2H/tracepad", "/scratch/tmp.Xy12Zw/tracepad"} {
+		if got := installDirFor("", "/home/u", self, "/tmp", ""); got != "/home/u/.local/bin" {
+			t.Errorf("%s: %s", self, got)
+		}
+	}
+	if got := installDirFor("", "/home/u", "/opt/tmp.d/tracepad", "/tmp", ""); got != "/opt/tmp.d" {
+		t.Errorf("a directory of one's own, named like none of mktemp's: %s", got)
+	}
+	out, err := exec.Command("/usr/bin/env", "-i", "mktemp", "-d").Output()
+	if err != nil {
+		t.Skip("no mktemp: ", err)
+	}
+	dir := strings.TrimSpace(string(out))
+	t.Cleanup(func() { _ = os.Remove(dir) })
+	// What the command sees in such a shell: os.TempDir() is /tmp.
+	if got := installDirFor("", "/home/u", filepath.Join(dir, "tracepad"), "/tmp", userTempDir()); got != "/home/u/.local/bin" {
+		t.Errorf("env -i mktemp -d made %s, and the bridge there installs into %s", dir, got)
 	}
 }
 

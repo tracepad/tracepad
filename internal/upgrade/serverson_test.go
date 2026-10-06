@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,5 +88,57 @@ func TestAServerOnOneInterfaceIsSaidNotChecked(t *testing.T) {
 	err := r.serversOn(context.Background(), bin, fOld, false)
 	if err == nil || !strings.Contains(err.Error(), "its version could not be checked: it listens on 192.0.2.10:4318") {
 		t.Errorf("the way back's check: %v", err)
+	}
+}
+
+// A tracepad first on PATH that no package manager put there is upgraded
+// by the install script, into its own directory (the live run of rc.3): the
+// plan gives that line, not "its package manager upgrades it".
+func TestABinaryOnPathGetsTheInstallScriptsLine(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	if _, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data); code != exitOK {
+		t.Fatal(code)
+	}
+	first := filepath.Join(t.TempDir(), "bin", "tracepad")
+	_ = os.MkdirAll(filepath.Dir(first), 0o700)
+	scriptBinary(t, first, fOld)
+	deps := w.deps()
+	deps.LookPath = func(string) string { return first }
+	rep, _ := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
+	want := "the install script upgrades it: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=" + fNew + " TRACEPAD_INSTALL_DIR=" + shq(filepath.Dir(first)) + " sh"
+	if all := strings.Join(rep.Person, "\n"); !strings.Contains(all, want) {
+		t.Errorf("the plan says:\n%s\nnot %s", all, want)
+	}
+	r := &runner{deps: Deps{Home: "/home/a"}}
+	if got := r.installLine("/home/a/.local/bin", "0.2.0"); got != "curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.2.0 sh" {
+		t.Errorf("the script's own directory: %s", got)
+	}
+}
+
+// After a way back the skill's copies are put back at the version that runs
+// again (the live run of rc.3: they stayed the newer one's), by the old
+// binary, back at the install path.
+func TestAWayBackPutsTheSkillBack(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	marker := filepath.Join(deps.Home, ".claude", "skills", "tracepad", ".version")
+	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
+	_ = os.WriteFile(marker, []byte(fOld+"\n"), 0o600)
+	var by []string
+	deps.Skills = func(ctx context.Context, bin, _ string, _ ...string) (string, error) {
+		v, _ := scriptVersion(ctx, bin)
+		by = append(by, v)
+		return "installed " + v, nil
+	}
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+	// The world's working directory is its home: the copy is found twice.
+	if code != exitOK || len(by) < 2 || by[0] != fNew || by[len(by)-1] != fOld || !strings.Contains(strings.Join(back.Done, "\n"), "skill: installed "+fOld) {
+		t.Errorf("%d %s; installed by %q; done %q", code, back.Summary, by, back.Done)
 	}
 }

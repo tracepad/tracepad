@@ -1098,7 +1098,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
 - **A container is yours to upgrade**, in this release: the plan and the
   upgrade name each one that runs an older version and give the commands —
   stop it, back its volume up, pull the release, and run it again with the
-  options you created it with, the old one kept until the new one is healthy
+  options you created it with — the `docker run` read from `docker inspect`,
+  its variables passed in a file read from Docker and never printed — the old
+  one kept until the new one is healthy
   ([docker.md](docker.md#upgrading-and-backing-up-first)), or Compose's
   `docker compose up -d`. The command changes nothing of a container. Its
   version is asked where its server listens — `--listen` or

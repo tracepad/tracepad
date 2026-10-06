@@ -57,7 +57,26 @@ func (j *job) wayBack(ctx context.Context) wentBack {
 	if out.ok && !out.unconfirmed && st.last() != stepBackDone {
 		j.step(stepBackDone)
 	}
+	if out.ok && !out.unconfirmed && st.has(stepSkill) {
+		j.backSkill(ctx)
+	}
 	return out
+}
+
+// backSkill puts the skill's copies back at the version that runs again
+// (the live run of rc.3: after a way back they stayed the newer version's,
+// ahead of the binary). The old binary, back at the install path, installs
+// them; a way back that cannot is said, and is done all the same — the
+// skill is advice, not the server.
+func (j *job) backSkill(ctx context.Context) {
+	st := j.st
+	want := st.From
+	if st.Kind == kindBinary {
+		want = st.Binary.From
+	}
+	if !j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, want) {
+		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("the skill's copies may still be %s's, ahead of the %s that runs now; %s skills install puts them back", st.To, want, shq(st.Binary.Path)))
+	}
 }
 
 func (j *job) fail(why string) wentBack { return wentBack{ok: false, why: why} }

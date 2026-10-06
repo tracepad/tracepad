@@ -19,6 +19,9 @@ import (
 	"time"
 )
 
+// imageEnv is the image's own environment, as its Dockerfile sets it.
+var imageEnv = []string{"PATH=/", "TRACEPAD_DATA_DIR=/data", "TRACEPAD_LISTEN=:4318", "TRACEPAD_IN_CONTAINER=1"}
+
 // fakeDocker is the docker CLI over containers in memory. It records every
 // call; a container is the person's in this release (spec 054 #36), and a
 // test fails on any call but the two the plan reads with.
@@ -26,8 +29,9 @@ type fakeDocker struct {
 	t      *testing.T
 	calls  [][]string
 	byName map[string]*fakeContainer
-	// down is a daemon that does not answer.
-	down bool
+	// down is a daemon that does not answer; noImage, images that cannot be
+	// inspected.
+	down, noImage bool
 }
 
 type fakeContainer struct {
@@ -52,10 +56,11 @@ func (d *fakeDocker) add(name, v, host, port, volume string, labels map[string]s
 	c.Name = "/" + name
 	c.Config.Image = "ghcr.io/tracepad/tracepad:" + v
 	c.Config.Labels = labels
+	c.Image = "sha256:image-" + v
 	c.Config.Entrypoint = []string{"/tracepad"}
-	c.Config.Env = []string{"PATH=/", "TRACEPAD_LISTEN=:4318"}
+	c.Config.Env = append(slices.Clone(imageEnv), "TRACEPAD_URL=http://localhost:"+port)
 	c.HostConfig.PortBindings = map[string][]portBinding{"4318/tcp": {{HostIP: host, HostPort: port}}}
-	c.Mounts = []mount{{Type: "volume", Name: volume, Destination: "/data"}}
+	c.Mounts = []mount{{Type: "volume", Name: volume, Destination: "/data", RW: true}}
 	d.byName[name] = c
 	return c
 }
@@ -76,6 +81,13 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 		}
 		slices.Sort(ids)
 		return []byte(strings.Join(ids, "\n")), nil
+	case len(args) == 3 && args[0] == "image" && args[1] == "inspect":
+		if d.noImage {
+			return nil, errors.New("No such image")
+		}
+		var img imageConfig
+		img.Config.Env, img.Config.Entrypoint = imageEnv, []string{"/tracepad"}
+		return json.Marshal([]imageConfig{img})
 	case len(args) > 2 && args[0] == "container" && args[1] == "inspect":
 		var list []inspectContainer
 		for _, ref := range args[2:] {
@@ -168,7 +180,12 @@ func runReport(t *testing.T, deps Deps, args ...string) (Report, int) {
 func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	t.Parallel()
 	d := newFakeDocker(t)
-	d.add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "tracepad-app", nil)
+	c := d.add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "tracepad-app", nil)
+	const secret = "demo:tp-pk-1:tp-sk-not-to-be-printed"
+	c.Config.Env = append(c.Config.Env, "TRACEPAD_PROJECTS="+secret)
+	c.Config.Cmd = []string{"serve"}
+	c.HostConfig.RestartPolicy.Name = "always"
+	c.Mounts = append(c.Mounts, mount{Type: "bind", Source: "/srv/my config", Destination: "/etc/extra", RW: false})
 	deps := containerDeps(t, d)
 	for _, mode := range [][]string{{"--plan"}, {}} {
 		rep, code := runReport(t, deps, mode...)
@@ -176,11 +193,19 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 			t.Fatalf("%q: %d %s", mode, code, rep.Summary)
 		}
 		all := strings.Join(rep.Person, "\n")
-		for _, want := range []string{"docker stop tracepad-app", "src=tracepad-app,dst=/data,readonly", "umask 077",
-			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename tracepad-app tracepad-app-old", "docker/#upgrading"} {
+		// The run as the container was created (the live run of rc.3): its
+		// ports, mounts, restart policy and command, and the variables it was
+		// given in a file read from Docker — named, never printed.
+		for _, want := range []string{"docker stop tracepad-app", "src=tracepad-app,dst=/data,readonly", "sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-app-0.1.0.tar.gz'",
+			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename tracepad-app tracepad-app-old", "docker/#upgrading",
+			"(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-app-old | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > tracepad-app.upgrade.env)",
+			"docker run -d --name tracepad-app --env-file tracepad-app.upgrade.env -p 127.0.0.1:4318:4318 -v tracepad-app:/data -v '/srv/my config:/etc/extra:ro' --restart always ghcr.io/tracepad/tracepad:0.2.0 serve; rm tracepad-app.upgrade.env; docker rm tracepad-app-old once the new one is healthy"} {
 			if !strings.Contains(all, want) {
 				t.Errorf("%q: the commands miss %q: %s", mode, want, all)
 			}
+		}
+		if out, _ := json.Marshal(rep); strings.Contains(string(out), "tp-sk-not-to-be-printed") {
+			t.Errorf("%q: the report prints a variable's value", mode)
 		}
 		if len(rep.Containers) != 1 || rep.Containers[0].Whose != "person" || rep.Containers[0].Version != "0.1.0" {
 			t.Errorf("%q: %+v", mode, rep.Containers)
@@ -235,5 +260,18 @@ func TestWhatThePlanSaysOfContainers(t *testing.T) {
 	rep, code = runReport(t, containerDeps(t, d), "--plan")
 	if code != exitOK || !strings.Contains(strings.Join(rep.Notes, " "), "Docker did not answer") {
 		t.Errorf("a daemon down: %d %q", code, rep.Notes)
+	}
+}
+
+// An image that cannot be inspected leaves the container's run to the
+// person, said: its options are in docker inspect, never guessed.
+func TestAContainerWhoseImageCannotBeReadGetsTheSentence(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	d.noImage = true
+	d.add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "tracepad-app", nil)
+	rep, _ := runReport(t, containerDeps(t, d), "--plan")
+	if all := strings.Join(rep.Person, "\n"); !strings.Contains(all, "with the options 'tracepad-app' was created with (docker inspect tracepad-app-old)") && !strings.Contains(all, "with the options tracepad-app was created with (docker inspect tracepad-app-old)") {
+		t.Errorf("%s", all)
 	}
 }
