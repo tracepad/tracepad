@@ -151,7 +151,7 @@ after half a minute, work through section 4 of `instrumenting.md`.
 - **The server**: you started it. Log `$data/server.log`, stopped by `kill
   "$(cat "$data/server.pid")"`; a container's are `docker logs` and `docker stop`
   `tracepad-<project>`. It does not outlive a reboot; a service does
-  (https://tracepad.github.io/tracepad/install/).
+  (https://tracepad.github.io/tracepad/latest/install/).
 - **What changed**: every file you edited, `.gitignore` included, and the
   test trace `tracepad-setup-check`.
 - **What is theirs**: the account, a provider key, keeping the server running,

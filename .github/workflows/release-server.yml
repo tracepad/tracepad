@@ -365,6 +365,14 @@ jobs:
     uses: ./.github/workflows/mirror-image.yml
     with:
       digest: ${{ needs.image.outputs.digest }}
+    # The one secret the job reads, by name and not `inherit`, which would hand
+    # it every secret this workflow can see: without it the called workflow's
+    # `secrets` context has no DOCKERHUB_TOKEN at all, and the token of the
+    # `release` environment it names is read as empty (spec 020 #36). This job
+    # has no environment, so the value passed is empty; the called job's
+    # environment secret replaces it.
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # The documentation for this release (spec 050 #6), under `vX.Y` — the line,
   # not the patch: a back-patch replaces its line's pages. `latest` moves with

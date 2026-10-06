@@ -41,6 +41,19 @@ on:
         description: "The index's digest on GHCR, as `image` pushed and attested it; read from the version's tag on GHCR when empty"
         type: string
         default: ""
+    # Declared so that the name exists in this workflow's `secrets` context,
+    # which holds only what a `workflow_call` declares (or `inherit`): the
+    # value is not the caller's. The job below names the `release`
+    # environment, and GitHub's rule is that a job of a called workflow that
+    # does so reads that environment's secret, "and not the secret passed from
+    # the caller" — while the caller, a job that cannot name an environment,
+    # has none of the environment's to pass. Without the declaration the v0.1.0
+    # mirror read an empty token (spec 020 #36). Not required: a dispatch has
+    # no caller, and an empty token is the step's own red, with its message.
+    secrets:
+      DOCKERHUB_TOKEN:
+        description: "Docker Hub's access token; the `release` environment's secret of the name is the one the job reads"
+        required: false
 
 permissions: {}
 

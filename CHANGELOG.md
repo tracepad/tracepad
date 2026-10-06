@@ -11,6 +11,12 @@ their own headings.
 
 ## [Unreleased]
 
+### Fixed
+
+- The links to the documentation that the install script, `tracepad upgrade` and
+  the agent skill print pointed at pages under the site's root, which does not
+  hold them; they now go to `latest/`.
+
 ## [0.1.0] - 2026-10-06
 
 The first release, **0.1.0**, is the beta, and everything below ships in it.
