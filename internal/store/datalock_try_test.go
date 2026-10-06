@@ -3,7 +3,6 @@ package store
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 )
 
@@ -44,5 +43,4 @@ func TestTheLockAsAnotherProcessSeesIt(t *testing.T) {
 	if _, err := RecordedPID(db); err == nil {
 		t.Error("a record that is not a pid")
 	}
-	_ = strconv.Itoa
 }
