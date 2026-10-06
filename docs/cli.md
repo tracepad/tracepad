@@ -1138,8 +1138,10 @@ release: it refuses there before it looks at anything. The design is spec 054.
   checks the same before its first act. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
-  or container whose version it cannot tell is named as one that may be
-  behind.
+  or container that does not say its version when asked is named as one that
+  may be behind. One the command does not ask — a server listening on a
+  single address of the machine's that is not a loopback one, a container
+  whose address cannot be told — is said to be not checked.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not

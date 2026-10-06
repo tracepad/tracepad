@@ -771,7 +771,7 @@ var refusalReasons = []refusalReason{
 	{id: "R08", fn: "restoreRoom", prefix: "the room beside %s for a restore cannot be told", n: 1, kind: 'M', cells: []string{"TestWhatCannotBeReadRefuses"}},
 	{id: "R09", fn: "restoreRoom", prefix: "no room beside %s for the restore a way back may need", n: 1, kind: 'M', cells: []string{"R09-no-room-beside-data/a", "R09-no-room-for-archive-and-restore/a", "R09-no-room-beside-data/b-healthy"}},
 	{id: "R10", fn: "pathAsRecorded", n: 1, kind: 'T', cells: []string{"R10-install-path-other-version/b-healthy"}},
-	{id: "R11", fn: "serversOn", n: 6, kind: 'M', cells: []string{"R11-other-server-same-binary/a-binary-replaced", "R11-other-server-same-binary/a-binary-already-target", "R11-other-server-same-binary/b-healthy", "R11-unread-processes/a", "R11-unread-processes/b-healthy", "TestTheWayBacksServerCheckComesBeforeTheStop"}},
+	{id: "R11", fn: "serversOn", n: 7, kind: 'M', cells: []string{"R11-other-server-same-binary/a-binary-replaced", "R11-other-server-same-binary/a-binary-already-target", "R11-other-server-same-binary/b-healthy", "R11-unread-processes/a", "R11-unread-processes/b-healthy", "TestTheWayBacksServerCheckComesBeforeTheStop"}},
 	// backProcess's body.
 	{id: "R13", fn: "backProcess", prefix: "%s is set aside as %s, and something is at %s again", n: 1, kind: 'T', cells: []string{"R13-data-dir-back-after-aside/b"}},
 	{id: "R13b", fn: "backProcess", prefix: "%s cannot be looked at (%v); nothing was touched", n: 1, kind: 'T', why: "the data's place made unreadable after it was set aside; as R13"},

@@ -250,6 +250,10 @@ func (r *runner) othersBehind(p *plan) {
 		s := &p.f.Servers[i]
 		switch {
 		case s == p.server:
+		case s.Version == "" && s.Unchecked != "":
+			// Not asked, and said so: not called behind, as a container
+			// whose address cannot be told is not (#41 (e)).
+			p.notes = append(p.notes, fmt.Sprintf("server pid %d was not checked: %s. Whether it is behind %s is yours to look at: its /health, at its own address, answers its version", s.Proc.PID, s.Unchecked, p.to))
 		case s.Version == "":
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
