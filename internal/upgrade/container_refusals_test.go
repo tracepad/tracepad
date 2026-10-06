@@ -318,6 +318,10 @@ var containerScenarios = []struct {
 	{"TheOldImageKeepsAName", testTheOldImageKeepsAName},
 	{"AVolumeWithALinkIsRefusedBeforeTheStop", testAVolumeWithALinkIsRefusedBeforeTheStop},
 	{"ANewerContainerDoesNotHoldAnotherRun", testANewerContainerDoesNotHoldAnotherRun},
+	{"AWayBacksStartThatErredIsAdopted", testAWayBacksStartThatErredIsAdopted},
+	{"ARenameCutShortAndTheOldContainerRemoved", testARenameCutShortAndTheOldContainerRemoved},
+	{"APersonsTagIsNeverMoved", testAPersonsTagIsNeverMoved},
+	{"AFailedReplacementSaysOneThing", testAFailedReplacementSaysOneThing},
 	{"AProcessOnTheBinaryKeepsItAndTheContainerGoesOn", testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn},
 }
 
@@ -442,5 +446,149 @@ func testANewerContainerDoesNotHoldAnotherRun(t *testing.T) {
 	}
 	if rep, code := c.cmd(c.deps, "--plan", "--to", "0.2.0", "--container", "tracepad-later"); code != exitRefused || !strings.Contains(rep.Summary, "older than 0.2.1") {
 		t.Errorf("named, it is a downgrade: %d %s", code, rep.Summary)
+	}
+}
+
+// The way back's docker run answers an error after the old image's container
+// started: it is the run's own, adopted, and checked — not "someone else's"
+// to every later --back (the review of #226).
+func testAWayBacksStartThatErredIsAdopted(t *testing.T) {
+	c := newContainerCell(t)
+	rep, code := c.cmd(c.deps, "--to", "0.2.0")
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	c.d.set(func() { c.d.startsAndErrs = "ghcr.io/tracepad/tracepad:0.1.0" })
+	if back, code := c.cmd(c.deps, "--back", rep.Run.ID); code != exitOK {
+		t.Errorf("--back: %d %s", code, back.Summary)
+	}
+	c.untouched("end", "ghcr.io/tracepad/tracepad:0.1.0")
+	if st, _ := loadState(rep.Run.Dir); st.Container.BackID == "" || st.last() != stepBackDone {
+		t.Errorf("the started container was not recorded: %+v", st.Steps)
+	}
+}
+
+// Killed between the rename and its record, the old container removed by the
+// person since: the way back runs the old image again from the run's record
+// (the review of #226), never refuses for good.
+func testARenameCutShortAndTheOldContainerRemoved(t *testing.T) {
+	c := newContainerCell(t)
+	deps := c.deps
+	deps.Fault = func(point string) error {
+		if point == stepRenamedOld+recordPoint {
+			panic(killed{})
+		}
+		return nil
+	}
+	c.cmd(deps, "--to", "0.2.0")
+	id, _ := runOf(t, deps)
+	c.d.set(func() { delete(c.d.byName, "tracepad-app-before-"+id) })
+	if !c.backUntil(id, 2) {
+		t.Errorf("--back never reached 0:\n%s", strings.Join(c.log, "\n"))
+	}
+	c.untouched("end", "ghcr.io/tracepad/tracepad:0.1.0")
+}
+
+// The old image has no name of the release's left and no digest, and the
+// release's tag names another image of the person's: the run tags it with a
+// name of its own, and the person's tag is where it was (the review of #226).
+func testAPersonsTagIsNeverMoved(t *testing.T) {
+	d := newFakeDocker(t)
+	old := d.images["ghcr.io/tracepad/tracepad:0.1.0"]
+	d.images["ghcr.io/tracepad/tracepad:latest"] = old
+	d.volumes["tracepad-app"] = 7
+	d.run(t, "--name", "tracepad-app", "--mount", "type=volume,src=tracepad-app,dst=/data", "-p", "127.0.0.1:4318:4318", "ghcr.io/tracepad/tracepad:latest")
+	deps := containerDeps(t, d)
+	rep, code := runReport(t, deps, "--to", "0.2.0")
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	mine := d.images["ghcr.io/tracepad/tracepad:0.2.1"]
+	d.set(func() {
+		d.images["ghcr.io/tracepad/tracepad:latest"] = d.images["ghcr.io/tracepad/tracepad:0.2.0"]
+		d.images["ghcr.io/tracepad/tracepad:0.1.0"] = mine // the person's own build, under the release's tag
+	})
+	if back, code := runReport(t, deps, "--back", rep.Run.ID); code != exitOK {
+		t.Fatalf("--back: %d %s", code, back.Summary)
+	}
+	if d.images["ghcr.io/tracepad/tracepad:0.1.0"].ID != mine.ID {
+		t.Error("the person's tag was moved")
+	}
+	want := "ghcr.io/tracepad/tracepad:0.1.0-before-" + rep.Run.ID
+	if cur := d.container("tracepad-app"); cur.Config.Image != want {
+		t.Errorf("the old image runs as %q, not %q", cur.Config.Image, want)
+	}
+}
+
+// The host's binary cannot be put in place after a healthy container
+// upgrade: one note, not a second of the skill's (the review of #226).
+func testAFailedReplacementSaysOneThing(t *testing.T) {
+	c := newContainerCell(t)
+	deps := c.deps
+	deps.Fault = func(point string) error {
+		if point == stepBinaryReplacing {
+			return errInjected
+		}
+		return nil
+	}
+	rep, code := c.cmd(deps, "--to", "0.2.0")
+	notes := strings.Join(rep.Notes, "\n")
+	if code != exitOK || !strings.Contains(notes, "was not replaced") || strings.Contains(notes, "skill") {
+		t.Errorf("%d %s\n%s", code, rep.Summary, notes)
+	}
+}
+
+// A way back checks the archive's database on this machine, in the run's
+// directory: no room there refuses it before its first act (the review of
+// #226). freeBytes is a package seam: this test runs alone.
+func TestAContainersWayBackAsksRoomForItsCheck(t *testing.T) {
+	inProcess(t)
+	saved := freeBytes
+	t.Cleanup(func() { freeBytes = saved })
+	c := newContainerCell(t)
+	rep, code := c.cmd(c.deps, "--to", "0.2.0")
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	freeBytes = func(dir string) (int64, error) {
+		if dir == rep.Run.Dir {
+			return mib100, nil
+		}
+		return saved(dir)
+	}
+	back, code := c.cmd(c.deps, "--back", rep.Run.ID)
+	if code == exitOK || !strings.Contains(back.Summary, "no room in "+rep.Run.Dir+" for the check") || !strings.Contains(back.Summary, "nothing was touched") {
+		t.Errorf("%d %s", code, back.Summary)
+	}
+	freeBytes = saved
+	if !c.backUntil(rep.Run.ID, 1) {
+		t.Error("--back did not reach 0 with room")
+	}
+	c.untouched("end", "ghcr.io/tracepad/tracepad:0.1.0")
+}
+
+// The way back writes the archive's database files by the command's own
+// three names, never by a name from the archive (CodeQL go/zipslip): entries
+// that leave the directory, or are absolute, write nothing anywhere.
+func TestAnArchivesNamesNeverLeaveTheCheck(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "check")
+	_ = os.Mkdir(dir, 0o700)
+	db := templateDB(t, 1)
+	archive := filepath.Join(root, "a.tar.gz")
+	body := archiveOf(t, map[string][]byte{"./tracepad.db": db, "../tracepad.db-wal": []byte("x"), "/abs/tracepad.db-shm": []byte("y"), "sub/../../tracepad.db-shm": []byte("z")})
+	if err := os.WriteFile(archive, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readBackInto(archive, Archived{DBSize: -1}, dir); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != dataDBName {
+		t.Errorf("written: %v", entries)
+	}
+	if others, _ := filepath.Glob(filepath.Join(root, "tracepad.db*")); len(others) > 0 {
+		t.Errorf("written outside: %q", others)
 	}
 }

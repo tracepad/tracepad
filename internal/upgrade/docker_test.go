@@ -59,6 +59,9 @@ type fakeDocker struct {
 	// failAfterStart makes `docker run -d` of the release start its
 	// container and answer an error.
 	failAfterStart bool
+	// startsAndErrs is an image whose next `docker run -d` starts its
+	// container and answers an error.
+	startsAndErrs string
 	// links is what busybox's find of links and special files says;
 	// digests, an image's repository digests by its ID.
 	links   string
@@ -351,11 +354,7 @@ func (d *fakeDocker) busybox(args []string) ([]byte, error) {
 	}
 	script := args[len(args)-1]
 	switch {
-	case slices.Contains(args, "find"):
-		return []byte(d.links), nil
-	case slices.Contains(args, "du"):
-		return []byte("2048\t/data\n"), nil
-	case slices.Contains(args, "df"):
+	case strings.Contains(script, "find /data"):
 		if d.failDf {
 			return nil, errors.New("docker run: df: /data: Input/output error")
 		}
@@ -363,7 +362,7 @@ func (d *fakeDocker) busybox(args []string) ([]byte, error) {
 		if room == 0 {
 			room = 99999999
 		}
-		return []byte(fmt.Sprintf("Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100000000 1 %d 1%% /data\n", room)), nil
+		return []byte(fmt.Sprintf("%s===\n2048\t/data\nFilesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100000000 1 %d 1%% /data\n", d.links, room)), nil
 	case strings.Contains(script, "tar czf"):
 		path := filepath.Join(mounts["/backup"]["src"], "data.tar.gz")
 		if _, err := os.Stat(path); err == nil && strings.Contains(script, "set -C") {
@@ -515,6 +514,12 @@ func (d *fakeDocker) create(args []string) ([]byte, error) {
 	}
 	c.NetworkSettings.Ports = c.HostConfig.PortBindings
 	d.byName[name] = c
+	if d.startsAndErrs != "" && ref == d.startsAndErrs {
+		// Started, and running, and the CLI answered an error all the same.
+		d.startsAndErrs = ""
+		d.boot(c)
+		return nil, errors.New("docker run: error waiting for container: unexpected EOF")
+	}
 	if d.failAfterStart && c.Config.Image != d.brokenRef && strings.HasSuffix(ref, ":0.2.0") {
 		// The container started, ran on its volume and exited, and the CLI
 		// answered an error all the same.

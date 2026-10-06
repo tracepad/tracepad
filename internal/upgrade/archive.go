@@ -197,8 +197,10 @@ func readBackInto(path string, want Archived, dbDir string) (ReadBack, error) {
 			return ReadBack{}, fmt.Errorf("%s holds %q, a link, which a backup never has", path, h.Name)
 		}
 		sink := io.Writer(io.Discard)
-		if dbDir != "" && h.Typeflag == tar.TypeReg && databaseFiles(cleanEntry(h.Name)) {
-			out, err := os.OpenFile(filepath.Join(dbDir, cleanEntry(h.Name)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if name := databaseFile(cleanEntry(h.Name)); dbDir != "" && h.Typeflag == tar.TypeReg && name != "" {
+			// The name written is one of the command's own three, never the
+			// archive's (CodeQL go/zipslip).
+			out, err := os.OpenFile(filepath.Join(dbDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 			if err != nil {
 				return ReadBack{}, err
 			}
@@ -367,7 +369,16 @@ func quickCheck(ctx context.Context, dbPath string) error {
 	return nil
 }
 
-// databaseFiles are the entries a check of an archive's database needs.
-func databaseFiles(name string) bool {
-	return name == dataDBName || name == dataDBName+"-wal" || name == dataDBName+"-shm"
+// databaseFile is the name a check of an archive's database writes an entry
+// to — one of three constants — or "" for an entry it does not need.
+func databaseFile(entry string) string {
+	switch entry {
+	case dataDBName:
+		return dataDBName
+	case dataDBName + "-wal":
+		return dataDBName + "-wal"
+	case dataDBName + "-shm":
+		return dataDBName + "-shm"
+	}
+	return ""
 }

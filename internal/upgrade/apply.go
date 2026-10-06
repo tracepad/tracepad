@@ -37,6 +37,9 @@ type job struct {
 	// ctr is the container a container run recreates: its inspect and its
 	// run, as the plan read them (#47).
 	ctr Container
+	// volumeFreeKB is the room on a container's volume's file system, as
+	// the preparation's look at it found; 0 when it did not look.
+	volumeFreeKB int64
 	// held are the database locks the command holds, by data directory:
 	// from the stop until a server starts on the data, and through a way
 	// back (spec 054 #26, #28, #32).
@@ -1018,7 +1021,11 @@ func (j *job) finishHealthy(ctx context.Context) {
 		// The host's CLI to the container's version, once it is healthy. One
 		// that cannot be put there is a note: the container is upgraded.
 		if err := j.putNew(ctx); err != nil {
+			// The skill follows the binary, and waits for the --check that
+			// puts it there: one note, not a second of the skill's (the
+			// review of #226).
 			j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not replaced: "+err.Error())
+			return
 		}
 	}
 	// A container run that kept the host's binary on purpose — a server

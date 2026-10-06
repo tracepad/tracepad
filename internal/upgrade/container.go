@@ -61,14 +61,17 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 	if err := r.ensureBusybox(ctx); err != nil {
 		return 0, err.Error()
 	}
-	// What a restore would not make again — a link, a device, a pipe —
-	// refuses the run here, before anything stops: the archive's read-back
-	// and the way back hold the same rule (the review of #226).
-	if out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+now.Volume, "dst=/data", "readonly"), busybox,
-		"find", "/data", "(", "-type", "l", "-o", "-type", "f", "-links", "+1", "-o", "!", "-type", "f", "!", "-type", "d", ")", "-print"); err != nil {
-		return 0, "could not look at what the volume " + now.Volume + " holds: " + firstLine(err.Error())
-	} else if found := strings.Fields(string(out)); len(found) > 0 {
-		return 0, fmt.Sprintf("the volume %s holds %s, a link or a special file, which a way back's restore would not make again: back it up and upgrade it yourself", now.Volume, found[0])
+	// One look at the volume, from one busybox container (the review of
+	// #226): what a restore would not make again — a link, a device, a pipe —
+	// refuses the run here, before anything stops, as the archive's
+	// read-back and the way back refuse it; what it holds; and the room
+	// beside it.
+	look, err := r.lookAt(ctx, now.Volume)
+	if err != nil {
+		return 0, "could not look at the volume " + now.Volume + ": " + firstLine(err.Error())
+	}
+	if len(look.odd) > 0 {
+		return 0, fmt.Sprintf("the volume %s holds %s, a link or a special file, which a way back's restore would not make again: back it up and upgrade it yourself", now.Volume, look.odd[0])
 	}
 	j.ctr = now
 	// What the way back recreates the container from: its inspect and its
@@ -93,15 +96,12 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 	if err := os.WriteFile(filepath.Join(j.dir, "env"), []byte(env), 0o600); err != nil {
 		return 0, err.Error()
 	}
-	kb, err := r.busyboxKB(ctx, now.Volume, "du", "-sk", "/data")
-	if err != nil {
-		return 0, "could not measure the volume " + now.Volume + ": " + firstLine(err.Error())
-	}
 	hc := now.inspect.HostConfig
 	st.Container = &ContainerState{Name: now.Name, ID: now.inspect.ID, Volume: now.Volume, URL: now.URL,
 		OldRef: now.Ref, OldImage: now.inspect.Image, NewRef: newRef, LogDriver: info.logDriver,
 		Restart: restartArg(hc.RestartPolicy.Name, hc.RestartPolicy.MaximumRetryCount)}
-	return kb << 10, ""
+	j.volumeFreeKB = look.freeKB
+	return look.usedKB << 10, ""
 }
 
 // ensureBusybox has busybox here, pulling it when it is not: it archives and
@@ -116,26 +116,36 @@ func (r *runner) ensureBusybox(ctx context.Context) error {
 	return nil
 }
 
-// busyboxKB runs a measure of a volume — `du -sk` of what it holds, or `df
-// -Pk` of the room on its file system — from a busybox container, and answers
-// the kilobytes.
-func (r *runner) busyboxKB(ctx context.Context, volume string, measure ...string) (int64, error) {
-	args := append([]string{"run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox}, measure...)
-	out, err := r.deps.Docker.Run(ctx, args...)
+// volumeLook is one look at a volume from busybox: the paths of what a
+// restore would not make again, the kilobytes it holds, and the kilobytes
+// free on its file system.
+type volumeLook struct {
+	odd            []string
+	usedKB, freeKB int64
+}
+
+// lookAt looks at a volume, mounted read-only, from one busybox container.
+func (r *runner) lookAt(ctx context.Context, volume string) (volumeLook, error) {
+	script := `find /data \( -type l -o -type f -links +1 -o ! -type f ! -type d \) -print; echo ===; du -sk /data; df -Pk /data`
+	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox, "sh", "-c", script)
 	if err != nil {
-		return 0, err
+		return volumeLook{}, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	field := 0
-	if measure[0] == "df" {
-		// Filesystem 1024-blocks Used Available Capacity Mounted-on
-		field = 3
+	odd, rest, ok := strings.Cut(string(out), "===\n")
+	lines := strings.Split(strings.TrimSpace(rest), "\n")
+	if !ok || len(lines) < 3 {
+		return volumeLook{}, fmt.Errorf("busybox said %q", strings.TrimSpace(string(out)))
 	}
-	f := strings.Fields(lines[len(lines)-1])
-	if len(f) <= field {
-		return 0, fmt.Errorf("%s said %q", measure[0], strings.TrimSpace(string(out)))
+	look := volumeLook{odd: strings.Fields(odd)}
+	used := strings.Fields(lines[0])
+	free := strings.Fields(lines[len(lines)-1]) // Filesystem 1024-blocks Used Available Capacity Mounted-on
+	if len(used) == 0 || len(free) < 4 {
+		return volumeLook{}, fmt.Errorf("busybox said %q", strings.TrimSpace(string(out)))
 	}
-	return strconv.ParseInt(f[field], 10, 64)
+	if look.usedKB, err = strconv.ParseInt(used[0], 10, 64); err == nil {
+		look.freeKB, err = strconv.ParseInt(free[3], 10, 64)
+	}
+	return look, err
 }
 
 // loadContainer reads what a way back recreates the container from — its
@@ -455,13 +465,29 @@ func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64
 			}
 		}
 		// The restore goes into a new volume on the old one's file system:
-		// room for it there, and 100 MiB.
-		free, err := r.busyboxKB(ctx, cs.Volume, "df", "-Pk", "/data")
-		if err != nil {
-			return fmt.Errorf("the room for a restore of the volume %s cannot be told (%s)", cs.Volume, firstLine(err.Error()))
+		// room for it there, and 100 MiB — as the preparation's look at it
+		// found, or a look of its own.
+		free := j.volumeFreeKB
+		if free <= 0 {
+			look, err := r.lookAt(ctx, cs.Volume)
+			if err != nil {
+				return fmt.Errorf("the room for a restore of the volume %s cannot be told (%s)", cs.Volume, firstLine(err.Error()))
+			}
+			free = look.freeKB
 		}
 		if need := restoreBytes + mib100; free<<10 < need {
 			return fmt.Errorf("no room beside the volume %s for the restore a way back may need: %d MiB free, %d MiB needed", cs.Volume, free>>10, need>>20)
+		}
+		// Its check reads the archive's database on this machine, in the
+		// run's directory: room for it there too (the review of #226).
+		if st.Archive != nil {
+			hostFree, err := freeBytes(j.dir)
+			if err != nil {
+				return fmt.Errorf("the room in %s for the check of the archive's database cannot be told (%v)", j.dir, err)
+			}
+			if need := st.Archive.DBSize + mib100; hostFree < need {
+				return fmt.Errorf("no room in %s for the check of the archive's database: %d MiB free, %d MiB needed", j.dir, hostFree>>20, need>>20)
+			}
 		}
 	}
 	return nil
@@ -527,52 +553,80 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	}
 	vol := cs.Volume + "-" + st.Run
 	fresh := false
-	running := false
-	if st.has(stepBackStarted) {
-		ok, err := r.containerRunning(ctx, cs.BackID, false)
-		if err != nil {
-			return j.fail(fmt.Sprintf("docker cannot say whether %s runs (%s); nothing was touched", cs.Name, firstLine(err.Error())))
-		}
-		running = ok
+	running, out, ok := j.runs(ctx, cs.BackID)
+	if !ok {
+		return out
 	}
-	if !running {
-		j.begin()
-		ref, err := j.oldRef(ctx)
-		if err != nil {
-			return j.fail(err.Error() + "; nothing was started")
-		}
-		if out, ok := j.clearName(ctx, cs.BackID); !ok {
+	if !running || !st.has(stepBackStarted) {
+		if fresh, out, ok = j.runOld(ctx, vol); !ok {
 			return out
 		}
-		// The container an earlier attempt ran is started again; otherwise
-		// the old image runs on the restored volume.
-		var made []byte
-		err = j.act(stepBackStarted, "run "+ref+" as "+cs.Name+" on "+vol, func() error {
-			if cs.BackID != "" {
-				if c, err := r.inspectOne(ctx, cs.BackID); err != nil {
-					return err
-				} else if c != nil {
-					_, err := docker.Run(ctx, "start", cs.BackID)
-					return err
-				}
-			}
-			out, err := docker.Run(ctx, runArgs(j.ctr, cs.Name, ref, filepath.Join(j.dir, "env"), vol)...)
-			made, fresh = out, err == nil
-			return err
-		})
-		if err != nil {
-			return j.fail(fmt.Sprintf("%s did not start on %s (%s); run --back again", st.From, vol, firstLine(err.Error())))
-		}
-		if fresh {
-			cs.BackID = strings.TrimSpace(string(made))
-			j.done("ran %s as %s on %s; the volume %s keeps what the new version left", ref, cs.Name, vol, cs.Volume)
-		} else {
-			j.done("started %s again on %s", cs.Name, vol)
-		}
-		j.step(stepBackStarted)
 	}
 	j.backHostBinary(ctx)
 	return j.checkBackContainer(ctx, cs.BackID, fresh)
+}
+
+// runs says whether the container id runs, as a way back asks before it
+// acts: a docker that cannot say refuses, with nothing touched.
+func (j *job) runs(ctx context.Context, id string) (bool, wentBack, bool) {
+	ok, err := j.r.containerRunning(ctx, id, false)
+	if err != nil {
+		return false, j.fail(fmt.Sprintf("docker cannot say whether %s runs (%s); nothing was touched", j.st.Container.Name, firstLine(err.Error()))), false
+	}
+	return ok, wentBack{}, true
+}
+
+// runOld runs the old image under the run's name — on vol, the restored
+// volume, or on its own when vol is "" — or starts again the container an
+// earlier attempt ran (BackID). It answers whether it made a container. A
+// docker run that answers an error after its container started is a start,
+// read as settle reads it, and the run's own: recorded, never "someone
+// else's" to the next attempt, which refused for good (the review of #226).
+func (j *job) runOld(ctx context.Context, vol string) (bool, wentBack, bool) {
+	r, cs := j.r, j.st.Container
+	j.begin()
+	ref, err := j.oldRef(ctx)
+	if err != nil {
+		return false, j.fail(err.Error() + "; nothing was started"), false
+	}
+	if out, ok := j.clearName(ctx, cs.BackID); !ok {
+		return false, out, false
+	}
+	on := ""
+	if vol != "" {
+		on = " on " + vol
+	}
+	fresh := false
+	var made []byte
+	err = j.act(stepBackStarted, "run "+ref+" as "+cs.Name+on, func() error {
+		if cs.BackID != "" {
+			if c, err := r.inspectOne(ctx, cs.BackID); err != nil {
+				return err
+			} else if c != nil {
+				_, err := r.deps.Docker.Run(ctx, "start", cs.BackID)
+				return err
+			}
+		}
+		out, err := r.deps.Docker.Run(ctx, runArgs(j.ctr, cs.Name, ref, filepath.Join(j.dir, "env"), vol)...)
+		made, fresh = out, err == nil
+		return err
+	})
+	if err != nil {
+		if started, serr := j.settleContainer(ctx, stepBackStarted); serr == nil && started {
+			j.step(stepBackStarted)
+			j.done("%s answered an error and started %s all the same", ref, cs.Name)
+			return false, wentBack{}, true
+		}
+		return false, j.fail(fmt.Sprintf("%s did not start%s (%s); run --back again", j.st.From, on, firstLine(err.Error()))), false
+	}
+	if fresh {
+		cs.BackID = strings.TrimSpace(string(made))
+		j.done("ran %s as %s%s; the volume %s keeps what the new version left", ref, cs.Name, on, cs.Volume)
+	} else {
+		j.done("started %s again%s", cs.Name, on)
+	}
+	j.step(stepBackStarted)
+	return fresh, wentBack{}, true
 }
 
 // startOld starts the old container again, under its name, with the restart
@@ -581,13 +635,25 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 func (j *job) startOld(ctx context.Context) wentBack {
 	r, cs := j.r, j.st.Container
 	if j.st.has(stepBackStarted) {
-		ok, err := r.containerRunning(ctx, cs.ID, false)
-		if err != nil {
-			return j.fail(fmt.Sprintf("docker cannot say whether %s runs (%s); nothing was touched", cs.Name, firstLine(err.Error())))
+		running, out, ok := j.runs(ctx, cs.ID)
+		if !ok {
+			return out
 		}
-		if ok {
+		if running {
 			return j.checkBackContainer(ctx, cs.ID, false)
 		}
+	}
+	// Removed by the person since — after a run cut short at its rename,
+	// say: the old image runs again from the run's record, on the volume the
+	// new version never ran on (the review of #226).
+	if c, err := r.inspectOne(ctx, cs.ID); err != nil {
+		return j.fail(fmt.Sprintf("docker cannot say what %s is (%s); nothing was touched", cs.ID[:12], firstLine(err.Error())))
+	} else if c == nil {
+		fresh, out, ok := j.runOld(ctx, "")
+		if !ok {
+			return out
+		}
+		return j.checkBackContainer(ctx, cs.BackID, fresh)
 	}
 	j.begin()
 	err := j.act(stepBackStarted, "start "+cs.Name+" again with its restart policy "+cs.Restart, func() error {
@@ -616,11 +682,11 @@ func (j *job) renameBack(ctx context.Context) wentBack {
 	cs := st.Container
 	if st.has(stepBackStarted) {
 		// Taken up after it ran: started again if it was stopped since.
-		ok, err := r.containerRunning(ctx, cs.BackID, false)
-		if err != nil {
-			return j.fail(fmt.Sprintf("docker cannot say whether %s runs (%s); nothing was touched", cs.Name, firstLine(err.Error())))
-		}
+		running, out, ok := j.runs(ctx, cs.BackID)
 		if !ok {
+			return out
+		}
+		if !running {
 			if is, err := j.nameIs(ctx, cs.BackID); err != nil || !is {
 				return j.fail("the container named " + cs.Name + " is not the one this run's way back started; nothing was touched")
 			}
@@ -648,26 +714,13 @@ func (j *job) renameBack(ctx context.Context) wentBack {
 	j.begin()
 	if before == nil && !named {
 		// Removed by the person since: the old image runs again, as the
-		// run recorded it was created.
-		ref, err := j.oldRef(ctx)
-		if err != nil {
-			return j.fail(err.Error() + "; nothing was started")
-		}
-		if out, ok := j.clearName(ctx, ""); !ok {
+		// run recorded it was created, on the volume nothing else ran on.
+		fresh, out, ok := j.runOld(ctx, "")
+		if !ok {
 			return out
 		}
-		var out []byte
-		err = j.act(stepBackStarted, "run "+ref+" as "+cs.Name, func() (err error) {
-			out, err = r.deps.Docker.Run(ctx, runArgs(j.ctr, cs.Name, ref, filepath.Join(j.dir, "env"), "")...)
-			return err
-		})
-		if err != nil {
-			return j.fail(fmt.Sprintf("%s did not start (%s); run --back again", st.From, firstLine(err.Error())))
-		}
-		cs.BackID = strings.TrimSpace(string(out))
-		j.step(stepBackStarted)
-		j.done("%s was gone; ran %s as %s again", j.before(), ref, cs.Name)
-		return j.checkBackContainer(ctx, cs.BackID, true)
+		j.done("%s was gone; the old image runs as %s again", j.before(), cs.Name)
+		return j.checkBackContainer(ctx, cs.BackID, fresh)
 	}
 	if before != nil {
 		if before.ID != cs.ID {
@@ -852,6 +905,16 @@ func (j *job) oldRef(ctx context.Context) (string, error) {
 			return ref, err
 		}
 	}
+	taken := func(ref string) (bool, error) {
+		_, err := r.deps.Docker.Run(ctx, "image", "inspect", "--format", "{{.Id}}", ref)
+		switch {
+		case err == nil:
+			return true, nil
+		case strings.Contains(err.Error(), "No such image"):
+			return false, nil
+		}
+		return false, fmt.Errorf("docker cannot say which image %s names (%s)", ref, firstLine(err.Error()))
+	}
 	out, err := r.deps.Docker.Run(ctx, "image", "inspect", "--format", "{{json .RepoDigests}}", cs.OldImage)
 	if err != nil {
 		return "", fmt.Errorf("docker cannot say the digests of %s (%s)", cs.OldImage, firstLine(err.Error()))
@@ -864,10 +927,26 @@ func (j *job) oldRef(ctx context.Context) (string, error) {
 			}
 		}
 	}
-	if _, err := r.deps.Docker.Run(ctx, "tag", cs.OldImage, release); err != nil {
-		return "", fmt.Errorf("the old image %s has no name of the release's to run it by, and could not be given %s (%s)", cs.OldImage, release, firstLine(err.Error()))
+	// A tag of the person's is never moved (the review of #226): the
+	// release's when it names nothing, else one of the run's own.
+	tag := release
+	if busy, err := taken(release); err != nil {
+		return "", err
+	} else if busy {
+		tag = release + "-before-" + j.st.Run
+		if ok, err := names(tag); err != nil || ok {
+			return tag, err
+		}
+		if busy, err := taken(tag); err != nil {
+			return "", err
+		} else if busy {
+			return "", fmt.Errorf("the old image %s has no name of the release's to run it by, and %s and %s name other images", cs.OldImage, release, tag)
+		}
 	}
-	return release, nil
+	if _, err := r.deps.Docker.Run(ctx, "tag", cs.OldImage, tag); err != nil {
+		return "", fmt.Errorf("the old image %s has no name of the release's to run it by, and could not be given %s (%s)", cs.OldImage, tag, firstLine(err.Error()))
+	}
+	return tag, nil
 }
 
 // nameIs says whether the container under the run's name is the one with
@@ -979,6 +1058,14 @@ func (j *job) settleContainer(ctx context.Context, step string) (bool, error) {
 			}
 			return true, nil
 		case under != nil && under.ID == cs.ID:
+			return false, nil
+		}
+		// Under neither name: removed since, by the person — the rename's
+		// outcome no longer matters, and the way back runs the old image
+		// again from the run's record (the review of #226).
+		if gone, err := r.inspectOne(ctx, cs.ID); err != nil {
+			return false, err
+		} else if gone == nil {
 			return false, nil
 		}
 		return false, fmt.Errorf("the container %s is neither %s nor %s", cs.ID[:12], cs.Name, j.before())
