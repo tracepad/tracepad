@@ -1,0 +1,2556 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/docker/">
+      
+      
+        <link rel="prev" href="../install/">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Docker - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#docker" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Docker
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-keys-are-printed-once-to-the-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The keys are printed once, to the log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-image-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the image is
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the image is">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-hub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Hub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-volume-and-who-owns-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The volume, and who owns it
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The volume, and who owns it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-else-can-read-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who else can read it
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ingest-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingest under load
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reads-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads under load
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serving-over-tls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serving over TLS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stopping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading-and-backing-up-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading, and backing up first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-it-yourself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building it yourself
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-keys-are-printed-once-to-the-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The keys are printed once, to the log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-image-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the image is
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the image is">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-hub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Hub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-volume-and-who-owns-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The volume, and who owns it
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The volume, and who owns it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-else-can-read-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who else can read it
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ingest-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingest under load
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reads-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads under load
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serving-over-tls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serving over TLS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stopping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading-and-backing-up-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading, and backing up first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-it-yourself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building it yourself
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/docker.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="docker">Docker</h1>
+<p><code>ghcr.io/tracepad/tracepad</code> is the server, the web interface and the CLI in one
+image — the same binary the release archives carry, built from the <code>Dockerfile</code>
+in this repository. It runs as a non-root user, keeps everything under <code>/data</code>,
+and listens on <code>4318</code>. The same image is on Docker Hub as
+<a href="#docker-hub"><code>tracepad/tracepad</code></a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p>That is the whole command: the image already sets <code>TRACEPAD_DATA_DIR=/data</code> and
+<code>TRACEPAD_LISTEN=:4318</code>, so there is nothing to configure to get a running
+store. The interface is on <a href="http://localhost:4318/">http://localhost:4318/</a>.</p>
+<p><strong>The port is published on loopback, and every example here does the same.</strong>
+<code>-p 4318:4318</code> would publish it on every interface of the host, and Tracepad
+speaks plain HTTP: the passwords people sign in with, their session cookies and
+your applications' keys would cross the network readable by anything on the
+path. Keep <code>127.0.0.1:</code> for applications on the same machine; to serve anyone
+else, put a TLS proxy in front — <a href="#serving-over-tls">Serving over TLS</a>. Inside
+the container the server cannot see where its port was published, so it says
+this once at every start, as an <code>INFO</code> line, whatever <code>TRACEPAD_URL</code> says. (The
+same binary on a host listens on loopback unless told otherwise, and bound
+beyond it makes this a <code>WARN</code>.) The note reads the same whatever the
+publish is, so it does not tell you when the port <em>is</em> exposed: with
+<code>--network host</code>, in a Kubernetes pod, or with <code>-p 4318:4318</code>, other machines
+reach the server over plain HTTP and nothing louder is printed.</p>
+<h2 id="the-keys-are-printed-once-to-the-log">The keys are printed once, to the log</h2>
+<p>The first run creates the database, a project called <code>default</code> and a key for
+your application, and prints it exactly as it does on a host
+(<a href="../quickstart/">quickstart</a>) — which for a container means its stdout:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>logs<span class="w"> </span>tracepad
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Project "default" created. Connect your app with either:
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  # OpenTelemetry SDK
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer tp-sk-…"
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  …
+</code></pre></div>
+<p><strong>Copy the secret key somewhere.</strong> It is stored hashed, so this is the only
+time it is printable, and it is not printed again on later starts. There is
+deliberately no file under <code>/data</code> holding it: that would put a secret on a
+volume outliving the container, and give anyone who can read the volume a way
+to learn a key that a host install does not have.</p>
+<p><strong>The log still holds it.</strong> Docker keeps a container's output for as long as
+the container exists, and with the default <code>json-file</code> driver it never rotates
+it: whoever can run <code>docker logs tracepad</code> — or read the log file under the
+daemon's directory, or receive whatever ships your logs elsewhere — can read
+that key next month. That is why it holds the <code>ingest</code> scope alone: whoever
+finds it can send spans into the project, not read what is in it. A key that
+reads — for the CLI, an agent, the eval harness — is minted in the interface
+and shown in your browser, never in this log
+(<a href="../quickstart/#3-look-at-them">quickstart</a>). Treat the printed key as exposed
+once it has been copied out all the same, and rotate onto one that was never
+printed: in the web interface, under
+<strong>Settings → Project → API keys</strong>, mint a pair — with the <code>ingest</code> scope alone
+for an application (<a href="../api/#scopes">api.md</a>) — move your applications onto it,
+and revoke the printed one. A project key cannot do this for you — no key
+mints or revokes keys — so from a terminal it takes the admin token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>TRACEPAD_API_KEY<span class="w">   </span><span class="c1"># paste TRACEPAD_ADMIN_TOKEN</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>projects<span class="w"> </span>ls<span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">ID</span><span class="o">=</span>…<span class="w">   </span><span class="c1"># the project's id from that listing: the token reaches every project</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># move your applications onto the new pair, then revoke the printed one</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>keys<span class="w"> </span>rm<span class="w"> </span>tp-pk-…<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
+</code></pre></div>
+<p>Inside the container the admin token is already in the environment, or in the
+file <code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, and the commands the CLI's help marks
+<code>(admin token)</code> read it from there when no key is set (the server being on this
+machine, which inside the container it is) — so
+<code>docker exec tracepad /tracepad keys ls --url http://localhost:4318</code> needs no
+<code>-e</code> and no paste. No other command takes it that way; they ask for a key.</p>
+<p><strong><code>docker exec</code> is for commands that talk to the server, and <code>skills install</code>
+does not.</strong> It writes files, and in the running container they would land in the
+container's own layer — gone with the container, and the image has no shell to
+look for them with. Inside a container <code>skills install</code> refuses a target that
+is not on a mounted volume; run it in a container of its own, onto a directory
+you mount, as <a href="../agents/#from-the-docker-image">agents.md</a> shows.</p>
+<p>A key minted this way is shown in your browser or printed to your terminal,
+never to the container's log. A deployment that declares its keys in <code>TRACEPAD_PROJECTS</code>
+from the start never has one printed: the server names the variable where the
+secret would go instead of repeating it.</p>
+<p>The same log carries the <strong>setup link</strong> — the way into the browser interface,
+until this deployment has an owner:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>  http://localhost:4318/setup#token=…
+</code></pre></div>
+<p>Its token is minted per start and held in memory, never on the volume, and it
+works for 24 hours: a <code>docker restart</code> prints a new one, and a log kept from
+last week opens nothing. A deployment that makes its first owner with the admin
+token can set <code>TRACEPAD_SETUP=off</code>, and no link is minted or printed at all.
+The address in it is the container's own guess; behind a proxy, set
+<code>TRACEPAD_URL</code> and the link is printed at the address your people use. See
+<a href="../accounts/">accounts.md</a>.</p>
+<p>There is deliberately no environment variable for the first owner's password:
+one in <code>docker-compose.yml</code> is the thing accounts exist to stop pasting.</p>
+<p>Any command can be run against the server from inside its own container —
+<code>/tracepad</code> is the same binary, and <code>--url http://localhost:4318</code> points it at
+the server it is sharing with. Hand it the credential through the environment,
+as <code>-e TRACEPAD_API_KEY</code> with no value — Docker copies the variable from your
+shell — and not as <code>--key</code>: an argument is in your shell's history and in the
+process list of the host and the container while it runs, where every account
+can read it. <code>read -s</code> takes the value without echoing it or leaving it in the
+history either.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>TRACEPAD_API_KEY<span class="w">   </span><span class="c1"># paste the key</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--url<span class="w"> </span>http://localhost:4318
+</code></pre></div>
+<p><strong>If the key is lost</strong>, nothing the key could do is left to do with it — and
+minting a new one was never among them. The credentials that mint keys are an
+owner's or editor's session and the admin token, which is why a deployment you
+cannot afford to lock yourself out of should be started with one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># A token of at least 32 characters, generated rather than invented; a shorter</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># one stops the server from starting.</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="o">(</span><span class="w"> </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="p">;</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'TRACEPAD_ADMIN_TOKEN=%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span>tracepad.env<span class="w"> </span><span class="o">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span>--env-file<span class="w"> </span>./tracepad.env<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s1">'s/^TRACEPAD_ADMIN_TOKEN=//p'</span><span class="w"> </span>tracepad.env<span class="k">)</span><span class="s2">"</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>projects<span class="w"> </span>ls<span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="nv">ID</span><span class="o">=</span>…<span class="w">   </span><span class="c1"># the project's id from that listing</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-e<span class="w"> </span>TRACEPAD_API_KEY<span class="w"> </span>tracepad<span class="w"> </span>/tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--url<span class="w"> </span>http://localhost:4318
+</code></pre></div>
+<p>Without one, an owner or editor signed in to the web interface mints a pair
+in the project's settings. <code>TRACEPAD_PROJECTS</code> is not a way back in: it creates
+the projects it names that do not exist yet and leaves an existing project's
+keys as they are. See <a href="../admin/">admin.md</a> and <a href="../cli/">cli.md</a>.</p>
+<h2 id="what-the-image-is">What the image is</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Name</td>
+<td><code>ghcr.io/tracepad/tracepad</code>, and <code>tracepad/tracepad</code> on <a href="#docker-hub">Docker Hub</a></td>
+</tr>
+<tr>
+<td>Tags</td>
+<td><code>X.Y.Z</code>, <code>X.Y</code>, <code>latest</code>; a pre-release publishes its exact tag alone, on GHCR</td>
+</tr>
+<tr>
+<td>Platforms</td>
+<td><code>linux/amd64</code>, <code>linux/arm64</code></td>
+</tr>
+<tr>
+<td>User</td>
+<td><code>nonroot</code>, uid <strong>65532</strong></td>
+</tr>
+<tr>
+<td>Entrypoint</td>
+<td><code>/tracepad</code> — arguments are the server's flags</td>
+</tr>
+<tr>
+<td>Port</td>
+<td><code>4318</code></td>
+</tr>
+<tr>
+<td>Volume</td>
+<td><code>/data</code></td>
+</tr>
+<tr>
+<td>Set in the image</td>
+<td><code>TRACEPAD_DATA_DIR=/data</code>, <code>TRACEPAD_LISTEN=:4318</code>, <code>TRACEPAD_IN_CONTAINER=1</code> (turns the plain-HTTP warning into a note, printed at every start whatever <code>TRACEPAD_URL</code> is)</td>
+</tr>
+<tr>
+<td>Health</td>
+<td><code>HEALTHCHECK</code> running <code>tracepad health</code></td>
+</tr>
+<tr>
+<td>Licences</td>
+<td><code>/usr/share/doc/tracepad/</code> — <code>LICENSE</code>, <code>NOTICE</code>, <code>THIRD_PARTY_NOTICES</code> (every Go module and npm package the binary carries) and <code>third_party/</code></td>
+</tr>
+</tbody>
+</table>
+<p>There is no shell in it. The runtime layer is distroless — the binary, CA
+roots, zone data and nothing else — so there is no package manager to run, no
+<code>sh</code> to exec into, and nothing to patch inside the container. Upgrading is
+pulling a new image.</p>
+<p>Pin a tag in anything you deploy. <code>latest</code> is convenient for a laptop and is
+the wrong choice for a machine you are not watching; <code>X.Y</code> is the pin for
+"patches yes, surprises no".</p>
+<h3 id="docker-hub">Docker Hub</h3>
+<p>Every stable release is also on Docker Hub, as <code>docker.io/tracepad/tracepad</code>
+(<code>docker pull tracepad/tracepad</code>), with the same exact tags (<code>0.1.0</code>) as on GHCR:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>tracepad/tracepad
+</code></pre></div>
+<p>GHCR is where releases are published and what the examples here use; Docker
+Hub carries a copy of the same multi-architecture image, byte for byte, so
+the digest of <code>tracepad/tracepad:0.1.0</code> is the digest of
+<code>ghcr.io/tracepad/tracepad:0.1.0</code>. Pick the one your network can reach, or
+the one your registry mirror already caches. A pre-release (<code>0.2.0-rc.1</code>) is
+on GHCR only.</p>
+<p>The moving tags, <code>X.Y</code> and <code>latest</code>, follow the same rule on both — only
+forward, to the newest release of the line and overall — but each registry
+applies it when its own copy is made, so while two releases overlap they can
+end up pointing at different releases: GHCR's <code>latest</code> stays at whichever
+release finished publishing last, Docker Hub's follows the newest tag, and
+neither registry corrects the other until the next release that moves it.
+Anything you deploy should pin an exact tag, or a digest, which is the same
+on both.</p>
+<p>The build-provenance attestation lives with GHCR's image and is found by
+digest, so it covers the copy: verify it exactly as for the GHCR image, by
+name or by the digest you pulled.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>oci://docker.io/tracepad/tracepad:0.1.0<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad
+</code></pre></div>
+<p>Without a terminal (a script, CI) a verification that passes prints nothing:
+the exit code is the answer. When a log should carry the signer and the commit
+too, ask for them (the details are in
+<a href="../install/#verify-what-you-downloaded">install.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>gh<span class="w"> </span>attestation<span class="w"> </span>verify<span class="w"> </span>oci://docker.io/tracepad/tracepad:0.1.0<span class="w"> </span>--repo<span class="w"> </span>tracepad/tracepad<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--format<span class="w"> </span>json<span class="w"> </span>--jq<span class="w"> </span><span class="s1">'.[0].verificationResult.signature.certificate</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s1">                      | {buildSignerURI, sourceRepositoryDigest}'</span>
+</code></pre></div>
+<p>Do not add <code>--bundle-from-oci</code>: that reads the attestation from the registry
+you name, and Docker Hub does not hold it.</p>
+<p>The copy is made after the GHCR image is published, so for a short while after
+a release — longer, if the copy has to be repeated — <code>0.1.0</code> can be on GHCR and
+not yet on Docker Hub. The GHCR image is never held back by it.</p>
+<h2 id="the-volume-and-who-owns-it">The volume, and who owns it</h2>
+<p>The server runs as uid 65532 and writes the database as that user. <strong>A named
+volume is the path of least resistance</strong>: Docker creates it with the ownership
+the image declares, and nothing else is needed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p>A <strong>host directory</strong> bind-mounted over <code>/data</code> keeps the host's ownership
+instead, and if that is root the server cannot create its database and exits
+saying so:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ERROR fatal err="open /data/tracepad.db: … unable to open database file (14)"
+</code></pre></div>
+<p>The fix is to create the directory for the user that will write it, once,
+before the first run — owned by uid 65532 and closed to everyone else:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0700</span><span class="w"> </span>-o<span class="w"> </span><span class="m">65532</span><span class="w"> </span>-g<span class="w"> </span><span class="m">65532</span><span class="w"> </span>./tracepad-data
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/tracepad-data:/data"</span><span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p><code>mkdir -p</code> and a <code>chown</code> would work too, and leave the directory <code>0755</code> until
+the server's first start closes it (<a href="#who-else-can-read-it">Who else can read it</a>).</p>
+<p>You can also run the container as root with <code>--user 0:0</code>, and it will work. Do
+not: this store holds every prompt and completion your application ever sent,
+and a container that writes <code>/data</code> as root is one that hands root-owned files
+back to your host and runs a network service as root to do it.</p>
+<h3 id="who-else-can-read-it">Who else can read it</h3>
+<p>The database holds every prompt and completion, the accounts' password hashes
+and the key that signs media uploads, so the server keeps it to its owner: the
+data directory <code>0700</code>, the database, its <code>-wal</code> and <code>-shm</code>, its lock file
+(<code>tracepad.db.lock</code>) and the pre-migration backups <code>0600</code>. It creates them that way, and it tightens them
+<strong>at every start</strong> — an install from before this, whose files were <code>0644</code> in a
+<code>0755</code> directory, is closed by the first start of the new version. The image
+creates <code>/data</code> as <code>0700</code>, so a new named volume starts closed.</p>
+<p>The directory is tightened only while it holds nothing but the database's own
+files. One you share with other things — <code>TRACEPAD_DATA_DIR=.</code>, a home
+directory — keeps the mode you gave it, and the log says so at every start, a
+<code>WARN</code> naming the directory and one of the other files; the database files in
+it are <code>0600</code> all the same. Give the database a directory of its own.</p>
+<p>When a mode cannot be changed — a filesystem without Unix modes, a directory
+the server does not own — the server starts anyway and says so in its log, a
+<code>WARN</code> naming the file and its mode. Close that one yourself; for a host
+directory, through <code>sudo</code>, since once it is <code>0700</code> and owned by uid 65532 your
+own shell can no longer list it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">0700</span><span class="w"> </span>./tracepad-data
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sudo<span class="w"> </span>find<span class="w"> </span>./tracepad-data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db*'</span><span class="w"> </span>-exec<span class="w"> </span>chmod<span class="w"> </span><span class="m">0600</span><span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
+</code></pre></div>
+<h2 id="configuration">Configuration</h2>
+<p>Every <code>TRACEPAD_*</code> variable the binary understands (<a href="../configuration/">configuration.md</a>
+lists them all, and <code>tracepad help</code> prints the server's) is passed with <code>-e</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">TRACEPAD_STORE_RAW</span><span class="o">=</span>off<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">TRACEPAD_SWEEP_INTERVAL</span><span class="o">=</span>30m<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p>Three of them deserve a warning.</p>
+<p><code>TRACEPAD_URL</code> is not only the CLI's "which server" any more: it is the host of
+the setup and invitation links this server prints and hands out. Behind a
+reverse proxy the container can only guess, and the guess is its own address,
+so set it to the address your people type — see
+<a href="#serving-over-tls">Serving over TLS</a>.</p>
+<p><code>TRACEPAD_ADMIN_TOKEN</code> is a credential that creates owner accounts, and <strong>no
+environment variable keeps it out of <code>docker inspect</code></strong>: <code>-e</code>, <code>--env-file</code> and
+Compose's <code>env_file</code> all end up in the container's configuration, which shows
+every variable in plain text to anyone who can talk to the Docker daemon. An
+env file does keep the value off the command line — out of your shell's
+history, the host's process list and a <code>docker-compose.yml</code> you commit — so if
+you use one, <code>chmod 600</code> it and keep it out of version control. What keeps the
+token out of the container's configuration is a file mounted into it, named by
+<code>TRACEPAD_ADMIN_TOKEN_FILE</code>; the configuration then shows the path, not the
+token. The server reads the file at start, trims the newline, and refuses to
+start when both variables are set:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="o">(</span><span class="w"> </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="p">;</span><span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>admin-token<span class="w"> </span><span class="o">)</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1"># The image runs as uid 65532; the file must be readable by it.</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>sudo<span class="w"> </span>chown<span class="w"> </span><span class="m">65532</span><span class="w"> </span>admin-token
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/admin-token:/run/secrets/tracepad_admin_token:ro"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">TRACEPAD_ADMIN_TOKEN_FILE</span><span class="o">=</span>/run/secrets/tracepad_admin_token<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p>Compose's <code>secrets:</code> mounts the same file at <code>/run/secrets/&lt;name&gt;</code> for you (see
+<a href="#compose">Compose</a>). The rest is who has the Docker socket: on that host it is
+as good as root, and it reads this token whatever you do. The same goes for
+<code>TRACEPAD_PROJECTS</code>, whose entries carry secret keys. An admin token shorter
+than 32 characters stops the start, and so does a short declared secret for a
+project the start would create, each with the command above in the message. A
+project that already exists keeps the keys it has — the variable never rotates
+them — so a short declared secret that is still its key is a warning at every
+start, saying how to replace it.</p>
+<p><code>TRACEPAD_LISTEN</code> is already right, and the way to break it is to set it to
+<code>127.0.0.1:4318</code> — or to <code>localhost:4318</code>, the binary's default, which the image
+overrides for this reason. Inside a container, loopback is the container's own: the
+server would answer its own health check and nothing else, and <code>-p</code> would
+publish a port nothing accepts on. Bind to <code>:4318</code> — the container <strong>is</strong> the
+isolation boundary — and control who can reach it with <code>-p 127.0.0.1:4318:4318</code>
+on the host side instead.</p>
+<p><strong>To change the port, set <code>TRACEPAD_LISTEN</code>; do not pass <code>--listen</code>.</strong> Both
+move the server, but only the variable moves the health check with it: the
+probe reads <code>TRACEPAD_LISTEN</code> (and <code>TRACEPAD_URL</code> ahead of it) and cannot see a
+flag you appended to the command line, so a container started with <code>--listen
+:8080</code> runs correctly and is marked <code>unhealthy</code> for ever.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-e<span class="w"> </span><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:8080:8080<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<h3 id="ingest-under-load">Ingest under load</h3>
+<p>Two settings size what one export may cost everything else. Neither needs
+tuning on a laptop or a small server; both are checked at start, and a value
+out of range refuses to start. (<a href="../configuration/">configuration.md</a> has them
+with every other variable.)</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_MAX_SPANS_PER_REQUEST</code></td>
+<td><code>20000</code></td>
+<td>Spans one export may carry; an export with more is <code>413</code>, refused whole. At least <code>1</code>.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_BODY_BUDGET_BYTES</code></td>
+<td>four times <code>TRACEPAD_MAX_BODY_BYTES</code> (80 MiB — up to about 1.6 GiB of heap at the peak, see below)</td>
+<td>Request bodies held in memory at once, counted decompressed; a body that does not fit is <code>429</code> with <code>Retry-After</code>, which exporters retry. At least <code>TRACEPAD_MAX_BODY_BYTES</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The budget counts body bytes, not the heap: while an export is decoded,
+mapped and written, its heap peaks at roughly 12 to 18 times its body for
+protobuf and 15 to 20 times for JSON
+(<a href="../ingest/#how-much-one-export-may-carry">ingest.md</a>), so the default 80 MiB
+budget can mean a gigabyte or more at the peak. With a memory limit on the
+container (<code>--memory 1g</code>), keep the budget times about 20 under it — for 1 GiB,
+<code>TRACEPAD_BODY_BUDGET_BYTES=41943040</code> (40 MiB) with the body cap at its 20 MiB
+default, or lower both. <strong>On a small machine, lower <code>TRACEPAD_BODY_BUDGET_BYTES</code></strong>:
+the default is sized for a host with memory to spare, and the budget is what
+bounds the heap ingest can take at once.</p>
+<p>An OpenTelemetry Collector in front of Tracepad should bound its batches, or
+one export after a burst can pass the span limit and be dropped as a <code>413</code>:
+set the <code>batch</code> processor's <code>send_batch_max_size</code> — see
+<a href="../ingest/#how-much-one-export-may-carry">ingest.md</a>.
+<a href="../api/#system"><code>GET /api/v1/system</code></a> shows the budget in use and how often
+each refusal happened.</p>
+<h3 id="reads-under-load">Reads under load</h3>
+<p>Two settings size what reads may cost everything else. Neither needs tuning on
+a laptop or a small server; both are checked at start, and a value out of range
+refuses to start.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_READ_TIMEOUT</code></td>
+<td><code>20s</code></td>
+<td>The deadline of one read, its wait for a slot included. A read it stops is <code>503</code> "narrow the time range or the filters". From <code>1s</code> to <code>4m</code>: the server gives a response five minutes to be written, and the deadline's answer has to come first.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_READ_CONCURRENCY</code></td>
+<td>twice the processors, at least <code>4</code></td>
+<td>Reads served at once; one that finds no slot before its deadline is <code>503</code> "busy" with <code>Retry-After</code>. At least <code>1</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Reads are CPU-bound, so more of them at once than there are cores only makes
+each slower and holds more memory. The processors are the container's: with a
+CPU limit (<code>--cpus 2</code>), Go counts the limit, not the host. The database pool
+opens at most two connections for each slot and for the system endpoint's own
+one, one for the writer, and eight more — background jobs, credential checks
+and ingest take no slot and have that headroom. Keep a
+proxy's read timeout (<code>proxy_read_timeout</code> in nginx, 60 s by default) above
+<code>TRACEPAD_READ_TIMEOUT</code>, so the server's reason reaches the client rather than
+the proxy's. <a href="../api/#system"><code>GET /api/v1/system</code></a> shows the slots in use and
+how often each refusal happened.</p>
+<h2 id="serving-over-tls">Serving over TLS</h2>
+<p>Tracepad does not terminate TLS; a reverse proxy in front of it does, and it is
+the only way to serve anyone who is not on the same machine without their
+passwords, cookies and keys crossing the network in the clear. Keep the
+container's port on loopback, so the proxy is the only way in, and give the
+proxy the name people will use:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a># Caddyfile — Caddy obtains and renews the certificate itself
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>traces.example.com {
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    reverse_proxy 127.0.0.1:4318
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>}
+</code></pre></div>
+<p>Any proxy will do if it does four things, which Caddy does by default and
+nginx needs told:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="k">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">    </span><span class="kn">proxy_pass</span><span class="w"> </span><span class="s">http://127.0.0.1:4318</span><span class="p">;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Host</span><span class="w">              </span><span class="nv">$host</span><span class="p">;</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-Host</span><span class="w">  </span><span class="nv">$host</span><span class="p">;</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-For</span><span class="w">   </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">    </span><span class="kn">client_max_body_size</span><span class="w"> </span><span class="mi">20m</span><span class="p">;</span><span class="w">   </span><span class="c1"># an OTLP batch may be up to 20 MiB</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong><code>X-Forwarded-Proto: https</code></strong> is how the server knows the browser is on
+  https, when a trusted proxy (below) sends it, and it then marks the session cookie <code>Secure</code>
+  (<a href="../accounts/#signing-in">accounts.md</a>) and refuses writes from an
+  <code>http://</code> page on the same name. Configure the proxy to set
+  <code>X-Forwarded-Proto</code>, not append to it, as nginx's <code>proxy_set_header</code> does:
+  behind more than one proxy the first value counts, and it should never be
+  one a client sent.</li>
+<li><strong><code>Host</code> or <code>X-Forwarded-Host</code></strong> carries the name the browser typed. Writes
+  from the interface are refused unless their <code>Origin</code> is one of this server's
+  hosts, and behind a proxy that rewrites <code>Host</code> the forwarded one, from a
+  trusted proxy, is how it recognises its own.</li>
+<li><strong><code>X-Forwarded-For</code>, appended to</strong> (<code>$proxy_add_x_forwarded_for</code> in nginx;
+  Caddy writes it on its own). The server reads it from the right, and only
+  when the connection comes from a proxy it trusts, to learn the client's
+  address. It uses that address to limit how many passwords one client may
+  check, and to list where each session signed in. A proxy on the same host is
+  trusted by default. A container's proxy is not: to the container, the host
+  is the bridge's gateway (<code>172.17.0.1</code> on Docker's default network), so name
+  it with <code>TRACEPAD_TRUSTED_PROXIES</code>. Otherwise every client counts as one, and
+  the log says so once an hour. The same list governs <code>X-Forwarded-Proto</code> and
+  <code>X-Forwarded-Host</code>: from any other peer they are ignored, so behind an
+  untrusted proxy the cookie is not marked <code>Secure</code>, and only <code>Host</code> and
+  <code>TRACEPAD_URL</code> name the server's address.</li>
+<li><strong>A body limit at least <code>TRACEPAD_MAX_BODY_BYTES</code></strong> (20 MiB by default).
+  nginx refuses anything over 1 MiB unless told otherwise, and an exporter's
+  large batch is then lost at the proxy with a <code>413</code> the server never sees.</li>
+</ul>
+<p>The proxy should not add a <code>Content-Security-Policy</code> of its own unless it is
+meant to narrow the page. The server already sends one with the interface
+(<a href="../ui/#what-the-page-may-load">ui.md</a>), the browser enforces every policy it
+is given, and a proxy that <em>replaces</em> the header owns what the interface may
+load from then on. The same goes for <code>X-Frame-Options</code> and <code>Referrer-Policy</code>,
+which the server sets too (<a href="../api/#response-headers">api.md</a>).</p>
+<p>Then tell the server where people reach it, and it prints its setup and
+invitation links there. The note about plain HTTP stays: the direct listener
+is still reachable without the proxy, which is why the port stays on loopback,
+and the server cannot tell from inside the container that it is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>https://traces.example.com<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">TRACEPAD_TRUSTED_PROXIES</span><span class="o">=</span><span class="m">172</span>.17.0.1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">  </span>ghcr.io/tracepad/tracepad
+</code></pre></div>
+<p><code>TRACEPAD_TRUSTED_PROXIES</code> takes addresses and CIDR ranges, comma-separated
+(<code>172.17.0.1</code>, <code>10.0.0.0/24</code>, <code>loopback</code>), or <code>none</code>. On Docker Desktop the
+gateway is another address. To check, ask <code>GET /api/v1/system</code> through the
+proxy with a project key that holds <code>read</code> (<code>curl -H "Authorization: Bearer
+tp-sk-…" https://traces.example.com/api/v1/system</code>) and read <code>source</code>: it
+should be your own address, not the gateway's. Trust only
+the proxy, not the network it sits on. A trusted address can name any client
+it likes, so trusting the whole bridge (<code>172.17.0.0/16</code>) lets every other
+container on it pick its own source. A range wider than one network's
+proxies could be — shorter than <code>/8</code> for IPv4 or <code>/16</code> for IPv6, <code>0.0.0.0/0</code>
+above all — would let clients name their own sources and switch the limit off,
+and the server does not start with one.</p>
+<p>Loopback is trusted by default because a proxy on the same host is what the
+docs recommend, but not everything that connects over loopback is a proxy
+that appends. A TCP relay on loopback passes the client's own
+<code>X-Forwarded-For</code> through untouched, and the client then picks its source.
+Examples are a service-mesh sidecar, <code>ssh -L</code>, <code>socat</code>, stunnel and
+<code>kubectl port-forward</code>. If one sits in front of the server, set
+<code>TRACEPAD_TRUSTED_PROXIES=none</code>, or name only the real proxy's address.</p>
+<p>Applications then export to <code>https://traces.example.com/v1/traces</code>, and the
+CLI takes the same address as <code>--url</code>. The server believes
+<code>X-Forwarded-Proto</code> from whoever sends it, which is one more reason for the
+loopback publish: only the proxy should be able to.</p>
+<h2 id="health">Health</h2>
+<p>The image declares a <code>HEALTHCHECK</code>, so Docker knows whether the server is up:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{.State.Health.Status}}'</span><span class="w"> </span>tracepad<span class="w">   </span><span class="c1"># healthy; starting until the first check passes</span>
+</code></pre></div>
+<p>It runs <a href="../cli/#health"><code>tracepad health</code></a>, which needs no key — the same
+command works from a load balancer, a systemd unit or your own script:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://tracepad.internal:4318
+</code></pre></div>
+<p>A bug in one write or one background pass does not stop the server. The
+writer recovers a panic in a job it is applying, and the retention sweeper, the
+statistics rollup and the erasure worker recover one in a project's, an hour's
+or a run's work: an <code>ERROR</code> line, <code>a panic was recovered</code>, says where and
+carries the stack; the write that hit it is answered with an error and refused
+alone, and the others in its window commit; the next tick tries the project
+again, and gives up on one that panics three passes in a row until the next
+start, which <a href="../api/#system"><code>GET /api/v1/system</code></a> shows the admin token or an owner in <code>worker_panics</code>. The line carries the panic's own words only when it is a runtime fault (an
+index out of range, a nil pointer), never a value the code chose to panic with,
+so the stack is what to report. A panic anywhere else — the writer's own loop, the WAL checkpoint —
+ends the process, as a Go program's does; run the server under something that
+restarts it, such as <code>restart: unless-stopped</code> below.</p>
+<h2 id="compose">Compose</h2>
+<p>The image is published under three kinds of tag: an exact release (<code>0.1.0</code>),
+its minor line (<code>0.1</code>, which moves with each patch) and <code>latest</code> (the newest
+stable release). A pre-release such as <code>0.1.0-rc.1</code> has its exact tag and
+nothing else. A deployment that wants patches without surprises pins the minor
+line; one that wants to choose the day pins the exact version.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">tracepad</span><span class="p">:</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/tracepad/tracepad:0.1</span><span class="w">    </span><span class="c1"># a minor line: it moves with its patches; X.Y.Z pins one release</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"127.0.0.1:4318:4318"</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tracepad:/data</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">      </span><span class="nt">TRACEPAD_ADMIN_TOKEN_FILE</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/tracepad_admin_token</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">      </span><span class="c1"># Behind a TLS proxy, its address as this container sees it (below).</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">      </span><span class="c1"># TRACEPAD_TRUSTED_PROXIES: 172.18.0.1</span>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">    </span><span class="nt">secrets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">tracepad_admin_token</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="w">  </span><span class="nt">tracepad_admin_token</span><span class="p">:</span>
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="w">    </span><span class="nt">file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./admin-token</span><span class="w">     </span><span class="c1"># not in git; made as below</span>
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="w">  </span><span class="nt">tracepad</span><span class="p">:</span>
+</code></pre></div>
+<p>Behind a <a href="#serving-over-tls">TLS proxy</a>, name it in <code>TRACEPAD_TRUSTED_PROXIES</code>,
+or the server ignores its <code>X-Forwarded-*</code> headers: session cookies lose
+<code>Secure</code>, and the log says so once an hour. Compose puts the stack on a network
+of its own, so a proxy on the host reaches the container from that network's
+gateway rather than <code>172.17.0.1</code>: <code>docker network inspect &lt;project&gt;_default</code>
+shows it. A proxy in another service of the same stack has an address Compose
+picks at each start; give the network a fixed <code>subnet</code> and the proxy a fixed
+<code>ipv4_address</code>, and name that address.</p>
+<p>Compose mounts the file as it is on the host, owner and mode included, so make
+it the way the <code>docker run</code> example above does — readable by the image's user
+and by nobody else:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="o">(</span><span class="w"> </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="p">;</span><span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>admin-token<span class="w"> </span><span class="o">)</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>sudo<span class="w"> </span>chown<span class="w"> </span><span class="m">65532</span><span class="w"> </span>admin-token
+</code></pre></div>
+<p><code>docker compose logs tracepad</code> is where the first run's keys are — and where
+they stay, which is why <a href="#the-keys-are-printed-once-to-the-log">the first key is worth rotating</a>.</p>
+<h2 id="stopping">Stopping</h2>
+<p>A <code>docker stop</code> gives the server ten seconds: it drains open requests for five,
+waits up to three more for the handlers it interrupted, closes its database
+and exits. An MCP client's open stream is ended as the stop begins, so it does
+not hold the drain. A second signal while it stops kills the process at once. Those windows are fixed and fit inside the default, so a longer
+<code>--stop-timeout</code> (Compose: <code>stop_grace_period</code>) changes nothing: a response
+still being written after five seconds is cut off either way.</p>
+<h2 id="upgrading-and-backing-up-first">Upgrading, and backing up first</h2>
+<p>Schema migrations run on start, as they do on a host: a new image opens the
+existing <code>/data</code> and brings it forward. <strong>A downgrade is not supported</strong> — an
+older binary meeting a newer schema is not a case anything here handles — so
+the upgrade is only as safe as the copy you took before it.</p>
+<p><strong><code>tracepad upgrade</code> upgrades a container it can recreate exactly.</strong> On the
+host, <code>tracepad upgrade --plan</code> — or your coding agent, given
+<code>Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md</code> —
+finds every container of the image. One named <code>tracepad-&lt;project&gt;</code>, as the
+agent's setup names it, or named with <code>--container</code> (<code>--container tracepad</code>
+for this page's), is the command's when it is published on this machine only,
+keeps its data on a named volume, and has nothing set that its <code>docker run</code>
+would not carry: <code>tracepad upgrade</code> stops it, archives its volume into
+<code>~/tracepad-backups/&lt;run&gt;/</code> and reads the archive back, renames it
+<code>&lt;name&gt;-before-&lt;run&gt;</code>, runs the release under its name with the options it was
+created with, checks it, and goes back by itself when the new one does not
+answer — onto a new volume restored from the archive, deleting nothing
+(<a href="../cli/#upgrade">cli.md</a>). Every other container is yours: the plan names it,
+says why, and gives the steps below with its name, its volume and the release
+filled in, and the <code>docker run</code> it was created with — its ports, mounts,
+restart policy, labels and command, read from <code>docker inspect</code> — the variables
+it was given passed in a file read from Docker, named and never printed. A
+Compose project takes the new tag in its Compose file and <code>docker compose up
+-d</code>, after the same backup.</p>
+<p>Back the volume up by tarring it from a throwaway container, then run the new
+release with the old one's options — as one command, each step only once the
+one before it worked, so a backup that is refused stops everything after it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>docker<span class="w"> </span>stop<span class="w"> </span>tracepad<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">:/backup"</span><span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">'umask 077 &amp;&amp; set -C &amp;&amp; tar czf - -C /data . &gt; /backup/tracepad-$(date +%F).tar.gz'</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>rename<span class="w"> </span>tracepad<span class="w"> </span>tracepad-old<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="o">(</span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">set</span><span class="w"> </span>-C<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{range .Config.Env}}{{println .}}{{end}}'</span><span class="w"> </span>tracepad-old<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(TRACEPAD_PROJECTS|TRACEPAD_URL)='</span><span class="w"> </span>&gt;<span class="w"> </span>tracepad.upgrade.env<span class="o">)</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>--env-file<span class="w"> </span>tracepad.upgrade.env<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">  </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span>serve<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>rm<span class="w"> </span>tracepad.upgrade.env
+</code></pre></div>
+<p><code>X.Y.Z</code> is the release you are moving to; the variables are the ones you gave
+the container, read from Docker into a file that holds its keys and is removed
+once the new one runs; the <code>-p</code>, <code>-v</code> and <code>serve</code> are the options you created it
+with. The old container is kept, renamed: once the new one has proved itself,
+<code>docker rm tracepad-old</code>. Stopped before the rename, <code>docker start tracepad</code>.
+Stopped after it, put the old one back:
+<code>docker rm tracepad</code> if the new one was made, <code>rm -f tracepad.upgrade.env</code>, then
+<code>docker rename tracepad-old tracepad &amp;&amp; docker start tracepad</code>.</p>
+<p>Stopping first matters: SQLite's write-ahead log is part of the database, and a
+tar of a live one is a copy of a file mid-write. <code>umask 077</code> makes the archive
+readable by its owner alone; it is the whole database, and without it the file
+lands in your directory as readable as that directory lets it be. <code>set -C</code>
+keeps it from writing over an earlier backup of the same name. Restoring is the
+same command the other way round, <code>tar xzf - -C /data &lt; /backup/&lt;the file&gt;</code>,
+into a stopped container's volume mounted without <code>readonly</code>.</p>
+<p><strong>One server per volume.</strong> The server holds a lock on <code>tracepad.db.lock</code>, beside the
+database, for as long as it runs, and a second one started on the same
+directory exits at once, telling you a server is already running there and the
+pid that last recorded itself in the file, which may be stale (a crash leaves
+its pid behind, and two containers sharing a volume are both pid 1). That is
+what a <code>docker run</code> that overlaps the container it replaces, or a second
+<code>tracepad serve</code> on the same <code>--data-dir</code>, meets: stop the first, or give the
+second a directory of its own. A server that was killed leaves the database
+free at once; the file it leaves behind holds nothing that matters and is safe
+to delete or to include in a backup. On a file system that cannot lock at all
+(NFS without a lock daemon, some FUSE volumes) the server starts anyway and
+says in a <code>WARN</code> that nothing guards the directory: do not run two.</p>
+<p><strong>The server keeps a copy of its own, too.</strong> Before every start that applies a
+migration it writes <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code> beside the database — a
+full copy as it stood before the upgrade, readable by its owner only, for
+rolling that upgrade back by swapping the file in. Once the upgrade's
+migrations have committed, the server removes the backups of earlier upgrades,
+naming each in its log; the sweeper removes the newest seven days after it was
+written. That week is the window for a rollback — and the copy holds
+everything erased or swept since, as does any tar of the volume taken in it.
+Once the upgrade has proved itself you can remove it sooner. This removes
+every backup the server wrote, names each one, and does nothing on a volume
+that has none:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span>find<span class="w"> </span>/data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db.pre-[0-9][0-9][0-9][0-9]_*.bak'</span><span class="w"> </span>-print<span class="w"> </span>-exec<span class="w"> </span>rm<span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
+</code></pre></div>
+<p>The server deletes only files named exactly that way — <code>pre-</code>, the four-digit
+number of a migration, an underscore and its name — so a copy you take yourself
+is safe from it under any other name. Better still, keep it outside the data
+directory (the tar above does); if it must sit beside the database, call it
+anything but <code>pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>: <code>tracepad.db.pre-upgrade-&lt;sha&gt;.bak</code> is
+fine, <code>tracepad.db.pre-0035_mine.bak</code> would be taken for the server's own.</p>
+<p>A data-subject erasure does not rewrite this file; while it exists, the
+erasure's answer names it and the day it goes — see
+<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>.</p>
+<h2 id="building-it-yourself">Building it yourself</h2>
+<p>The <code>Dockerfile</code> is the whole recipe — it builds the interface and the binary
+from the sources in the checkout, so a fork or a patched tree produces the same
+kind of artifact the releases do:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span><span class="m">0</span>.1.0-mine<span class="w"> </span>-t<span class="w"> </span>tracepad:mine<span class="w"> </span>.
+</code></pre></div>
+<p>Without <code>--build-arg VERSION</code>, the image reports <code>dev</code>. <code>make image</code> and <code>make
+image-check</code> are the same build and the boot test CI runs against it.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3397 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/cli/">
+      
+      
+        <link rel="prev" href="../api/">
+      
+      
+        <link rel="next" href="../mcp/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>CLI - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#traces-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#searching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Searching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-last" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces last
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces rm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sessions ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sessions show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        users ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        users show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-add-scores-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores add, scores rm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-trend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores trend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prompts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#facets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        facets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#datasets-runs-score-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        datasets, runs, score-configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        queues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Administration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Administration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accounts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-skew" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version skew
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#traces-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#searching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Searching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-last" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces last
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traces-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        traces rm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sessions ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sessions show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        users ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        users show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-ls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores ls
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-add-scores-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores add, scores rm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scores-trend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scores trend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prompts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#facets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        facets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#datasets-runs-score-configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        datasets, runs, score-configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        queues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Administration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Administration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        accounts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-skew" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version skew
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/cli.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="cli">CLI</h1>
+<p>The same binary that runs the server is also its client. For an agent working
+in a terminal that is zero integration: the tool is already on <code>PATH</code>.</p>
+<p>The CLI is an HTTP client of the <a href="../api/">read API</a> and nothing else. It never
+opens the database — the server holds the SQLite writer, and a second process
+reading the live file is the kind of cleverness that ends in a corrupted
+database. It also cannot do anything the API cannot: if a command here would
+need a workaround, that is an API gap, and the gap gets fixed in the API.</p>
+<h2 id="connecting">Connecting</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318<span class="w">      </span><span class="c1"># the default</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
+</code></pre></div>
+<p><code>--url</code> and <code>--key</code> override the environment on any command.</p>
+<p>The key the server prints on its first start holds <code>ingest</code> alone: it sends
+spans and cannot read them, so <code>tracepad traces ls</code> with it is a <code>403</code>. A key
+that reads is minted by an owner or editor in the web interface (<em>Settings →
+Project → API keys</em>), or with the admin token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--scope<span class="w"> </span><span class="nb">read</span><span class="w"> </span>--name<span class="w"> </span>agent
+</code></pre></div>
+<p>What a command may do is the key's <a href="../api/#scopes">scopes</a>. Everything that
+reads — <code>traces</code>, <code>tail</code>, <code>sessions</code>, <code>users</code>, <code>scores ls</code>, <code>scores trend</code>,
+<code>stats</code>, <code>facets</code>, <code>system</code>, the listings and <code>show</code>s of prompts, datasets,
+runs, score configs and queues, <code>export</code> — needs <code>read</code>; <code>scores add</code> needs
+<code>ingest</code>; everything that changes something — <code>traces rm</code>, <code>scores rm</code>,
+<code>prompts push</code>, <code>label</code> and <code>rm</code>, the writes of datasets, runs, score configs
+and queues, <code>queues next</code> among them (it claims an item), <code>retention set</code>,
+<code>users rm-data</code>, <code>users erasure</code> and <code>users erasures</code> — needs <code>write</code>. <code>projects ls</code>, <code>projects show</code>,
+<code>retention show</code> and <code>prompts get</code> work with any key. A key without the scope
+a command needs prints the server's <code>403</code> and exits 1:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ tracepad traces ls
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tracepad: this key's scopes are ingest; GET /api/v1/traces needs read
+</code></pre></div>
+<p>A key with <code>read</code> alone is the one for an agent that only looks; <code>projects
+show</code> says what the key in hand holds (<a href="#administration">Administration</a>).</p>
+<h2 id="output">Output</h2>
+<p>On a terminal you get a table. Anywhere else — a pipe, a file, a subprocess —
+you get the API's JSON, byte for byte, with no flags at all. <code>--json</code> forces
+JSON on a terminal too.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w">                </span><span class="c1"># a table, if you are looking at it</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.traces'</span><span class="w"> </span><span class="c1"># JSON, because you are not</span>
+</code></pre></div>
+<p>That is the whole reason for the TTY check: an agent shelling out to
+<code>tracepad</code> should not have to know a flag to get machine output.</p>
+<p>A trace's text is written by whoever sends it — and by the users whose words
+your application logs — so the table never hands a terminal a control
+character. Escape sequences, other control characters (a tab or newline inside
+a name included), C1 characters and bidirectional overrides are printed as
+visible escapes: a trace named <code>a&lt;ESC&gt;[2Jb</code> shows as <code>a\x1b[2Jb</code>, not as a
+cleared screen. Text that is text by nature — a prompt, a diff, an error
+message such as a failed span's status — keeps its newlines and tabs, its
+lines after the first indented under the label. The JSON is untouched: it is the API's bytes, and
+escaping is the job of whatever reads it.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>It worked.</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>The request failed: no such trace, bad key, server unreachable.</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>The command was typed wrong: unknown flag, missing argument, a <code>--limit</code> out of range.</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: not upgraded — the way back ran, and the old version runs again.</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: yours to decide (a check that needs you; with <code>--plan</code>, only what is yours is behind).</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: stuck — a step failed and could not be undone, or the old version did not answer after a way back; the report says what is where.</td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td><a href="#upgrade"><code>upgrade --plan</code></a> only: the upgrade would change something (<code>0</code>: everything is up to date).</td>
+</tr>
+</tbody>
+</table>
+<p>The split is what lets a script tell "there is no such trace" from "you
+typoed a flag".</p>
+<h2 id="commands">Commands</h2>
+<h3 id="traces-ls"><code>traces ls</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error<span class="w"> </span>--since<span class="w"> </span>1h
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--search</code></td>
+<td>Find traces by what was said in them. See <a href="#searching">Searching</a>.</td>
+</tr>
+<tr>
+<td><code>--env</code></td>
+<td>Environment, or a comma-separated list of them. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>--error</code></td>
+<td>Only traces with a failed observation.</td>
+</tr>
+<tr>
+<td><code>--since</code></td>
+<td>A Go duration (<code>1h</code>, <code>30m</code>) or an RFC 3339 instant.</td>
+</tr>
+<tr>
+<td><code>--until</code></td>
+<td>The other end of the range, same spellings.</td>
+</tr>
+<tr>
+<td><code>--user</code>, <code>--session</code></td>
+<td>Exact matches.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>The trace name, or a comma-separated list of them. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>--tag</code></td>
+<td>A tag the trace must carry; give the flag again for more, and a trace must carry every one.</td>
+</tr>
+<tr>
+<td><code>--min-cost</code></td>
+<td>Traces costing at least this much.</td>
+</tr>
+<tr>
+<td><code>--min-tokens</code></td>
+<td>Traces whose input plus output tokens are at least this many — the TOKENS column's number. A trace that reported neither never matches.</td>
+</tr>
+<tr>
+<td><code>--release</code></td>
+<td>The deployment, or a comma-separated list of them. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>--version</code></td>
+<td>The version of the trace's own logic. Exact match.</td>
+</tr>
+<tr>
+<td><code>--type</code></td>
+<td>Traces containing a step of this kind: <code>span</code>, <code>generation</code>, <code>event</code>, <code>agent</code>, <code>tool</code>, <code>chain</code>, <code>retriever</code>, <code>guardrail</code>, <code>evaluator</code>, <code>embedding</code>. Exact — <code>generation</code> does not match <code>embedding</code>.</td>
+</tr>
+<tr>
+<td><code>--prompt</code></td>
+<td>Traces that ran a prompt: <code>name</code>, or <code>name@7</code> for one version of it. A version is a number, so an <code>@</code> in a name is just part of it — <code>@acme/support</code> and <code>team@acme/answer</code> work as written, and <code>name@latest</code> is read as a name rather than as a label.</td>
+</tr>
+<tr>
+<td><code>--fields</code></td>
+<td>Comma-separated subset of the row fields.</td>
+</tr>
+<tr>
+<td><code>--limit</code></td>
+<td>1–500, default 50.</td>
+</tr>
+<tr>
+<td><code>--cursor</code></td>
+<td>Continue from a previous page.</td>
+</tr>
+<tr>
+<td><code>--oldest</code></td>
+<td>Start at the far end of the listing instead of the newest page. Takes no <code>--cursor</code>.</td>
+</tr>
+<tr>
+<td><code>--newer</code></td>
+<td>Walk back towards newer traces from a <code>--cursor</code>, which it requires.</td>
+</tr>
+<tr>
+<td><code>--total</code></td>
+<td>Also print how many traces match, counted up to 1000 (<code>847</code>, or <code>1000+</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>The table ends with the commands that continue the walk, in whichever
+direction there is one left:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>older: --cursor MTc4ODIy…
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>newer: --newer --cursor MTc4ODIx…
+</code></pre></div>
+<p><code>--oldest</code> costs what any other page costs: pagination is a keyset, so "the
+end" is a direction to read the index in and not a count of rows to skip.
+It is also not a dead end — the <code>newer:</code> line is how you come back up.</p>
+<p>The two flags are the same direction under different names, so the two
+combinations that would quietly mean the other one are refused: <code>--oldest</code>
+with a <code>--cursor</code> (the cursor would win and the jump never happen), and
+<code>--newer</code> without one (which is the far end, not a step back).</p>
+<p>A <code>--cursor</code> passed with nothing in it is refused for the same reason, on every
+listing that takes one: <code>--cursor "$NEXT"</code> with <code>NEXT</code> unset is a script that
+lost its place, and answering it with the newest page would restart the walk
+instead of continuing it — a loop that never ends.</p>
+<h3 id="lists">Lists</h3>
+<p><code>--env</code>, <code>--release</code> and <code>--name</code> take one value or a comma-separated list, and
+a trace matches when its column equals any item:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--env<span class="w"> </span>production,staging
+</code></pre></div>
+<p>The flag passes its string through to the query parameter untouched, so what it
+accepts is exactly what the <a href="../api/#lists">API</a> accepts: items are trimmed,
+duplicates collapse, an empty item (<code>--env production,</code>) is refused by the
+server, and a value containing a comma is not expressible. Give the flag once:
+the last <code>--env</code> wins, the way it does for every other string flag, and the
+server refuses a repeated query parameter outright rather than guess which one
+was meant. The same three flags mean the same thing on <code>traces last</code>, <code>tail</code>,
+<code>sessions ls</code> (<code>--env</code> only) and <code>stats</code> (<code>--env</code> only).</p>
+<p><code>--tag</code> is not a list of this kind: it is repeatable and it is an AND, so a
+trace must carry every tag given.</p>
+<p><a href="#facets"><code>facets</code></a> prints what the three can be set to.</p>
+<h3 id="searching">Searching</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>ls<span class="w"> </span>--search<span class="w"> </span><span class="s2">"refund failed"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>TIME                 ID                                NAME          ENV         OBS  ERR  LATENCY  TTFT   COST       TOKENS
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>2026-09-01 10:00:00  4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f  support-chat  production  2    0    820ms    388ms  $0.001000  169
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    2b3c4d5e6f7a8b9c output: …the refund failed for the order because the card issuer…
+</code></pre></div>
+<p>The second line under a row says where the trace matched — the observation and
+the field — and what the text says around the hit. It is dimmed on a terminal
+and plain in a pipe; with <code>--json</code> the row carries the same thing as a <code>match</code>
+object.</p>
+<p><code>--search</code> maps to the API's <code>q</code>, so the rules are the API's:
+<a href="../api/#search">docs/api.md</a>. Words, not substrings; <code>"quoted phrases"</code> for
+adjacent words; a trailing <code>*</code> for a prefix; everything else is literal text.
+A search with no word in it is refused rather than answered with an empty
+table.</p>
+<p><code>traces last --search "…"</code> is the same search, answered with the newest
+matching trace and its whole tree. <code>tail</code> does not take it: it follows the
+newest page, which is not a question about text.</p>
+<h3 id="traces-show"><code>traces show</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>show<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f<span class="w"> </span>--full
+</code></pre></div>
+<p>The observation tree. <code>--full</code> adds every payload, asking for the largest
+budget the API allows; a payload still too large for it prints its preview and
+the URL that returns the rest.</p>
+<p>Each observation's line names its kind, and — where the client sent them —
+<code>ttft</code> and the prompt it ran:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>· generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
+</code></pre></div>
+<p><code>N tokens</code> is that observation's input plus output, read under the spellings
+every listing reads (<a href="../api/#tokens">api.md</a>), or the <code>total</code> it sent when
+that is larger or there is nothing else to add up.</p>
+<p>The header above the tree carries the trace's release and version when it
+named them, beside its latency, TTFT and cost. <code>ttft</code> is the wait before the
+first token; the trace's is the earliest one among its observations.</p>
+<h3 id="traces-last"><code>traces last</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>last<span class="w"> </span>--error<span class="w"> </span>--full
+</code></pre></div>
+<p>"Why did the last run fail" — every filter of <code>traces ls</code>, <code>--search</code>
+included, the newest match, the whole tree. One request.</p>
+<h3 id="traces-rm"><code>traces rm</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span><span class="m">2026</span>-09-17T14:02:17Z<span class="w"> </span>--env<span class="w"> </span>loadtest<span class="w"> </span>--since<span class="w"> </span>24h
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>tracepad<span class="w"> </span>traces<span class="w"> </span>rm<span class="w"> </span>--to<span class="w"> </span>1h<span class="w"> </span>--search<span class="w"> </span><span class="s2">"api key"</span><span class="w"> </span>--yes
+</code></pre></div>
+<p>Deletes one trace by id, or every trace the listing's filters match before
+<code>--to</code> — the trace with its observations, scores, payloads and queue items,
+the statistics of its hour corrected in the same transaction, the raw OTLP
+body it arrived in left alone (<a href="../admin/#deleting-traces">admin.md</a>). Both
+forms are destructive commands like the ones under
+<a href="#administration">Administration</a>: the server's preview is printed, the echo
+is typed back — the trace id for one trace, the project's name for a filter
+— and <code>--yes</code> answers that for a script without skipping the check.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>$ tracepad traces rm --to 1h --env loadtest
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>this would delete every trace matching these filters that started before 2026-09-17 13:02:17:
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>  matched        12000
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  annotation_items 0
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  observations   36000
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  scores         0
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  traces         12000
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>  oldest arrival 2026-09-16 09:12:40
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>raw OTLP bodies are not deleted; they expire on the raw retention window
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>type "checkout-service" to confirm:
+</code></pre></div>
+<p>The bulk form takes the filters of <code>traces ls</code> — <code>--search</code> included — but
+<code>--to</code> in place of <code>--until</code>, and <strong>requires</strong> it: it closes the set, so that
+what the preview counted is what goes however much ingest flows in
+meanwhile, and the command does not fill it in because a script that deletes
+by filter should say what it means. No other filter is needed: <code>--to</code> alone
+is <em>every trace before then</em>. The server deletes in rounds of <code>--limit</code>
+traces (1–1000, the default 1000) and the command repeats them until there is
+no more, printing the running total on stderr between rounds and the total
+once at the end; <code>--json</code> sums the rounds into one answer with a <code>rounds</code>
+count. A run cut off between rounds has lost nothing but the tally: what
+committed is gone, and re-running the same command continues.</p>
+<h3 id="tail"><code>tail</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>tracepad<span class="w"> </span>tail<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--error
+</code></pre></div>
+<p>Follows the trace listing, printing each new trace on one line. It polls the
+public API (every 2 s, <code>--interval</code> to change it), so it needs no new server
+surface and inherits authentication, filters and budgets.</p>
+<p>Two of them it does not take. <code>--until</code>: a follow has no far end — the newest
+page is never past it — so the flag would either do nothing or stop the
+following without saying so, and a bounded range of traces is <code>traces ls
+--until</code>. And <code>--search</code>: following the newest page is not a question about
+text. Both are a <code>flag provided but not defined</code> rather than a flag that
+quietly means something else.</p>
+<p>A trace is timestamped by when its earliest span <em>started</em>, not by when it was
+stored, and exporters batch — the OpenTelemetry SDK's default processor flushes
+every five seconds. So a follow looks a minute back rather than only forward,
+and skips what it has already printed: a run that started before one you have
+already seen still appears when it lands, exactly once.</p>
+<p>Each poll reads one page, so on a server producing more than <code>--limit</code> traces
+per interval you see the newest page of each poll rather than everything.
+Raise <code>--limit</code>, or shorten <code>--interval</code>.</p>
+<p>In a pipe it prints one JSON row per line. Ctrl-C stops it.</p>
+<h3 id="sessions-ls"><code>sessions ls</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>ls<span class="w"> </span>--since<span class="w"> </span>24h<span class="w"> </span>--env<span class="w"> </span>production
+</code></pre></div>
+<p>One row per session, most recent activity first: last seen, id, how many
+traces, how many of those failed, cost, tokens and when the session started.</p>
+<p>Filters: <code>--since</code>, <code>--until</code>, <code>--env</code> (one or a comma-separated list —
+<a href="#lists">Lists</a>), <code>--user</code>, <code>--limit</code>, <code>--cursor</code>,
+<code>--oldest</code>, <code>--newer</code>, <code>--total</code>.
+<code>--since</code> and <code>--until</code> bound the traces, so a session appears when any of
+its traces falls in the window and its totals then describe those traces.
+Paging works like <code>traces ls</code>: the last line prints the <code>--cursor</code> for the
+next page.</p>
+<h3 id="sessions-show"><code>sessions show</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>tracepad<span class="w"> </span>sessions<span class="w"> </span>show<span class="w"> </span>session-77
+</code></pre></div>
+<p>The session's totals — traces, how many failed, cost, tokens, the window it
+spans — and its traces. The tokens line is input plus output, with every
+other class that was reported beside it: <code>2052 (cache read 1024, reasoning 128)</code>.</p>
+<h3 id="users-ls"><code>users ls</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>cost<span class="w"> </span>--limit<span class="w"> </span><span class="m">20</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--sort<span class="w"> </span>tokens
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>ls<span class="w"> </span>--prefix<span class="w"> </span>acme:
+</code></pre></div>
+<p>One row per end user: id, traces, sessions, how many of those traces failed,
+cost, tokens, first and last seen. <code>--sort</code> is <code>last_seen</code> (the default),
+<code>traces</code>, <code>cost</code>, <code>tokens</code> or <code>errors</code> — always descending, with the user id as
+the tie-break, a user with no costed trace sorting last under <code>cost</code> and a
+user with no tokens sorting as 0 under <code>tokens</code>. <code>--prefix</code> keeps ids
+starting with it, case-sensitively; it is a prefix, not a search.</p>
+<p>Paging is <code>traces ls</code>'s: <code>--limit</code>, <code>--cursor</code>, <code>--oldest</code>, <code>--newer</code>, and
+<code>--total</code> for the capped count.</p>
+<p>This listing is built from an hourly roll-up and trails live traffic by a few
+minutes, so a user first seen just now is not on it yet — <code>users show</code> is
+exact for any id. Both are explained in <a href="../users/">users.md</a>.</p>
+<h3 id="users-show"><code>users show</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>show<span class="w"> </span>user-4821
+</code></pre></div>
+<p>That user's totals — traces, sessions, cost, tokens, p50/p95 latency and the
+window they span — merged with the traffic too recent for the roll-up. An id nothing
+was ever filed under exits 1 with the server's <code>404</code>.</p>
+<p>For their activity over time, or a split by model or environment, use
+<code>tracepad stats --user</code>.</p>
+<h3 id="scores-ls"><code>scores ls</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>ls<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--since<span class="w"> </span>24h
+</code></pre></div>
+<p>Filters: <code>--trace</code>, <code>--observation</code>, <code>--session</code>, <code>--name</code>, <code>--type</code>,
+<code>--author</code>, <code>--since</code>.</p>
+<p>The <code>AUTHOR</code> column says who wrote each score: the account's or the key's
+name, or <code>-</code> for an author with none and for a score from before the server
+recorded authors (<a href="../scores/#who-wrote-a-score">scores.md</a>); <code>--json</code> has the
+kind and the id. <code>--author me</code> is
+the scores the key you run with wrote; <code>--author</code> also takes an account id or
+a public key, as <code>--json</code> prints them.</p>
+<p>Newest first, and it pages: <code>--limit</code> (1–500, default 50) and <code>--cursor</code>, with
+the last line printing the command that continues the walk.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>older: --cursor MTc4ODEyOTQ5ODQ0…
+</code></pre></div>
+<p>One direction only — there is no <code>--oldest</code> or <code>--newer</code> here, because the
+endpoint has no other end to jump to.</p>
+<h3 id="scores-add-scores-rm"><code>scores add</code>, <code>scores rm</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>helpfulness<span class="w"> </span>--value<span class="w"> </span><span class="m">0</span>.9<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>--comment<span class="w"> </span><span class="s2">"answered the question"</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span><span class="m">0011</span>…<span class="w"> </span>--name<span class="w"> </span>step-ok<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span>--type<span class="w"> </span>boolean<span class="w"> </span>--value<span class="w"> </span><span class="m">1</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--session<span class="w"> </span>support-42<span class="w"> </span>--name<span class="w"> </span>csat<span class="w"> </span>--value<span class="w"> </span><span class="m">5</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--name<span class="w"> </span>tone<span class="w"> </span>--type<span class="w"> </span>categorical<span class="w"> </span>--string<span class="w"> </span>friendly
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>rm<span class="w"> </span>8673743e8ca15b9213d541a703786e86
+</code></pre></div>
+<p><code>add</code> posts one score and prints the id it was written under; with <code>--json</code> it
+prints the endpoint's answer whole. The target is <code>--trace</code> (with an optional
+<code>--observation</code> inside it) or <code>--session</code>; the value is <code>--value</code> for a number
+and <code>--string</code> for a word or a sentence, exactly one of the two. <code>--type</code>
+states <code>boolean</code> or <code>categorical</code>, which cannot be inferred — a bare <code>--value</code>
+is <code>numeric</code> and a bare <code>--string</code> is <code>text</code>. <code>--comment</code> carries the
+rationale.</p>
+<p><code>--id</code> writes the score under an id you choose, which is how a correction is
+made: the same id posted again replaces the row whole. See
+<a href="../scores/#idempotency-and-corrections">scores.md</a>.</p>
+<p><code>rm</code> takes one id and retracts it, printing the id it took, or reporting the
+server's <code>404</code> when there is no such score in this project. There is no echo
+to type: a score is one row that <code>add --id</code> puts straight back.</p>
+<h3 id="scores-trend"><code>scores trend</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w">                                    </span><span class="c1"># every name, by day</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--since<span class="w"> </span>168h
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--name<span class="w"> </span>hallucination<span class="w"> </span>--group-by<span class="w"> </span>release
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>trend<span class="w"> </span>--group-by<span class="w"> </span>model<span class="w"> </span>--env<span class="w"> </span>production
+</code></pre></div>
+<p><code>GET /api/v1/stats/scores</code>: how a score has moved, in the buckets <code>stats</code>
+groups the traffic into. One block per score name, headed by the name, its
+data type and what was counted, and one table under it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>hallucination (numeric, any scores)
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>DAY         SCORES  MEAN (MIN..MAX)
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>2026-09-01  412     0.18 (0..0.9)
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>2026-09-02  389     0.14 (0..0.7)
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>verdict (categorical, any scores)
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>DAY         SCORES  CATEGORIES
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>2026-09-01  412     pass 380 · fail 32
+</code></pre></div>
+<p>The third column is what the type says: a mean with its extremes, a rate as a
+percentage, or the distribution. <code>--group-by</code> is <code>hour</code>, <code>day</code>, <code>environment</code>,
+<code>release</code> or <code>model</code>; the window is <code>--since</code> and <code>--until</code>, and <code>--env</code>
+narrows it, exactly as <code>stats</code> spells them. Grouped by model only the scores
+that name an observation can be counted, and the header says
+<code>observation scores</code> rather than <code>any scores</code> so that two runs of the command
+are not read as the same question.</p>
+<p><code>--limit</code> is how many names come back — 50 by default, the busiest first, at
+most 500. A project that files more than that gets a line under the tables
+saying how many were left out, rather than a shorter list that looks complete.</p>
+<p>Without <code>--name</code> every score name in the range gets a block. A range that holds
+none prints <em>no score names a trace in this range</em> — a score that grades only a
+session, and a <code>text</code> score, are never on a timeline. See
+<a href="../quality/">quality.md</a>.</p>
+<h3 id="prompts"><code>prompts</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>ls
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>get<span class="w"> </span>support<span class="w"> </span>--label<span class="w"> </span>production
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>push<span class="w"> </span>support<span class="w"> </span>--file<span class="w"> </span>prompt.json<span class="w"> </span>--label<span class="w"> </span>staging
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>diff<span class="w"> </span>support<span class="w"> </span>--from<span class="w"> </span><span class="m">1</span><span class="w"> </span>--to<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--version<span class="w"> </span><span class="m">4</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>label<span class="w"> </span>support<span class="w"> </span>production<span class="w"> </span>--rm
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>tracepad<span class="w"> </span>prompts<span class="w"> </span>rm<span class="w"> </span>support<span class="w"> </span>--yes
+</code></pre></div>
+<p><code>push</code> sends the file as the version's request body, so the prompt stays JSON
+and out of shell quoting:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w"> </span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"You are a support agent."</span><span class="p">,</span><span class="w"> </span><span class="nt">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">}}</span>
+</code></pre></div>
+<p><code>--label</code>, <code>--message</code> and <code>--expect</code> fill in <code>labels</code>, <code>commit_message</code> and
+<code>expect_version</code> when the file does not already set them — the file wins, so a
+script that sets both is never silently overruled.</p>
+<p><code>--expect N</code> says which version you believe the name is at (<code>--expect 0</code> for a
+name you believe is new). A name that moved under you is then a <code>409</code> naming
+where it actually is, rather than a version quietly appended onto somebody
+else's work — see
+<a href="../prompts/#appending-to-the-version-you-meant">prompts.md</a>.</p>
+<p><code>ls</code> pages: <code>--limit</code> (1–500, default 50) and <code>--cursor</code>, with the last line
+printing the command that continues the walk.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>more: --cursor c3VwcG9ydA
+</code></pre></div>
+<p>It says <code>more</code> rather than <code>older</code> because this listing is alphabetical by
+name, not newest-first. The command walks that way only: the endpoint does page
+in both directions, and the web interface uses it, but a terminal walk that
+started at <code>a</code> has nothing to go back to that it has not just printed.</p>
+<p><code>label</code> is the deploy path (see <a href="../prompts/#labels">prompts.md</a>): promote by
+pointing <code>production</code> at a newer version, roll back by pointing it at an older
+one, retire it with <code>--rm</code>. Neither writes a version, and both print where the
+label ended up — a removal printing the version it was taken from, which is
+what you point it back at.</p>
+<p><code>rm</code> deletes a name with every version and every label it has, so it wears the
+same ceremony as the administrative commands: without <code>--yes</code> it prints what
+would go and asks you to type the name back, and off a terminal it refuses
+outright. Traces that ran the prompt keep the name and version they recorded.</p>
+<h3 id="stats"><code>stats</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--since<span class="w"> </span>168h
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>model
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>release
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--user<span class="w"> </span>user-4821
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>total<span class="w"> </span>--since<span class="w"> </span>168h
+</code></pre></div>
+<p><code>--since</code> takes Go durations (<code>1h</code>, <code>30m</code>, <code>168h</code>) or an RFC 3339 instant.
+There is no day unit — <code>7d</code> is a usage error, not a week. <code>--until</code> closes the
+other end, in the same two spellings, so a duration there is also counted back
+from now: <code>--since 48h --until 24h</code> is the day before yesterday.</p>
+<p>The table's second column names what is being counted: grouping by hour, day,
+environment, release or total counts <strong>traces</strong>, grouping by model counts
+<strong>observations</strong>, because a trace has no model. Grouped by release, the traces
+that named none share one bucket with an empty key.</p>
+<p><code>--group-by total</code> is the whole window as one row, with an empty key: the
+counts summed and the percentiles merged over every hour in it, which is not
+the same as the p95 of the daily p95s. Last week beside this week is the
+command run twice with two windows — there is no <code>--compare</code>; the difference
+is arithmetic the caller does.</p>
+<p>TOKENS is input plus output — what a bill is made of — summed over the
+generations in the bucket, and a dash when none of them reported usage, the
+way COST is a dash when nothing was priced. It is the same number the TOKENS
+column of <code>traces ls</code>, <code>sessions ls</code> and <code>users ls</code> shows. Cache-read,
+reasoning and cache-write tokens are never added in (a provider that reports
+cached tokens inside the input, or reasoning inside the output, would be
+counted twice); <code>--json</code> carries all five under <code>tokens</code>
+(<a href="../api/#tokens">api.md</a>).</p>
+<p><code>--env</code> takes the list every other command takes it as
+(<a href="#lists">Lists</a>): <code>--env production,staging</code> counts both.</p>
+<p><code>--user</code> restricts every bucket to one end user, with the groupings and the
+counts unchanged. On an <code>hour</code> or <code>day</code> timeline, and on the <code>total</code> row, it
+also adds a SESSIONS column: how many of that user's sessions began in the
+bucket, counted where they start so a sum is exact (<a href="../users/">users.md</a>).</p>
+<h3 id="facets"><code>facets</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>tracepad<span class="w"> </span>facets
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>tracepad<span class="w"> </span>facets<span class="w"> </span>--since<span class="w"> </span>168h
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>2026-09-02 12:00:00 .. 2026-09-09 12:00:00
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>ENV         TRACES
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>production  4656
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>staging     218
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>prod        1
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>RELEASE   TRACES
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>2026.9.1  3120
+<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a>
+<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a>NAME          TRACES
+<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>support-chat  2984
+</code></pre></div>
+<p>What <code>--env</code>, <code>--release</code> and <code>--name</code> can be set to over a range, busiest
+first, with how many traces carry each. The counts are the point as much as the
+values: <code>prod 1</code> beside <code>production 4656</code> is a typo, and nothing but the count
+says so.</p>
+<p><code>--since</code> and <code>--until</code> are the window, spelled as everywhere else — a Go
+duration or an RFC 3339 instant, and there is no day unit, so a week is <code>168h</code>.
+Given neither, the endpoint answers from <strong>the oldest hour it has summaries
+for</strong> up to now — as far back as <code>stats_retention_days</code> keeps, and no further:
+it does not read the raw traces for hours the summaries no longer cover. A
+column with nothing in it says so instead of printing an empty table, and a
+column the 100-value cap truncated says how many it left out. Values that
+cannot be spelled as a filter — one with a comma in it, one padded with spaces
+— are left out of the list, since ticking them could not work.</p>
+<h3 id="datasets-runs-score-configs"><code>datasets</code>, <code>runs</code>, <code>score-configs</code></h3>
+<p>The eval commands. The loop they make — declare, push, run, close, compare —
+is written out end to end in <a href="../datasets/#the-same-loop-from-a-shell">datasets.md</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>ls
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>show<span class="w"> </span>support-golden<span class="w"> </span>--version<span class="w"> </span><span class="m">12</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>push<span class="w"> </span>support-golden<span class="w"> </span>--file<span class="w"> </span>cases.jsonl<span class="w"> </span>--description<span class="w"> </span><span class="s2">"the golden set"</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm-item<span class="w"> </span>support-golden<span class="w"> </span>a1b2c3d4e5f60718293a4b5c6d7e8f90
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>rm<span class="w"> </span>support-golden<span class="w"> </span>--yes
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w">                                   </span><span class="c1"># every dataset's runs, newest first</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>ls<span class="w"> </span>support-golden
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--name<span class="w"> </span><span class="s2">"prompt v8"</span><span class="w"> </span>--metadata-file<span class="w"> </span>run.json
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>show<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--items
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>finish<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7<span class="w"> </span>--failed<span class="w"> </span><span class="s2">"judge timed out"</span>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>compare<span class="w"> </span>0e5a…<span class="w"> </span>1f6b…<span class="w"> </span>--all
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>rm<span class="w"> </span>0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>ls
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>accuracy<span class="w"> </span>--file<span class="w"> </span>accuracy.json
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>rm<span class="w"> </span>accuracy
+</code></pre></div>
+<p><code>datasets push</code> takes a <code>.jsonl</code> — one case per line, which is the shape a
+dataset is edited by hand in — or a <code>.json</code> array, which is the shape a script
+generates. Either way it is <strong>one</strong> batch on the wire — up to the 10,000 cases
+one request takes; a longer file is several writes, below — because the
+dataset's version advances once per write: a file sent case by case would leave
+a version per case and no number that names the file. It prints where it
+landed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>version 12: 3 items changed, 200 in the batch
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>unchanged at version 12
+</code></pre></div>
+<p>A file of more than 10,000 cases — the most one request takes — goes as the
+fewest writes of up to 10,000 that carry it — a write that changes something
+is a version of its own, and one that changes nothing leaves the version
+where it was; the line
+ends <code>sent as N writes</code>, and <code>--json</code> answers the one shape a single write
+has, with every id, the last version and the sum of the changes. A write that
+fails says how many cases before it are written; pushing the file again
+finishes the job when every case carries an <code>id</code>. An <code>id</code> the file gives twice
+is refused before anything is sent, <code>--description</code> included. The split counts
+cases, not bytes: a write of 10,000 large cases can still be over
+<code>TRACEPAD_MAX_BODY_BYTES</code> and be refused with <code>413</code>, and such a file has to be
+cut into smaller files by hand.</p>
+<p><code>runs ls</code> without a dataset reads <code>GET /api/v1/runs</code> — the whole project's
+runs, newest first, with a dataset column the per-dataset table has no need
+of. With one it reads that dataset's own listing.</p>
+<p><code>runs create --json</code> answers with the whole run, so a script reads the id and
+the version it pinned from one call:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--json<span class="k">)</span>
+</code></pre></div>
+<p><code>datasets show --json</code> walks every page rather than printing the first: it is
+the dataset's export, and an export that looks complete and is not would be
+worse than none. It is the one command whose JSON stitches pages; every other
+<code>--json</code> prints the endpoint's own bytes, cursors included, so a script pages
+exactly the way an HTTP client does.</p>
+<p>The <code>runs compare</code> <strong>table</strong> walks every page too — the cases worth reading are
+the ones that moved, and the regression may be on page two. <code>runs compare
+--json</code> does not: it prints the one page the endpoint returned, next to counts
+(<code>improved</code>, <code>regressed</code>, <code>same</code>) that are always about the whole pair, and
+<code>next_cursor</code> for the rest of the cases.</p>
+<p><code>runs show --items</code> is the case-by-case view: expected output beside what was
+produced, with the scores each attempt got. Add <code>--unknown</code> to see the run's
+traces that name a case its dataset version does not have.</p>
+<p><code>datasets rm</code> is destructive — it takes the dataset's runs with it and releases
+every trace they were keeping out of retention — so it shows the preview and
+asks you to type the name back, and needs <code>--yes</code> off a terminal. <code>runs rm</code>,
+<code>score-configs rm</code> and <code>datasets rm-item</code> do not: one row each, and the traces of a deleted run are
+released, not deleted.</p>
+<h3 id="queues"><code>queues</code></h3>
+<p>The annotation commands. The loop they make — declare the queue, fill it, take
+the next item, post the scores, complete — is written out end to end in
+<a href="../annotation/#the-same-loop-from-the-command-line">annotation.md</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>ls
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>put<span class="w"> </span>weekly-review<span class="w"> </span>--config<span class="w"> </span>accuracy<span class="w"> </span>--config<span class="w"> </span>tone<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Did support answer the question?"</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c…<span class="w"> </span>--observation<span class="w"> </span>2b3c4d5e6f7a8b9c
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--from-traces<span class="w"> </span>--error<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--limit<span class="w"> </span><span class="m">200</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>next<span class="w">     </span>weekly-review<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a>tracepad<span class="w"> </span>queues<span class="w"> </span><span class="nb">complete</span><span class="w"> </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>skip<span class="w">     </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">"not a support conversation"</span>
+<a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>reopen<span class="w">   </span>weekly-review<span class="w"> </span>c0ffee00c0ffee00c0ffee00c0ffee00<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a>
+<a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>items<span class="w"> </span>weekly-review<span class="w"> </span>--status<span class="w"> </span>completed<span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>rm<span class="w">    </span>weekly-review<span class="w"> </span>--yes
+</code></pre></div>
+<p><code>queues put</code> is declarative: the whole queue in one call, and the same call
+twice writes nothing. Every <code>--config</code> must be a declared score config, in the
+order a reviewer will be asked for them.</p>
+<p><code>queues add --from-traces</code> takes the same filters as <code>traces ls</code> and adds the
+newest matches, at most <code>--limit</code> (100 by default, 1000 at most). It prints how
+many matched and whether the cap bit; run it again with <code>--until</code> at the oldest
+one added to continue. Adding a target the queue already holds is not an error
+and adds nothing, so a filter is safe to re-run.</p>
+<p><code>queues next</code> claims the item it hands out for ten minutes, and hands the same
+one back on a second call from the same <code>--annotator</code> — a script that crashes
+and restarts resumes rather than skipping. <code>--annotator</code> is the name a
+program signs with; a person working the queue from the web interface is held
+by their account instead, and <code>queues items --account ID</code> finds their items
+(<a href="../annotation/#taking-an-item">annotation.md</a>). <code>queues complete</code> is refused until
+every score the queue names is on the item's target, whoever wrote it: post
+them with <code>scores add</code> first. <code>queues reopen</code> on an item that is already
+pending simply releases the claim.</p>
+<p><code>queues skip</code> refuses an item somebody has already completed — it writes the
+same columns the completion filled — so reopen it first.</p>
+<p><code>queues items</code> reads oldest first, which is the order the items are worked in;
+<code>--newer --cursor</code> walks back up. <code>--annotator</code> is "what has this person got":
+what they completed or skipped, plus the pending items they are holding, so
+<code>--status pending --annotator ada</code> is ada's desk right now. <code>queues rm</code> is destructive — it takes the
+queue's items — so it shows the preview and asks you to type the name back,
+and needs <code>--yes</code> off a terminal. The scores written while annotating stay.</p>
+<h3 id="system"><code>system</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>tracepad<span class="w"> </span>system
+</code></pre></div>
+<p>Version and uptime, then what your credential is given
+(<a href="../api/#system">api.md</a>). With a project key: the project's row counts, the
+raw archive, the ingest counters and what the retention sweeper has done since
+the server started. With the admin token as <code>--key</code>: the deployment's database
+size, how many projects share it, the writer queue and the compaction. An
+owner's session sees both, but the CLI holds no session. A line says which half
+was not shown, so a missing line is never read as a zero. The first thing to
+run when something looks wrong, and the thing to paste into a bug report.</p>
+<p>Under the admin token a line says whether a compaction is waiting for the next
+sweep — <code>compaction pending since …</code> after an erasure or a deletion — or when
+one last finished (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).</p>
+<p>The <code>raw archive</code> block is what an export can carry out, and how far back:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>raw archive in this project
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>  storage       on
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>  batches       12400
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a>  on disk       3.1 GiB
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>  covering      2026-08-06 04:12:19 .. 2026-09-05 09:44:02
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a>  not covered   214 traces started before it begins
+</code></pre></div>
+<h3 id="export"><code>export</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--to<span class="w"> </span>http://collector:4318/v1/traces
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>tracepad<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--otlp<span class="w"> </span>--dir<span class="w"> </span>./tracepad-export
+</code></pre></div>
+<p>Replays the archive — every export body as it arrived — into any OTLP receiver
+or onto disk, in arrival order, resumably. <code>--dry-run</code> prints what would go and
+sends nothing; a receiver that answers <code>429</code> or <code>5xx</code> is retried, anything else
+<code>4xx</code> stops the export with the cursor to pass as <code>--after</code>. The summary ends
+with how many traces started before the archive begins, which are the ones no
+export can carry. The receiver's credentials go in <code>--header</code>;
+<code>OTEL_EXPORTER_OTLP_HEADERS</code> is not read, and a Tracepad key bound for the
+receiver is refused — the ones this machine holds for your Tracepad always,
+any other unless <code>--allow-tracepad-key</code> says the receiver is a Tracepad of
+yours.</p>
+<p>It has a page of its own: <a href="../export/">export.md</a>.</p>
+<h2 id="administration">Administration</h2>
+<p><code>projects</code>, <code>keys</code>, <code>retention</code>, <code>users rm-data</code> and <code>accounts</code> manage the
+server itself; <a href="#traces-rm"><code>traces rm</code></a> is the same ceremony on the data
+plane. They are clients of the same API as everything else, and they
+are covered in <a href="../admin/">admin.md</a>, <a href="../retention/">retention.md</a> and
+<a href="../accounts/">accounts.md</a>; what matters here is how they behave at a terminal.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>tracepad<span class="w"> </span>projects<span class="w"> </span>ls
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a>tracepad<span class="w"> </span>keys<span class="w"> </span>create<span class="w"> </span>--project<span class="w"> </span><span class="nv">$ID</span><span class="w"> </span>--scope<span class="w"> </span>ingest<span class="w"> </span>--name<span class="w"> </span><span class="s2">"checkout api"</span><span class="w">   </span><span class="c1"># admin token</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--days<span class="w"> </span><span class="m">90</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a>tracepad<span class="w"> </span>retention<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--media<span class="w"> </span>placeholder
+<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711
+</code></pre></div>
+<p><code>users rm-data</code> prints what went, then the raw archive's line — <code>removed 252
+spans from 41 raw batches, 3 deleted</code> — the date the freed bytes are
+overwritten by, and the pre-migration backup when one exists. Its preview
+names the runs and the datasets that lose something, the raw batches older
+than the trace window that it cannot attribute, when there are any, and an
+erasure of the user already under way — <code>an erasure of this user is running:
+4f0c… (parsed)</code>. The server runs an erasure as a task: the command asks it to
+answer within 30 seconds, and when the erasure takes longer it watches it,
+printing where it is to stderr as that changes — <code>erasing: parsed 5123/20000
+traces</code> — and the lines above once it ends. A failed erasure prints why and
+exits 1. <code>--no-wait</code> prints the erasure's id and how to look at it, and
+exits 0 at once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>tracepad<span class="w"> </span>users<span class="w"> </span>rm-data<span class="w"> </span>user-4711<span class="w"> </span>--yes<span class="w"> </span>--no-wait
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="c1"># erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5 queued; tracepad users erasure 4f0c9d3e8a1b2c3d4e5f60718293a4b5</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasure<span class="w"> </span>4f0c9d3e8a1b2c3d4e5f60718293a4b5
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a>tracepad<span class="w"> </span>users<span class="w"> </span>erasures<span class="w">        </span><span class="c1"># the project's hundred, those under way first</span>
+</code></pre></div>
+<p>Leaving the command stops the watching, not the erasure. If the connection
+is lost after the request went out, the command cannot know whether the
+server took it, and says to run <code>tracepad users erasures</code> to see. An ended
+erasure names no one: its record forgets the user id when it ends. A server
+from before erasures were tasks does not know the 30 seconds; the command asks
+it again without them and prints its answer, which is the end, <code>--no-wait</code> or
+not. <code>export --otlp</code> counts the batches an erasure rewrote as <code>scrubbed</code> in its summary.</p>
+<p>The <code>keys</code> commands take the admin token, because no project key lists, mints
+or revokes keys; with a project key they print the server's <code>403</code> and exit 1.
+An owner or editor does the same in the web interface. <code>keys ls</code> shows each
+key's name, scopes, creation date, who minted it — <code>email (standing)</code>, <code>admin
+token</code>, <code>server</code> or <code>unknown</code> — and when it was last used, which is written
+once a minute (<a href="../admin/#keys">admin.md</a>). <code>keys create --name</code> says which
+program will hold the key.</p>
+<p><code>keys create --scope</code> says what the key may do, and is required: one or more
+of <code>ingest</code>, <code>read</code> and <code>write</code>, comma-separated or with the flag repeated —
+<code>--scope ingest</code> for a production application, <code>--scope read</code> for an agent,
+<code>--scope ingest,read,write</code> for an eval harness. Without it the command is a
+usage error (exit 2) that lists the three, and sends nothing. The secret is
+printed once, after the public key and the scopes, with the lines that fit
+them: <code>TRACEPAD_API_KEY</code> for every key — the <code>tracepad</code> packages export with it
+as well as read — and, when the key holds <code>ingest</code>, the <code>LANGFUSE_*</code> pair. A key's
+scopes never change; to change what a program may do, mint a new key and
+revoke the old.</p>
+<p><code>projects show</code> run with a project key ends with the key itself — its public
+key, its name and its scopes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>  key         tp-pk-81c0… (checkout api): ingest
+</code></pre></div>
+<p><code>retention show</code> prints the project's media setting beside the three windows,
+and <code>retention set --media store|placeholder</code> changes it
+(<a href="../media/#not-keeping-them-the-placeholder-setting">media.md</a>); it deletes
+nothing, so it asks for no confirmation.</p>
+<p>Every destructive command asks the server what it would do, prints that, and
+asks you to type the name of what is being destroyed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>$ tracepad projects rm 9f2c…
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>this would delete project 9f2c…:
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>  api_keys       2
+<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>  observations   180114
+<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>  raw_batches    812
+<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>  traces         41203
+<a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a>  oldest arrival 2026-03-14 08:21:00
+<a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a>the keys stop working immediately; the data is restorable for seven days
+<a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a>type "checkout-service" to confirm:
+</code></pre></div>
+<p><code>--yes</code> answers that for a script. It is not a bypass: the command still asks
+the server first and still sends back the confirm value the server named — what
+<code>--yes</code> replaces is the typing. Run non-interactively <strong>without</strong> it and the
+command stops with the preview on stderr and exit code 1, because a script that
+deletes a project by default is a script that deletes a project by accident.</p>
+<p>Commands that act on a project take <code>--project &lt;id&gt;</code>; with one reachable
+project, the credential answers that by itself. <code>projects show</code> also takes the
+id as a positional, which is the same argument under a second spelling — so
+passing both is a usage error rather than one of them quietly winning, and that
+holds when the two agree as well. The commands marked as needing
+the admin token in <a href="../admin/">admin.md</a> take it as <code>--key</code> or
+<code>TRACEPAD_API_KEY</code>, since it rides in the same header as a project key — and,
+with neither set, from <code>TRACEPAD_ADMIN_TOKEN</code> or the file
+<code>TRACEPAD_ADMIN_TOKEN_FILE</code> names, which is what the server's own container has
+in its environment — but only for a server on this machine (<code>localhost</code>,
+<code>127.0.0.0/8</code>, <code>::1</code>; a name that merely resolves there is not taken for it): the deployment's credential is not sent to another host
+unless you pass it as <code>--key</code> or <code>TRACEPAD_API_KEY</code>. Those are <code>projects</code>
+(<code>create</code>, <code>rename</code>, <code>rm</code>, <code>restore</code> and <code>ls --deleted</code>; a plain <code>projects ls</code> is
+the project key's), <code>keys</code>, <code>accounts</code> and <code>system</code> (the deployment's view, where
+a key gets its project's); no other command reads the admin token this way.</p>
+<p><code>tracepad &lt;command&gt; --help</code>, and the error a mistyped command ends in, print the
+help of that command (<code>keys --help</code> of the group), not the whole text; <code>tracepad
+--help</code> lists every command.</p>
+<h3 id="accounts"><code>accounts</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>ls
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>show<span class="w">   </span>&lt;id<span class="p">|</span>email&gt;
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>create<span class="w"> </span>&lt;email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="o">]</span>
+<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a><span class="w">                         </span><span class="o">[</span>--project<span class="w"> </span>&lt;project-id&gt;:viewer<span class="p">|</span>editor<span class="o">]</span>...
+<a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;
+<a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span><span class="nb">set</span><span class="w">    </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--name<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--owner<span class="w"> </span><span class="p">|</span><span class="w"> </span>--no-owner<span class="o">]</span>
+<a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a><span class="w">                         </span><span class="o">[</span>--disable<span class="w"> </span><span class="p">|</span><span class="w"> </span>--enable<span class="o">]</span>
+<a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>grant<span class="w">  </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;<span class="w"> </span>viewer<span class="p">|</span>editor
+<a id="__codelineno-41-9" name="__codelineno-41-9" href="#__codelineno-41-9"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>revoke<span class="w"> </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span>&lt;project-id&gt;
+<a id="__codelineno-41-10" name="__codelineno-41-10" href="#__codelineno-41-10"></a>tracepad<span class="w"> </span>accounts<span class="w"> </span>rm<span class="w">     </span>&lt;id<span class="p">|</span>email&gt;<span class="w"> </span><span class="o">[</span>--confirm<span class="w"> </span>&lt;email&gt;<span class="o">]</span>
+</code></pre></div>
+<p>People sign in and programs use keys; <a href="../accounts/">accounts.md</a> is the whole
+of it, and this is that from a terminal. Every command here needs the <strong>admin
+token</strong> — the routes take an owner's session or the token, and a terminal has
+no cookie:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span>
+</code></pre></div>
+<p>Each takes the account as an <strong>id or an email</strong>, whichever you have. An email
+is what you know about somebody, so it is what you type; the <code>@</code> is what tells
+the two apart.</p>
+<p>Inviting somebody prints the link once, and only its hash is stored — carry it
+to them, and the link is what sets their password, so the password never passes
+through your hands:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>$ tracepad accounts create helper@example.com --name "The Helper" \
+<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>    --project 9f2c…:viewer
+<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>account helper@example.com created (4b1e…)
+<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a>
+<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>  http://localhost:4318/invite#token=…
+<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>
+<a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a>the invitation link is shown only here; only its hash is stored.
+<a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a>It is good until 2026-09-17 10:00:00, and it is what sets their password —
+<a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a>which is why the password never passes through your hands.
+</code></pre></div>
+<p><code>accounts invite</code> mints a fresh link for an account that already exists, which
+is also the <strong>password reset</strong>: it ends that account's sessions, and the old
+password goes on working until the new link is used, so a link that never
+arrives leaves nobody locked out.</p>
+<p><code>accounts ls</code> answers "who can see what" in one table — the projects and roles
+are on the row, and an owner reads as <em>every project</em> because an owner has no
+membership rows:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>EMAIL                NAME        STANDING         LAST LOGIN           PROJECTS
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a>helper@example.com   The Helper  member           2026-09-09 11:04:12  checkout (viewer)
+<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a>partner@example.com  Partner     owner, invited   never                every project
+</code></pre></div>
+<p><em>invited</em> is an account that has not used its link yet, and it is said next to
+<code>owner</code> rather than instead of it: an owner counts only once they can actually
+sign in, which is why you cannot stand down the moment you invite a successor.</p>
+<p><code>accounts grant</code> and <code>accounts revoke</code> move one project in and out of one
+account, and <code>revoke</code> prints the account afterwards rather than claiming that
+access is gone — because for an <strong>owner</strong> it is not. An owner has no membership
+rows and every project there is, so revoking one takes nothing away; the
+account it prints says so in as many words.</p>
+<p><code>accounts rm</code> is for people who are gone. It takes their memberships, sessions
+and invitations and nothing else, and it wears the same ceremony as the rest of
+the destructive commands — except that the echo is the <strong>email</strong>. The keys the
+account minted are not deleted with it; the preview lists them, so you can
+decide whether to rotate them first:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>$ tracepad accounts rm helper@example.com
+<a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a>this would delete the account helper@example.com:
+<a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a>  memberships    1
+<a id="__codelineno-45-4" name="__codelineno-45-4" href="#__codelineno-45-4"></a>  sessions       2
+<a id="__codelineno-45-5" name="__codelineno-45-5" href="#__codelineno-45-5"></a>  keeps key      tp-pk-81c0… in checkout (nightly eval), last used 2026-09-26 17:41:12
+<a id="__codelineno-45-6" name="__codelineno-45-6" href="#__codelineno-45-6"></a>disabling the account instead takes access away without losing its roles; the keys it minted keep working until they are revoked
+<a id="__codelineno-45-7" name="__codelineno-45-7" href="#__codelineno-45-7"></a>type "helper@example.com" to confirm:
+</code></pre></div>
+<p><code>--confirm helper@example.com</code> is that echo typed in advance, which is what a
+script has instead of a terminal. It is deliberately not a <code>--yes</code>: naming the
+account is the point, so a script cannot delete whichever account an id
+happened to resolve to. Any case will do — an email is a case-insensitively
+unique identifier, and what you have to get right is which account.</p>
+<p><strong>When every owner's password is lost</strong>, this is the way back in — which is why
+the admin token is worth keeping somewhere:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>you@example.com
+</code></pre></div>
+<p>Open the link it prints and set a new password.</p>
+<h3 id="health"><code>health</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>tracepad<span class="w"> </span>health<span class="w"> </span><span class="o">[</span>--url<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+</code></pre></div>
+<p>Is the server up, and which build is it? Exit <code>0</code> and the version on stdout — on a terminal; piped, like every command, <code>{"version":"0.1.0","ok":true}</code>;
+exit <code>1</code> and the reason on stderr for anything else — a refused connection, a
+non-200, or a 200 whose body carries no version, which is what a proxy's splash
+page on the wrong port looks like.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health
+<a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a><span class="m">0</span>.1.0
+<a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--json
+<a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a><span class="o">{</span><span class="s2">"version"</span>:<span class="s2">"0.1.0"</span>,<span class="s2">"ok"</span>:true<span class="o">}</span>
+<a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a>$<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w"> </span>--url<span class="w"> </span>http://localhost:9999<span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+<a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a>tracepad:<span class="w"> </span>cannot<span class="w"> </span>reach<span class="w"> </span>http://localhost:9999:<span class="w"> </span>…<span class="w"> </span>connection<span class="w"> </span>refused
+<a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a><span class="m">1</span>
+</code></pre></div>
+<p><strong>It is the one command that needs no key</strong>, because <code>/health</code> is the one route
+that needs none. That is the point of it: a container's health check, a systemd
+unit or a load balancer can ask whether the process is alive without holding a
+project secret to do it. It is what the <a href="../docker/">Docker image</a> declares as
+its <code>HEALTHCHECK</code>.</p>
+<p>It is also the one command that will look for the server rather than assume it.
+With neither <code>--url</code> nor <code>TRACEPAD_URL</code>, it reads <strong><code>TRACEPAD_LISTEN</code></strong> — the
+variable that told the server where to bind — and probes that, treating a
+wildcard bind as <code>127.0.0.1</code>; only with neither of those does it fall back to
+<code>http://localhost:4318</code>. A probe usually runs beside the process it is asking
+about, and on a server moved to another port it should move too.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="nv">TRACEPAD_LISTEN</span><span class="o">=</span>:8080<span class="w"> </span>tracepad<span class="w"> </span>health<span class="w">     </span><span class="c1"># probes http://127.0.0.1:8080</span>
+</code></pre></div>
+<p>The <code>--listen</code> <strong>flag</strong> is not consulted, because a flag on the server's command
+line is not visible to a second process. Where both a server and its probe read
+the configuration, put the port in the environment.</p>
+<h3 id="mcp"><code>mcp</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>tracepad<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>--url<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--key<span class="w"> </span>KEY<span class="o">]</span>
+</code></pre></div>
+<p>Serves the MCP tools over stdio against the server <code>--url</code> or <code>TRACEPAD_URL</code>
+names, with <code>--key</code> or <code>TRACEPAD_API_KEY</code>, which needs the <code>read</code> scope. It is
+what an MCP client that cannot speak remote HTTP runs; the tools and the
+client configuration are in <a href="../mcp/">mcp.md</a>.</p>
+<h3 id="skills"><code>skills</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install
+<a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--project
+<a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--dir<span class="w"> </span>~/.agents/skills
+<a id="__codelineno-51-4" name="__codelineno-51-4" href="#__codelineno-51-4"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show
+<a id="__codelineno-51-5" name="__codelineno-51-5" href="#__codelineno-51-5"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show<span class="w"> </span>debugging.md
+</code></pre></div>
+<p>The agent skill this binary carries: <code>install</code> writes it where a coding agent
+finds it — <code>~/.claude/skills/tracepad</code> by default, <code>./.claude/skills/tracepad</code>
+with <code>--project</code>, <code>DIR/tracepad</code> with <code>--dir</code> — and <code>show</code> prints <code>SKILL.md</code> or
+one of its references. Both are local: no server, no key. An update replaces
+the directory whole, and a <code>tracepad</code> directory the command did not install is
+refused unless <code>--force</code>. A <code>tracepad</code> symlink in your own skills directory is
+followed only into a skill the command installed, or with <code>--force</code> into an
+empty directory; with <code>--project</code> no link on the way is followed at all.
+Either refusal holds with <code>--force</code> too. Inside a container (the image sets
+<code>TRACEPAD_IN_CONTAINER</code>) it writes only onto a mounted volume — not the
+container's own layer, not a <code>tmpfs</code> — and otherwise refuses, printing the
+<code>docker run … -v DIR:/skills … skills install --dir /skills</code> that works, so
+<code>docker exec … skills install</code> is refused (<a href="../agents/#from-the-docker-image">agents.md</a>).
+Exit <code>1</code> for any of these refusals, <code>2</code> for a usage error.
+The whole of it is <a href="../agents/">agents.md</a>.</p>
+<h3 id="upgrade"><code>upgrade</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--plan<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="w"> </span><span class="p">|</span><span class="w"> </span>--container<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="w"> </span><span class="p">|</span><span class="w"> </span>--container<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--check<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--back<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+</code></pre></div>
+<p>Upgrades the installed binary and one server or container you started, to the newest
+stable release or the one <code>--to</code> names — never an older one: migrations run
+forward only. With no <code>--to</code>, the target is the later of the latest stable
+release and the installed binary: a release candidate installed is never gone
+back from, and a server still running an older version from it is yours to
+take there — the plan gives the command, with the candidate named
+(<code>--to 0.2.0-rc.1 --data-dir DIR</code>, or <code>--container NAME</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
+command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, as
+the agent's bridge does; <code>TRACEPAD_INSTALL_DIR</code> names another). One a package
+manager installed — Homebrew's Cellar, the Nix store, a snap, <code>/usr/bin</code> — is
+yours, and the plan names the manager's command. It is local, like <code>skills</code>: it reads this machine's processes and containers and asks a
+server only at the server's own address. It does not run on Windows in this
+release: it refuses there before it looks at anything. The design is spec 054.</p>
+<ul>
+<li><code>--plan</code> changes nothing. It lists the binary, every <code>tracepad serve</code> of
+  yours and every container of the image, says which the command may upgrade
+  and why each other is yours (a service, an address beyond this machine,
+  another binary, a Compose project), and what the upgrade would do, step by
+  step. More than one of the command's behind: name one with <code>--data-dir</code> or
+  <code>--container</code>.</li>
+<li><strong>A container</strong> is the command's when it is named <code>tracepad-&lt;project&gt;</code>, as
+  the setup names one, or with <code>--container NAME</code>, and a recreate of it is the
+  same container: no Compose, Swarm or Kubernetes label; running; a local named
+  volume at <code>/data</code>, without options of its own; every port published on a
+  loopback address only, at a fixed port, its server's among them; the default
+  network; the image's entrypoint, health check and stop signal; no tmpfs; no
+  mount option beyond read-only (a relabel, a propagation, a <code>--mount</code>
+  option); no link or special file in its volume, which a restore would not
+  make again; no log option that can hold a credential (rotation and tags are
+  carried); Docker neither rootless nor remapping user namespaces; and nothing
+  set in <code>docker inspect</code> that its <code>docker run</code> does not carry — each such
+  setting is named, in the plan and in the commands it gives you. It is
+  stopped with SIGTERM (its restart policy set to <code>no</code> for the stop, never
+  <code>docker stop</code>'s kill), its volume archived from <code>busybox</code> into the run's
+  directory and read back whole, renamed <code>&lt;name&gt;-before-&lt;run&gt;</code>, and the
+  release is run under its name with <strong>the <code>docker run</code> it was created with</strong>
+  — its ports, its mounts (read-only ones read-only), its restart policy, its
+  labels, a log driver of its own, its user, its command — and the variables
+  you gave it through a file of the run's (<code>0600</code>), never a command line. Its
+  version is asked where its server listens (<code>--listen</code> or <code>TRACEPAD_LISTEN</code>,
+  as published on this machine). Once it is healthy, the installed binary is
+  brought to its version when no server runs from it. Every other container
+  of the image is yours, and the plan gives the commands that upgrade it —
+  the same <code>docker run</code>, its variables in a file read from Docker and never
+  printed, the old one kept until the new one is healthy
+  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>) — or Compose's
+  <code>docker compose up -d</code>. One whose address cannot be told is said to be not
+  checked, not called behind.</li>
+<li>Without it, the command does it. A <strong>server</strong> is the command's when it runs
+  the installed binary, its data directory's lock records its pid, it listens
+  on this machine only, and it is in no service manager's hands: a server in
+  a systemd service (system or <code>--user</code>) or a launchd job is yours, whatever
+  started it, and so is one whose cgroup cannot be read or names no session —
+  a container's root without systemd, a slice — since no manager can be ruled
+  out; the plan gives the <code>systemctl restart</code> or <code>launchctl kickstart</code> for a
+  service's. A terminal's session, tmux, or the <code>nohup … &amp;</code> the setup starts a
+  server with is not a service. It
+  is backed up with
+  the server stopped (the data directory archived into
+  <code>~/tracepad-backups/&lt;run&gt;/</code> and read back whole), the new binary — checked
+  against the release's <code>checksums.txt</code>, and its attestation when <code>gh</code> is
+  logged in — is put in place, and the server starts again with <strong>the same
+  arguments, environment and working directory</strong> — in its data directory when
+  that working directory is gone, and not at all (a refusal before the stop)
+  when its data directory or a file it reads, such as
+  <code>TRACEPAD_ADMIN_TOKEN_FILE</code>, is named relative to the one gone. A server is stopped with
+  SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
+  (exit <code>5</code>), and <code>--back</code> starts it again once it has. <strong>No binary is put
+  under another server</strong>: while any server but the run's own runs from the
+  installed binary, at any version, the plan and the upgrade refuse — its next
+  restart would be the new version with no backup — and say to stop it first;
+  two servers of the command's on one binary are refused up front, with the
+  order to take them in.
+  A way back puts the old binary back only where nothing runs it at a later
+  version. <strong>What a way back needs is checked before the stop</strong>: the copy of
+  the old version, room beside the data directory for a restore (beside the
+  archive, when both are on one disk), and a parent directory the restore can
+  be made in and the data renamed aside through, and no other server on the
+  installed binary that a way back would put the old version under; <code>--back</code>
+  checks the same before its first act. For a container: the old image there
+  to run again, <code>busybox</code>, the names a way back makes free, and room for a
+  restore beside its volume. What the command cannot read — a process, a lock on a file system
+  that cannot lock, the room on a disk, a version that is not said — is a
+  reason to stop, never a yes: it refuses with nothing changed, and a server
+  or container that does not say its version when asked is named as one that
+  may be behind. One the command does not ask — a server listening on a
+  single address of the machine's that is not a loopback one, a container
+  whose address cannot be told — is said to be not checked.</li>
+<li><strong>The check</strong> asks the server's <code>/health</code> at its own address, and compares
+  the trace count of <code>/api/v1/system</code> before and after, with the key in
+  <code>TRACEPAD_API_KEY</code> (from the environment only; without one the counts are not
+  compared). A new version that exits, or answers as another version, goes back at once (exit <code>3</code>). One that runs
+  but stays silent through the two-minute wait — a long migration runs before
+  the server listens — or answers but counts fewer traces, or cannot count
+  them, is left running for you to decide (exit <code>4</code>).</li>
+<li><code>--check RUN</code> asks again, for a server that was still starting — the one the
+  run started, or the same one you started again since — and never goes back
+  by itself. <code>--back RUN</code> takes a run's way back: the archive is
+  restored beside the data and checked before anything stops, what the new
+  version left is <strong>set aside, not deleted</strong> (<code>&lt;data&gt;.after-&lt;run&gt;</code>), and the
+  old version starts
+  with its arguments. Whether the archive is restored is decided from what
+  the run recorded when it happened — whether the new version was started on
+  the data, or a server found there started while the installed binary may
+  have been the new one — never from how fast a server answers. <code>--back</code> again
+  ends where the first did: it checks the old version, starts it again if it
+  was stopped since, and changes nothing else. A container's way back
+  restores the archive into a new volume, <code>&lt;volume&gt;-&lt;run&gt;</code>, owned as the old
+  one's root is, sets the new container aside as <code>&lt;name&gt;-after-&lt;run&gt;</code> (restart
+  policy <code>no</code>), and runs the old image under its name on the restored volume;
+  the volume the new version migrated is kept as it was.</li>
+</ul>
+<p>A run directory is a full copy of the database and of the server's
+environment, secrets included, kept until you delete it; erasing traces or a
+user does not reach it, nor what a way back set aside. The report says so, and
+gives the commands to remove each. The command never deletes any of it.</p>
+<p>The exit status, by mode — one table, which the skill reads too:</p>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th><code>--plan</code></th>
+<th>the upgrade</th>
+<th><code>--check RUN</code></th>
+<th><code>--back RUN</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>nothing runs older (an older <code>tracepad</code> elsewhere is named, and runs nothing)</td>
+<td>upgraded, healthy; or nothing to do anywhere</td>
+<td>healthy</td>
+<td>went back; the old version runs, healthy</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>refused, or interrupted: no verdict (the install script reads it as "could not check")</td>
+<td>refused, or interrupted before the stop, with nothing changed</td>
+<td>refused</td>
+<td>refused, with nothing touched</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>a usage error</td>
+<td>a usage error</td>
+<td>a usage error</td>
+<td>a usage error</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>—</td>
+<td>not upgraded: the way back ran, and the old version runs, healthy</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td>only servers or containers of yours run older</td>
+<td>with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind</td>
+<td>the new version is not healthy, or is yours to decide</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td>—</td>
+<td>stuck: a step failed and could not be undone, or the old version was started and not seen healthy</td>
+<td>stuck: the run could not record its check</td>
+<td>stuck: the way back did not finish, or the old version was not seen healthy</td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td>an upgrade is pending</td>
+<td>nothing to do for the one named, and another of the command's is behind: the report's <code>next</code> upgrades it</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>An upgrade that finds nothing of its own to do exits as <code>--plan</code> would on the
+same machine. Either refuses (<code>1</code>) when something runs later than the version
+asked for — after an install script put an older binary in place, say. The
+report says what runs and what is where, whatever the status. <code>--json</code>
+prints the report as one object: <code>mode</code>, <code>status</code>, <code>exit_code</code>, <code>summary</code>,
+<code>from</code>, <code>to</code>, <code>run</code>, <code>binary</code>, <code>servers</code>, <code>containers</code>, <code>probe</code>, <code>check</code>,
+<code>back_check</code> (the way back's check of the old version), <code>plan</code>, <code>done</code>,
+<code>set_aside</code>, <code>person</code>, <code>next</code> and <code>notes</code>.</p>
+<h2 id="version-skew">Version skew</h2>
+<p>Every API response carries the server's build. When it differs from the CLI's,
+the first command of a session prints a warning to stderr and carries on — a
+skew is usually fine, and a client that refused to run would be worse than one
+that says what it noticed.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

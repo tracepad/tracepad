@@ -1,0 +1,2643 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/sdk-python/">
+      
+      
+        <link rel="prev" href="../ingest/">
+      
+      
+        <link rel="next" href="../sdk-js/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Python package - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#the-python-package" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Python package
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="init">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-trace-around-a-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trace around a step
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scores
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-raises-and-what-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What raises and what does not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it writes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        init
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="init">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#streams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streams
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-trace-around-a-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The trace around a step
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scores
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing your instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-raises-and-what-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What raises and what does not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it writes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/sdk-python.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="the-python-package">The Python package</h1>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad
+</code></pre></div>
+<p><code>tracepad</code> is a thin layer of ergonomics over the OpenTelemetry SDK. It owns
+no transport, no batching, no retry and no context propagation — those are the
+OTel SDK's — and it wraps no provider client. Everything it does is reachable
+with <code>opentelemetry-sdk</code> and <code>curl</code>, which the rest of these docs keep showing;
+what it adds is the one line that points an application at a store, and the
+handful of shapes a person writes the same way every time.</p>
+<p>Python 3.10 or newer. Two dependencies: <code>opentelemetry-sdk</code> and
+<code>opentelemetry-exporter-otlp-proto-http</code>.</p>
+<blockquote>
+<p>The package installs no <code>tracepad</code> command. <code>tracepad</code> on your <code>PATH</code> is the
+server binary; the CLI is <a href="../cli/">cli.md</a>.</p>
+</blockquote>
+<h2 id="init">init</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracepad</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Environment</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td><code>TRACEPAD_URL</code></td>
+<td>Where the store is, e.g. <code>http://localhost:4318</code></td>
+</tr>
+<tr>
+<td><code>key</code></td>
+<td><code>TRACEPAD_API_KEY</code></td>
+<td>A secret key (<code>tp-sk-…</code>), sent as <code>Bearer</code></td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td><code>TRACEPAD_ENVIRONMENT</code></td>
+<td>The deployment this process is</td>
+</tr>
+<tr>
+<td><code>release</code></td>
+<td><code>TRACEPAD_RELEASE</code></td>
+<td>The version of this deployment — per trace, <a href="#the-trace-around-a-step"><code>update_trace(version=…)</code></a></td>
+</tr>
+<tr>
+<td><code>export</code></td>
+<td>—</td>
+<td><code>False</code> attaches everything except the exporter</td>
+</tr>
+<tr>
+<td><code>export_timeout</code></td>
+<td><code>TRACEPAD_EXPORT_TIMEOUT</code></td>
+<td>Seconds one export may take, its retries included; <code>5.0</code> by default</td>
+</tr>
+</tbody>
+</table>
+<p>The arguments win over the environment, and without a host or without a key the
+call raises <code>TracepadConfigError</code> — misconfiguration discovered as a <code>401</code> in a
+log file an hour later is the bug report that rule prevents.</p>
+<p><code>TRACEPAD_URL</code> is the same variable the CLI and the MCP server read; the package's first name for it, <code>TRACEPAD_HOST</code>, still works, warns once, and loses to <code>TRACEPAD_URL</code>.</p>
+<p><strong>Not calling <code>init</code> is how tracing is turned off</strong> — in tests, on a machine
+with no key — as long as the process has no OpenTelemetry provider of its own:
+spans are no-ops, ids are absent, scores without a target are dropped. A
+process whose own provider traces is tracing, <code>init</code> or not: its ids are real
+and its scores are sent.</p>
+<p>Standard OpenTelemetry variables (<code>OTEL_SERVICE_NAME</code>,
+<code>OTEL_RESOURCE_ATTRIBUTES</code>, the batch processor's own limits) are honoured by
+the OTel SDK as they are; the package neither reads them nor sets them.</p>
+<p><strong><code>export_timeout</code></strong> is handed to the OTLP exporter as its per-export timeout.
+OpenTelemetry's default is ten seconds, retries inside them — long for a
+request thread that flushes before it answers — so the package's is five.
+With neither the argument nor <code>TRACEPAD_EXPORT_TIMEOUT</code>,
+<code>OTEL_EXPORTER_OTLP_TRACES_TIMEOUT</code> keeps working underneath when it is set.
+An argument or a <code>TRACEPAD_EXPORT_TIMEOUT</code> that is not a positive number of
+seconds is ignored with a warning, and so is the argument under
+<code>export=False</code>, which adds no exporter to bound.</p>
+<p><strong><code>init</code> adapts to the provider it finds.</strong> If the application has already set
+a global <code>TracerProvider</code> — FastAPI instrumentation, <code>opentelemetry-instrument</code>,
+another SDK — the call adds a batching OTLP/HTTP exporter to <em>that</em> provider.
+Our spans and theirs then share one pipeline, one flush and one trace. Only
+when there is no provider does <code>init</code> build one, with <code>service.name</code> from
+<code>OTEL_SERVICE_NAME</code> or the process name and the environment and release on its
+resource.</p>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li>Under a provider somebody else built, <code>environment</code> and <code>release</code> are
+  refused with a warning: a resource is fixed when its provider is, and
+  <code>service.version</code> is <a href="../ingest/#where-an-attribute-came-from">read from the resource only</a>.
+  Set <code>OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=prod,service.version=1.4.0</code>
+  instead.</li>
+<li>If the application already exports to Tracepad through another SDK, pass
+  <code>export=False</code>. Otherwise every span arrives twice; it is upserted once and
+  nothing is lost, but the bytes are wasted. No detection is attempted —
+  reading another exporter's endpoint out of a provider is private API.</li>
+</ul>
+<p>A second <code>init</code> is a no-op with a warning.</p>
+<h3 id="which-key">Which key</h3>
+<p>The package sends one key for everything it does, so the key's
+<a href="../api/#scopes">scopes</a> decide which calls go through:</p>
+<table>
+<thead>
+<tr>
+<th>Calls</th>
+<th>The key needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The exporter, <a href="#scores"><code>score</code></a>, <a href="#prompts"><code>prompt</code></a></td>
+<td><code>ingest</code></td>
+</tr>
+<tr>
+<td><a href="#deleting-traces"><code>delete_trace</code>, <code>delete_traces</code></a></td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td>The <a href="#evals">eval harness</a>: datasets, runs and their scores</td>
+<td><code>ingest</code>, <code>read</code>, <code>write</code></td>
+</tr>
+</tbody>
+</table>
+<p>A production application needs nothing but <code>ingest</code>, so the key to set as its
+<code>TRACEPAD_API_KEY</code> is one minted with that scope alone
+(<a href="../admin/#keys">admin.md</a>); the harness runs under a key of its own that holds
+all three. A call the key does not cover is the server's <code>403</code>, message
+included — <code>this key's scopes are ingest; DELETE /api/v1/traces needs write</code> —
+raised as <code>TracepadHTTPError</code> by the calls that raise, and logged and dropped
+by the exporter and the score queue, as a <code>401</code> is.</p>
+<h2 id="steps">Steps</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@tracepad</span><span class="o">.</span><span class="n">observe</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">answer</span><span class="p">(</span><span class="n">question</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="o">...</span>
+</code></pre></div>
+<p>The decorator makes the call a span. Its arguments become the observation's
+<code>input</code>, by parameter name and with <code>self</code>/<code>cls</code> dropped, and its return value
+the <code>output</code>; <code>@tracepad.observe(capture_input=False)</code> and <code>capture_output=False</code>
+opt out. Payloads are serialized as JSON with <code>default=repr</code>, so an argument
+the encoder cannot express is a string in the trace rather than an exception in
+your function. A plain <code>str</code> is sent as it is, not as a JSON string of one.</p>
+<p>There is no client-side size cap. <code>OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT</code> is
+the OTel SDK's knob, and the server's own <code>TRACEPAD_MAX_BODY_BYTES</code> cut marks
+the payload as <a href="../api/#the-response-budget">every payload is marked</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@observe</code> / <code>@observe(...)</code></td>
+<td>With or without parentheses</td>
+</tr>
+<tr>
+<td><code>name=</code></td>
+<td>The span's name; the function's own by default</td>
+</tr>
+<tr>
+<td><code>type=</code></td>
+<td>One of the <a href="../ingest/#the-kind-of-each-step">ten kinds</a>; <code>"span"</code> by default</td>
+</tr>
+<tr>
+<td><code>type="generation"</code></td>
+<td>The return value is read as a model response (below)</td>
+</tr>
+</tbody>
+</table>
+<p><code>async</code> functions are wrapped, and so are generators of both kinds: the span
+ends when the generator is exhausted or closed, and its <code>output</code> is the list of
+what it yielded — a <code>break</code> out of a <code>for</code> keeps what came before it.</p>
+<p>An exception ends the span at level <code>ERROR</code> with the exception recorded as an
+OTel event, and propagates unchanged.</p>
+<p>The same thing without a decorator, plus the zero-duration kind:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">span</span><span class="p">(</span><span class="s2">"retrieve"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">"retriever"</span><span class="p">,</span> <span class="nb">input</span><span class="o">=</span><span class="p">{</span><span class="s2">"query"</span><span class="p">:</span> <span class="n">q</span><span class="p">})</span> <span class="k">as</span> <span class="n">step</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">step</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">output</span><span class="o">=</span><span class="n">documents</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"hits"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">documents</span><span class="p">)})</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">event</span><span class="p">(</span><span class="s2">"cache.miss"</span><span class="p">):</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">pass</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th><code>span</code></th>
+<th><code>event</code></th>
+<th><code>generation</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>input=</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>metadata=</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>type=</code></td>
+<td>one of the <a href="../ingest/#the-kind-of-each-step">ten kinds</a>; <code>"span"</code> by default</td>
+<td>— (<code>event</code>)</td>
+<td>— (<code>generation</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>type=</code> is the kind the step <em>is</em> — a retriever, a tool call, an agent — and it
+is known when the step opens, so it is written then. An empty one (<code>None</code>,
+<code>""</code>) is no kind at all, here as in <code>@observe</code> and <code>update</code>: the default
+stands. <code>"generation"</code> hands out what <code>generation()</code> does — the one kind with a
+handle of its own, <code>end</code> and <code>first_token</code> — as the decorator does; <code>"event"</code>
+is written as the kind, and the zero duration is <code>event()</code>'s. A spelling
+outside the ten is sent all the same, and the store keeps it in the
+observation's metadata; the <code>tracepad</code> logger warns once per spelling, when the
+first step is written.</p>
+<p><strong>What a step costs when nothing records.</strong> A span starts with the cheap
+attributes only — its kind, the model, the prompt reference — which is what a
+sampler or a span processor sees. Input, output, metadata and model parameters,
+everything serialised to JSON, are set after the span exists and only if it
+records: with tracing off, or under a sampler that dropped the span, none of
+them is serialised at all, in the opening call, in <code>update</code>, in <code>end</code> and in
+<code>@observe</code> alike.</p>
+<p><strong>Metadata merges by key.</strong> It is written one attribute per top-level key,
+<code>tracepad.observation.metadata.&lt;key&gt;</code> — a string, a number or a boolean as it
+is, anything else as JSON — so <code>update(metadata={"flag": 1})</code> adds <code>flag</code> and
+replaces only it, and the keys the step opened with stay. A key given as
+<code>None</code> writes nothing; it does not delete the key, since an attribute cannot be
+unset once written. Metadata that is no mapping is written whole under
+<code>tracepad.observation.metadata</code>. More than 32 keys in one write, or an empty key, are written whole under
+<code>tracepad.observation.metadata</code> as well: a span holds 128 attributes by
+default, and a full one drops the step's own. The store merges the whole
+object with the per-key entries, and a per-key entry wins — so a large write
+does not replace a key written on its own before it, and a second large write
+replaces the first whole: give a step its large metadata once, when it opens,
+and update a few keys at a time after. A string whose text is a JSON object or array
+is stored as that structure, as every per-key metadata is read.</p>
+<p><code>span</code>, <code>event</code> and <code>generation</code> hand out an <code>Observation</code> carrying
+<code>trace_id</code>, <code>span_id</code>, <code>update(...)</code> and the OTel span itself as <code>.span</code>. With
+no trace behind the span — tracing off — the two ids are <code>None</code>, not a string
+of zeros: <code>str | None</code>, so a checker asks what to do without one.</p>
+<h2 id="generations">Generations</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">generation</span><span class="p">(</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="s2">"chat"</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">model_parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">"temperature"</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">},</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="nb">input</span><span class="o">=</span><span class="n">messages</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"attempt"</span><span class="p">:</span> <span class="mi">2</span><span class="p">},</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span> <span class="k">as</span> <span class="n">call</span><span class="p">:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="n">messages</span><span class="p">)</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="n">call</span><span class="o">.</span><span class="n">end</span><span class="p">(</span><span class="n">response</span><span class="o">=</span><span class="n">response</span><span class="p">)</span>
+</code></pre></div>
+<p><code>metadata=</code> is the generation's own, written as <code>span(metadata=…)</code> writes it —
+what is known when the call starts, such as which attempt this is.</p>
+<p><code>end(response=…)</code> reads an OpenAI-compatible answer — a <code>dict</code> or any object
+with the attributes, which the OpenAI client's models are:</p>
+<table>
+<thead>
+<tr>
+<th>Read from</th>
+<th>Written as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model</code></td>
+<td><code>gen_ai.response.model</code></td>
+</tr>
+<tr>
+<td><code>usage.prompt_tokens</code></td>
+<td><code>gen_ai.usage.input_tokens</code></td>
+</tr>
+<tr>
+<td><code>usage.completion_tokens</code></td>
+<td><code>gen_ai.usage.output_tokens</code></td>
+</tr>
+<tr>
+<td><code>usage.prompt_tokens_details.cached_tokens</code></td>
+<td><code>gen_ai.usage.cache_read_input_tokens</code></td>
+</tr>
+<tr>
+<td><code>usage.completion_tokens_details.reasoning_tokens</code></td>
+<td><code>gen_ai.usage.reasoning_tokens</code></td>
+</tr>
+<tr>
+<td><code>usage.cost</code></td>
+<td><code>gen_ai.usage.cost</code></td>
+</tr>
+<tr>
+<td><code>choices[0].message.content</code></td>
+<td>the <code>output</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>The cost is the one you were charged.</strong> There is no price table here and none
+in the store: OpenRouter puts the charge in <code>usage.cost</code>, and a provider that
+does not report one leaves the field unset — the UI then shows <em>no data</em>, never
+<code>$0</code>. A response with no <code>usage</code> at all (a stream's last chunk without
+<code>stream_options</code>) still records the model and the output.</p>
+<p>Every other provider is carried by the explicit arguments, which win over
+anything read:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">call</span><span class="o">.</span><span class="n">end</span><span class="p">(</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">"claude-sonnet-5"</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">usage</span><span class="o">=</span><span class="p">{</span><span class="s2">"input_tokens"</span><span class="p">:</span> <span class="mi">128</span><span class="p">,</span> <span class="s2">"output_tokens"</span><span class="p">:</span> <span class="mi">41</span><span class="p">,</span> <span class="s2">"cache_read_input_tokens"</span><span class="p">:</span> <span class="mi">96</span><span class="p">},</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">cost</span><span class="o">=</span><span class="mf">0.0011</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">output</span><span class="o">=</span><span class="n">text</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>usage</code> keys are written verbatim under <code>gen_ai.usage.*</code> and the store keeps
+them under the names you sent.</p>
+<p><code>call.first_token()</code> stamps the completion start the moment the first chunk
+arrives — that is where the TTFT column comes from. Only the first call counts.
+Leaving the block without <code>end</code> ends the span with what it has.</p>
+<h3 id="streams">Streams</h3>
+<p>A streamed answer goes through <code>call.stream(…)</code>, which yields every chunk
+unchanged and does the bookkeeping on the way:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">generation</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="nb">input</span><span class="o">=</span><span class="n">messages</span><span class="p">)</span> <span class="k">as</span> <span class="n">call</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">stream</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>        <span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="n">messages</span><span class="p">,</span> <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>        <span class="n">stream_options</span><span class="o">=</span><span class="p">{</span><span class="s2">"include_usage"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="p">)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">call</span><span class="o">.</span><span class="n">stream</span><span class="p">(</span><span class="n">stream</span><span class="p">):</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>        <span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">choices</span><span class="p">:</span>  <span class="c1"># the last chunk carries the usage and no choices</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>            <span class="nb">print</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">delta</span><span class="o">.</span><span class="n">content</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">""</span><span class="p">)</span>
+</code></pre></div>
+<p>The first chunk with content stamps the first token, so <code>first_token()</code> is not
+needed; the <code>choices[0].delta.content</code> pieces are joined into the <code>output</code>; the
+<code>model</code> is taken from the chunks that name it and the <code>usage</code> — the cost
+included — from the chunk that carries it, which is the last one. When the
+stream is exhausted the generation ends with all of that, through the same
+table as <code>end(response=…)</code>. A stream you leave early, with <code>break</code> or an
+exception, is ended by the block around it, with what had been read by then
+and the exception recorded; an <code>end(…)</code> you call yourself before the stream is
+over wins, and nothing ends twice. An <code>async</code> client reads the same way:
+<code>async for chunk in call.astream(stream)</code>.</p>
+<p><strong>Whether the stream carries usage is the provider's choice</strong>, and the package
+cannot make it, because the request is yours. Ask for it: an OpenAI-compatible
+client takes <code>stream_options={"include_usage": True}</code>, which adds a final chunk
+with <code>usage</code> and no <code>choices</code>; OpenRouter takes
+<code>extra_body={"usage": {"include": True}}</code>, and the cost rides in that same
+final chunk as <code>usage.cost</code>. Without either, the stream records the model and
+the output and no usage — no token counts, no cost — the same as a whole
+response with no <code>usage</code> in it.</p>
+<p><code>@tracepad.observe(type="generation")</code> is the same reader over a function's
+return value, for a helper that already returns the provider's response. A
+generator is the exception: what it returns is the list of its chunks rather
+than an answer, so that list is recorded as the <code>output</code> and nothing is read
+from it. For a stream, <code>call.stream</code> is the helper, not the decorator.</p>
+<h2 id="the-trace-around-a-step">The trace around a step</h2>
+<p>A request handler rarely holds the root span — the framework does — and the one
+thing it knows is who the user is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">update_trace</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"support-chat"</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="s2">"u-42"</span><span class="p">,</span> <span class="n">session_id</span><span class="o">=</span><span class="s2">"s-7"</span><span class="p">,</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                      <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">"support"</span><span class="p">],</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"channel"</span><span class="p">:</span> <span class="s2">"web"</span><span class="p">},</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                      <span class="n">version</span><span class="o">=</span><span class="s2">"retrieval-v2"</span><span class="p">)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="s2">"WARNING"</span><span class="p">,</span> <span class="n">status_message</span><span class="o">=</span><span class="s2">"retried once"</span><span class="p">)</span>
+</code></pre></div>
+<p>Both act on the <em>current</em> span, whoever started it, and the store resolves the
+trace-level ones for the trace. Calls on one span add up: <code>tags</code> are merged in
+the order they first appeared, without repeats, and <code>metadata</code> is merged by key
+across calls, the later value winning — the package keeps what it has written on
+the span, in memory and under a lock, and writes the one array and the one
+object whole each time. Only what <em>this package</em> wrote is merged: tags another
+writer set on the same span are not readable through the OpenTelemetry API and
+are replaced by the first call. Tags are bounded at 50 and metadata at 512 keys
+and 1 MiB, as the server bounds them, and the first time each bites the package
+says so in a warning. Values are encoded when the call is made, so changing one afterwards changes nothing in the trace; metadata that is not an object is ignored with a warning; and a span the package cannot keep state for (another provider's) is written on its own, with one warning. Outside every span, in a process that traces,
+both log a warning and do nothing — that call is a mistake. On a span that does
+not record — tracing off, or a sampler's choice — they do nothing with a debug
+line: that is configuration, and a warning on every call would teach an
+operator to ignore the package's warnings.</p>
+<p><code>version</code> is the version of <em>this trace's</em> logic — a pipeline revision, a
+prompt bundle, an experiment arm — and the trace listing filters on it
+(<code>version=</code>). It sits beside <code>release</code>, the deployment's version set once at
+<code>init</code>: two arms running in one release are told apart by <code>version</code>.</p>
+<h2 id="scores">Scores</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"helpful"</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="n">comment</span><span class="o">=</span><span class="s2">"cited the source"</span><span class="p">)</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"verdict"</span><span class="p">,</span> <span class="n">string_value</span><span class="o">=</span><span class="s2">"pass"</span><span class="p">,</span> <span class="n">data_type</span><span class="o">=</span><span class="s2">"categorical"</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"grounded"</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">data_type</span><span class="o">=</span><span class="s2">"boolean"</span><span class="p">,</span> <span class="n">observation</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>With no target given, the target is the trace of the active span — and its
+observation too when <code>observation=True</code>. Outside a span, with no <code>trace_id</code>,
+the call raises <code>ValueError</code>: a score that silently went nowhere is the failure
+this API is worst at surfacing. Where nothing traces — no <code>init</code>, no provider
+of the application's own (or <code>OTEL_SDK_DISABLED=true</code>), no recording span — the
+same call is dropped with a debug line instead: every span is a no-op there, and
+the call site is not wrong. A <code>trace_id</code> given is scored either way.</p>
+<p><code>score</code> does not call the server. It enqueues, and a daemon thread posts
+<a href="../scores/"><code>POST /api/v1/scores</code></a> in batches of up to 100 every two seconds.
+A rejected batch is retried once, then logged with the server's own message —
+which names the offending item — and dropped: a scoring failure must not fail
+the request that produced the trace. Pass <code>id=</code> for the
+<a href="../scores/#idempotency-and-corrections">idempotency</a> the API offers.</p>
+<p>The server records the key the package sends with as the score's
+<a href="../scores/#who-wrote-a-score">author</a>: give the key a name that says which
+program it is, and put anything finer — the judge's model, the run — in the
+score's <code>metadata</code>.</p>
+<p><code>tracepad.flush(timeout=10.0)</code> drains the queue and then the span processors,
+and runs at interpreter exit on its own. The timeout is one budget over both,
+and <code>flush</code> returns within it: OpenTelemetry's batch processor exports
+synchronously and does not keep a deadline, so the spans are flushed on a
+helper thread that is waited for what is left of the budget. When it runs out,
+<code>flush</code> logs a warning and returns, and the export finishes in the background —
+a request that flushes in a <code>finally</code> is not held for as long as a store that
+is away takes to time out.</p>
+<h2 id="prompts">Prompts</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">support</span> <span class="o">=</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">prompt</span><span class="p">(</span><span class="s2">"support-answer"</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"production"</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">messages</span> <span class="o">=</span> <span class="n">support</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">product</span><span class="o">=</span><span class="s2">"Tracepad"</span><span class="p">)</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">with</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">generation</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">,</span> <span class="n">prompt</span><span class="o">=</span><span class="n">support</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">support</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s2">"model"</span><span class="p">]):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="o">...</span>
+</code></pre></div>
+<p><code>Prompt</code> carries <code>name</code>, <code>version</code>, <code>type</code>, <code>text</code> or <code>messages</code>, <code>labels</code> and
+<code>config</code>. <code>compile(**variables)</code> substitutes <code>{placeholder}</code>s — in the text,
+or in every message's content — with each value rendered the way
+<code>f"{value}"</code> renders it, and raises <code>TracepadPlaceholderError</code> on a
+placeholder with no variable (a <code>TracepadError</code>, and a <code>KeyError</code> as well).
+<code>{{</code> and <code>}}</code> are the braces themselves, so a prompt can show a JSON example;
+a brace that pairs with nothing is left as it is. A message whose content is
+not a string — a list of content parts — is passed on as it is, with no
+substitution inside it. It is not <code>str.format</code>: <code>{q:&gt;12}</code>, <code>{user.email}</code>,
+<code>{items[0]}</code> and <code>{q!r}</code> are not evaluated — they are placeholders no
+variable names, so they raise. The stored text is written by whoever may
+change prompts — an editor, or a key with <code>write</code> — and it must not run in
+your process. The Node package reads
+the same text the same way, so a prompt compiled with string variables is one
+prompt in both. Nothing else: a template language is a product, and what the
+store stores is plain text.</p>
+<p>Passing the prompt to <code>generation</code> records which prompt ran, so the trace can
+be <a href="../api/#listing-traces">filtered by it</a>.</p>
+<p>The answer is cached per <code>(name, label | version)</code> for as long as the server
+said — <code>Cache-Control: max-age=60</code> on
+<a href="../prompts/#fetching-a-prompt">every prompt</a> — so a label move reaches the
+application within a minute of being made. When the store is away, the last
+answer is served stale with a warning, because a restart of your observability
+must not take your chat down. With nothing cached the call raises: a fallback
+prompt baked into the code is a prompt the trace cannot name.</p>
+<h2 id="deleting-traces">Deleting traces</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timezone</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">to</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">timezone</span><span class="o">.</span><span class="n">utc</span><span class="p">)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">preview</span> <span class="o">=</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">delete_traces</span><span class="p">(</span><span class="n">to</span><span class="o">=</span><span class="n">to</span><span class="p">,</span> <span class="n">environment</span><span class="o">=</span><span class="s2">"loadtest"</span><span class="p">)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">preview</span><span class="p">[</span><span class="s2">"matched"</span><span class="p">],</span> <span class="n">preview</span><span class="p">[</span><span class="s2">"would_delete"</span><span class="p">])</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">total</span> <span class="o">=</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">delete_traces</span><span class="p">(</span><span class="n">to</span><span class="o">=</span><span class="n">to</span><span class="p">,</span> <span class="n">environment</span><span class="o">=</span><span class="s2">"loadtest"</span><span class="p">,</span> <span class="n">confirm</span><span class="o">=</span><span class="s2">"checkout-service"</span><span class="p">)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">total</span><span class="p">[</span><span class="s2">"deleted"</span><span class="p">][</span><span class="s2">"traces"</span><span class="p">],</span> <span class="s2">"traces in"</span><span class="p">,</span> <span class="n">total</span><span class="p">[</span><span class="s2">"rounds"</span><span class="p">],</span> <span class="s2">"rounds"</span><span class="p">)</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">delete_trace</span><span class="p">(</span><span class="n">trace_id</span><span class="p">,</span> <span class="n">confirm</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>A script's door to what <a href="../cli/#traces-rm"><code>traces rm</code></a> does: an eval harness that
+exported under the wrong key, a test suite that wants its traces gone before
+the next run. Both calls are a dry run until confirmed, the way every
+destructive act in the store is, and both raise <code>TracepadHTTPError</code> for what
+the API refuses — a <code>404</code> for an unknown id, a <code>400</code> for a wrong echo or a
+filter name it does not know.</p>
+<p><code>delete_trace(id, confirm=False)</code> takes one trace with everything attached to
+it. Without <code>confirm</code> the answer is the preview — <code>would_delete</code>,
+<code>affected_runs</code>, <code>confirm</code>, <code>note</code>; with <code>confirm=True</code> the package sends the
+id as the echo, because it has the id in hand, and the answer says what went.</p>
+<p><code>delete_traces(*, to, confirm="", limit=1000, **filters)</code> takes every trace
+the <a href="../api/#filters">listing's filters</a> match, by their API names — <code>from_</code>
+for <code>from</code>, <code>tag</code> a list — before <code>to</code>, which is required so that the set is
+closed; a time is a <code>datetime</code> or an RFC 3339 string, and a naive <code>datetime</code>
+is local time, as Python's own <code>astimezone()</code> reads it. Without <code>confirm</code> it
+is one dry run and the answer is the API's preview, <code>matched</code> counted
+exactly. With the project's name as <code>confirm</code> — a name you type, since the
+package does not know it — it deletes in rounds of at most <code>limit</code> traces,
+each given sixty seconds, repeats while the API says there is more, and
+returns one total: <code>{"deleted": {"traces", "observations", "scores", "payloads",
+"annotation_items"}, "rounds": N}</code>. A filter that matches nothing is one round
+of zero, not an error.</p>
+<p>Raw OTLP bodies are <strong>not</strong> touched — a raw batch holds many traces of many
+kinds, and a trace cannot be cut out of one — and the preview says so in its
+<code>note</code>. What goes, what stays and the ingest race are in
+<a href="../admin/#deleting-traces">admin.md</a>.</p>
+<h2 id="evals">Evals</h2>
+<p>The package is also the harness of <a href="../datasets/">datasets.md</a>: a dataset
+object, a run that opens and closes itself, and a block inside which every
+span carries the run and the case it answered. It runs nothing — the cases are
+your program. Its key holds <code>ingest</code>, <code>read</code> and <code>write</code>
+(<a href="#which-key">Which key</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">golden</span> <span class="o">=</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">dataset</span><span class="p">(</span><span class="s2">"support-golden"</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">golden</span><span class="o">.</span><span class="n">put_items</span><span class="p">(</span><span class="n">cases</span><span class="p">)</span>          <span class="c1"># same cases → same version, nothing written</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">with</span> <span class="n">golden</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"prompt v7"</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"prompt"</span><span class="p">:</span> <span class="s2">"support-answer@7"</span><span class="p">})</span> <span class="k">as</span> <span class="n">run</span><span class="p">:</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="n">golden</span><span class="o">.</span><span class="n">items</span><span class="p">(</span><span class="n">version</span><span class="o">=</span><span class="n">run</span><span class="o">.</span><span class="n">dataset_version</span><span class="p">):</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="k">with</span> <span class="n">run</span><span class="o">.</span><span class="n">item</span><span class="p">(</span><span class="n">case</span><span class="p">)</span> <span class="k">as</span> <span class="n">attempt</span><span class="p">:</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>            <span class="n">answer</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">answer</span><span class="p">(</span><span class="n">case</span><span class="o">.</span><span class="n">input</span><span class="p">[</span><span class="s2">"question"</span><span class="p">])</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>            <span class="n">attempt</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"accuracy"</span><span class="p">,</span> <span class="n">judge</span><span class="p">(</span><span class="n">answer</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">expected_output</span><span class="p">))</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">get</span><span class="p">()[</span><span class="s2">"summary"</span><span class="p">])</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dataset(name)</code></td>
+<td>A <code>Dataset</code>. No request is made here — it is a name.</td>
+</tr>
+<tr>
+<td><code>Dataset.create(description=…, metadata=…)</code></td>
+<td>Create it, or replace those two.</td>
+</tr>
+<tr>
+<td><code>Dataset.put_items(items)</code></td>
+<td>One batch, one version tick → <code>(version, changed)</code>. A longer list than the 10,000 items one request takes goes as consecutive writes of 10,000, each ticking the version if it changes anything: the answer is the last version and the sum of the changes, a write that fails leaves the ones before it in place, and an id the list gives twice is refused before anything is sent. An index in the server's message about a write that fails counts from the first item of that write, not of the list. Items are counted, not bytes: a write of 10,000 large items can still be over <code>TRACEPAD_MAX_BODY_BYTES</code> and be refused with <code>413</code>, and such a list has to be cut into smaller ones by hand.</td>
+</tr>
+<tr>
+<td><code>Dataset.items(version=…)</code></td>
+<td>A generator of <code>Item</code>s over every page, whole.</td>
+</tr>
+<tr>
+<td><code>Dataset.run(name, *, metadata=…, id=…, dataset_version=…)</code></td>
+<td>Opens a <code>Run</code>.</td>
+</tr>
+<tr>
+<td><code>Dataset.runs()</code>, <code>Run.get()</code>, <code>Run.items(unknown=…, limit=…)</code>, <code>compare(a, b)</code></td>
+<td>The server's JSON as <code>dict</code>s — no number is computed here. A run's items inline their payloads and are budget-checked, so that listing pages at the server's own size unless you name one.</td>
+</tr>
+<tr>
+<td><code>Dataset.delete(confirm=name)</code></td>
+<td>The name must be echoed, as the API asks.</td>
+</tr>
+<tr>
+<td><code>score_configs([...])</code>, <code>ScoreConfig</code></td>
+<td><code>PUT</code> each, in order, synchronously.</td>
+</tr>
+<tr>
+<td><code>item_id(key)</code></td>
+<td><code>sha256(key)[:32]</code>, for a natural key of your own.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The run pins a version, and <code>run.dataset_version</code> is it.</strong> Fetching by that
+number rather than by "the current one" is what makes the version the harness
+<em>fetched</em> and the version it <em>ran</em> one number.</p>
+<p><strong><code>with … as run</code> closes it</strong>: <code>finished</code> on a clean exit, <code>failed</code> with the
+exception's <code>repr</code> on an error, which is then re-raised. A run finished by
+hand is not finished twice. <code>finish(timeout=30.0)</code> flushes the scores and then
+the spans <em>before</em> it posts, so <code>run.get()</code> on the next line is over
+everything the run produced; a late span still links, so a flush that timed
+out is a number read early rather than a trace lost.</p>
+<p><strong><code>run.item(case)</code> opens no span of its own.</strong> It sets a <code>contextvars</code> value
+that a span processor reads at every span's start — so the root span may be
+the framework's, another SDK's or a decorator's, and it is still stamped. That
+also says exactly how far the block reaches:</p>
+<table>
+<thead>
+<tr>
+<th>Where the work runs</th>
+<th>Stamped</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the same function, and anything it calls</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>an <code>await</code>, and a task spawned inside the block</td>
+<td>yes — <code>asyncio</code> inherits the context</td>
+</tr>
+<tr>
+<td>a thread started with <code>contextvars.copy_context().run(fn)</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>a thread started bare (<code>Thread(target=fn)</code>)</td>
+<td><strong>no</strong> — it has no context to inherit</td>
+</tr>
+<tr>
+<td>another process, over HTTP</td>
+<td><strong>no</strong> — see below</td>
+</tr>
+<tr>
+<td>the loop itself already inside a span of yours</td>
+<td>stamped, but see below</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Do not trace the harness.</strong> If the loop runs inside a span of your own — a
+<code>@observe</code>d driver, an instrumented test runner — then the case's spans are
+children of it, and one trace covers the whole run. Everything is still
+stamped and <code>attempt.score(...)</code> still has a trace to score (the block's first
+span starts the case, not the trace's root), but the run then has one trace
+for every case, and a trace links to one item: its coverage collapses to the
+last case stamped. A case wants a trace of its own.</p>
+<p>The two attributes do not travel with the trace context, by design. For a
+service the block cannot reach, <code>attempt.attributes()</code> is the <code>dict</code> to
+forward by your own means:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="n">payload</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">"x-eval"</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">attempt</span><span class="o">.</span><span class="n">attributes</span><span class="p">())})</span>
+</code></pre></div>
+<p><code>attempt.traces</code> is every root span that started inside the block, in order —
+a case run three times is three traces of one item, and the run's summary
+counts them all — and <code>attempt.trace_id</code> is the last of them, which is what
+<code>attempt.score(...)</code> scores. Scoring before anything has run raises
+<code>ValueError</code>; after the block, the <code>Attempt</code> is a record and stamps nothing.</p>
+<p><code>init(export=False)</code> still registers the processor: an application exporting
+through another SDK wants its spans stamped all the same.</p>
+<h2 id="testing-your-instrumentation">Testing your instrumentation</h2>
+<p><code>tracepad.testing</code> is what a test suite uses to check that the code traces:
+that a step is a span with the right name, a model call a generation with its
+usage, a thumbs-up a score.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracepad</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tracepad.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">capture</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_answer_is_traced</span><span class="p">():</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="k">with</span> <span class="n">capture</span><span class="p">()</span> <span class="k">as</span> <span class="n">captured</span><span class="p">:</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        <span class="n">answer</span><span class="p">(</span><span class="s2">"why is the sky blue"</span><span class="p">)</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    <span class="k">assert</span> <span class="n">captured</span><span class="o">.</span><span class="n">one</span><span class="p">(</span><span class="s2">"answer"</span><span class="p">)</span><span class="o">.</span><span class="n">attributes</span><span class="p">[</span><span class="s2">"tracepad.observation.type"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"span"</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="k">assert</span> <span class="n">captured</span><span class="o">.</span><span class="n">attributes</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">)[</span><span class="s2">"gen_ai.usage.input_tokens"</span><span class="p">]</span> <span class="o">==</span> <span class="mi">12</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="k">assert</span> <span class="n">captured</span><span class="o">.</span><span class="n">scores</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">"name"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"helpful"</span>
+</code></pre></div>
+<p><code>capture()</code> resets everything the package keeps process-wide and initialises
+the package against a provider that records into memory, with export off and
+nothing read from the environment; the score queue keeps each body instead of
+posting it. The global provider follows the capture's, so a tracer your
+application took at import — <code>trace.get_tracer(__name__)</code> — records into
+every capture, not only the first, as long as <code>tracepad.testing</code> is imported
+before anything sets a provider (the plugin line in <code>conftest.py</code> is). Leaving the block resets the process
+again, and what was captured stays readable:</p>
+<table>
+<thead>
+<tr>
+<th>On a <code>Capture</code></th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>spans</code></td>
+<td>Every finished span, in the order it ended — OpenTelemetry's own <code>ReadableSpan</code></td>
+</tr>
+<tr>
+<td><code>one(name)</code></td>
+<td>The single span of that name; an <code>AssertionError</code> naming the spans there were otherwise</td>
+</tr>
+<tr>
+<td><code>attributes(name)</code></td>
+<td>That span's attributes, as a <code>dict</code></td>
+</tr>
+<tr>
+<td><code>scores</code></td>
+<td>The bodies <code>score()</code> would have posted: <code>name</code>, <code>trace_id</code>, <code>value</code> and the rest</td>
+</tr>
+</tbody>
+</table>
+<p><code>reset()</code> alone returns the process to one that never called <code>init</code> — tracing
+off, as <a href="#init">above</a> — for a test of the code with tracing off: <code>score</code>
+does nothing, and the ids are <code>None</code>.</p>
+<p>On pytest, a suite opts into both as fixtures in its <code>conftest.py</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">pytest_plugins</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"tracepad.testing"</span><span class="p">]</span>
+</code></pre></div>
+<p><code>tracepad_capture</code> is a <code>Capture</code>, reset around the test; <code>tracepad_off</code> is a
+reset process. Nothing loads the plugin into a suite that does not name it.</p>
+<p>Nothing is sent: the placeholder host is <code>tracepad.test</code>, which does not
+resolve, so a REST call a test forgot to stub — <code>prompt</code>, a dataset,
+<code>delete_trace</code> — fails rather than reaching a store. A reset shuts down a
+provider <code>init</code> built and drops the scores still queued. A provider your
+application installs at import time is replaced for the capture and not
+restored after it. The capture is process-wide; pytest-xdist's workers are
+processes, so they do not share one.</p>
+<h2 id="what-raises-and-what-does-not">What raises and what does not</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>On failure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>init</code> after configuration, the decorators, <code>update</code>, <code>end</code>, the exporter, the score queue</td>
+<td>Logged through the <code>tracepad</code> logger; never raised into your code</td>
+</tr>
+<tr>
+<td><code>update</code>, <code>update_trace</code> on a span that does not record (tracing off, or sampled out)</td>
+<td>Nothing; a debug line</td>
+</tr>
+<tr>
+<td><code>flush</code> that runs out of time</td>
+<td>A warning; the export finishes in the background</td>
+</tr>
+<tr>
+<td><code>prompt</code>, <code>flush</code>, <code>delete_trace</code>, <code>delete_traces</code>, and every call of the harness above</td>
+<td><code>TracepadError</code>, or <code>TracepadHTTPError(status, body)</code> for a non-2xx</td>
+</tr>
+<tr>
+<td><code>Prompt.compile</code> with a placeholder no variable names</td>
+<td><code>TracepadPlaceholderError</code> — a <code>TracepadError</code> and a <code>KeyError</code></td>
+</tr>
+<tr>
+<td>A name that is empty, <code>.</code> or <code>..</code></td>
+<td><code>TracepadError</code>, before any request — no name the store accepts is one</td>
+</tr>
+<tr>
+<td><code>init</code> with no host or key</td>
+<td><code>TracepadConfigError</code></td>
+</tr>
+<tr>
+<td><code>score</code> with no target outside every span while tracing — initialised, or through a provider of the application's own</td>
+<td><code>ValueError</code> — a programming error, visible at the call site</td>
+</tr>
+<tr>
+<td><code>score</code> with no target where nothing traces (no <code>init</code>, no provider of its own, no recording span)</td>
+<td>Nothing; a debug line — tracing is off</td>
+</tr>
+</tbody>
+</table>
+<p>A REST call that meets a redirect sends the next hop without the key, wherever
+it points, so a write redirected to a <code>GET</code> is answered <code>401</code>. The store itself
+never redirects, so <code>TRACEPAD_URL</code> should be the address it answers on.</p>
+<p>Instrumentation that can break the function it observes is worse than none.
+Everything the package logs goes to the <code>tracepad</code> logger, which has no handler
+of its own: your logging configuration owns it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"tracepad"</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="what-it-writes">What it writes</h2>
+<p>The OTel GenAI semantic conventions where a name exists, and <code>tracepad.*</code> where
+none does — a trace name, tags, free metadata, a trace version, an observation
+kind, a prompt reference. The whole table is in
+<a href="../ingest/#what-tracepad-reads-from-your-spans">ingest.md</a>; the <code>tracepad.*</code>
+half is <a href="../ingest/#the-tracepad-dialect">its own section</a>. A span this package
+produced means the same thing to any OTel backend, and <code>langfuse.*</code> is never
+written.</p>
+<h2 id="what-it-does-not-do">What it does not do</h2>
+<ul>
+<li><strong>No provider-client wrapper and no auto-instrumentation.</strong> A wrapper per
+  provider is a release per provider release. OpenLLMetry and the OpenTelemetry
+  GenAI instrumentations are the answer, and they work because the transport is
+  shared: point them at the same endpoint and their spans join yours.</li>
+<li><strong>No async client.</strong> The REST calls are <code>urllib</code>, synchronously; their callers
+  are scripts and start-up code. The one thing written from inside a request
+  handler — a score — is queued instead.</li>
+<li><strong>No price table</strong>, no prompt templating beyond <code>{placeholders}</code>. The
+  JavaScript twin is <a href="../sdk-js/">sdk-js.md</a>.</li>
+<li><strong>The harness runs nothing.</strong> No judge, no retries, no concurrency helpers,
+  no <code>tracepad eval …</code> command, and no pytest plugin for running one (the
+  opt-in plugin of <a href="#testing-your-instrumentation"><code>tracepad.testing</code></a> is for
+  asserting on spans): the loop is your
+  program, and this is the part of it that talks to the store.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

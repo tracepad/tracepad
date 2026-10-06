@@ -1,0 +1,2286 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/annotation/">
+      
+      
+        <link rel="prev" href="../datasets/">
+      
+      
+        <link rel="next" href="../quality/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Annotation queues - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#annotation-queues" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Annotation queues
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-a-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring a queue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filling-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filling it
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filling it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-target-at-a-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One target at a time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#everything-a-filter-matches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Everything a filter matches
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#annotating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Annotating
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Annotating">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#taking-an-item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taking an item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#posting-the-verdict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Posting the verdict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#completing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Completing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skipping-reopening-releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skipping, reopening, releasing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-to-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens to items
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edge-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edge cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-a-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring a queue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filling-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filling it
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filling it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-target-at-a-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One target at a time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#everything-a-filter-matches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Everything a filter matches
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#annotating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Annotating
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Annotating">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#taking-an-item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taking an item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#posting-the-verdict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Posting the verdict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#completing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Completing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skipping-reopening-releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skipping, reopening, releasing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-to-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens to items
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edge-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edge cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/annotation.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="annotation-queues">Annotation queues</h1>
+<p>Scoring the trace you happen to be reading is one thing. A review programme is
+the other way round: somebody decides <em>which</em> traces deserve a human verdict,
+several people work through them, and the team can see what is done and what
+is left.</p>
+<p>Two nouns:</p>
+<ul>
+<li>A <strong>queue</strong> is a named list and the <strong>score names</strong> a reviewer must set on
+  every item in it. The names are score configs — the same ones an eval
+  harness declares (see <a href="../scores/#score-configs">scores.md</a>) — so a queue and
+  a chart never disagree about what <code>accuracy</code> means.</li>
+<li>An <strong>item</strong> is one trace, or one observation of a trace. In an agent trace
+  the thing to judge is often one generation, so an item can point at it.</li>
+</ul>
+<p>The verdicts themselves are not stored here. They are <strong>scores</strong>, written
+through the endpoint everything else writes scores through, and <em>completing</em>
+an item is the server checking that the scores the queue asked for are
+actually on the target. Delete a queue and the scores stay: they are the work,
+and the queue was only the list of what to do.</p>
+<p>Everything below is a plain JSON API that works with <code>curl</code>, and every step
+has a CLI command and a screen.</p>
+<h2 id="endpoints">Endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+<th>A key needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues</code></td>
+<td>Every queue with its progress</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/v1/queues/{name}</code></td>
+<td>Create a queue or replace it whole</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues/{name}</code></td>
+<td>One queue: its score names and counts</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/queues/{name}</code></td>
+<td>Delete it with its items; dry run until <code>?confirm=</code></td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/queues/{name}/items</code></td>
+<td>Add one target or an array of them</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/queues/{name}/items/from-traces</code></td>
+<td>Add every trace a listing filter matches, capped</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues/{name}/items</code></td>
+<td>The items oldest first, filtered and paginated</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues/{name}/next</code></td>
+<td>The next item to annotate, claimed</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues/{name}/items/{id}</code></td>
+<td>One item</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/queues/{name}/items/{id}/complete</code></td>
+<td>Mark it done</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/queues/{name}/items/{id}/skip</code></td>
+<td>Mark it skipped, with the reason</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/queues/{name}/items/{id}/reopen</code></td>
+<td>Back to pending — or just release the claim</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/queues/{name}/items/{id}</code></td>
+<td>Take one item out of the list</td>
+<td><code>write</code></td>
+</tr>
+</tbody>
+</table>
+<p>Authentication is the same as everywhere: <code>Authorization: Bearer &lt;secret key&gt;</code>
+(see <a href="../ingest/#authentication">ingest.md</a>). The last column is the
+<a href="../api/#scopes">scope</a> a key must hold: <code>next</code> is <code>write</code>, because it claims
+the item it hands out, and the verdicts themselves are scores, which a key
+writes with <code>ingest</code>.</p>
+<h2 id="declaring-a-queue">Declaring a queue</h2>
+<p>A queue is declarative, like a score config: the <code>PUT</code> is the whole queue, and
+sending the same body twice writes nothing. Keep it in a script beside the
+configs it names.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>http://localhost:4318/api/v1/queues/weekly-review<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">    "description": "Did support answer the question, and how did it sound?",</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">    "score_configs": ["accuracy", "tone"]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">  }'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"weekly-review"</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Did support answer the question, and how did it sound?"</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"score_configs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"accuracy"</span><span class="p">,</span><span class="w"> </span><span class="s2">"tone"</span><span class="p">],</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"counts"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pending"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"skipped"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-08T09:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"updated_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-08T09:00:00Z"</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>201</code> on create, <code>200</code> on a replace or a no-op. Every name in <code>score_configs</code>
+must already be a declared config, or the call is a <code>400</code> naming the missing
+one — a queue that asked for a name nothing defines would be a form nobody can
+fill.</p>
+<p>The list can be changed later, and it then governs the items that are not yet
+completed. Nothing re-validates what is already done.</p>
+<p>The name follows the prompt grammar: one URL path segment, starting with a
+letter or a digit, at most 200 characters.</p>
+<h2 id="filling-it">Filling it</h2>
+<h3 id="one-target-at-a-time">One target at a time</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>http://localhost:4318/api/v1/queues/weekly-review/items<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"trace_id": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"}'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"ids"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"c0ffee00c0ffee00c0ffee00c0ffee00"</span><span class="p">],</span><span class="w"> </span><span class="nt">"added"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"existing"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+</code></pre></div>
+<p>An array works too, all-or-nothing, up to 1,000 targets: an add of more is a
+<code>400</code> (<code>an add takes at most 1000 targets; use items/from-traces for a filter</code>),
+refused before any target is looked at, and a filter is what <code>from-traces</code> is
+for. Adding a target the queue already holds answers with the item it already
+is and counts it as <code>existing</code>, whatever its status — which is what makes a
+script safe to retry. <code>observation_id</code> beside <code>trace_id</code> queues that step
+rather than the whole run.</p>
+<p>The target does not have to exist yet: an item may be queued for a trace whose
+spans are still in flight, exactly as a score may be written about one.</p>
+<h3 id="everything-a-filter-matches">Everything a filter matches</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/queues/weekly-review/items/from-traces?status=error&amp;environment=production&amp;limit=200"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span><span class="nt">"matched"</span><span class="p">:</span><span class="w"> </span><span class="mi">431</span><span class="p">,</span><span class="w"> </span><span class="nt">"added"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span><span class="w"> </span><span class="nt">"existing"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"capped"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<p>The query parameters are the <strong>trace listing's own</strong> — the same names, the
+same meanings, the same <code>400</code> on one that does not exist (see
+<a href="../api/#filters">api.md</a>). "Queue what I am looking at" is one call with no
+second grammar.</p>
+<p>The newest <code>limit</code> matches are added (1–1000, 100 by default). <code>matched</code> is
+how many there were, counted exactly; <code>capped</code> says more matched than were
+taken. To continue, run it again with <code>to=</code> at the oldest one you took — the
+window is half-open, so nothing is queued twice, and the dedupe above would
+catch it anyway.</p>
+<p>With no filter at all it takes the newest <code>limit</code> traces of the project.</p>
+<h2 id="annotating">Annotating</h2>
+<h3 id="taking-an-item">Taking an item</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/queues/weekly-review/next?annotator=ada"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"item"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c0ffee00c0ffee00c0ffee00c0ffee00"</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">"trace_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pending"</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">"seq"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="nt">"added_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-08T09:01:00Z"</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">"claimed_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ada"</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">"claimed_until"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-08T09:11:00Z"</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span><span class="nt">"pending"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="p">}</span>
+</code></pre></div>
+<p>Being handed an item <strong>claims</strong> it for ten minutes, so two people at one desk
+do not review one trace twice by accident. The window is a constant, not a
+setting.</p>
+<p>Asking again gives you the same item back: a reload must not hand a reviewer a
+different trace mid-verdict. Somebody else asking gets the next one nobody
+holds. When nothing is claimable the answer is <code>{"item": null, "pending": N}</code>,
+and <code>pending</code> is then what other people are holding — come back, the claims
+expire.</p>
+<p><strong>Who is asking</strong> depends on the credential. A program working the queue with
+a key sends <code>annotator</code>, a name of 1–200 characters: it has a name and no
+account, and the name is what holds its claim and what <code>claimed_by</code> and
+<code>completed_by</code> say. A person signed in to the web interface sends nothing —
+the server holds their claim and their completion by their <strong>account</strong>, and a
+session that sends <code>annotator</code> is refused with a <code>400</code> rather than having it
+quietly dropped. So two people with the same display name are two reviewers,
+and renaming yourself mid-item keeps the item in your hands.</p>
+<p>For an account, <code>claimed_by_account</code> and <code>completed_by_account</code> carry its id,
+and <code>claimed_by</code> and <code>completed_by</code> name it for whoever reads: its display
+name, else its email for an editor or an owner, else <code>a member</code> — the rule the
+<a href="../scores/#who-wrote-a-score">author of a score</a> follows — or
+<code>a deleted account</code> once it is gone. <code>claimed_by_standing</code> and
+<code>completed_by_standing</code> say where that account stands in the project now — a
+role, or <code>removed</code>, <code>disabled</code>, <code>deleted</code> — and the queue page mutes one that is
+gone. A second completion's <code>409</code> names the first finisher the same way, for
+whoever it refuses.</p>
+<p>Work a desk did before the server held reviewers by account stays under the
+name it typed: <code>annotator=</code> finds it, <code>account=</code> does not, and a claim that was
+in flight when the server was upgraded simply expires within its ten minutes.</p>
+<h3 id="posting-the-verdict">Posting the verdict</h3>
+<p>The verdict is a score, written exactly as any other (see
+<a href="../scores/#writing-a-score">scores.md</a>). The interface stamps where it came
+from, and a script should too:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span>http://localhost:4318/api/v1/scores<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="s1">  "trace_id": "4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f",</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="s1">  "name": "accuracy",</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="s1">  "value": 0.9,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="s1">  "metadata": {"source": "annotation", "queue": "weekly-review", "annotator": "ada"}</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="s1">}'</span>
+</code></pre></div>
+<h3 id="completing">Completing</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>http://localhost:4318/api/v1/queues/weekly-review/items/c0ffee00c0ffee00c0ffee00c0ffee00/complete<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"annotator": "ada"}'</span>
+</code></pre></div>
+<p>The queue promised a shape, and <em>completed</em> means the shape was filled. The
+server checks it against the scores actually stored:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"item c0ffee… is missing a score for tone"</span><span class="p">,</span><span class="w"> </span><span class="nt">"missing"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"tone"</span><span class="p">]}</span>
+</code></pre></div>
+<p>— <code>409</code>, and nothing changes. Post the missing score and try again.</p>
+<p>Two rules are worth stating:</p>
+<ul>
+<li><strong>Whoever wrote it counts.</strong> A judge's verdict already on the trace is a
+  verdict; the reviewer confirms or edits it rather than repeating it. The
+  desk prefills the form from exactly those scores.</li>
+<li><strong>The target has to match.</strong> A trace item needs scores that name no
+  observation; an observation item needs scores that name <em>its</em> observation.
+  They are different verdicts about different things.</li>
+</ul>
+<p>A second completion is a <code>409</code> naming who got there first, so a race between
+two reviewers is visible to the one who lost it.</p>
+<h3 id="skipping-reopening-releasing">Skipping, reopening, releasing</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>curl<span class="w"> </span>…<span class="w"> </span>/items/<span class="o">{</span>id<span class="o">}</span>/skip<span class="w">   </span>-d<span class="w"> </span><span class="s1">'{"annotator": "ada", "reason": "not a support conversation"}'</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>curl<span class="w"> </span>…<span class="w"> </span>/items/<span class="o">{</span>id<span class="o">}</span>/reopen<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"annotator": "ada"}'</span>
+</code></pre></div>
+<p>Not every trace deserves a verdict, and the reason is what makes that readable
+afterwards. Skipping an item somebody has already <strong>completed</strong> is a <code>409</code>
+naming them: a skip writes the same columns a completion filled, so it would
+destroy the record of who decided what rather than add to it. Reopen it first.</p>
+<p><code>reopen</code> puts a completed or skipped item back to pending — for a manager who
+disagrees with a verdict, or wants a skip looked at again; the scores stay
+where they are, because reopening asks for another look and not for a
+retraction.</p>
+<p><code>reopen</code> on an item that is <em>already</em> pending is not refused: what it does to
+one is release the claim. That is how the desk's <em>Later</em> puts an item back
+without waiting out the ten minutes.</p>
+<h2 id="reading-the-results">Reading the results</h2>
+<p>The queue page is the bookkeeping — who completed what, what was skipped and
+why:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/queues/weekly-review/items?status=completed&amp;annotator=ada"</span>
+</code></pre></div>
+<p>Items come back oldest first, in the order they were added, which is the order
+they are worked in. <code>?status=</code>, <code>?annotator=</code> and <code>?account=</code> narrow it;
+paging is the same keyset both ways as every other listing
+(<a href="../api/#paging">api.md</a>).</p>
+<p><code>annotator=</code> is "what has this program got", by the name it sends: the items
+it completed or skipped, and the pending ones it is holding a claim on — one
+that has not expired, since an expired claim is anybody's <code>next</code>. So
+<code>?status=pending&amp;annotator=ada</code> is ada's desk right now, and
+<code>?status=completed&amp;annotator=ada</code> is her work. <code>account=</code> asks the same of a
+signed-in person, by account id — <code>account=me</code> is the account asking, which a
+key does not have.</p>
+<p>The <strong>verdicts</strong> are read where every score is read — filtered by name, by
+target, or by time:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/scores?name=accuracy&amp;trace_id=4f8c…"</span>
+</code></pre></div>
+<p>A score written from the desk carries <code>metadata.queue</code>, and its
+<a href="../scores/#who-wrote-a-score">author</a> is the account that wrote it, so
+"everything ada decided in the weekly review" is a filter over the scores you
+already have (<code>?author=</code>) — and the chip on the trace says <code>annotation</code> where
+a judge's says <code>api</code> and a reader's says <code>web</code>. A script can stamp its own
+<code>metadata.annotator</code>, as the example above does; the server reads nothing
+from it.</p>
+<h2 id="the-same-loop-from-the-command-line">The same loop from the command line</h2>
+<p>The key this runs with holds <code>ingest</code> (the scores), <code>read</code> and <code>write</code> (the
+queue).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">'{"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}'</span><span class="w"> </span>&gt;<span class="w"> </span>accuracy.json
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">'{"data_type": "categorical", "categories": ["warm", "neutral", "curt"]}'</span><span class="w"> </span>&gt;<span class="w"> </span>tone.json
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>accuracy<span class="w"> </span>--file<span class="w"> </span>accuracy.json
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>tone<span class="w">     </span>--file<span class="w"> </span>tone.json
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>put<span class="w"> </span>weekly-review<span class="w"> </span>--config<span class="w"> </span>accuracy<span class="w"> </span>--config<span class="w"> </span>tone<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">"Did support answer the question, and how did it sound?"</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="c1"># Fill it: one trace, or everything a filter matches.</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--trace<span class="w"> </span>4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>add<span class="w"> </span>weekly-review<span class="w"> </span>--from-traces<span class="w"> </span>--error<span class="w"> </span>--env<span class="w"> </span>production<span class="w"> </span>--limit<span class="w"> </span><span class="m">200</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="c1"># Work it. `next` answers with the whole item, so one call gives both ids.</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="nv">NEXT</span><span class="o">=</span><span class="k">$(</span>tracepad<span class="w"> </span>queues<span class="w"> </span>next<span class="w"> </span>weekly-review<span class="w"> </span>--annotator<span class="w"> </span>ada<span class="w"> </span>--json<span class="k">)</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="nv">ITEM</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$NEXT</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.item.id<span class="k">)</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="nv">TRACE</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$NEXT</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.item.trace_id<span class="k">)</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span><span class="s2">"</span><span class="nv">$TRACE</span><span class="s2">"</span><span class="w"> </span>--name<span class="w"> </span>accuracy<span class="w"> </span>--value<span class="w"> </span><span class="m">0</span>.9
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>tracepad<span class="w"> </span>scores<span class="w"> </span>add<span class="w"> </span>--trace<span class="w"> </span><span class="s2">"</span><span class="nv">$TRACE</span><span class="s2">"</span><span class="w"> </span>--name<span class="w"> </span>tone<span class="w"> </span>--type<span class="w"> </span>categorical<span class="w"> </span>--string<span class="w"> </span>warm
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>tracepad<span class="w"> </span>queues<span class="w"> </span><span class="nb">complete</span><span class="w"> </span>weekly-review<span class="w"> </span><span class="s2">"</span><span class="nv">$ITEM</span><span class="s2">"</span><span class="w"> </span>--annotator<span class="w"> </span>ada
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a><span class="c1"># Or not.</span>
+<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>skip<span class="w"> </span>weekly-review<span class="w"> </span><span class="s2">"</span><span class="nv">$ITEM</span><span class="s2">"</span><span class="w"> </span>--annotator<span class="w"> </span>ada<span class="w"> </span>--reason<span class="w"> </span><span class="s2">"not a support conversation"</span>
+<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a>
+<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a><span class="c1"># The bookkeeping.</span>
+<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>ls
+<a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>tracepad<span class="w"> </span>queues<span class="w"> </span>items<span class="w"> </span>weekly-review<span class="w"> </span>--status<span class="w"> </span>completed
+</code></pre></div>
+<p>The same loop with a judge model in place of <code>ada</code> is the same commands: the
+CLI can do nothing the API cannot, and the API can do nothing the desk cannot.
+See <a href="../cli/#queues">cli.md</a>.</p>
+<h2 id="the-same-loop-from-the-web-interface">The same loop from the web interface</h2>
+<p><em>Evals → Queues</em>. A queue's page shows what is done, by whom and what was
+skipped; <em>Start annotating</em> opens the desk, which is the loop above with
+nothing to type: the trace on the left, one control per score on the right,
+<em>Complete &amp; next</em>.</p>
+<p>Traces reach a queue from two places — the <em>Add to queue</em> button on a trace
+header or an observation panel, and <em>Add to queue…</em> beside the filter bar on
+<em>Traces</em>, which queues what the current filters match. See
+<a href="../ui/#queues">ui.md</a>.</p>
+<h2 id="what-happens-to-items">What happens to items</h2>
+<ul>
+<li><strong>Items follow their trace.</strong> The retention sweep that deletes a trace
+  deletes its items in the same job, erasing a user's data
+  (<a href="../retention/">retention.md</a>) takes the items of their traces, and so does
+  deleting a trace by hand — one by id, or a filter's worth
+  (<a href="../admin/#deleting-traces">admin.md</a>). An item is a pointer, and a pointer
+  to a deleted trace is a desk showing an empty page. Every one of these
+  destructive endpoints counts what it takes under <code>annotation_items</code> in the
+  dry run and in the answer, and deleting a <strong>project</strong> names the queues
+  themselves too (<a href="../admin/#dry-run-by-default">admin.md</a>). A trace deleted
+  from the desk itself takes its item with it, and the desk moves on to the
+  next.</li>
+<li><strong>Deleting a queue takes its items and nothing else.</strong> The scores written
+  while annotating stay on their traces and expire on their own timestamps,
+  like every other score.</li>
+<li>Deleting a <strong>score config</strong> a queue names touches neither the queue nor the
+  scores. The queue keeps asking for that name, and the desk shows it as a
+  free-typed score with a note; <code>PUT</code> the queue again to drop it.</li>
+</ul>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li><strong>An item whose trace has not arrived.</strong> The desk shows the trace page's
+  not-found state, with <em>Skip</em> and <em>Later</em> available. <code>complete</code> is a <code>409</code>
+  listing every name, because none of them can be on a trace that is not
+  there.</li>
+<li><strong>An observation id that is not in the trace.</strong> The desk shows the trace with
+  a note; scores go to the observation id as given, exactly as
+  <code>POST /api/v1/scores</code> would take them.</li>
+<li><strong>A claim that expires while the form is open.</strong> The save still posts the
+  scores — they are scores — and <code>complete</code> still succeeds if nobody else
+  completed the item meanwhile. The claim gates <code>next</code>, not completion.</li>
+<li><strong>Two queues over the same trace.</strong> Independent items, shared scores. So
+  completing the second may need nothing new: the desk prefills and <em>Complete</em>
+  is enabled at once.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

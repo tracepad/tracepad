@@ -1,0 +1,2671 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/ingest/">
+      
+      
+        <link rel="prev" href="../compare/">
+      
+      
+        <link rel="next" href="../sdk-python/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Sending traces - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sending-traces-to-tracepad" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Sending traces
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-json-encoding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The JSON encoding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connecting-an-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting an application
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-much-one-export-may-carry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How much one export may carry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-kept-and-for-how-long" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is kept, and for how long
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#images-and-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images and files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-tracepad-reads-from-your-spans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Tracepad reads from your spans
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What Tracepad reads from your spans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-tracepad-dialect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The tracepad dialect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-kind-of-each-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The kind of each step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-an-attribute-came-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where an attribute came from
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-run-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The run link
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-to-first-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time to first token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-the-price-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the price comes from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-json-encoding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The JSON encoding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connecting-an-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting an application
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-much-one-export-may-carry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How much one export may carry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-kept-and-for-how-long" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is kept, and for how long
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#images-and-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images and files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-tracepad-reads-from-your-spans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Tracepad reads from your spans
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What Tracepad reads from your spans">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-tracepad-dialect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The tracepad dialect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-kind-of-each-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The kind of each step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-an-attribute-came-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where an attribute came from
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-run-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The run link
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-to-first-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time to first token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-the-price-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the price comes from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/ingest.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="sending-traces-to-tracepad">Sending traces to Tracepad</h1>
+<p>Tracepad speaks OTLP. Any OpenTelemetry-instrumented application can send to
+it by changing an endpoint and an auth header — nothing has to be installed.
+There <em>are</em> packages for Python (<a href="../sdk-python/">sdk-python.md</a>), Node
+(<a href="../sdk-js/">sdk-js.md</a>) and Go (<a href="../sdk-go/">sdk-go.md</a>), and each is a
+convenience over exactly this
+endpoint, not a way around it.</p>
+<h2 id="endpoints">Endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/traces</code></td>
+<td>Canonical OTLP/HTTP trace endpoint</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/public/otel/v1/traces</code></td>
+<td>Alias, so the Langfuse SDK works unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>Both routes are the same endpoint and accept the same credentials.</p>
+<ul>
+<li><strong>Body</strong>: <code>ExportTraceServiceRequest</code>, in either OTLP encoding.</li>
+<li><strong>Content-Type</strong>: <code>application/x-protobuf</code> (<code>application/protobuf</code> is
+  accepted too), or <code>application/json</code> for the OTLP/JSON encoding — see
+  <a href="#the-json-encoding">The JSON encoding</a>. Anything else is <code>415</code>.</li>
+<li><strong>Content-Encoding</strong>: <code>gzip</code> is supported and transparently decoded, in
+  either encoding. <code>TRACEPAD_MAX_BODY_BYTES</code> applies twice: to the
+  compressed bytes on the wire, and to the body they decompress to. A batch
+  that expands past it is <code>413</code>.</li>
+<li>OTLP over gRPC is not implemented.</li>
+</ul>
+<h2 id="the-json-encoding">The JSON encoding</h2>
+<p>Any OpenTelemetry SDK can send JSON instead of protobuf:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/json
+</code></pre></div>
+<p>Same endpoints, same credentials, same mapping — the encoding is transport, not
+meaning, and a span arrives as the same row either way. The response comes back
+in the encoding the request was sent in, so a JSON export gets a JSON
+<code>ExportTraceServiceResponse</code> with <code>partialSuccess</code> when spans were skipped.</p>
+<p>Two things the OTLP/JSON encoding prescribes and that Tracepad holds you to:</p>
+<ul>
+<li><strong>Ids are hex, not base64.</strong> <code>traceId</code>, <code>spanId</code>, <code>parentSpanId</code> and the ids
+  inside a span link are hex strings — <code>"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</code>,
+  not <code>"T4wdLjpbbH2OnwobLD1OXw=="</code>. This is the one place OTLP/JSON departs
+  from protobuf-JSON, and it is the departure every collector implements; a
+  base64 id is a <code>400</code> that names the field. Accepting both would make one body
+  mean two things.</li>
+<li><strong>64-bit integers may be strings or numbers.</strong> <code>"startTimeUnixNano":
+  "1787738400000000000"</code> and <code>"startTimeUnixNano": 1787738400000000000</code> are
+  both read, exactly.</li>
+</ul>
+<p>Unknown fields are ignored, as they are on the protobuf path: an exporter on a
+newer OTLP version keeps working.</p>
+<p>A JSON batch is <strong>archived as JSON</strong>, under its own content type, and
+<a href="../export/"><code>tracepad export --otlp</code></a> replays it as JSON. The archive is what
+arrived; converting at ingest would make it the converter's output instead, and
+a bug in that conversion would be unfixable because the original would be gone.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">now</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>date<span class="w"> </span>+%s<span class="k">)</span><span class="s2">000000000"</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-sS<span class="w"> </span>http://localhost:4318/v1/traces<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"'</span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">16</span><span class="k">)</span><span class="s2">"</span><span class="s1">'","spanId":"'</span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">8</span><span class="k">)</span><span class="s2">"</span><span class="s1">'","name":"hello","kind":1,"startTimeUnixNano":"'</span><span class="s2">"</span><span class="nv">$now</span><span class="s2">"</span><span class="s1">'","endTimeUnixNano":"'</span><span class="s2">"</span><span class="nv">$now</span><span class="s2">"</span><span class="s1">'"}]}]}]}'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{}
+</code></pre></div>
+<p>A <code>200</code> with <code>{}</code> means every span was accepted.</p>
+<h2 id="authentication">Authentication</h2>
+<p>Either scheme works on either route:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Authorization: Bearer &lt;secret key&gt;
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Authorization: Basic base64(&lt;public key&gt;:&lt;secret key&gt;)
+</code></pre></div>
+<p>Keys are printed when a project is created (see the server's startup output).
+Unknown credentials get <code>401 {"error": "unauthorized"}</code>.</p>
+<p>Both routes ask a key for the <strong><code>ingest</code> scope</strong> (<a href="../api/#scopes">api.md</a>). A
+key minted without it — one for <code>read</code> or <code>write</code> alone — gets <code>403</code> with
+<code>WWW-Authenticate: Bearer error="insufficient_scope", scope="ingest"</code>, which an
+exporter does not retry: a retry will not grow a scope. The key a production
+application holds should carry <code>ingest</code> and nothing else. It sends spans, uses
+the Langfuse media channel, writes scores and fetches a prompt by name, which
+is all an application does; it cannot read what anybody else sent, and the
+store holds your end users' prompts and outputs. Mint one in the interface
+(Settings → Project → API keys, where <code>ingest</code> is ticked by default) or with
+<code>tracepad keys create --scope ingest</code> and the admin token
+(<a href="../admin/#keys">admin.md</a>). The key the first start prints is one already;
+the first key of a project made in the interface, with <code>tracepad projects
+create</code> or from <code>TRACEPAD_PROJECTS</code> holds all three scopes. A key the server
+could not check — the database did not answer the lookup within five seconds —
+gets <code>503</code> with <code>Retry-After: 1</code> instead, which an exporter retries: a <code>401</code>
+would make it drop the batch.</p>
+<h2 id="connecting-an-application">Connecting an application</h2>
+<p><strong>OpenTelemetry SDK</strong> — nothing but environment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</span><span class="o">=</span>http://localhost:4318/v1/traces
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"authorization=Bearer tp-sk-…"</span>
+</code></pre></div>
+<p>The protocol line is required wherever an SDK defaults to gRPC: Tracepad has no
+gRPC receiver, and an SDK left to its own default may choose it — the application reports nothing and
+the trace list stays empty. <code>http/json</code> works too (<a href="#the-json-encoding">below</a>).</p>
+<p><strong>Langfuse SDK</strong> — point it at Tracepad instead of Langfuse:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_BASE_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_HOST</span><span class="o">=</span>http://localhost:4318<span class="w">   </span><span class="c1"># the older name, for older SDKs</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>tp-pk-…
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>tp-sk-…
+</code></pre></div>
+<p>The JavaScript SDK 5.x reads <code>LANGFUSE_BASE_URL</code> alone, and with only
+<code>LANGFUSE_HOST</code> set it keeps sending to Langfuse's cloud. What else changes,
+and what does not carry over, is in
+<a href="../langfuse-sdk/">Coming from the Langfuse SDK</a>.</p>
+<p><strong>The <code>tracepad</code> package</strong> — the same exporter with the ergonomics on top, in
+Python (<a href="../sdk-python/">sdk-python.md</a>), in Node (<a href="../sdk-js/">sdk-js.md</a>) and in
+Go (<a href="../sdk-go/">sdk-go.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pip<span class="w"> </span>install<span class="w"> </span>tracepad<span class="w">        </span><span class="c1"># or: npm install tracepad @opentelemetry/api, go get github.com/tracepad/tracepad/sdk/go</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_URL</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span>tp-sk-…
+</code></pre></div>
+<p>Working examples of all of them live in <a href="https://github.com/tracepad/tracepad/tree/main/scripts/smoke"><code>scripts/smoke</code></a>,
+which is also the test that keeps them working.</p>
+<p>One more is not an SDK at all: <a href="#claude-code">Claude Code</a> exports its own
+sessions, and needs only environment too.</p>
+<h2 id="claude-code">Claude Code</h2>
+<p>Claude Code emits OpenTelemetry spans for what it does — one
+<code>claude_code.interaction</code> per prompt, one <code>claude_code.llm_request</code> per API
+call, one <code>claude_code.tool</code> per tool call — and Tracepad is an OTLP endpoint,
+so connecting the two is environment and nothing else:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENABLE_TELEMETRY</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_TRACES_EXPORTER</span><span class="o">=</span>otlp
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="o">=</span>http/protobuf
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
+</code></pre></div>
+<p>The same six as the <code>env</code> object of <code>~/.claude/settings.json</code>, which is how they
+outlive the shell that set them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENABLE_TELEMETRY"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">"OTEL_TRACES_EXPORTER"</span><span class="p">:</span><span class="w"> </span><span class="s2">"otlp"</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_PROTOCOL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http/protobuf"</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_ENDPOINT"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:4318"</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="nt">"OTEL_EXPORTER_OTLP_HEADERS"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Authorization=Bearer tp-sk-…"</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">}</span>
+</code></pre></div>
+<p>Two of those lines are the ones people lose an afternoon to:</p>
+<ul>
+<li><code>OTEL_EXPORTER_OTLP_PROTOCOL</code> is <strong>not optional</strong>. Tracepad speaks OTLP over
+  HTTP and <a href="#endpoints">not over gRPC</a>, and an exporter left to its own default
+  does not reach it — the CLI reports nothing, and the traces list simply stays
+  empty.</li>
+<li><code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is the <strong>base</strong> URL, not the trace path: the
+  exporter appends <code>/v1/traces</code> itself. It is the one place in this page where
+  the path is not written out.</li>
+</ul>
+<p>A day of prompts is a lot of traces to have arrive beside your application's,
+so give them an environment of their own — the filter and the statistics are
+per environment (retention is per project):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_RESOURCE_ATTRIBUTES</span><span class="o">=</span>deployment.environment<span class="o">=</span>claude-code
+</code></pre></div>
+<p><strong>What arrives.</strong> One trace per prompt, named <code>claude_code.interaction</code>, with
+the API calls and the tool calls under it: a <code>claude_code.tool</code> span carries a
+<code>claude_code.tool.blocked_on_user</code> child while it waits for your answer to the
+permission prompt and a <code>claude_code.tool.execution</code> child for the work itself.
+Each <code>claude_code.llm_request</code> is a generation on the model it called, and its
+four token counts — <code>input_tokens</code>, <code>output_tokens</code>, <code>cache_read_tokens</code> and
+<code>cache_creation_tokens</code>, the last two usually the largest numbers on the
+span — arrive as usage, under those names. Everything else Claude Code stamps
+(<code>tool_name</code>, <code>stop_reason</code>, <code>duration_ms</code>, <code>span.type</code>) is in the
+observation's metadata. The session id is the CLI session, so a day's prompts
+group on the Sessions screen; the release is the CLI's own version.</p>
+<p>What does <em>not</em> arrive is the conversation. Claude Code redacts the prompt
+before it exports anything — <code>user_prompt</code> is the literal string <code>&lt;REDACTED&gt;</code>,
+beside a <code>user_prompt_length</code> — and no completion text is on the spans at all,
+so the input and output panels of these observations are empty. The user id is
+a hash, not an address. Cost is absent for the same reason it is absent
+everywhere: none was sent, and Tracepad does not estimate one.</p>
+<h2 id="responses">Responses</h2>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>Committed to disk. An empty body (<code>{}</code> for a JSON export) means everything was accepted; otherwise the body carries <code>partial_success</code> (<code>partialSuccess</code> in JSON) with the number of skipped spans.</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td>The body is not a decodable OTLP export.</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>Unknown credentials.</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>A key without the <code>ingest</code> scope (<a href="#authentication">Authentication</a>). Exporters do not retry it.</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td>The body is over <code>TRACEPAD_MAX_BODY_BYTES</code> — on the wire, or once decompressed — or the export carries more spans than <code>TRACEPAD_MAX_SPANS_PER_REQUEST</code>. See <a href="#how-much-one-export-may-carry">How much one export may carry</a>.</td>
+</tr>
+<tr>
+<td><code>415</code></td>
+<td><code>Content-Type</code> is neither <code>application/x-protobuf</code> nor <code>application/json</code>.</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>The write queue is saturated, or the server is holding as many request bodies as <code>TRACEPAD_BODY_BUDGET_BYTES</code> allows; retry after the <code>Retry-After</code> delay. Standard OTLP exporters do this on their own.</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td>The batch could not be stored for a reason of its own, which a retry would meet again; exporters do not retry it. No known client input leads here — one that does is a bug worth reporting.</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>The database could not take the batch right now — a lock that did not clear, a full disk, an I/O error — or could not check the key. Carries <code>Retry-After: 1</code>, and exporters retry it.</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>200</code> means the spans are committed and fsynced, not merely queued.</p>
+<p>A failure after part of a large export has been written — a <code>503</code> answered
+between two of its slices (<a href="#how-much-one-export-may-carry">below</a>) — leaves the
+part written visible until the retry rewrites it. A full write queue refuses an
+export before its first slice only; once it is admitted, its later slices wait
+for room. Ingest is an
+upsert by span id, so the retry converges on exactly the rows an uninterrupted
+export writes, and the raw body is stored once, by the attempt that succeeds.
+A <code>500</code> between two slices is not retried: the part written stays, without
+the raw body, which travels with the last slice.</p>
+<p>A span that cannot be mapped — a missing or malformed trace/span id — is
+skipped and counted in <code>partial_success</code> rather than failing the whole export.
+Its bytes are still in the stored raw body, so nothing is lost.</p>
+<h2 id="how-much-one-export-may-carry">How much one export may carry</h2>
+<p>Three bounds keep one request from costing every other project its turn at
+the database and the server its memory:</p>
+<ul>
+<li>
+<p><strong>Spans per export: <code>TRACEPAD_MAX_SPANS_PER_REQUEST</code>, 20,000 by default.</strong>
+  An export with more is <code>413</code> <code>this export carries N spans; the server takes
+  at most M per request (TRACEPAD_MAX_SPANS_PER_REQUEST)</code>, refused whole: no
+  span of it is stored and no raw body kept, so no trace ends up with an
+  arbitrary half of its spans. The OpenTelemetry SDKs' batch processors send
+  512 spans at most, and the Collector's <code>batch</code> processor 8,192 — but a
+  Collector with no <code>send_batch_max_size</code> can pass one incoming request through
+  whole, whatever its size, after a burst. An exporter treats <code>413</code> as final
+  and drops the batch, so bound the Collector's batches explicitly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">processors</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">batch</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">send_batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">send_batch_max_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span><span class="w">   </span><span class="c1"># never more than this in one export</span>
+</code></pre></div>
+<p>Batching in the exporter instead, as newer Collectors can, the same bound is
+the OTLP/HTTP exporter's <code>sending_queue::batch::max_size</code> (counted in items,
+which for traces are spans); its default of 0 means no maximum.
+- <strong>Slices.</strong> An export is written in slices of at most 1,000 rows — traces and
+  observations — one after another, and other projects' writes run between
+  them; a trace larger than a slice is spread across consecutive ones. The
+  <code>200</code> still comes after the last slice is on disk. What this changes is only
+  what a failure in the middle leaves behind (see <a href="#responses">Responses</a>).
+- <strong>Bodies in memory: <code>TRACEPAD_BODY_BUDGET_BYTES</code>, four times
+  <code>TRACEPAD_MAX_BODY_BYTES</code> by default (80 MiB).</strong> Every request body the
+  server reads — exports, the JSON API, the Langfuse SDK's media uploads —
+  holds its bytes in this budget until the request is answered, its write
+  committed whether or not the client is still waiting. A body that declares
+  its length and is not compressed reserves that length whole before it is
+  read, so bodies arriving together are admitted whole or refused whole. A
+  gzip body — which the OpenTelemetry Collector sends by default — or a
+  chunked one declares nothing that bounds what it becomes, and reserves its
+  decompressed bytes as it is read, in steps of 64 KiB: several of those
+  arriving together can each hold part of the budget and all be refused, and
+  the exporters' retry backoff, with its jitter, is what spreads them out
+  again. If a Collector's exports keep meeting <code>429</code> while the server is not
+  short of memory, raise the budget. A request whose next
+  step does not fit is <code>429</code> <code>the server is holding as many request bodies as
+  it can; retry shortly</code>, with <code>Retry-After: 1</code>, which every OTLP exporter
+  retries; the rest of its body is then read and dropped, so the exporter reads
+  that answer rather than a closed connection. The budget counts body bytes, not the heap: while an export is
+  decoded, mapped and written, the heap it takes peaks at roughly 12 to 18
+  times its body for protobuf and 15 to 20 times for JSON — the high end for
+  many small spans, the low end for fewer spans with large payloads (measured
+  on a laptop with synthetic spans, garbage not yet collected included). So
+  the default 80 MiB budget, spent entirely on exports, can mean a gigabyte or
+  more of heap at the peak; size the budget against a container's memory limit
+  with that in mind. A budget smaller than the body cap refuses to start.</p>
+</li>
+</ul>
+<p><code>GET /api/v1/system</code> shows the budget binding to the admin token or an owner —
+<code>body_budget</code> with <code>held_bytes</code> and <code>capacity_bytes</code>, deployment-wide — and
+counts, per project and to the project's own callers, the exports
+refused for their spans (<code>counters.exports_over_span_cap</code>, also counted in
+<code>rejected_batches</code>) and the bodies refused for the budget
+(<code>counters.bodies_refused_for_budget</code>). The array writes of the JSON API have
+counters of their own for the arrays they refuse for their length
+(<code>counters.scores_over_row_cap</code>, <code>counters.dataset_items_over_row_cap</code> and
+<code>counters.queue_adds_over_target_cap</code>; see <a href="../api/#system">api.md</a>).</p>
+<h2 id="what-is-kept-and-for-how-long">What is kept, and for how long</h2>
+<p>Every accepted body is stored as it arrived, compressed, under the project's
+raw retention window (<code>TRACEPAD_STORE_RAW</code>, <code>raw_retention_days</code> — see
+<a href="../retention/">retention.md</a>). That archive is what
+<a href="../export/"><code>tracepad export --otlp</code></a> replays, and it is readable through
+<code>GET /api/v1/raw</code> (<a href="../api/#the-raw-archive">api.md</a>).</p>
+<p><code>GET /api/v1/system</code> reports its size and its reach:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>traces_before_window</code> is the honest edge of the promise: those traces still
+have rows, but no body to replay. <code>tracepad system</code> prints the same block.</p>
+<p>The raw body is kept <strong>as sent, with the media factored out</strong>: an image or a
+file ingest takes out of a payload (see <a href="../media/">media.md</a>) is replaced by the
+same reference in the archived body, so a picture is stored once rather than a
+second time for the raw window. Nothing else in the body changes — a part of the
+export that held no media keeps its bytes — and the way out puts the bytes back
+(<code>GET /api/v1/raw/{id}</code>, <a href="../export/">export.md</a>).</p>
+<h2 id="images-and-files">Images and files</h2>
+<p>Images and files in a payload — data URLs, Anthropic and Gemini inline bodies,
+GenAI blob parts, at least 4 KiB decoded — are taken out at ingest, stored once
+each, and left as a reference <code>{"tracepad_media": "&lt;sha256&gt;", "mime_type",
+"size"}</code>. The Langfuse SDK's own upload channel is served under
+<code>/api/public/media</code>, so a picture sent through the bridge is kept too. Both are
+<a href="../media/">media.md</a>.</p>
+<h2 id="what-tracepad-reads-from-your-spans">What Tracepad reads from your spans</h2>
+<p>Attributes are resolved by a priority chain per field: an explicit
+<code>langfuse.*</code> attribute beats the <code>tracepad.*</code> one that mirrors it, which beats
+an OTel GenAI semconv one, which beats a bare fallback. Resource and scope
+attributes participate at lower priority than the span's own.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Attributes, highest priority first</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>trace name</td>
+<td><code>langfuse.trace.name</code> · <code>tracepad.trace.name</code> · the root span's name</td>
+</tr>
+<tr>
+<td>user</td>
+<td><code>langfuse.user.id</code> · <code>user.id</code></td>
+</tr>
+<tr>
+<td>session</td>
+<td><code>langfuse.session.id</code> · <code>session.id</code> · <code>gen_ai.conversation.id</code></td>
+</tr>
+<tr>
+<td>environment</td>
+<td><code>langfuse.environment</code> · <code>deployment.environment.name</code> · <code>deployment.environment</code> · <code>default</code></td>
+</tr>
+<tr>
+<td>release</td>
+<td><code>langfuse.release</code> · the resource's <code>service.version</code></td>
+</tr>
+<tr>
+<td>version</td>
+<td><code>langfuse.version</code> · <code>tracepad.trace.version</code></td>
+</tr>
+<tr>
+<td>run</td>
+<td><code>tracepad.run_id</code> (a 32-hex run id; see <a href="#the-run-link">The run link</a>)</td>
+</tr>
+<tr>
+<td>item</td>
+<td><code>tracepad.item_id</code> (a 32-hex item id, claimed only beside a run id)</td>
+</tr>
+<tr>
+<td>tags</td>
+<td><code>langfuse.trace.tags</code> · <code>tracepad.trace.tags</code> (JSON array, comma-separated list, or single value)</td>
+</tr>
+<tr>
+<td>trace metadata</td>
+<td><code>langfuse.trace.metadata</code> and <code>langfuse.trace.metadata.*</code> · <code>tracepad.trace.metadata</code> and <code>tracepad.trace.metadata.*</code> (JSON objects, merged)</td>
+</tr>
+<tr>
+<td>observation type</td>
+<td><code>langfuse.observation.type</code> · <code>tracepad.observation.type</code> · a model attribute ⇒ <code>generation</code> · a zero-duration childless span ⇒ <code>event</code> · otherwise <code>span</code></td>
+</tr>
+<tr>
+<td>completion start</td>
+<td><code>langfuse.observation.completion_start_time</code> · <code>tracepad.observation.completion_start_time</code> (RFC 3339, or whole nanoseconds)</td>
+</tr>
+<tr>
+<td>prompt</td>
+<td><code>langfuse.observation.prompt.name</code>/<code>.version</code> · <code>tracepad.prompt.name</code>/<code>tracepad.prompt.version</code> (a whole number from 1; anything else stays in metadata and the name is still recorded)</td>
+</tr>
+<tr>
+<td>model</td>
+<td><code>langfuse.observation.model.name</code> · <code>gen_ai.request.model</code> · <code>gen_ai.response.model</code> · <code>llm.model_name</code> · <code>model</code></td>
+</tr>
+<tr>
+<td>model parameters</td>
+<td><code>langfuse.observation.model.parameters</code> (JSON object) · every <code>gen_ai.request.*</code> except the model</td>
+</tr>
+<tr>
+<td>input</td>
+<td><code>langfuse.observation.input</code> · <code>gen_ai.input.messages</code> · <code>gen_ai.prompt</code> (including the flattened <code>gen_ai.prompt.0.content</code> form)</td>
+</tr>
+<tr>
+<td>output</td>
+<td><code>langfuse.observation.output</code> · <code>gen_ai.output.messages</code> · <code>gen_ai.completion</code> (same flattened form)</td>
+</tr>
+<tr>
+<td>usage</td>
+<td><code>langfuse.observation.usage_details</code> (JSON object) · every <code>gen_ai.usage.*</code> count, key kept as sent · the bare token keys <code>input_tokens</code>, <code>output_tokens</code>, <code>total_tokens</code>, <code>cache_read_tokens</code>, <code>cache_creation_tokens</code>, <code>cache_read_input_tokens</code>, <code>cache_creation_input_tokens</code>, <code>prompt_tokens</code>, <code>completion_tokens</code>, <code>reasoning_tokens</code>, key kept as sent</td>
+</tr>
+<tr>
+<td>cost</td>
+<td><code>langfuse.observation.cost_details</code> (JSON object) · <code>gen_ai.usage.cost</code></td>
+</tr>
+<tr>
+<td>level</td>
+<td><code>langfuse.observation.level</code> · <code>tracepad.observation.level</code> · span status <code>ERROR</code> ⇒ <code>ERROR</code> · otherwise <code>DEFAULT</code></td>
+</tr>
+<tr>
+<td>status message</td>
+<td><code>langfuse.observation.status_message</code> · <code>tracepad.observation.status_message</code> · the span's status message</td>
+</tr>
+<tr>
+<td>observation metadata</td>
+<td><code>langfuse.observation.metadata</code> and <code>langfuse.observation.metadata.*</code> · the same two under <code>tracepad.</code>, <strong>plus every attribute no rule above consumed</strong>, plus the span's events under <code>events</code>, plus the instrumentation scope's own name and version under <code>scope.name</code> and <code>scope.version</code></td>
+</tr>
+</tbody>
+</table>
+<p>Trace tags and trace metadata are not single values but sets every span adds
+to, in one export or across several, in whatever order the spans arrive: the
+tags are the union of every span's, in the order first seen and at most 50, and
+the metadata is every span's keys, a later value winning where two name the
+same key. A span that carries neither leaves them as they are. Metadata stops
+at 512 keys or 1 MiB: past either, a span's new keys are not added — the keys
+already there still take its values — and the server logs it once per project. This is how
+Langfuse keeps them too. An observation is different: a span sent again is the
+same span, and its latest delivery replaces it whole.</p>
+<p>The usage row is a chain like every other one: the first source that yields a
+count wins whole, and the losers stay in metadata rather than being merged into
+it. An exporter that sends both <code>gen_ai.usage.input_tokens</code> and <code>input_tokens</code>
+is describing one number twice, and the bare list is closed — ten spellings,
+named above — because a bare word like <code>input_tokens</code> is exactly the kind of key
+that collides with an attribute meaning something else. For the same reason the
+ten are read on the <strong>span</strong> only: on the Resource they would describe a whole
+export at once, which no token count does.</p>
+<p>A value that is not a number is not a count and stays where it was — and
+neither is <code>NaN</code> or an infinity, anywhere the mapping reads a number. They are
+kept as the text they arrived as, in metadata.</p>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li><strong>Nothing is dropped.</strong> An attribute Tracepad does not recognize shows up in
+  the observation's metadata — and so does one it <em>did</em> recognize but could
+  not use: an unknown level spelling, a <code>cost_details</code> that is not a JSON
+  object, or the runner-up of a chain (<code>gen_ai.response.model</code> when
+  <code>gen_ai.request.model</code> won, since those are two different facts). A new SDK
+  convention degrades to visible metadata, never to lost data.</li>
+<li><strong>Cost is never estimated.</strong> There is no price table. <code>total_cost</code> is
+  present only when the client sent one; otherwise the UI shows "no data",
+  not <code>$0</code>. How to send one, for each way in, is
+  <a href="#where-the-price-comes-from">below</a>.</li>
+<li><strong>Labels are bounded.</strong> The fields a listing shows — the trace's name,
+  user, session, environment, release and version, each tag, and an
+  observation's name and model — are cut at 1,000 characters, and a trace
+  keeps its first 50 distinct tags in the order they were sent; a repeated tag
+  is kept once. The raw body keeps every value as it was sent, and a replay
+  applies the same cut. A lookup by a label is cut the same way — a filter,
+  a user or session in the path, a user's erasure, a score's <code>session_id</code> —
+  so the whole value still finds its row.</li>
+<li><strong>Exceptions count as errors.</strong> OTel records a failure as a span <em>event</em>,
+  not an attribute. Every event is kept under <code>metadata.events</code> with its
+  attributes intact — stack traces included — and a span carrying an
+  <code>exception</code> event is stored at level <code>ERROR</code> with the exception's message
+  as its status message, so it reaches <code>error_count</code> and error filters even
+  when the exporter never set an ERROR span status. An explicit
+  <code>langfuse.observation.level</code> still wins. Span links are not mapped.</li>
+</ul>
+<h3 id="the-tracepad-dialect">The <code>tracepad</code> dialect</h3>
+<p>The GenAI semantic conventions have no name for a trace name, for tags, for
+free metadata, for the version of a trace's own logic, for the kind of a step
+or for the prompt one ran. Where they do
+have a name, the <a href="../sdk-python/">Python</a>, <a href="../sdk-js/">Node</a> and <a href="../sdk-go/">Go</a>
+packages use it — <code>gen_ai.*</code>, <code>user.id</code>, <code>session.id</code>,
+<code>deployment.environment.name</code>, the resource's <code>service.version</code> — and where
+they do not, they write these:</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>What it sets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tracepad.trace.name</code></td>
+<td>the trace's name</td>
+</tr>
+<tr>
+<td><code>tracepad.trace.tags</code></td>
+<td>its tags, as a JSON array</td>
+</tr>
+<tr>
+<td><code>tracepad.trace.metadata</code></td>
+<td>its metadata, as a JSON object</td>
+</tr>
+<tr>
+<td><code>tracepad.trace.version</code></td>
+<td>the version of its own logic — a pipeline revision, a prompt bundle, an experiment arm — beside the deployment's <code>release</code></td>
+</tr>
+<tr>
+<td><code>tracepad.observation.type</code></td>
+<td>the <a href="#the-kind-of-each-step">kind</a> of this step</td>
+</tr>
+<tr>
+<td><code>tracepad.observation.level</code></td>
+<td>its level</td>
+</tr>
+<tr>
+<td><code>tracepad.observation.status_message</code></td>
+<td>why</td>
+</tr>
+<tr>
+<td><code>tracepad.observation.metadata</code></td>
+<td>its metadata, as a JSON object — or <code>tracepad.observation.metadata.&lt;key&gt;</code>, one attribute per entry, which is what the packages write, so that a second write adds keys. An entry's string whose text is a JSON object or array is stored as that structure, as under <code>langfuse.</code>. The packages write more than 32 keys at once, or an empty key, as the whole object; the two forms merge, and a per-key entry wins over the object's — so a large write does not replace a key written on its own before it</td>
+</tr>
+<tr>
+<td><code>tracepad.observation.completion_start_time</code></td>
+<td>when the first token came back</td>
+</tr>
+<tr>
+<td><code>tracepad.prompt.name</code>, <code>tracepad.prompt.version</code></td>
+<td>the prompt it ran</td>
+</tr>
+</tbody>
+</table>
+<p>Each sits at the same rank as the <code>langfuse.*</code> key it mirrors, and a span
+carrying both resolves to the <code>langfuse.*</code> one — a span written by two SDKs was
+configured by the operator in that order. All of them are read at any of the
+three levels of an export, and none of them is a signature: a <code>tracepad.*</code> key
+on a span some other SDK exported is claimed exactly the same, because the
+dialect is a vocabulary rather than a marker.</p>
+<p><code>tracepad.run_id</code> and <code>tracepad.item_id</code> are the exception. They are
+<a href="#the-run-link">the run link</a>, stamped by an eval harness in any language over
+whatever SDK the application already runs, so they say nothing about who wrote
+the span and do not label a batch <code>tracepad</code>.</p>
+<h3 id="the-kind-of-each-step">The kind of each step</h3>
+<p><code>type</code> holds the whole Langfuse vocabulary, stored as your client sent it:
+<code>span</code>, <code>generation</code>, <code>event</code>, <code>agent</code>, <code>tool</code>, <code>chain</code>, <code>retriever</code>,
+<code>guardrail</code>, <code>evaluator</code>, <code>embedding</code>. A spelling outside those ten is kept in
+the observation's metadata and the span is classified by the heuristics above.</p>
+<p>The trace listing can be asked for the traces that contain one of them
+(<code>?type=tool</code>). The match is exact: <code>generation</code> does not find an <code>embedding</code>,
+even though the cost and model breakdowns count both as calls to a model.</p>
+<h3 id="where-an-attribute-came-from">Where an attribute came from</h3>
+<p>The three levels of an OTLP export — Resource, InstrumentationScope and the
+span — are one namespace to the priority chains above: <code>deployment.environment</code>
+sets the environment whether it sits on the resource or on the span.</p>
+<p>One name is the exception. <code>service.version</code> is read from the Resource only,
+because on a span it is the version of whatever that span talked to rather
+than of the service that produced the trace; a span carrying one keeps it in
+metadata and does not name the release.</p>
+<p>What no rule claims keeps its origin instead of being merged:</p>
+<table>
+<thead>
+<tr>
+<th>It arrived on</th>
+<th>It lands in metadata as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the span</td>
+<td><code>&lt;key&gt;</code></td>
+</tr>
+<tr>
+<td>the InstrumentationScope</td>
+<td><code>scope.&lt;key&gt;</code></td>
+</tr>
+<tr>
+<td>the Resource</td>
+<td><code>resource.&lt;key&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>So a <code>service.name</code> on the resource and a <code>service.name</code> on the span are two
+entries — <code>resource.service.name</code> and <code>service.name</code> — rather than one
+overwriting the other. The scope's own name and version, which are not
+attributes in OTLP at all, are <code>scope.name</code> and <code>scope.version</code>: they are what
+says which SDK sent the span.</p>
+<h3 id="the-run-link">The run link</h3>
+<p>An eval harness ties each trace to the run it belongs to and the dataset item
+it answered with two attributes (<a href="../datasets/">datasets.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>tracepad.run_id  = 0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>tracepad.item_id = a1b2c3d4e5f60718293a4b5c6d7e8f90
+</code></pre></div>
+<p>They are trace-level, resolved like <code>session.id</code>: any span may carry them and
+the root span is the convention, at any of the three levels. Both must be the
+32 lower-case hex characters the API handed out. Any other shape — a run's
+name, a case's label — is left in metadata unclaimed and sets neither column,
+and an item without a run on the same trace is left in metadata too: an item
+is a position inside a run. One namespace: <code>langfuse.experiment.*</code> is not
+mapped and stays in metadata.</p>
+<p>The run is not required to exist. A trace naming a run this project does not
+have is stored with its columns as sent, counted under
+<code>runs.orphan_traces</code> in <code>GET /api/v1/system</code>, and logged once per unknown id
+per process — so a harness that stamps a wrong id finds out before it reads an
+empty run. What the link costs the write path is one primary-key lookup per
+trace that carries it, paid by eval traffic only.</p>
+<p>A trace re-delivered with a different <code>tracepad.run_id</code> moves to the new run:
+per-field upsert, last delivery wins, like every other trace field.</p>
+<h3 id="time-to-first-token">Time to first token</h3>
+<p><code>langfuse.observation.completion_start_time</code> is when the first token came
+back. Tracepad accepts it as an RFC 3339 instant or as whole nanoseconds, and
+it accepts the doubly-quoted form (<code>"\"2026-08-30T10:15:03.412Z\""</code>) some SDK
+versions put on the wire. Anything else stays in metadata.</p>
+<p>From it come two numbers: the observation's own <code>ttft_ms</code>, and the trace's,
+which is the earliest completion start among its observations minus the moment
+the trace started. Both are stored as sent — no clamping and no clock
+correction — so a client whose completion start precedes its own span produces
+a negative TTFT rather than a silently corrected one.</p>
+<p>The trace's is null when no observation carried a completion start, and also
+when none of them said when it started: a wait needs a moment to be measured
+from, and a trace like that has no latency either.</p>
+<h3 id="where-the-price-comes-from">Where the price comes from</h3>
+<p>A price on an observation is one the provider reported and your side put on
+the span; the mapping reads it from <code>langfuse.observation.cost_details</code> or
+<code>gen_ai.usage.cost</code> (the table above) and never computes one. Which of the
+two you write, and where, depends on how your spans get here.</p>
+<p><strong>The <code>tracepad</code> package</strong> reads it from the answer. <code>call.end(response=…)</code>
+takes an OpenAI-compatible response and writes <code>usage.cost</code> when it is there —
+OpenRouter puts the charge in that field on every non-streamed answer, and on
+a streamed one when asked (<code>extra_body={"usage": {"include": True}}</code>, read by
+<code>call.stream</code>). A provider that reports its charge some other way is carried
+by the explicit argument, <code>call.end(cost=…)</code>. Both are in
+<a href="../sdk-python/#generations">sdk-python.md</a>.</p>
+<p><strong>A Langfuse SDK</strong> puts it in the generation's <code>cost_details</code> — an object with
+<code>input</code>, <code>output</code> and <code>total</code>, or any subset; a missing <code>total</code> is the sum of
+the parts, when that sum is a finite number — which arrives as
+<code>langfuse.observation.cost_details</code>. Nothing
+about that changes when the SDK points at Tracepad: what the SDK's own docs
+say about recording a cost is what applies.</p>
+<p>A price is counted — into a trace's total, the statistics, a user's summary —
+when its <code>total</code> is a number between −10¹² and 10¹²; a string that is a number,
+<code>"0.25"</code>, is stored as that number. Anything else there, a string that is not
+a number or a number beyond that, is kept on the observation as it was sent and
+counted as no cost, the same as an observation that carried none.</p>
+<p><strong>Your own OpenTelemetry spans</strong> carry it as <code>gen_ai.usage.cost</code>, a number,
+set on the span before it ends:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">with</span> <span class="n">tracer</span><span class="o">.</span><span class="n">start_as_current_span</span><span class="p">(</span><span class="s2">"chat"</span><span class="p">)</span> <span class="k">as</span> <span class="n">span</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.request.model"</span><span class="p">,</span> <span class="s2">"gpt-4o-mini"</span><span class="p">)</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">"gpt-4o-mini"</span><span class="p">,</span> <span class="n">messages</span><span class="o">=</span><span class="n">messages</span><span class="p">)</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.input_tokens"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">prompt_tokens</span><span class="p">)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">span</span><span class="o">.</span><span class="n">set_attribute</span><span class="p">(</span><span class="s2">"gen_ai.usage.cost"</span><span class="p">,</span> <span class="n">response</span><span class="o">.</span><span class="n">usage</span><span class="o">.</span><span class="n">cost</span><span class="p">)</span>  <span class="c1"># OpenRouter reports it</span>
+</code></pre></div>
+<p><strong>A third-party auto-instrumentation</strong> — OpenLLMetry, the OpenTelemetry GenAI
+instrumentations — opens and closes the span around the provider call itself,
+so by the time the answer is in your hands the span has ended, and an
+attribute set on an ended span is dropped by the OTel SDK. The price can land
+on that span only if the instrumentation reads it from the answer, and the
+GenAI conventions it writes have no attribute for one: the token counts
+arrive, the price does not, unless its own attribute list says otherwise. The
+way to a price for that call is to make it a <code>tracepad.generation</code> block of
+your own — the package reads the answer after the call returns, which is when
+the price exists.</p>
+<p>When no price arrived, the store records none: <code>total_cost</code> is absent on the
+trace, the interface shows <em>no data</em> where a cost would be, and the
+statistics chart the token counts — which every provider reports — beside the
+cost that some do. Tracepad does not go and ask the provider afterwards.
+OpenRouter's generation endpoint could answer for a span that carries the
+generation's id and nothing else, but at the price of an OpenRouter key kept
+in the server, a background fetch with retries and limits of its own, and a
+write that revises an observation already landed; the recipes above put the
+price on the span at the source, where it is exact and needs no credential.</p>
+<h2 id="configuration">Configuration</h2>
+<p>The settings that bear on ingest; <a href="../configuration/">configuration.md</a> lists
+every variable the server reads.</p>
+<table>
+<thead>
+<tr>
+<th>Environment variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_STORE_RAW</code></td>
+<td><code>on</code></td>
+<td>Keep every accepted body (zstd) so mapping can be replayed later</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_MAX_BODY_BYTES</code></td>
+<td><code>20971520</code></td>
+<td>Request body cap, gzip counted decompressed; over it the answer is <code>413</code></td>
+</tr>
+<tr>
+<td><code>TRACEPAD_MAX_SPANS_PER_REQUEST</code></td>
+<td><code>20000</code></td>
+<td>Spans one export may carry; over it the answer is <code>413</code>. At least <code>1</code></td>
+</tr>
+<tr>
+<td><code>TRACEPAD_BODY_BUDGET_BYTES</code></td>
+<td>four times <code>TRACEPAD_MAX_BODY_BYTES</code></td>
+<td>Request bodies held in memory at once, counted decompressed; a body that does not fit is <code>429</code> with <code>Retry-After</code>. At least <code>TRACEPAD_MAX_BODY_BYTES</code></td>
+</tr>
+</tbody>
+</table>
+<p>An exporter treats <code>413</code> as final and drops the batch, so a batch over the
+cap — in bytes or in spans — is lost, not retried. The server logs each such refusal of a gzip body
+(<code>WARN … expanded past TRACEPAD_MAX_BODY_BYTES after decompression</code>, at most
+one line a minute); if you see it, raise <code>TRACEPAD_MAX_BODY_BYTES</code> or make
+the exporter's batches smaller.</p>
+<p>Raw bodies are the reason a mapping bug is fixable after the fact rather than
+being data loss. Turning them off makes ingest work exactly the same and
+leaves nothing to replay.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

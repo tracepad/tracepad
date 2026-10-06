@@ -1,0 +1,3903 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/api/">
+      
+      
+        <link rel="prev" href="../users/">
+      
+      
+        <link rel="next" href="../cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Read API - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#read-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Read API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scopes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#finding-your-way-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Finding your way around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-one-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The one command
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#listing-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing traces
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Listing traces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#paging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#counting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Counting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-and-is-not-matched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is and is not matched
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-trace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One trace
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="One trace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expandio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ?expand=io
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#erasing-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Erasing a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-response-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The response budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-observations-payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One observation's payloads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-raw-archive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The raw archive
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The raw archive">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One body
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#media" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Media
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#statistics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Statistics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-the-numbers-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the numbers come from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#score-trends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Score trends
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filter values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-version-diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt version diff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-description" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-description
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response headers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reads-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads under load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scopes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#finding-your-way-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Finding your way around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-one-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The one command
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#listing-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing traces
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Listing traces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#paging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#counting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Counting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Search">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-and-is-not-matched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is and is not matched
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-trace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One trace
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="One trace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expandio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ?expand=io
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#erasing-a-users-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Erasing a user's data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-traces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-response-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The response budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-observations-payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One observation's payloads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-raw-archive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The raw archive
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The raw archive">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One body
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#media" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Media
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#statistics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Statistics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-the-numbers-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the numbers come from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#score-trends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Score trends
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filter values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-version-diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt version diff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-description" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-description
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response headers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reads-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads under load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/api.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="read-api">Read API</h1>
+<p>Everything tracepad knows is readable over HTTP. The UI, the CLI and the MCP
+server are thin clients over exactly these endpoints — a feature that is not
+here does not exist.</p>
+<p>The API is written for agents and for <code>curl</code>, in that order: flat snake_case
+JSON, RFC 3339 timestamps, opaque cursors, and a byte budget so that a
+response never quietly eats a context window.</p>
+<p>Authentication is the same as for ingest — <code>Authorization: Bearer &lt;secret
+key&gt;</code> or <code>Basic base64(&lt;public key&gt;:&lt;secret key&gt;)</code>. See
+<a href="../ingest/#authentication">ingest.md</a>. No <code>Content-Type</code> is required. What a
+key may read or change is its <a href="#scopes">scopes</a>.</p>
+<p>A browser sends a session cookie instead, and names the project it is asking
+about with <code>X-Tracepad-Project</code>; every route says which of the two — and which
+role — it takes, in one word. See <a href="../accounts/#who-may-do-what">accounts.md</a>.
+An <code>Authorization</code> header always wins over a cookie, so nothing below changes
+for a script.</p>
+<h2 id="scopes">Scopes</h2>
+<p>A project key holds one or more of three <strong>scopes</strong>, chosen when it is minted
+and never changed afterwards:</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>What a key with it may do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ingest</code></td>
+<td>What a running application does: send spans on both OTLP routes, use the Langfuse media channel, write scores (<code>POST /api/v1/scores</code>). Fetching one prompt (<code>GET /api/v1/prompts/{name}</code>) is open to every key, so an application's <code>ingest</code> key covers it without a scope of its own.</td>
+</tr>
+<tr>
+<td><code>read</code></td>
+<td>Every read of the project's data, and nothing that changes it.</td>
+</tr>
+<tr>
+<td><code>write</code></td>
+<td>Every change a key may make to the project: prompts, datasets and their items, runs, score configs, queues and the work in them — claiming the next item included — retracting a score, deleting traces, the retention windows and user-data erasure.</td>
+</tr>
+</tbody>
+</table>
+<p>Any combination is a valid key, so which one to mint follows from the program
+that will hold it:</p>
+<table>
+<thead>
+<tr>
+<th>Program</th>
+<th>Scopes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A production application: OTLP export, a Langfuse SDK, the <code>tracepad</code> packages' tracing, scores and prompt fetch</td>
+<td><code>ingest</code></td>
+</tr>
+<tr>
+<td>An agent, the <a href="../mcp/">MCP server</a>, a dashboard, the CLI's read commands, the source of an <a href="../export/">export</a></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td>An online judge that reads traces and writes scores</td>
+<td><code>ingest</code>, <code>read</code></td>
+</tr>
+<tr>
+<td>The <a href="../datasets/">eval harness</a>, a CI job, an operator's script</td>
+<td><code>ingest</code>, <code>read</code>, <code>write</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every key that existed before scopes did holds all three, and so do the keys
+<code>TRACEPAD_PROJECTS</code> declares and the key <code>POST /api/v1/projects</code> answers
+with. The key the first start generates and prints for project <code>default</code>
+holds <code>ingest</code> alone: it goes to a log. Every other key holds what it was minted with
+(<a href="../admin/#keys">admin.md</a>). No key, whatever its scopes, lists, mints or
+revokes keys.</p>
+<p>Every route names the scope it asks of a key — <code>ingest</code>, <code>read</code>, <code>write</code>, or
+<code>any</code> for every key, or <code>none</code> for no key at all — in the
+<a href="#self-description">endpoint map</a>, and as <code>x-tracepad-scope</code> on each operation
+of the OpenAPI document. <code>any</code> is the routes that need no credential,
+<code>GET /api/v1/projects</code>, <code>GET /api/v1/projects/{id}</code> and fetching one prompt;
+<code>none</code> is the session and owner routes and the three under
+<code>/api/v1/projects/{id}/keys</code>. Two are not what their method suggests:
+<code>GET /api/v1/queues/{name}/next</code> is <code>write</code>, because it claims an item, and
+<code>POST /api/v1/scores</code> is <code>ingest</code>, because an end user's thumbs-up is written
+by the application.</p>
+<p>A key without the scope a route needs is answered:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>HTTP/1.1 403 Forbidden
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>WWW-Authenticate: Bearer error="insufficient_scope", scope="read"
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>{"error": "this key's scopes are ingest; GET /api/v1/traces needs read"}
+</code></pre></div>
+<p>The header is RFC 6750's, so a program can read the scope it lacks without
+parsing the sentence, and the sentence names the route's pattern, never the
+ids in the request. <code>403</code> rather than <code>401</code>: the key is good, and a retry will
+not grow a scope. A soft-deleted project's key keeps the answers it had —
+<code>401</code> everywhere but reading its project
+(<a href="../retention/#deleting-a-project">retention.md</a>).</p>
+<p>A key learns what it holds from its own project: <code>GET /api/v1/projects</code> and
+<code>GET /api/v1/projects/{id}</code> answer a key with its project's row plus</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"public_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tp-pk-…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"checkout api"</span><span class="p">,</span><span class="w"> </span><span class="nt">"scopes"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"ingest"</span><span class="p">]}</span>
+</code></pre></div>
+<p>and <code>tracepad projects show</code> prints the same line.</p>
+<p>A session and the admin token never meet a scope: the role decides for a
+session (<a href="../accounts/#who-may-do-what">accounts.md</a>), and the admin token
+reaches what <a href="../admin/#who-may-ask">admin.md</a> says it does.</p>
+<h2 id="finding-your-way-around">Finding your way around</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span>http://localhost:4318/api/v1
+</code></pre></div>
+<p>returns every endpoint with a one-line description. The machine-readable
+version is <a href="#self-description"><code>/api/v1/openapi.json</code></a>, an OpenAPI 3.1
+document served without authentication.</p>
+<p>In the examples below, <code>curl …</code> stands for <code>curl -H "Authorization: Bearer $TRACEPAD_API_KEY"</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+<th>A key needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/traces</code></td>
+<td>List traces, filtered and paginated</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/traces/{id}</code></td>
+<td>One trace, observations as a tree</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/traces/last</code></td>
+<td>The newest trace matching the filters, whole</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/traces/{id}</code></td>
+<td>Delete one trace; a dry run until confirmed with its id</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/traces?…&amp;to=</code></td>
+<td>Delete every trace the filters match before <code>to</code>, in rounds; a dry run until confirmed with the project name</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/observations/{id}/io</code></td>
+<td>One observation's payloads, whole</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/sessions</code></td>
+<td>List sessions by most recent activity</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/sessions/{id}</code></td>
+<td>One session: totals and traces</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/users</code></td>
+<td>List users by last seen, traffic, cost or errors</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/users/{id}</code></td>
+<td>One user: traffic, sessions, cost, errors, latency</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/runs</code></td>
+<td>List the project's eval runs, newest first, across datasets</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues</code></td>
+<td>List the annotation queues with their progress</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/queues/{name}/next</code></td>
+<td>The next item to annotate, claimed for ten minutes</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/stats</code></td>
+<td>Counts, errors, cost, latency percentiles</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/stats/scores</code></td>
+<td>Score means, rates and category shares per bucket</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/facets</code></td>
+<td>The environments, releases and trace names in a range, with counts</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/raw</code></td>
+<td>The archived export bodies, oldest first</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/raw/{id}</code></td>
+<td>One archived export body, as received</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/media/{sha256}</code></td>
+<td>One image or file a payload references</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/prompts/{name}/diff</code></td>
+<td>Unified diff between two prompt versions</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/prompts/{name}</code></td>
+<td>Delete a prompt name whole; a dry run until confirmed</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/scores/{id}</code></td>
+<td>Retract one score; no dry run, a re-POST puts it back</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/system</code></td>
+<td>Version, uptime, the deployment's gauges or the project's figures</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1</code></td>
+<td>This endpoint map</td>
+<td><code>any</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/openapi.json</code></td>
+<td>The OpenAPI document</td>
+<td><code>any</code></td>
+</tr>
+</tbody>
+</table>
+<p>Scores and prompts have their own pages: <a href="../scores/">scores.md</a> (score
+configs included), <a href="../prompts/">prompts.md</a>. So do datasets and runs — the
+cases an eval ran and the container that groups the traces one pass produced,
+under <code>/api/v1/datasets</code> and <code>/api/v1/runs</code>: <a href="../datasets/">datasets.md</a>. So
+does administration — projects, keys, retention windows and user-data erasure
+— under <code>/api/v1/projects</code>: <a href="../admin/">admin.md</a> and
+<a href="../retention/">retention.md</a>. A project key with the <code>write</code> scope
+administers its own project there — retention and erasure — but no key
+manages keys: <code>GET</code>, <code>POST</code> and <code>DELETE</code> under <code>/api/v1/projects/{id}/keys</code>
+answer any key <code>403</code> — <code>a project key cannot list, mint or revoke keys; that
+needs an owner or editor signed in, or the admin token</code> — and the listing says
+what each key may do, who minted it and when it was last used
+(<a href="../admin/#keys">admin.md</a>). And
+so do the annotation queues — what a team
+has decided deserves a human verdict, and who has given one — under
+<code>/api/v1/queues</code>: <a href="../annotation/">annotation.md</a>.</p>
+<p>Everything under <code>/api/v1/projects</code> that destroys something is a dry run until
+<code>?confirm=</code> echoes the name of what it destroys, and so is deleting a dataset,
+an annotation queue, or <a href="#deleting-traces">traces</a>.
+That contract is described once, in <a href="../admin/#dry-run-by-default">admin.md</a>.
+The ceremony is for what cannot be undone: deleting one score takes no
+<code>?confirm=</code>, because writing its id again recreates it.</p>
+<h2 id="the-one-command">The one command</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/traces/last?status=error&amp;expand=io"</span>
+</code></pre></div>
+<p>"The last failed trace, with its payloads" — one request instead of list,
+filter, get, and one get per observation.</p>
+<h2 id="listing-traces">Listing traces</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/traces?environment=production&amp;status=error&amp;limit=20"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">"user_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user-4821"</span><span class="p">,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="nt">"session_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"session-77"</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="s2">"production"</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">      </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026.8.30"</span><span class="p">,</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-v9"</span><span class="p">,</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="nt">"tags"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"beta"</span><span class="p">,</span><span class="w"> </span><span class="s2">"support"</span><span class="p">],</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">      </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.001</span><span class="p">,</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1840</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">212</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">},</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">      </span><span class="nt">"latency_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">820</span><span class="p">,</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">      </span><span class="nt">"ttft_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">388</span><span class="p">,</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">      </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">      </span><span class="nt">"observation_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MTc4ODIyMDgwMDAwMDAwMDAwMDo0Zjhj…"</span><span class="p">,</span>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">  </span><span class="nt">"prev_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="p">}</span>
+</code></pre></div>
+<p>Rows carry the aggregate columns and never a payload: a listing is for
+choosing what to fetch.</p>
+<p><code>release</code> and <code>version</code> are what the deployment called itself and what the
+trace's own logic called itself; <code>ttft_ms</code> is the wait before the first token
+— the earliest completion start among the trace's observations, minus when the
+trace began. <code>tokens</code> is the trace's observations' usage summed per class —
+see <a href="#tokens">Tokens</a>. Each is absent when nothing reported it.</p>
+<p>A trace produced by an eval also carries <code>run_id</code> and <code>item_id</code> — the run it
+belongs to and the case it answered, from the <code>tracepad.run_id</code> and
+<code>tracepad.item_id</code> attributes the harness stamped. Both are absent on ordinary
+traffic, and <code>item_id</code> never appears without <code>run_id</code>. See
+<a href="../datasets/">Datasets and runs</a>.</p>
+<h3 id="filters">Filters</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>from</code>, <code>to</code></td>
+<td>RFC 3339. Half-open — <code>from</code> inclusive, <code>to</code> exclusive — so walking a timeline never reports a trace twice.</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>The environment a trace ran in, or a comma-separated list matching <strong>any</strong> of them: <code>?environment=production,staging</code>. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>user_id</code>, <code>session_id</code></td>
+<td>Exact match.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>The trace name, or a comma-separated list matching any of them. A trace with no name never matches. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>tag</code></td>
+<td>Repeatable; a trace must carry <strong>every</strong> tag given. At most 50 distinct values — duplicates collapse first — since a trace keeps at most 50 tags; more is a <code>400</code> (<code>tag: at most 50 values</code>).</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>error</code> (at least one failed observation) or <code>ok</code>.</td>
+</tr>
+<tr>
+<td><code>min_cost</code></td>
+<td>Traces whose total cost is at least this. A trace whose client provided no cost has none and never matches.</td>
+</tr>
+<tr>
+<td><code>min_tokens</code></td>
+<td>Traces whose input plus output tokens are at least this many — a whole number. A trace that reported neither has none and never matches, not even <code>min_tokens=0</code>. See <a href="#tokens">Tokens</a>.</td>
+</tr>
+<tr>
+<td><code>q</code></td>
+<td>Full-text search over what the observations carried. See <a href="#search">Search</a>.</td>
+</tr>
+<tr>
+<td><code>release</code></td>
+<td>The deployment the trace ran in, or a comma-separated list matching any of them. See <a href="#lists">Lists</a>.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>Exact match on the version of the trace's own logic.</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>Traces with at least one observation of this kind — one of <code>span</code>, <code>generation</code>, <code>event</code>, <code>agent</code>, <code>tool</code>, <code>chain</code>, <code>retriever</code>, <code>guardrail</code>, <code>evaluator</code>, <code>embedding</code>. Exact: <code>generation</code> does not match <code>embedding</code>. Anything else is a <code>400</code>.</td>
+</tr>
+<tr>
+<td><code>prompt</code></td>
+<td><code>name</code>, or <code>name@version</code>: traces with at least one observation that ran this prompt, at any version or at that one. A version is a <strong>run of digits after the last <code>@</code>, with a name in front of it</strong>; every other string is a name, <code>@</code> included — <code>@acme/support</code>, <code>team@acme/answer</code>, <code>name@latest</code> and <code>svc@-1</code> all filter as names. Labels are not versions: <code>name@latest</code> matches a prompt literally called that, and otherwise returns nothing.</td>
+</tr>
+<tr>
+<td><code>run_id</code>, <code>item_id</code></td>
+<td>The traces of one eval run, and the attempts at one case (<a href="../datasets/">datasets.md</a>). Both take the 32-hex ids this API issues; another shape is a <code>400</code>, because nothing else can be in those columns and an empty listing would report a typo as a fact.</td>
+</tr>
+<tr>
+<td><code>fields</code></td>
+<td>Comma-separated subset of the row fields.</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>1–500, default 50.</td>
+</tr>
+<tr>
+<td><code>cursor</code></td>
+<td>The <code>next_cursor</code> or <code>prev_cursor</code> of a previous page.</td>
+</tr>
+<tr>
+<td><code>direction</code></td>
+<td><code>next</code> (default) or <code>prev</code>. See <a href="#paging">Paging</a>.</td>
+</tr>
+<tr>
+<td><code>count</code></td>
+<td><code>1</code> adds <code>total</code> and <code>total_capped</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A parameter the endpoint does not know is a <code>400</code>, and so is one sent without
+a value (<code>?environment=</code> is what an unset shell variable expands to, and
+answering it with the whole project would be a wider answer to a narrower
+question).</p>
+<h4 id="lists">Lists</h4>
+<p><code>environment</code>, <code>release</code> and <code>name</code> take <strong>one value or a comma-separated
+list</strong>, and a trace matches when its column equals any item:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces?environment=production,staging"</span>
+</code></pre></div>
+<p>One value behaves exactly as it always did. Items are trimmed, so
+<code>a, b</code> is the pair it looks like, and duplicates collapse. An <strong>empty item</strong>
+— <code>a,,b</code>, <code>a,</code> — is a <code>400</code> for the reason an empty value is: it is a template
+that did not fill in, and reading it as "just the rest" would answer a broken
+request with a well-formed listing.</p>
+<p><strong>Repeating the parameter</strong> is a <code>400</code> too: <code>?environment=a&amp;environment=b</code> is
+one list spelled the way <code>tag</code> is spelled, and answering it with the traces of
+<code>a</code> alone would be a listing narrower than the one that was asked for. One
+list, one parameter.</p>
+<p>A list carries <strong>at most 100 items</strong>; beyond that the request is a <code>400</code>
+(<code>environment: at most 100 values in a list</code>). That is the same hundred
+<a href="#filter-values"><code>/facets</code></a> offers per column, so it is not a limit the
+interface can reach — and out of range is an error rather than a silent
+truncation, exactly as it is for <code>limit</code>.</p>
+<p>A value that <strong>contains a comma</strong> is not expressible through these parameters.
+An environment, a release or a trace name is an identifier, and an identifier
+with a comma in it is a choice its owner made against every tool that will
+ever list it.</p>
+<p><code>tag</code> is not a list of this kind: it stays repeatable and stays an <strong>AND</strong>, so
+<code>?tag=a&amp;tag=b</code> keeps the traces carrying both. Two spellings for two semantics
+is clearer than one spelling for both.</p>
+<p><a href="#filter-values"><code>GET /api/v1/facets</code></a> lists what these three can be set to.</p>
+<p><code>?fields=</code> keeps the row's own field order and drops the rest:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces?fields=id,name,error_count"</span>
+</code></pre></div>
+<p>A field the trace never carried stays absent rather than coming back empty —
+absent means "this trace said nothing", which is not the same as zero.</p>
+<h3 id="paging">Paging</h3>
+<p>Cursors are opaque; pass one back as <code>?cursor=</code>. They are a keyset over
+<code>(timestamp, id)</code>, so a trace ingested mid-walk cannot make a page skip or
+repeat a row — and page four hundred costs what page one costs, which no
+<code>OFFSET</code> can promise.</p>
+<p>Every listing answers with two of them:</p>
+<ul>
+<li><strong><code>next_cursor</code></strong> — the page after this one, towards older rows. <code>null</code> on
+  the oldest page.</li>
+<li><strong><code>prev_cursor</code></strong> — the page before it, towards newer rows, fetched with
+  <code>?direction=prev</code>. <code>null</code> on the newest page.</li>
+</ul>
+<p><code>direction</code> also names the two ends, because <strong>with no cursor it is an
+anchor</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"/api/v1/traces?limit=50"</span><span class="w">                  </span><span class="c1"># the newest page</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"/api/v1/traces?limit=50&amp;direction=prev"</span><span class="w">   </span><span class="c1"># the oldest page</span>
+</code></pre></div>
+<p>The oldest page is a full page ending at the oldest row, not the remainder
+that walking forward happens to stop on: with five rows and pages of two,
+walking forward ends on one row and <code>direction=prev</code> answers with two. Both
+end on the same row.</p>
+<p>Rows always come back newest first, whichever direction the page was fetched
+in: the direction is how a page was found, not how it is read.</p>
+<h3 id="counting">Counting</h3>
+<p><code>?count=1</code> adds two fields to a listing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="err">…</span><span class="w"> </span><span class="p">],</span><span class="w"> </span><span class="nt">"total"</span><span class="p">:</span><span class="w"> </span><span class="mi">847</span><span class="p">,</span><span class="w"> </span><span class="nt">"total_capped"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p><code>total</code> counts what the <strong>filters</strong> match — not the page, and not what is
+left after the cursor. It stops at 1000: <code>total_capped: true</code> means the real
+number is larger and the count did not go looking for it.</p>
+<p>That cap bounds the <strong>answer</strong>. It bounds the work only where matches are
+plentiful, because <code>LIMIT</code> ends a scan once that many rows have <em>matched</em>: a
+selective filter over a column no index covers (<code>name</code>, <code>tag</code>, <code>status</code>,
+<code>min_cost</code>) is read to the end, and the session count — which has to form its
+groups before it can count them — is barely bounded at all. Measured on
+500 000 rows: an unfiltered trace count 1 ms, one matching nothing 260 ms; an
+unfiltered session count 23 ms, one inside a 1 % time window 719 ms.</p>
+<p>Worth the perspective, though: the listing beside it reads the same rows and
+then sorts them — 864 ms for that same 260 ms count. A count is a fraction of
+a screen that is already expensive for that filter, never the reason it is.</p>
+<p>It is off by default because the answer changes with the filters and not with
+the page: a client asks for it when the filters move, and pages without it.</p>
+<p><code>GET /api/v1/sessions/{id}</code> pages the same way but takes no <code>count</code>: its
+<code>trace_count</code> is that number already, and exactly.</p>
+<h2 id="search">Search</h2>
+<p>Every filter above asks about a trace's labels — who, when, where, how much.
+<code>q</code> asks about what was <em>said</em>: the error message somebody pasted, a sentence
+the model should not have produced, an order id from a support ticket.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer tp-sk-…"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="s2">"http://localhost:4318/api/v1/traces?q=%22refund+failed%22&amp;status=error"</span>
+</code></pre></div>
+<p>It searches, per observation, the <code>input</code>, <code>output</code> and <code>metadata</code> payloads,
+the observation's <code>name</code> and its <code>status_message</code> — and the trace's own <code>name</code>.
+A trace matches when <strong>one field of one of its observations</strong> matches.</p>
+<p>Of a payload it searches the <strong>values</strong>, not the JSON around them: the strings,
+numbers and booleans it carries, wherever they are nested. <code>role</code>, <code>content</code>
+and every other key of a message array are structure, not text, and they match
+nothing.</p>
+<p>Each row then carries <code>match</code>: where the hit was, and the text around it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">"match"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="nt">"observation_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2b3c4d5e6f7a8b9c"</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">"field"</span><span class="p">:</span><span class="w"> </span><span class="s2">"output"</span><span class="p">,</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">    </span><span class="nt">"snippet"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…the refund failed for the order because the card issuer declined the…"</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>field</code> is one of <code>input</code>, <code>output</code>, <code>metadata</code>, <code>name</code>, <code>status_message</code> or
+<code>trace_name</code>; with <code>trace_name</code> the <code>observation_id</code> is <code>null</code> and the trace
+itself is what matched. The snippet is at most 160 characters, cut on word
+boundaries around the first term and out of the same text the index searched —
+so it reads as a sentence rather than as the JSON it arrived in — and it is
+<strong>plain text</strong>: the hit is not marked up, because the API answers with data and
+a client that highlights folds the query terms itself. <code>match</code> is a row field like the others: it
+answers to <code>?fields=</code>, and it is never present without a <code>q</code>.</p>
+<h3 id="what-is-and-is-not-matched">What is and is not matched</h3>
+<ul>
+<li><strong>Words, not substrings.</strong> <code>error</code> does not find <code>errors</code>; <code>err*</code> finds both.</li>
+<li><strong>Case and diacritics are folded.</strong> <code>Refund</code>, <code>refund</code> and <code>réfund</code> are one
+  word.</li>
+<li><strong>Several words are ANDed, in any order.</strong> <code>refund order</code> finds a field
+  containing both; <code>"refund order"</code> finds them adjacent, in that order.</li>
+<li><strong>Identifiers split on punctuation</strong> and are found whole or by part:
+  <code>user_id_42</code> is found by <code>user_id_42</code>, by <code>user</code> and by <code>42</code>.</li>
+<li><strong>A payload's keys and structure are not searched.</strong> <code>{"role": "user",
+  "content": "the refund failed"}</code> is found by <code>refund</code> and by <code>user</code>, and not
+  by <code>role</code> or <code>content</code>. A number is found by its digits: an <code>order_id</code> of
+  <code>12345</code> answers to <code>12345</code>. A payload that is not JSON is searched whole.
+  The values of one field are one text, so a <code>"quoted phrase"</code> can run from the
+  end of one value into the start of the next.</li>
+<li><strong>Only the first 64 KiB of each payload's text is indexed</strong> — the text inside
+  the JSON, not the JSON. A word past that is stored and readable but not
+  findable; <code>/observations/{id}/io</code> still returns the whole thing. See
+  <a href="../retention/#what-search-costs">retention.md</a>.</li>
+<li><strong>All the words must occur in the same field of the same observation.</strong> Two
+  words in two different observations of one trace are not a match.</li>
+</ul>
+<p>There is no operator syntax and nothing to escape: words, <code>"quoted phrases"</code>
+and a trailing <code>*</code> are the whole language, and everything else — <code>AND</code>, <code>OR</code>,
+<code>NOT</code>, parentheses, <code>:</code>, <code>^</code>, <code>-</code> — is literal text. The only <code>q</code> this endpoint
+refuses is one with no word in it, or one over 512 characters, and both are a
+<code>400</code> rather than an empty listing.</p>
+<p><code>q</code> changes what is listed and nothing else: the rows stay newest first, the
+cursors are the same keyset, and the count is the count with the search. A
+cursor taken with a <code>q</code> is valid only with the same <code>q</code>, which is already how
+every other filter behaves. There is no relevance ordering — the useful order
+for "when did this last happen?" is the one the listing already has.</p>
+<p><code>GET /api/v1/traces/last</code> takes <code>q</code> too, which is "the last trace that said
+this", whole, in one request. It returns the trace as <code>GET /traces/{id}</code> does,
+without a <code>match</code>: the payloads are in the response already.</p>
+<h2 id="one-trace">One trace</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span>
+</code></pre></div>
+<p>Returns the trace's fields, its <code>metadata</code>, and <code>observations</code> as a <strong>nested
+tree</strong>: children inside their parents, siblings ordered by start time.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="s2">"production"</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">"observation_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"channel"</span><span class="p">:</span><span class="w"> </span><span class="s2">"web"</span><span class="p">},</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1a2b3c4d5e6f7a8b"</span><span class="p">,</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"span"</span><span class="p">,</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"handle-request"</span><span class="p">,</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">      </span><span class="nt">"start_time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">      </span><span class="nt">"end_time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00.82Z"</span><span class="p">,</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">      </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"DEFAULT"</span><span class="p">,</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">      </span><span class="nt">"children"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">        </span><span class="p">{</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">          </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2b3c4d5e6f7a8b9c"</span><span class="p">,</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">          </span><span class="nt">"parent_observation_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1a2b3c4d5e6f7a8b"</span><span class="p">,</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">          </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"generation"</span><span class="p">,</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">          </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"chat-completion"</span><span class="p">,</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">          </span><span class="nt">"completion_start_time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00.428Z"</span><span class="p">,</span>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="w">          </span><span class="nt">"ttft_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">388</span><span class="p">,</span>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="w">          </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"claude-sonnet-5"</span><span class="p">,</span>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="w">          </span><span class="nt">"model_parameters"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">},</span>
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a><span class="w">          </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"DEFAULT"</span><span class="p">,</span>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="w">          </span><span class="nt">"usage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">41</span><span class="p">,</span><span class="w"> </span><span class="nt">"total"</span><span class="p">:</span><span class="w"> </span><span class="mi">169</span><span class="p">},</span>
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="w">          </span><span class="nt">"cost_details"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.00038</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.00062</span><span class="p">},</span>
+<a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a><span class="w">          </span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-answer"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">},</span>
+<a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a><span class="w">          </span><span class="nt">"input_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">12480</span><span class="p">,</span>
+<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a><span class="w">          </span><span class="nt">"output_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3011</span>
+<a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a><span class="w">        </span><span class="p">}</span>
+<a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-13-35" name="__codelineno-13-35" href="#__codelineno-13-35"></a><span class="p">}</span>
+</code></pre></div>
+<p>An observation whose parent has not arrived yet renders at the root with its
+<code>parent_observation_id</code> intact — a trace still being written looks incomplete,
+not empty. <code>children</code> is absent for a leaf.</p>
+<p>A tree has two bounds, the same on every server because they shape the answer
+a client parses:</p>
+<ul>
+<li>
+<p><strong>At most 10,000 observations and 32 MiB of structure.</strong> A larger trace is
+  answered with the longest prefix of its observations, in start-time order,
+  that fits both — the part of the run that happened first — and says what it
+  left out:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"observation_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">10001</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations_omitted"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">…</span><span class="p">]}</span>
+</code></pre></div>
+<p><code>observations_omitted</code> is <code>observation_count</code> minus the observations in the
+tree, and is present only when that is more than zero. The 32 MiB counts the
+observations' own fields — <code>usage</code>, <code>model_parameters</code> and <code>cost_details</code>
+are what make one heavy; the trace's own fields and metadata are rendered
+whole. An observation whose parent was left out renders at the root with
+its <code>parent_observation_id</code>, as an orphan does. Every observation is still
+one <code>/api/v1/observations/{id}/io</code> away, and the listing row's
+<code>observation_count</code> still counts all of them.
+- <strong>At most 100 levels deep.</strong> An observation that would sit at depth 101 is
+  detached from its parent and rendered at the root with its
+  <code>parent_observation_id</code>, keeping its own children, so a chain of a thousand
+  steps reads as ten chains of a hundred and every observation still appears
+  once. Parsers have nesting limits of their own — Python's is about a
+  thousand levels — and each observation is two of them. A parent cycle,
+  which a client can produce, is broken the same way, at the observation
+  that enters it.</p>
+</li>
+</ul>
+<p><code>prompt</code> is the prompt your client said this observation ran, recorded as sent
+and resolved against no registry: this store may not manage that prompt at
+all, and a label pointing at nothing is still a label. Its <code>version</code> is null
+when the client named a prompt without a whole-number version.
+<code>input_bytes</code> and <code>output_bytes</code> are the uncompressed payload sizes — present
+whether or not <code>?expand=io</code> inlined the payloads themselves, because they are
+what you decide with before asking for the rest.</p>
+<h3 id="expandio"><code>?expand=io</code></h3>
+<p>Adds each observation's <code>input</code>, <code>output</code> and <code>metadata</code>. Without it, a trace
+of hundreds of observations still fits the response budget; with it, you get
+the shape of every payload in one round trip.</p>
+<h2 id="erasing-a-users-data">Erasing a user's data</h2>
+<p><code>DELETE /api/v1/projects/{id}/users/{user_id}/data</code> — an editor's route, a dry
+run until <code>?confirm=&lt;user id&gt;</code>. The dry run's <code>would_delete</code> counts <code>traces</code>,
+<code>observations</code>, <code>scores</code>, <code>session_scores</code>, <code>annotation_items</code>,
+<code>dataset_items</code>, <code>media</code> and <code>media_bytes</code>, and beside it come
+<code>affected_runs</code>, <code>affected_datasets</code> (<code>[{dataset, items}]</code>), <code>raw</code>
+(<code>{batches_to_scan, unattributable_batches}</code>) and, while one exists,
+<code>pre_migration_backup</code>, and <code>running</code> (<code>{id, state, phase}</code>) while an
+erasure of the user is under way.</p>
+<p>Confirmed, an erasure is a task. Whatever can refuse it refuses first and
+records nothing; then it answers <strong><code>202 Accepted</code></strong> with the erasure and
+<code>Location: /api/v1/projects/{id}/erasures/{erasure_id}</code>. <code>?wait=&lt;seconds&gt;</code>,
+from 0 to 30 (0 by default, anything else a <code>400</code>), holds the answer until the
+erasure ends or the time is up, and answers <strong><code>200</code></strong> with the same body when
+it ended. A second request for a user whose erasure is queued or running
+answers that erasure. The erasure resource is <code>{id, state, phase, user_id,
+dry_run: false, created_at, started_at, finished_at, progress:
+{traces_at_start, traces_deleted}, deleted, compaction, pre_migration_backup,
+error}</code>: <code>state</code> is <code>queued</code>, <code>running</code>, <code>done</code> or <code>failed</code>; <code>phase</code> is <code>raw</code>,
+<code>parsed</code> or <code>tail</code> while it runs; <code>deleted</code> adds <code>payloads</code>, <code>raw_spans</code>,
+<code>raw_batches_rewritten</code> and <code>raw_batches_deleted</code> to the dry run's counts and
+says what has been committed so far. <code>user_id</code> is <code>null</code> once the erasure has
+ended, except in the answer to the request that started it.</p>
+<p><code>GET /api/v1/projects/{id}/erasures/{erasure_id}</code> reads one erasure, <code>404</code> for
+one that is unknown, another project's, or removed 30 days after it ended.
+<code>GET /api/v1/projects/{id}/erasures</code> is the project's hundred, those queued or
+running first and then the newest, as <code>{"erasures": [...]}</code>. Both are an editor's, or a <code>write</code> key's, like
+the erasure. The shapes in full, and what each count means, are in
+<a href="../admin/#erasing-a-users-data">admin.md</a>.</p>
+<h2 id="deleting-traces">Deleting traces</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces/4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f?confirm=4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">"dry_run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">"would_delete"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"observations"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span><span class="w"> </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">"annotation_items"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">                   </span><span class="nt">"media"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"media_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="nt">"oldest_ingested"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">  </span><span class="nt">"affected_runs"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="nt">"confirm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">  </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"raw OTLP bodies are not deleted; they expire on the raw retention window"</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>DELETE /api/v1/traces/{id}</code> removes one trace and everything attached to it
+— observations, scores, payloads, search entries, annotation-queue items —
+with the hour it started in re-rolled in the same transaction. An editor's
+route. Without <code>confirm</code> it answers the dry run above; the echo is the trace
+id, its only identity. With it: <code>{"dry_run": false, "deleted": {"traces": 1,
+"observations": 7, "scores": 2, "payloads": 9, "annotation_items": 1, "media": 0,
+"media_bytes": 0}, "id":
+"4f8c…", "compaction": {"requested_at": "…", "expected_by": "…"}}</code> —
+<code>compaction</code> is the sweeper pass that overwrites what the deletion unlinked,
+and when it is due (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).
+An unknown id is <code>404</code> either way, a wrong echo <code>400</code>. When an
+eval run holds the trace it is deleted all the same, and <code>affected_runs</code>
+names the run in the dry run (<a href="../datasets/#what-a-run-keeps">datasets.md</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces?environment=loadtest&amp;to=2026-09-17T14:02:17Z"</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/traces?environment=loadtest&amp;to=2026-09-17T14:02:17Z&amp;confirm=checkout-service&amp;limit=1000"</span>
+</code></pre></div>
+<p><code>DELETE /api/v1/traces</code> takes every <a href="#filters">filter of the listing</a>, with
+the same validation, and <strong>requires <code>to</code></strong> — dry run and confirmed alike, a
+<code>400</code> without it — so the set is closed: what the preview counted is what is
+deleted, however much ingest flows in between. The dry run adds <code>matched</code>,
+the exact count (the listing's own stops at a thousand), and its echo is the
+<strong>project name</strong>. A confirmed request deletes <strong>one round</strong> — the newest
+<code>limit</code> matches, 1–1000 and 1000 by default, in chunks of whole hours, and at
+most fifty chunks — and answers <code>{"dry_run": false, "deleted": {…}, "more":
+true, "compaction": {…}}</code>; repeat the same call while <code>more</code> is true. Nothing is recounted on the way, a filter that
+matches nothing is a successful dry run of zero and a successful deletion of
+nothing, and a repeat after <code>more: false</code> is harmless. The whole of it — what
+goes, what stays, the ingest race — is in
+<a href="../admin/#deleting-traces">admin.md</a>.</p>
+<h2 id="the-response-budget">The response budget</h2>
+<p>Every response spends at most <strong>50 KiB</strong> on payloads (<code>TRACEPAD_RESPONSE_BUDGET_BYTES</code>
+to change the default, <code>?budget=</code> to override per request, between 4096 and
+5242880). The budget never truncates the structure of a response — only
+payloads; a tree's own bounds are in <a href="#one-trace">One trace</a>.</p>
+<p>Each expanded observation gets an equal share of what is left. A payload that
+does not fit is cut on a UTF-8 boundary and replaced by a marker:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">"truncated"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">"size"</span><span class="p">:</span><span class="w"> </span><span class="mi">3200000</span><span class="p">,</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[{\"role\":\"user\",\"content\":\"here is the whole log file…"</span><span class="p">,</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">  </span><span class="nt">"trace_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">  </span><span class="nt">"observation_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2b3c4d5e6f7a8b9c"</span><span class="p">,</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">  </span><span class="nt">"full"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/observations/2b3c4d5e6f7a8b9c/io?trace_id=4f8c…"</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>full</code> is the URL that returns it whole. <code>trace_id</code> and <code>observation_id</code> are
+the same target for a consumer that speaks tools rather than URLs — they are
+exactly what the MCP <code>get_observation_io</code> tool takes.</p>
+<p><strong>Media in a cut payload.</strong> A payload that holds images or files holds
+<a href="../media/">references</a> to them, and one after the cut is not in the preview,
+which would make the picture look lost. The marker says how many references the
+payload holds, as <code>media_count</code> — distinct bodies, a placeholder counted as one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p">{</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">"truncated"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span><span class="nt">"size"</span><span class="p">:</span><span class="w"> </span><span class="mi">3200000</span><span class="p">,</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">  </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[{\"text\":\"here is the whole log file…"</span><span class="p">,</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">  </span><span class="nt">"trace_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f"</span><span class="p">,</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">  </span><span class="nt">"observation_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2b3c4d5e6f7a8b9c"</span><span class="p">,</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="w">  </span><span class="nt">"full"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/observations/2b3c4d5e6f7a8b9c/io?trace_id=4f8c…"</span><span class="p">,</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="w">  </span><span class="nt">"media_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>The field is absent when the payload holds none, and when the share left for the
+marker was too small to carry it. <code>full</code> returns the payload with every
+reference in place, and the bytes of one are at <code>GET /api/v1/media/{sha256}</code>.</p>
+<h2 id="one-observations-payloads">One observation's payloads</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/observations/2b3c4d5e6f7a8b9c/io?trace_id=4f8c…"</span>
+</code></pre></div>
+<p>The one endpoint no budget applies to: it exists to be the <code>full</code> target of
+every marker, and a budget here would recurse. Payload size is bounded at
+ingest by <code>TRACEPAD_MAX_BODY_BYTES</code>.</p>
+<p><code>trace_id</code> is optional. A span id is unique only inside its trace, so if the
+same id appears in more than one trace of the project the answer is a <code>409</code>
+listing the candidates — never a guess. Truncation markers always carry the
+pair, so following a marker never lands there.</p>
+<h2 id="the-raw-archive">The raw archive</h2>
+<p>Every export body Tracepad accepts is kept as it arrived, and these two
+endpoints are how it leaves. They are the project's own reads under the
+project's own keys — a key that reads traces reads the batches they came from;
+signed in, an editor's or an owner's, and not a viewer's —
+and they are what <a href="../export/"><code>tracepad export --otlp</code></a> is a client of. Anything
+else can be one too: a backup job, a script, a second Tracepad.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/raw?limit=2&amp;count=1"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T00:00:00Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dialect"</span><span class="p">:</span><span class="w"> </span><span class="s2">"langfuse"</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">     </span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"application/x-protobuf"</span><span class="p">,</span><span class="w"> </span><span class="nt">"content_encoding"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gzip"</span><span class="p">,</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">     </span><span class="nt">"size_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">1274</span><span class="p">,</span><span class="w"> </span><span class="nt">"scrubbed_at"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">},</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n2"</span><span class="p">,</span><span class="w"> </span><span class="nt">"received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T00:00:00.001Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dialect"</span><span class="p">:</span><span class="w"> </span><span class="s2">"genai"</span><span class="p">,</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">     </span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"application/json"</span><span class="p">,</span><span class="w"> </span><span class="nt">"content_encoding"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">     </span><span class="nt">"size_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3810</span><span class="p">,</span><span class="w"> </span><span class="nt">"scrubbed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">}</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bjoxNzg4MjIwODAwMDAxMDAwMDAwOjI"</span><span class="p">,</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">  </span><span class="nt">"prev_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">  </span><span class="nt">"total"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">  </span><span class="nt">"total_capped"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>This is the one listing here that runs forward.</strong> Everything else in this API
+is newest first, because that is how a person reads. A replay is not reading: a
+receiver that does not upsert by span id — a file, a stream — has to see the
+spans in the order the world produced them, and <code>received_at</code> is the only order
+this server knows. So <code>next</code> walks towards <em>newer</em> batches and <code>prev</code> back
+towards older ones, and rows come back oldest first either way.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>since</code>, <code>until</code></td>
+<td>RFC 3339, on <code>received_at</code>. Half-open: <code>since</code> inclusive, <code>until</code> exclusive.</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>1–500, default 100.</td>
+</tr>
+<tr>
+<td><code>cursor</code>, <code>direction</code></td>
+<td>Keyset over <code>(received_at, id)</code>.</td>
+</tr>
+<tr>
+<td><code>count</code></td>
+<td>Adds <code>total</code> and <code>total_capped</code>, counted up to 100000 — high, because this count answers "how much is this export about to send".</td>
+</tr>
+</tbody>
+</table>
+<p><code>id</code> is <code>n</code> and the batch's <strong>number within your project</strong>: <code>n1</code>, <code>n2</code>, <code>n3</code>…
+in the order your batches were stored. It is never reused, and other projects'
+batches are no gaps in it. A gap is a batch of yours that retention or an
+erasure took.</p>
+<p>Anything else in the place of an id — a bare integer among them — is a <code>400</code>,
+never read as one of your batches; so is a cursor the listing did not give.</p>
+<p><code>size_bytes</code> is the <strong>decoded</strong> length, which is what a fetch of the body
+returns; the row itself is compressed and smaller. <code>content_type</code> is what the
+body is in, and a batch stored before schema 0012 reads as
+<code>application/x-protobuf</code>, which is the only thing it can be. <code>dialect</code> is which
+attribute vocabulary the mapper recognised, and is empty when it claimed
+nothing. <code>scrubbed_at</code> is when a user-data erasure rewrote the batch without
+the erased user's spans, and <code>null</code> for a batch as received
+(<a href="../retention/#deleting-a-users-data">retention.md</a>).</p>
+<p>A cursor and a <code>since</code> that contradict each other are a <code>400</code> rather than a
+reconciliation: the cursor says where the page starts and so does the window,
+and guessing which was meant is worse than asking.</p>
+<h3 id="one-body">One body</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>curl<span class="w"> </span>…<span class="w"> </span>-o<span class="w"> </span>batch.pb<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/raw/n1"</span>
+</code></pre></div>
+<p>The bytes the client posted, with gzip already removed — the stored body is the
+decoded one, so a replay does not have to unwrap two layers. The response
+carries:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Content-Type</code></td>
+<td>The type it was received in, which is what a replay posts it under</td>
+</tr>
+<tr>
+<td><code>X-Tracepad-Received-At</code></td>
+<td>RFC 3339</td>
+</tr>
+<tr>
+<td><code>X-Tracepad-Dialect</code></td>
+<td>Absent when the mapper claimed nothing</td>
+</tr>
+<tr>
+<td><code>X-Tracepad-Scrubbed-At</code></td>
+<td>RFC 3339; present only on a batch an erasure rewrote — the batch as received minus the erased user's spans</td>
+</tr>
+</tbody>
+</table>
+<p>Like <code>/observations/{id}/io</code>, this endpoint is <strong>exempt from the response
+budget</strong>: a cut body is not a smaller batch, it is a broken one.</p>
+<p>A <code>404</code> means the id is not this project's, or the retention sweeper has
+already taken it. Both answer the same way, because a batch that is not yours
+does not exist to you.</p>
+<p>The archive stores each body with its media factored out, and this endpoint
+puts it back: each reference becomes what it replaced again — the base64 in an
+Anthropic, Gemini or GenAI object, the data URL of a string — so what leaves is
+the batch the client sent (<a href="../media/#the-way-out">media.md</a>). <code>size_bytes</code> above is
+the stored length, before that.</p>
+<h2 id="media">Media</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>curl<span class="w"> </span>…<span class="w"> </span>-o<span class="w"> </span>picture.png<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/media/3f2a…c91e"</span>
+</code></pre></div>
+<p>Ingest takes images and files out of the payloads and leaves a reference
+object in their place (<a href="../media/">media.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="p">{</span><span class="nt">"tracepad_media"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3f2a…c91e"</span><span class="p">,</span><span class="w"> </span><span class="nt">"mime_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"image/png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"size"</span><span class="p">:</span><span class="w"> </span><span class="mi">48213</span><span class="p">}</span>
+</code></pre></div>
+<p>Every read — a trace, an observation's payloads, search, the CLI, MCP —
+returns that object as it is; this endpoint is where the bytes are. It answers
+them in the MIME type this project stored them under, with
+<code>Cache-Control: private, max-age=31536000, immutable</code> (with <code>Vary:
+Authorization, Cookie, X-Tracepad-Project</code>, so a browser's cache never answers
+one project with another's body), <code>X-Content-Type-Options: nosniff</code> and a
+sandboxing <code>Content-Security-Policy</code>; anything that is not an
+image, audio or video comes as an attachment. It answers only a project that
+points at the body, from a trace or a raw batch: any other hash is <code>404</code>, the
+same as one nobody holds. A reference with <code>"stored": false</code> has no bytes to
+fetch.</p>
+<p>The Langfuse SDK's media channel (<code>/api/public/media</code>) is described in
+<a href="../media/#the-langfuse-sdks-media-channel">media.md</a>.</p>
+<h2 id="sessions">Sessions</h2>
+<p>A session is not a stored entity: it is the set of traces that named it, and
+both endpoints below aggregate those traces on the way out.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/sessions?environment=production&amp;limit=2"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="p">{</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="nt">"sessions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"session-77"</span><span class="p">,</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">      </span><span class="nt">"trace_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">      </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="w">      </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.043</span><span class="p">,</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="w">      </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="w">      </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:14:22Z"</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MTc4ODIyMDgwMDAwMDAwMDAwMDpzZXNzaW9uLTc3"</span>
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a><span class="p">}</span>
+</code></pre></div>
+<p>Most recent activity first (<code>last_seen DESC</code>, with the session id as the
+tie-break), paginated by the same opaque cursor as every other listing.</p>
+<table>
+<thead>
+<tr>
+<th>Filter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>from</code>, <code>to</code></td>
+<td>RFC 3339, half-open, on the <strong>traces</strong>: a session appears when any of its traces falls in the window, and its totals then describe those traces.</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>The environment of the session's traces, or a comma-separated list matching any of them (<a href="#lists">Lists</a>).</td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>Exact match on the session's traces.</td>
+</tr>
+</tbody>
+</table>
+<p>A trace that named no session is not a session of one and never appears.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/sessions/session-77"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="p">{</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"session-77"</span><span class="p">,</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">  </span><span class="nt">"trace_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">  </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.043</span><span class="p">,</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">  </span><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">22480</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">3105</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">12288</span><span class="p">},</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">  </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="w">  </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="w">  </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:14:22Z"</span><span class="p">,</span>
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="w">  </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="err">…</span><span class="w"> </span><span class="p">],</span>
+<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="p">}</span>
+</code></pre></div>
+<p>Every number counts traces: <code>error_count</code> is how many of the session's traces
+failed, not how many spans did. <code>tokens</code> is summed per class over the
+session's traces, on the listing's rows and here. <code>traces</code> pages with the same <code>limit</code>/<code>cursor</code>
+as the listing.</p>
+<h2 id="users">Users</h2>
+<p>The two endpoints and everything they promise are on their own page:
+<a href="../users/">users.md</a>. In short:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/users?sort=tokens&amp;limit=3"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="p">{</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span><span class="nt">"users"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="w">      </span><span class="nt">"user_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user-4821"</span><span class="p">,</span>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="w">      </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">312</span><span class="p">,</span>
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="w">      </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="w">      </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">6.10</span><span class="p">,</span>
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a><span class="w">      </span><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1840220</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">201544</span><span class="p">,</span><span class="w"> </span><span class="nt">"reasoning"</span><span class="p">:</span><span class="w"> </span><span class="mi">40960</span><span class="p">},</span>
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a><span class="w">      </span><span class="nt">"sessions"</span><span class="p">:</span><span class="w"> </span><span class="mi">28</span><span class="p">,</span>
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a><span class="w">      </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-14T09:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a><span class="w">      </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T10:00:00Z"</span>
+<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-31-14" name="__codelineno-31-14" href="#__codelineno-31-14"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MjA0MTc2NDp1c2VyLTQ4MjE"</span><span class="p">,</span>
+<a id="__codelineno-31-15" name="__codelineno-31-15" href="#__codelineno-31-15"></a><span class="w">  </span><span class="nt">"prev_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-31-16" name="__codelineno-31-16" href="#__codelineno-31-16"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>sort</code> is <code>last_seen</code> (the default), <code>traces</code>, <code>cost</code>, <code>tokens</code> (input plus
+output, a user with none as 0) or <code>errors</code>, always descending, with the user
+id as the tie-break; <code>prefix</code> keeps ids starting
+with it, case-sensitively. <code>limit</code>, <code>cursor</code>, <code>direction</code> and <code>count</code> are the
+same as on every other listing.</p>
+<p>The listing is answered from the per-user rollup <strong>only</strong>, so it trails live
+traffic by the same lag the statistics do (below) — a user first seen minutes
+ago is not on it yet. <code>GET /api/v1/users/{id}</code> merges the live rows and is
+exact for any id, listed or not; it answers <code>404</code> when neither half has seen
+it, and adds <code>latency_ms</code> to the row shape above.</p>
+<h2 id="statistics">Statistics</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=day&amp;from=2026-09-01T00:00:00Z"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="p">{</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span><span class="nt">"group_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"trace"</span><span class="p">,</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">  </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="w">      </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="w">      </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="w">      </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="w">      </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.82</span><span class="p">,</span>
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="w">      </span><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1284930</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">96410</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">402118</span><span class="p">,</span>
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="w">                 </span><span class="nt">"reasoning"</span><span class="p">:</span><span class="w"> </span><span class="mi">20480</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_write"</span><span class="p">:</span><span class="w"> </span><span class="mi">51200</span><span class="p">},</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="w">      </span><span class="nt">"latency_ms"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"p50"</span><span class="p">:</span><span class="w"> </span><span class="mi">640</span><span class="p">,</span><span class="w"> </span><span class="nt">"p95"</span><span class="p">:</span><span class="w"> </span><span class="mi">2310</span><span class="p">}</span>
+<a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>group_by</code> is <code>hour</code>, <code>day</code>, <code>model</code>, <code>environment</code>, <code>release</code> or <code>total</code>
+(default <code>day</code>), and <code>unit</code> says what a bucket counts. Grouping by hour,
+day, environment, release or total counts <strong>traces</strong>; grouping by model
+counts <strong>observations</strong>, because a trace has no model. The two counts are
+not comparable, which is why the response says which one you are looking at.</p>
+<p>Grouped by release, the traces that named none fall in the bucket whose <code>key</code>
+is the empty string — that is a group, not a gap, and dropping it would make
+the numbers stop adding up.</p>
+<p>Grouped by <code>total</code>, the whole window is <strong>one bucket</strong> under the empty key,
+in the same shape as a day bucket: the count, the errors, the cost and the
+tokens summed, and <code>p50</code>/<code>p95</code> merged over every hour's histogram in the
+window — which is not the same number as a percentile of the daily
+percentiles. It takes every filter the other groupings take. A window with
+nothing in it has no bucket, as everywhere. This is the figure the
+dashboard's summary row shows; the change against the previous window is two
+requests and a subtraction the caller does — there is no <code>compare</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=total&amp;from=2026-09-08T00:00:00Z"</span>
+</code></pre></div>
+<p><code>user_id</code> restricts every bucket to one end user. The shape, the groupings and
+<code>unit</code> do not change; with <code>group_by=hour</code>, <code>group_by=day</code> or
+<code>group_by=total</code> each bucket additionally carries <code>sessions</code> — how many of
+that user's sessions <em>began</em> in it, so a sum over any range is exact. Without
+the filter the key is absent rather than zero, because the statistics rollup
+holds no such number. The per-user answer trails the raw data by the same lag
+as the rest.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=day&amp;user_id=user-4821"</span>
+</code></pre></div>
+<p>Latency percentiles are <strong>histogram-based</strong>: accurate to a few percent, and
+stable across the expiry of the rows they came from. <code>total_cost</code> is summed
+only over rows whose client provided a cost — a <code>total</code> that is a number
+between −10¹² and 10¹² (<a href="../ingest/#where-the-price-comes-from">ingest.md</a>) —
+and is absent when none did. A
+range with nothing in it comes back with no buckets rather than with
+fabricated zeroes.</p>
+<p><code>tokens</code> is the same idea for the one number every provider reports, on
+every grouping and both units, with <code>user_id</code> too: the sums of each token
+class over the generations in the bucket. The classes, how they are read and
+what the one headline number is are the same everywhere a row carries
+<code>tokens</code> — see <a href="#tokens">Tokens</a>.</p>
+<h3 id="tokens">Tokens</h3>
+<p>Traces, sessions, users and statistics buckets carry a <code>tokens</code> object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1200</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">340</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span><span class="w"> </span><span class="nt">"reasoning"</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_write"</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="p">}</span>
+</code></pre></div>
+<p>There are five classes, each read off an observation's <code>usage</code> under the first
+spelling present of a short list, so the OpenAI, Anthropic, Langfuse and
+OpenTelemetry spellings land in the same numbers:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Spellings, first present wins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>input</code></td>
+<td><code>input_tokens</code>, <code>prompt_tokens</code>, <code>input</code></td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><code>output_tokens</code>, <code>completion_tokens</code>, <code>output</code></td>
+</tr>
+<tr>
+<td><code>cache_read</code></td>
+<td><code>cache_read_input_tokens</code>, <code>cache_read_tokens</code>, <code>input_cached_tokens</code>, <code>input_cache_read</code>, <code>cache_read.input_tokens</code></td>
+</tr>
+<tr>
+<td><code>reasoning</code></td>
+<td><code>reasoning_tokens</code>, <code>output_reasoning_tokens</code>, <code>reasoning.output_tokens</code></td>
+</tr>
+<tr>
+<td><code>cache_write</code></td>
+<td><code>cache_creation_input_tokens</code>, <code>cache_creation_tokens</code>, <code>input_cache_creation</code>, <code>input_cache_write_tokens</code>, <code>cache_write_tokens</code>, <code>cache_creation.input_tokens</code></td>
+</tr>
+</tbody>
+</table>
+<p>The dotted spellings are the <code>gen_ai.usage.*</code> attribute names without their
+prefix, as the store keeps them — one key, not a nested object. A count is a
+number from 0 to 10⁹; a spelling that holds anything else — a string, a
+negative number, one past that — is not a count, and that class is left out
+rather than read from the next spelling. Only observations that <strong>name a
+model</strong> count: a span with usage and no model is usually a parent's sum over
+the calls beneath it, and counting it would count them twice.</p>
+<p><strong>No class is ever added to another.</strong> Providers disagree about whether
+cached tokens are inside the input and reasoning tokens inside the output, so
+a sum across classes would double-count for some and under-count for others.
+Where one number is needed — the Tokens column, <code>min_tokens</code>, <code>sort=tokens</code>,
+the CLI's <code>TOKENS</code> — it is <strong>input plus output</strong>, a missing class read as 0,
+and absent when both are. A provider that reports reasoning beside the output
+is under-counted by that number, and <code>reasoning</code> says by how much.</p>
+<p>A key is present only when something carried that count, and the object is
+absent when nothing did: a trace whose calls reported no usage says nothing
+rather than zero. A trace's classes are kept on the trace as its spans arrive,
+a session's are summed over its traces, and a user's are rolled with the rest
+of the per-user rollup. Data stored before this store learned the classes is
+filled in on upgrade: the traces by the migration, before the server
+listens, and the statistics and users by the first pass after it, which
+re-rolls every retained hour. <strong>Until that pass is through</strong>, a user's
+tokens — on the listing, under <code>sort=tokens</code> and in the rolled half of the
+user page — and the statistics' tokens for the older hours cover only the
+hours re-rolled so far, and grow as it goes; the pass logs when it ends. An
+hour past the project's <code>retention_days</code> is frozen: its observations are
+gone, and it keeps the classes it had — none of the new ones — for ever.</p>
+<h3 id="where-the-numbers-come-from">Where the numbers come from</h3>
+<p>Closed hours are rolled up in the background and answered from that rollup;
+the hour in progress is always answered live. Three consequences worth
+knowing:</p>
+<ul>
+<li>The statistics <strong>trail the raw data by up to twice the rollup interval</strong>
+  (<code>TRACEPAD_ROLLUP_INTERVAL</code>, five minutes by default, so ten in the worst
+  case) for hours that have closed: an hour becomes eligible one interval
+  after it ends, and the pass that takes it can be a further interval away.
+  The current hour is never stale — it is answered live.</li>
+<li>Ranges older than the project's <code>retention_days</code> <strong>keep answering</strong> — from
+  the rollup — for as long as <code>stats_retention_days</code> allows. This is the
+  point of the rollup: configuring retention no longer amputates the charts.</li>
+<li>A trace that arrives late for an hour already rolled is picked up by the
+  next pass. Past the retention window that hour is <strong>frozen</strong>: the raw rows
+  behind it are gone by design, so the late fragment appears in the listings
+  but does not rewrite the history. See
+  <a href="../retention/#what-outlives-what">retention.md</a>.</li>
+</ul>
+<h2 id="score-trends">Score trends</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?group_by=day&amp;from=2026-09-01T00:00:00Z"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="p">{</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">  </span><span class="nt">"group_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">  </span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="s2">"any"</span><span class="p">,</span>
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a><span class="w">  </span><span class="nt">"series"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hallucination"</span><span class="p">,</span>
+<a id="__codelineno-38-8" name="__codelineno-38-8" href="#__codelineno-38-8"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span>
+<a id="__codelineno-38-9" name="__codelineno-38-9" href="#__codelineno-38-9"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-38-10" name="__codelineno-38-10" href="#__codelineno-38-10"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.18</span><span class="p">,</span><span class="w"> </span><span class="nt">"min"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"max"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.9</span><span class="p">}</span>
+<a id="__codelineno-38-11" name="__codelineno-38-11" href="#__codelineno-38-11"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-38-12" name="__codelineno-38-12" href="#__codelineno-38-12"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-38-13" name="__codelineno-38-13" href="#__codelineno-38-13"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-38-14" name="__codelineno-38-14" href="#__codelineno-38-14"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"verdict"</span><span class="p">,</span>
+<a id="__codelineno-38-15" name="__codelineno-38-15" href="#__codelineno-38-15"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"categorical"</span><span class="p">,</span>
+<a id="__codelineno-38-16" name="__codelineno-38-16" href="#__codelineno-38-16"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-38-17" name="__codelineno-38-17" href="#__codelineno-38-17"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"categories"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pass"</span><span class="p">:</span><span class="w"> </span><span class="mi">380</span><span class="p">,</span><span class="w"> </span><span class="nt">"fail"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">}}</span>
+<a id="__codelineno-38-18" name="__codelineno-38-18" href="#__codelineno-38-18"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-38-19" name="__codelineno-38-19" href="#__codelineno-38-19"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-38-20" name="__codelineno-38-20" href="#__codelineno-38-20"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-38-21" name="__codelineno-38-21" href="#__codelineno-38-21"></a><span class="p">}</span>
+</code></pre></div>
+<p>The quality curve beside the traffic one. A score is counted in the hour of the
+<strong>trace it names</strong> — not in the hour it was graded — and takes that trace's
+environment, release and model, so these buckets line up with <code>/api/v1/stats</code>'
+own. A score that names only a session, and a <code>text</code> score, are not counted at
+all: <a href="../quality/#what-is-counted-and-what-is-not">quality.md</a> says why.</p>
+<p><code>from</code>, <code>to</code> and <code>environment</code> are the statistics' own filters, and <code>group_by</code>
+is <code>hour</code>, <code>day</code>, <code>environment</code>, <code>release</code> or <code>model</code> (default <code>day</code>).
+Without <code>name</code> every score name in the range is a series; with it, one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?name=hallucination&amp;group_by=release"</span>
+</code></pre></div>
+<p>What a bucket carries depends on the series' <code>data_type</code>: a <code>numeric</code> name
+reports <code>mean</code>, <code>min</code> and <code>max</code>, a <code>boolean</code> name the <code>rate</code> of true values
+between 0 and 1, and a <code>categorical</code> name the <code>categories</code> seen with their
+counts. All three carry <code>count</code>, which is what the mean or the rate is out of.
+A bucket with no scores does not exist rather than reporting zero, and one name
+graded two ways is two series with the same name.</p>
+<p><code>targets</code> says what was counted. Grouped by model it is <code>observation</code>, because
+only a score that names an observation has a model to sit under; every other
+grouping counts each score once and it is <code>any</code>. It is here for the reason
+<code>unit</code> is on the statistics: two counts that are not comparable must not look
+alike.</p>
+<p>Both sides of the answer are bounded, because both are unbounded client input:
+a score name needs no <code>score_config</code>, and a <code>categorical</code> value is whatever the
+client sent. <code>limit</code> caps how many series come back — 1 to 500, default 50, the
+busiest names first — and <code>omitted</code> says how many that left out. Inside one
+series only the twenty busiest values of the range are named; the rest are
+summed under <code>other</code>, so a bucket's <code>categories</code> still add up to its <code>count</code>.</p>
+<p>An unknown parameter, or a parameter given without a value, is a <code>400</code>.</p>
+<p>The numbers come from the same seam and carry the same lag as the statistics
+above, plus one addition: a score's own arrival dirties the hour of its trace,
+so a judge grading yesterday's traffic is picked up by the next pass rather
+than never. Deleting a score, or moving one onto another trace, corrects the
+hour it leaves in the same transaction as the write itself. See
+<a href="../quality/#the-lag">quality.md</a>.</p>
+<h2 id="filter-values">Filter values</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/facets?from=2026-09-01T00:00:00Z"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="p">{</span>
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T00:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-09T12:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"production"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">4656</span><span class="p">},</span>
+<a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"staging"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">218</span><span class="p">},</span>
+<a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prod"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span>
+<a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-41-9" name="__codelineno-41-9" href="#__codelineno-41-9"></a><span class="w">  </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026.9.1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">3120</span><span class="p">}],</span>
+<a id="__codelineno-41-10" name="__codelineno-41-10" href="#__codelineno-41-10"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">2984</span><span class="p">}],</span>
+<a id="__codelineno-41-11" name="__codelineno-41-11" href="#__codelineno-41-11"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+<a id="__codelineno-41-12" name="__codelineno-41-12" href="#__codelineno-41-12"></a><span class="p">}</span>
+</code></pre></div>
+<p>What the three many-valued filters can be set to: the distinct values of
+<code>environment</code>, <code>release</code> and <code>name</code> among the traces of a range, each with the
+number of traces carrying it. It is what a filter panel asks before it offers a
+list, and what saves a client guessing at a value it could have read.</p>
+<p>The counts are the point as much as the values are: <code>prod: 1</code> beside
+<code>production: 4656</code> is a typo, and nothing but the count says so.</p>
+<p><code>from</code> and <code>to</code> are the statistics' own bounds — RFC 3339, half-open. <code>to</code>
+defaults to now. <code>from</code> defaults to <strong>the oldest hour the rollup holds</strong>, so
+with no range at all the answer covers as much history as
+<a href="../retention/"><code>stats_retention_days</code></a> keeps — which is what the listing covers
+when its own range is unset. On a project nothing has rolled yet there is no
+floor and the answer is all of history.</p>
+<p>The <code>from</code> in the answer is the range that was actually covered, not the one
+that was asked for: with no <code>from</code> given it reads back as the rollup's oldest
+hour rather than the beginning of time.</p>
+<p>That floor is also a ceiling on how far back the endpoint looks: unlike
+<code>/stats</code>, it does <strong>not</strong> scan the raw traces for hours the rollup no longer
+holds. Everywhere else that scan answers a question about a specific window; a
+list of values to pick from is not worth an unbounded pass over <code>traces</code>, and
+the values it would add are the ones outside the window this install chose to
+keep.</p>
+<p>The range is the <em>only</em> thing this endpoint takes: the counts do not respect
+the other filters, so the list does not move as boxes are ticked. An unknown
+parameter, or one given without a value, is a <code>400</code>; so is a window whose
+<code>from</code> is not before its <code>to</code>.</p>
+<p>Values are sorted by count descending and then by value ascending, and each
+column carries at most <strong>100</strong> of them; <code>omitted</code> says how many were left out,
+rarest first. A trace with no release is not a release, and a trace with no
+name is not a name — neither is a value anything can be filtered by. For the
+same reason the list leaves out a value that the filter could not be <em>given</em>: a
+value containing a comma, or one with space at either end, cannot be spelled in
+the list form, so offering it would be offering a filter that does not work.
+Those traces are still reachable through <code>q=</code>.</p>
+<p>The numbers come from the same seam as the statistics, so a range behind the
+watermark is answered from the rollup and outlives the traces it summarizes.
+The tail is answered live, which is what keeps the list <em>complete</em>: an
+environment first seen a minute ago is already here.</p>
+<p>One caveat, on an install that was upgraded and keeps its summaries longer than
+its traces. <code>environment</code> and <code>release</code> have been in the rollup since it
+existed; the trace name got a table of its own with this feature, and its
+backfill can only fill an hour whose raw traces are still there. So where
+<code>retention_days</code> is shorter than <code>stats_retention_days</code>, a range reaching into
+the gap between the two answers the full environment and release lists beside a
+name list that starts where the traces do. Everything ingested after the
+upgrade has all three.</p>
+<h2 id="prompt-version-diff">Prompt version diff</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/prompts/support/diff?from=1&amp;to=3"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="p">{</span>
+<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support"</span><span class="p">,</span>
+<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a><span class="w">  </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- prompt (version 1)\n+++ prompt (version 3)\n@@ -1 +1 @@\n-\"Be brief.\"\n+\"Be brief and cite the source.\"\n"</span>
+<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>A unified patch over the pretty-printed <code>prompt</code> <strong>and</strong> <code>config</code> of the two
+versions — a run can change because the text changed or because the parameters
+did, so both are diffed. Empty when the two versions are identical.</p>
+<h2 id="self-description">Self-description</h2>
+<p><code>GET /api/v1</code> returns the endpoint map: every route, a one-line description,
+the one word that says what calling it takes — its <code>policy</code>: <code>public</code>,
+<code>ingest</code>, <code>member</code>, <code>editor</code>, <code>owner</code>, <code>session</code> or <code>diagnostic</code>
+(<a href="../accounts/#who-may-do-what">accounts.md</a>) — and the <code>scope</code> it asks of a
+project key: <code>any</code>, <code>ingest</code>, <code>read</code>, <code>write</code> or <code>none</code> (<a href="#scopes">Scopes</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="p">{</span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GET"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/queues/{name}/next"</span><span class="p">,</span><span class="w"> </span><span class="nt">"policy"</span><span class="p">:</span><span class="w"> </span><span class="s2">"member"</span><span class="p">,</span>
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"write"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The next item to annotate, claimed for ten minutes"</span><span class="p">}</span>
+</code></pre></div>
+<p><code>GET /api/v1/openapi.json</code>
+returns a hand-authored OpenAPI 3.1 document — the contract itself, not a
+rendering of the code, kept honest by a test that fails when the document and
+the router disagree in either direction; each operation carries its scope as
+<code>x-tracepad-scope</code>, held to the router the same way. Neither needs a key.</p>
+<h2 id="system">System</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/system"</span>
+</code></pre></div>
+<p>Version, uptime, and two halves, each for the caller it belongs to:</p>
+<ul>
+<li><strong>The deployment view</strong> — the database's size on disk, how many projects
+  share the server, the writer queue, the body budget, the read slots, the
+  recovered panics and the compaction. These move with every tenant's
+  traffic, so only the <strong>admin token</strong> and an <strong>owner's session</strong> get them.
+  The admin token is the one caller outside a project this route admits; it
+  gets this half and nothing of any project.</li>
+<li><strong>The project view</strong> — the asking project's row counts, its retention
+  sweeper, runs, raw archive, media and counters. A project key gets it, and
+  so does a session for the project its <code>X-Tracepad-Project</code> names.</li>
+</ul>
+<p>So a key gets the project view, the admin token the deployment view, and an
+owner's session both — or the deployment view alone when it sends no
+<code>X-Tracepad-Project</code>, as on a fresh install with no project to name. A member's
+session must name its project. The route's policy word is <code>diagnostic</code>, which
+is this endpoint's alone. <code>view</code> says which halves the body holds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nt">"view"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"project"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4e5f6"</span><span class="p">,</span><span class="w"> </span><span class="nt">"deployment"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+</code></pre></div>
+<p>A field of a half you were not given is <strong>absent</strong> — not <code>0</code>, not <code>null</code>. A
+<code>"waiting": 0</code> in the writer queue says writes are keeping up, and from a key
+it would be a claim about other tenants' traffic, not about yours. <code>project</code>
+is <code>null</code> when the body has no project's half. That happens for the admin
+token, which has no project, and for an owner's session that named none. It
+also happens when an owner's session named a project that is not there, absent
+or deleted. The owner still gets the deployment half, and
+<code>"project_error": "no such project"</code> says why the other half is missing. A
+member's session naming such a project is refused, as on every read.</p>
+<p>The counters are since this process started and in memory, and say so:
+<code>counters.since</code> is when they started. They count how many batches and spans
+arrived per attribute dialect, how many were skipped, and every distinct
+<code>x-langfuse-ingestion-version</code> seen.</p>
+<p><code>body_budget</code> (deployment view) is how many bytes of request bodies the server
+holds now against <code>TRACEPAD_BODY_BUDGET_BYTES</code>, deployment-wide like the writer
+queue:
+<code>{"held_bytes": 1310720, "capacity_bytes": 83886080}</code>. Among the counters,
+<code>exports_over_span_cap</code> counts this project's exports refused with <code>413</code> for
+carrying more than <code>TRACEPAD_MAX_SPANS_PER_REQUEST</code> spans (each is a
+<code>rejected_batches</code> too), and <code>bodies_refused_for_budget</code> its request bodies —
+exports, JSON API writes, media uploads — refused with <code>429</code> because the budget
+was spent (<a href="../ingest/#how-much-one-export-may-carry">ingest.md</a>).
+<code>scores_over_row_cap</code> and <code>dataset_items_over_row_cap</code> count this project's
+arrays refused with <code>413</code> for carrying more than 10,000 scores or dataset
+items, and <code>queue_adds_over_target_cap</code> its queue adds refused with <code>400</code> for
+more than 1,000 targets — each its own counter, since the limits differ.</p>
+<p><code>worker_panics</code> (deployment view) counts the panics the process recovered from
+since it started, for the whole deployment: <code>recovered</code>, <code>given_up</code> (projects and shared steps of
+the retention sweeper and the statistics rollup that panicked in each of three
+passes in a row and are left out until a restart), <code>last_where</code> (a kind of
+work, never a project's name) and <code>last_at</code>. The asking project's own retention
+is <code>sweeper.given_up</code>. Each recovered panic has an <code>ERROR</code> line with its stack
+in the server's log.</p>
+<p><code>read_slots</code> (deployment view) is how many reads are being served now against
+<code>TRACEPAD_READ_CONCURRENCY</code>, deployment-wide like the writer queue:
+<code>{"busy": 3, "capacity": 16}</code>. Among the counters, <code>reads_timed_out</code> and
+<code>reads_refused_busy</code> count this project's reads the read deadline stopped and
+the ones that found no slot free before it — see <a href="#reads-under-load">Reads under
+load</a>.</p>
+<p><code>source</code> is the source this request counts as for the limit on password
+checks (<a href="../accounts/#signing-in">accounts.md</a>) — an address, or an IPv6 /64:
+the connection's peer, or the client a trusted proxy named in
+<code>X-Forwarded-For</code>. Behind a proxy, it is how to check that
+<code>TRACEPAD_TRUSTED_PROXIES</code> is right: it should be your address, not the
+proxy's. An IPv4 address is its own source, and so is a NAT64 address
+(<code>64:ff9b::/96</code>), which is an IPv4 client written in IPv6. The limit's own counts are not here — they are every tenant's
+sign-ins — and a refusal is in the server's log instead.</p>
+<p><code>runs</code> is the link between traces and eval runs (<a href="../datasets/">datasets.md</a>):
+<code>pinned_traces</code> is how many traces a live run is keeping out of the retention
+sweep — the size of retention's one exception — and <code>orphan_traces</code> how many
+trace deliveries since start named a run this project does not have.</p>
+<p><code>media</code> is what the images and files ingest took out of this project's
+payloads cost, beside the setting that decides whether they are kept:
+<code>{"setting": "store", "count": 212, "bytes": 318455112}</code> — distinct bodies the
+project's traces and raw batches point at, and their decoded size.</p>
+<p><code>raw</code> is the archive of export bodies — what an export can carry out, and what
+it cannot:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
+<a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
+<a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
+<a id="__codelineno-47-7" name="__codelineno-47-7" href="#__codelineno-47-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
+<a id="__codelineno-47-8" name="__codelineno-47-8" href="#__codelineno-47-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>Unlike the counters below it, these are on disk rather than since start.
+<code>enabled</code> is <code>TRACEPAD_STORE_RAW</code>; <code>bytes</code> is what the archive occupies
+compressed, which is the number an operator moving <code>raw_retention_days</code> is
+deciding about; <code>traces_before_window</code> counts the traces whose earliest span
+started before the oldest batch arrived, and which therefore have rows but no
+body to replay. It is a lower bound — a late export of an old trace lands after
+the batch line — and <a href="../export/">export.md</a> says what to do about it.</p>
+<p>The row counts and the ingest counters are <strong>your project's</strong>: a project key is
+a tenant credential, so this does not report how much data anybody else holds,
+how much traffic they send, which SDK versions they run, or how many keys they
+have. <code>payloads</code> is absent because that table has no project to attribute a row
+to.</p>
+<p><code>database.size_bytes</code> and <code>database.rows.projects</code> are the deployment view's:
+the file on disk — the operator question this endpoint exists to answer, which
+payloads and compression share so it cannot be split per project — and a bare
+count of how many tenants share this process. Both grow when somebody else
+ingests or makes a project, which is why a key does not see them.</p>
+<p><code>compaction</code> (deployment view) names nobody, but its <code>requested_at</code> is the
+moment the latest deletion asked for one, whoever made it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T09:00:00Z"</span><span class="p">}</span>
+</code></pre></div>
+<p>An erasure, a trace deletion or a project's purge asks the next sweeper pass to
+overwrite what it unlinked — merge the search index, drain the free pages,
+truncate the write-ahead log (<a href="../retention/#what-this-means-for-a-data-subject-request">retention.md</a>).
+<code>requested_at</code> is the latest request still waiting, <code>null</code> when none is;
+<code>completed_at</code> is when one last finished, <code>null</code> before the first. A project
+that deleted traces learns when its compaction is due from the deletion's
+answer, <code>compaction.expected_by</code>. An erasure goes further: its status carries
+<code>compaction.completed_at</code>, when the pass that covered it finished. That stamp
+is the erasure's own, and a later pass does not move it.</p>
+<p>This is the endpoint to read first when something looks wrong, and the one to
+paste into a bug report.</p>
+<h2 id="response-headers">Response headers</h2>
+<p>Every response, API and interface alike, carries:</p>
+<table>
+<thead>
+<tr>
+<th>Header</th>
+<th>Value</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Content-Security-Policy</code></td>
+<td><code>frame-ancestors 'none'</code></td>
+<td>No other page can draw this server inside a frame.</td>
+</tr>
+<tr>
+<td><code>X-Frame-Options</code></td>
+<td><code>DENY</code></td>
+<td>The same, for browsers that predate the line above.</td>
+</tr>
+<tr>
+<td><code>X-Content-Type-Options</code></td>
+<td><code>nosniff</code></td>
+<td>A response is only ever what its <code>Content-Type</code> says.</td>
+</tr>
+<tr>
+<td><code>Referrer-Policy</code></td>
+<td><code>same-origin</code></td>
+<td>A link out of the interface tells the other site nothing.</td>
+</tr>
+</tbody>
+</table>
+<p>A media body replaces the first with its own sandboxing policy, which refuses
+frames too (<a href="#media">Media</a>). So do the two HTML documents the server hands
+out, the interface's page and the stub of a build without it: they carry a
+policy that lets the bundle's own files and its one inline script run and
+nothing else (<a href="../ui/#what-the-page-may-load">ui.md</a>).</p>
+<p>A response on a route that needs a credential also carries <code>Cache-Control:
+private, no-store</code> and <code>Vary: Authorization, Cookie, X-Tracepad-Project</code>: it is
+one caller's, and no cache in front of the server may keep it. Prompt reads may
+be kept for a minute (<code>private, max-age=60</code>, <a href="../prompts/">prompts.md</a>) and media
+bodies for a year (<a href="#media">Media</a>); those two say so themselves.</p>
+<p>A response has five minutes to be written, which is what a 20 MiB body needs
+over a slow link. The five minutes count from the end of the request's headers,
+so they bound the work behind a response as well: a request whose work runs
+longer has its connection closed once that work is done, and the client sees
+the connection drop rather than the answer. Nothing in the API is meant to take
+that long, and a bulk deletion removes at most a bounded round of traces per
+request, so repeating one is safe. <code>/mcp</code> is a stream and has no such limit,
+for a request with a project key; without one it is <code>401</code>. A response the five
+minutes cut short is logged as a warning naming its route and how many bytes
+had been written, at most once a minute per route.</p>
+<h2 id="reads-under-load">Reads under load</h2>
+<p>Every read — every <code>GET</code> but the handful that need no credential — runs under
+a deadline, <code>TRACEPAD_READ_TIMEOUT</code> (20 s by default), and in one of
+<code>TRACEPAD_READ_CONCURRENCY</code> slots (twice the processors, at least 4). The
+deadline covers the wait for a slot as well, so one number bounds the whole
+read. Ingest, writes and the credential check take no slot.</p>
+<table>
+<thead>
+<tr>
+<th>Answer</th>
+<th>When</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>503</code> <code>{"error": "the server is busy; retry shortly"}</code>, <code>Retry-After: 1</code></td>
+<td>No slot came free before the deadline, or the read spent longer waiting for one than running when the deadline stopped it</td>
+<td>Retry after the header</td>
+</tr>
+<tr>
+<td><code>503</code> <code>{"error": "the read took longer than 20s and was stopped; narrow the time range or the filters"}</code></td>
+<td>The deadline stopped the read while it ran; the number is the setting</td>
+<td>Narrow it: the same request would be stopped again, so there is no <code>Retry-After</code></td>
+</tr>
+</tbody>
+</table>
+<p>A slot is given back as soon as the answer's status is written — after the
+work and the rendering, before the download — so a client that reads a large
+body slowly holds its connection, not a slot. A client that hangs up ends its
+read; the query stops with it. The interface gives up on a request after 30 s,
+so a person sees the server's reason first.</p>
+<p>Two <code>GET</code>s are exceptions. <code>GET /api/v1/system</code> runs under the deadline in a
+slot of its own, not one of <code>TRACEPAD_READ_CONCURRENCY</code>'s, so it answers — and
+shows the slots taken — when every one of those is; two at once wait for each
+other, and the second may be <code>503</code> busy.
+<code>GET /api/v1/queues/{name}/next</code> claims an item, which is a write, and is
+bounded as writes are.</p>
+<p>The other way round, a write's own reads are reads: the exact count of a queue
+fill from a filter, the dry runs of a bulk trace deletion, a shrinking
+retention window, a project's deletion, a user's erasure and the deletion of
+one trace, dataset or prompt, and the selection each round of a bulk deletion
+works through take a slot and run under the deadline, and answer the same two
+<code>503</code>s. The write that follows takes no
+slot.</p>
+<h2 id="errors">Errors</h2>
+<p>One shape everywhere:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unknown query parameter \"trace\" (accepted: from, to, environment, …)"</span><span class="p">}</span>
+</code></pre></div>
+<p>A refusal a client has to <em>act</em> on carries what it needs beside the sentence —
+a prompt append refused by <code>expect_version</code> says which version the name is
+actually at (<a href="../prompts/#appending-to-the-version-you-meant">prompts.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt \"summarize\" is at version 9, not 7: it changed while this one was being written"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>400</code></td>
+<td>The request cannot mean what it says: an unknown parameter, a malformed value, a <code>limit</code> out of range.</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>The credentials do not resolve to a project.</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>The credential resolves, but may not do this: a key without the route's scope, a viewer's write, a non-owner on an owner route, a cross-site request from another origin. The message says which.</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>No such thing in this project. On <code>traces/last</code>, the message names the filters that found nothing.</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td>An observation id that is ambiguous without a <code>trace_id</code>; a prompt append whose <code>expect_version</code> disagrees with the name's current state.</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td>The body is larger than <code>TRACEPAD_MAX_BODY_BYTES</code>, on the wire or once decompressed.</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>A write's body arrived while the server was holding as many request bodies as <code>TRACEPAD_BODY_BUDGET_BYTES</code> allows — <code>{"error": "the server is holding as many request bodies as it can; retry shortly"}</code> — or the write queue is full. Both carry <code>Retry-After</code>; the same request succeeds once the server has room (<a href="../ingest/#how-much-one-export-may-carry">ingest.md</a>).</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td>The answer could not be rendered — <code>{"error": "failed to render the response"}</code>. Never a <code>200</code> with an empty body.</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>The credentials could not be checked right now — <code>{"error": "cannot check credentials right now; retry shortly"}</code> — or a read or a write met a database condition that passes, a full disk or a lock that did not clear — <code>{"error": "storage is temporarily unavailable; retry shortly"}</code> — or a read found no slot free before its deadline — <code>{"error": "the server is busy; retry shortly"}</code>. These carry <code>Retry-After: 1</code>. A read the deadline stopped is a <code>503</code> without it — see <a href="#reads-under-load">Reads under load</a>. A browser session is not signed out by any of them.</td>
+</tr>
+</tbody>
+</table>
+<p>A number JSON cannot spell — an infinity a store written by an earlier version
+still holds — is rendered as <code>null</code>, this API's word for "no number", rather
+than failing the answer.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

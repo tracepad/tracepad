@@ -1,0 +1,2760 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/datasets/">
+      
+      
+        <link rel="prev" href="../prompts/">
+      
+      
+        <link rel="next" href="../annotation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Datasets and runs - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#datasets-and-runs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Datasets and runs
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-whole-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The whole loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#items-and-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Items and versions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Items and versions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#item-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Item fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-listing-is-whole" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The listing is whole
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-run-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a run back
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a run back">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-cases-and-what-was-answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The cases and what was answered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparing-two-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run keeps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orphans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-an-item-came-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where an item came from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a dataset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Node
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Go
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-a-shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from a shell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-whole-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The whole loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#items-and-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Items and versions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Items and versions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#item-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Item fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-listing-is-whole" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The listing is whole
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-run-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a run back
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a run back">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-cases-and-what-was-answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The cases and what was answered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparing-two-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-run-keeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run keeps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orphans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-an-item-came-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where an item came from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a dataset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Node
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from Go
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-a-shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from a shell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-loop-from-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same loop from the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/datasets.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="datasets-and-runs">Datasets and runs</h1>
+<p>An eval is a set of cases, a pass over them, and a comparison against last
+time. The traces a pass produces already land in Tracepad; this is where the
+cases and the passes land too, so that "did this change make it better" is
+answered by the tool that holds the evidence.</p>
+<p>Three nouns:</p>
+<ul>
+<li>A <strong>dataset</strong> is a named, versioned set of test cases (<strong>items</strong>). Items are
+  append-only: an edit is a new row, a delete is an archive, and every version
+  the dataset ever had can be read back.</li>
+<li>A <strong>run</strong> is a container a harness opens around one pass over a dataset. It
+  pins the dataset version it ran, carries whatever the harness wants to say
+  about what was tried, and is closed by the harness — never inferred.</li>
+<li>A <strong>score config</strong> pins what a score's name means — its type, which
+  direction is better, its range — so that names and scales do not drift
+  between harnesses. See <a href="../scores/#score-configs">scores.md</a>.</li>
+</ul>
+<p>Tracepad never executes an eval. Your harness fetches the items, runs its own
+function, exports the traces over OTLP exactly as in production, and posts
+scores exactly as today. Two span attributes tie each trace to its run and to
+the item it answered. Everything here is a JSON API that works with <code>curl</code>.</p>
+<p>The reading side is here too: a run's summary, its items with the attempts
+they got, and the comparison of two runs. Every number in it is computed by
+the server, so the CLI, the MCP tools and anything else you write cannot
+disagree about what "improved" means.</p>
+<h2 id="endpoints">Endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+<th>A key needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets</code></td>
+<td>List datasets by name</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/v1/datasets/{name}</code></td>
+<td>Create a dataset or replace its description and metadata</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets/{name}</code></td>
+<td>One dataset: version and counts</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/datasets/{name}</code></td>
+<td>Delete it with its items and runs; dry run until <code>?confirm=</code></td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/datasets/{name}/items</code></td>
+<td>Add or edit items, one or an array; the first write creates the dataset</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets/{name}/items</code></td>
+<td>The items at a version, whole</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets/{name}/items/{id}</code></td>
+<td>One item as of a version</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets/{name}/items/{id}/versions</code></td>
+<td>Every row of one item's history</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/datasets/{name}/items/{id}</code></td>
+<td>Archive an item at a new version</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/datasets/{name}/runs</code></td>
+<td>Open a run</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/datasets/{name}/runs</code></td>
+<td>List a dataset's runs, newest first</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/runs</code></td>
+<td>List the project's runs across every dataset, newest first</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/runs/{id}</code></td>
+<td>One run with its summary</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/runs/{id}/items</code></td>
+<td>The run's cases with the attempts it made at each</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/runs/{a}/compare/{b}</code></td>
+<td>Two runs of one dataset side by side</td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/runs/{id}/finish</code></td>
+<td>Close a run as finished or failed</td>
+<td><code>write</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/runs/{id}</code></td>
+<td>Delete a run, releasing its traces</td>
+<td><code>write</code></td>
+</tr>
+</tbody>
+</table>
+<p>Authentication is the same as everywhere: <code>Authorization: Bearer &lt;secret key&gt;</code>
+or <code>Basic base64(&lt;public key&gt;:&lt;secret key&gt;)</code>. Everything lives inside one
+project; nothing here crosses a project boundary.</p>
+<p>The last column is the <a href="../api/#scopes">scope</a> a key must hold. A harness
+touches all three — it pushes cases and opens runs (<code>write</code>), reads the items
+back (<code>read</code>), and exports its traces and posts its scores (<code>ingest</code>) — so its
+key is minted with <code>ingest</code>, <code>read</code> and <code>write</code>, and the <code>ingest</code> key a
+production application holds cannot run it.</p>
+<p>The <code>metadata</code> of a <strong>dataset</strong> and of a <strong>run</strong> must be a JSON object when it
+is sent at all — these are your own dimensions, keyed, and a bare string or
+number would be a label with nowhere to put the next one. An <strong>item</strong>'s three
+bodies are the exception: <code>input</code>, <code>expected_output</code> and <code>metadata</code> are any
+JSON value, because a test case is whatever your function takes.</p>
+<h2 id="the-whole-loop">The whole loop</h2>
+<p>The recipe, in the order that makes the numbers trustworthy: declare the
+configs, push the cases, open the run, fetch the items <strong>at the version the
+run pinned</strong>, stamp every trace, post the scores, close the run.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">TP</span><span class="o">=</span>http://localhost:4318
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">"Authorization: Bearer tp-sk-…"</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 1. Declare what your score names mean. Idempotent; put this in the harness.</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/score-configs/accuracy<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}'</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/score-configs/verdict<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"data_type": "categorical", "categories": ["pass", "fail"]}'</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># 2. Push the cases. Re-running with the same cases changes nothing.</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/datasets/support-golden/items<span class="w"> </span>-d<span class="w"> </span><span class="s1">'[</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="s1">  {"id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="s1">   "input": {"question": "how do I reset my password?"},</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="s1">   "expected_output": {"answer": "Settings, then Reset."},</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="s1">   "metadata": {"tags": ["auth"]}},</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s1">  {"id": "b2c3d4e5f60718293a4b5c6d7e8f90a1",</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="s1">   "input": {"question": "can I get a refund?"},</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="s1">   "expected_output": {"answer": "Within 30 days, yes."}}</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="s1">]'</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="c1"># → {"ids": ["a1b2…", "b2c3…"], "version": 1, "changed": 2}</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="c1"># 3. Open the run. The response says which dataset version it pinned.</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/datasets/support-golden/runs<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"name": "prompt v7 / claude-sonnet-5", "metadata": {"prompt": "support-answer@7"}}'</span><span class="k">)</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="nv">RUN_ID</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RUN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="nv">VERSION</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RUN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.dataset_version<span class="k">)</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="c1"># 4. Fetch the items at that version — not "the current one" — page by page.</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="nv">PAGE_URL</span><span class="o">=</span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden/items?version=</span><span class="nv">$VERSION</span><span class="s2">&amp;limit=500"</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="k">while</span><span class="w"> </span>:<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">  </span><span class="nv">PAGE</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-sH<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PAGE_URL</span><span class="s2">"</span><span class="k">)</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PAGE</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">'.items[]'</span><span class="w">          </span><span class="c1"># your harness runs these</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">  </span><span class="nv">CURSOR</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PAGE</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.next_cursor // empty'</span><span class="k">)</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="nv">$CURSOR</span><span class="s2">"</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">  </span><span class="nv">PAGE_URL</span><span class="o">=</span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden/items?version=</span><span class="nv">$VERSION</span><span class="s2">&amp;limit=500&amp;cursor=</span><span class="nv">$CURSOR</span><span class="s2">"</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="k">done</span>
+</code></pre></div>
+<p><code>limit</code> caps at 500, so a dataset larger than that needs the loop: a pass that
+silently stopped at the first page would be recorded as a whole run over a
+fraction of the cases. The first request omits <code>cursor</code> rather than sending it
+empty — a parameter given without a value is a <code>400</code> everywhere in this API,
+so the shorter loop that always appends <code>&amp;cursor=$CURSOR</code> fails on its first
+page.</p>
+<p>Then, for each item, run your function under a trace whose <strong>root span</strong>
+carries two attributes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tracepad.run_id  = &lt;RUN_ID&gt;
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>tracepad.item_id = &lt;item id&gt;
+</code></pre></div>
+<p>With the OpenTelemetry SDK that is one <code>span.set_attribute</code> per attribute on
+the span you start for the case; with the Langfuse SDK it is the same call on
+the trace's root observation. Both must be the 32-hex ids the API handed out —
+a run <em>name</em> or a case <em>label</em> in their place stays visible in the trace's
+metadata and links nothing. The item goes only where the run goes: an item id
+on a trace that carries no run id anywhere links nothing and is left where you
+put it, in the span's metadata.</p>
+<p>The two need not sit on the same span. Both are trace-level and may be set at
+any level — span, scope or resource — so a run id in the OTel resource of an
+eval process and an item id on the span that answered the case link the same
+way the recipe above does.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 5. Post the scores against the trace ids your exporter produced, as always.</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/scores<span class="w"> </span>-d<span class="w"> </span><span class="s1">'[</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s1">  {"trace_id": "'</span><span class="nv">$TRACE</span><span class="s1">'", "name": "accuracy", "value": 1},</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s1">  {"trace_id": "'</span><span class="nv">$TRACE</span><span class="s1">'", "name": "verdict", "data_type": "categorical", "string_value": "pass"}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="s1">]'</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># 6. Close the run.</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/runs/<span class="nv">$RUN_ID</span>/finish<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{}'</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># or, when the harness died:</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/runs/<span class="nv">$RUN_ID</span>/finish<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"status": "failed", "error": "judge timed out"}'</span>
+</code></pre></div>
+<p>Steps 1 and 2 are declarative and safe to run at the top of every CI job.
+Step 3 is safe to retry too if you supply the run's <code>id</code> yourself: a second
+<code>POST</code> with a known id returns the existing run unchanged with a <code>200</code>.</p>
+<h2 id="items-and-versions">Items and versions</h2>
+<p>A dataset has one <strong>version clock</strong>. It advances by exactly one on every write
+that changes the item set — a <code>POST</code> of one or many items, a <code>DELETE</code> of one —
+and never otherwise.</p>
+<ul>
+<li>A batch is <strong>one tick</strong>, however many items it carries. <code>version</code> in the
+  response is the dataset's version after the write, <code>changed</code> is how many
+  items produced a row. A batch holds at most <strong>10,000</strong> items; a longer one
+  is a <code>413</code> (<code>this request carries N items; the server takes at most 10000
+  per request — send them in batches</code>) and writes nothing. The SDKs' item
+  push and <code>tracepad datasets push</code> send a longer list as consecutive writes
+  of 10,000, so a write that changes something is a tick of its own, and one
+  that changes nothing is not.</li>
+<li>A <code>POST</code> whose items all say what is stored already writes nothing and
+  leaves the version where it was: <code>"changed": 0</code>. Equality is on the JSON
+  value of <code>input</code>, <code>expected_output</code> and <code>metadata</code> plus the source pair:
+  whitespace, key order, <code>\u</code> escapes and the spelling of a number (<code>1</code>,
+  <code>1.0</code>, <code>1e0</code>) are not changes, so the same cases posted from another client
+  are the same cases. An array's order and a value's type (<code>"1"</code> against <code>1</code>)
+  are. The stored body stays the text first sent: re-spelling a number and
+  nothing else writes nothing. A retry after a lost response is therefore
+  idempotent.</li>
+<li>An <strong>edit</strong> is a <code>POST</code> with the same <code>id</code> and a different body: a new row,
+  one tick. The old row is still readable at every earlier version.</li>
+<li>A <strong>delete</strong> is an archive: <code>DELETE …/items/{id}</code> writes a row marked
+  archived at a new version. The item is gone from the current version and
+  still there at every earlier one. Deleting an item that is unknown, or
+  already archived at the current version, is a <code>404</code>.</li>
+<li><strong>Order</strong> is first appearance. Every item gets a <code>seq</code> when it is first
+  written, keeps it through every edit, and returns to its place if it is
+  archived and posted again.</li>
+</ul>
+<p>"The dataset at version V" is, per item, the row with the greatest version at
+or below V, minus the archived ones. Every read resolves it that way:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden/items?version=3"</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden/items/a1b2…?version=3"</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden/items/a1b2…/versions"</span>
+</code></pre></div>
+<p>The last one lists every row of one item, newest first, archived rows
+flagged, and it lists them all: an item has as many rows as the dataset had
+ticks it took part in, so there is nothing to page. Version <code>0</code> is the dataset
+before its first item; a version above the current one is a <code>400</code>.</p>
+<h3 id="item-fields">Item fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>no</td>
+<td>32 lower-case hex characters. Omitted, the server generates one. The same id again is an edit of the same item — hash your case's natural key into it to stay idempotent.</td>
+</tr>
+<tr>
+<td><code>input</code></td>
+<td>yes</td>
+<td>Any JSON value. Tracepad never reads inside it.</td>
+</tr>
+<tr>
+<td><code>expected_output</code></td>
+<td>no</td>
+<td>Any JSON value.</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>no</td>
+<td>Any JSON value.</td>
+</tr>
+<tr>
+<td><code>source_trace_id</code>, <code>source_observation_id</code></td>
+<td>no</td>
+<td>Where the case came from, when it was cut from a production trace. Strings, not references: the source lives under retention and may be gone, and a case does not stop being a case when its origin does.</td>
+</tr>
+</tbody>
+</table>
+<p>Unknown fields are a <code>400</code> naming the field; so is a batch that gives the
+same <code>id</code> to two items, and an empty batch.</p>
+<h3 id="the-listing-is-whole">The listing is whole</h3>
+<p><code>GET …/items</code> returns item bodies <strong>whole</strong>. It is the one read endpoint
+beside <code>/observations/{id}/io</code> that ignores the response budget, because its
+consumer is the harness and a truncated test case is a different test case.
+Its bound is the page (<code>limit</code> up to 500, cursors both ways) and the body cap
+the store applied at write time (<code>TRACEPAD_MAX_BODY_BYTES</code>).</p>
+<h2 id="runs">Runs</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/datasets/support-golden/runs<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s1">  "id": "optional 32-hex",</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="s1">  "name": "prompt v7 / claude-sonnet-5",</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s1">  "metadata": {"prompt": "support-answer@7", "temperature": 0.2},</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s1">  "dataset_version": 12</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s1">}'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0e5a7c1d2b3f4a6980c1d2e3f4a5b6c7"</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">"dataset_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt v7 / claude-sonnet-5"</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-answer@7"</span><span class="p">,</span><span class="w"> </span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.2</span><span class="p">},</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"running"</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-03T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span><span class="nt">"finished_at"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>dataset_version</code> defaults to the dataset's version at that instant. Name an
+  older one when the harness fetched its items before it created the run; a
+  version above the current is a <code>400</code>. The version the harness <em>fetched</em> and
+  the version it <em>ran</em> must be the same number, and handing it out here is
+  what makes that true.</li>
+<li><code>metadata</code> is free-form: the dimensions of an experiment are yours. What
+  the run actually <em>did</em> — which models answered, which prompts ran — is
+  derived from its traces — the run's summary reports them — and is not declared here.</li>
+<li><code>status</code> is <code>running</code> until you say otherwise. A run left <code>running</code> is
+  reported as such with its age; Tracepad never guesses from a timeout,
+  because a slow judge and a crashed harness look the same from inside.</li>
+<li><code>finish</code> closes it once: <code>{}</code> for <code>finished</code>, <code>{"status": "failed",
+  "error": "…"}</code> for <code>failed</code>. A second <code>finish</code> is a <code>409</code>. A run with zero
+  traces can be closed — a harness that failed before its first case still
+  closes it, as failed, with the reason.</li>
+<li>Linking does not stop at <code>finish</code>: a late span of a trace that started
+  inside the run still belongs to it.</li>
+</ul>
+<p><code>GET /api/v1/datasets/{name}/runs</code> lists newest first, with the run object
+above and no summary: a page of runs is for choosing one.</p>
+<p><code>GET /api/v1/runs</code> is the same listing across <strong>every dataset</strong> of the
+project — "what ran lately", whichever set it ran — in the same order and
+with the same rows, which already say which dataset each belongs to. It takes
+two filters, <code>dataset</code> (an exact name) and <code>status</code> (<code>running</code>, <code>finished</code> or
+<code>failed</code>), pages both ways with the same cursor shape, and answers <code>?count=1</code>
+with the capped total the filters match, as the trace and session listings do
+(<a href="../api/#counting">api.md</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/runs?status=running&amp;count=1"</span>
+</code></pre></div>
+<p>A <code>dataset</code> that does not exist is an empty page, not a <code>404</code>: here the name
+is a filter, not an address.</p>
+<h2 id="reading-a-run-back">Reading a run back</h2>
+<p><code>GET /api/v1/runs/{id}</code> adds the summary — how the run went:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0e5a…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"finished"</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">"summary"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">"items"</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="nt">"total"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span><span class="w"> </span><span class="nt">"covered"</span><span class="p">:</span><span class="w"> </span><span class="mi">198</span><span class="p">,</span><span class="w"> </span><span class="nt">"missing"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">"unknown"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">,</span><span class="w"> </span><span class="nt">"attempts_max"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">               </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.42</span><span class="p">,</span><span class="w"> </span><span class="nt">"latency_ms"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"p50"</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">"p95"</span><span class="p">:</span><span class="w"> </span><span class="mi">2410</span><span class="p">}},</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">      </span><span class="nt">"accuracy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span><span class="w"> </span><span class="nt">"direction"</span><span class="p">:</span><span class="w"> </span><span class="s2">"higher"</span><span class="p">,</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">                   </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">,</span><span class="w"> </span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.81</span><span class="p">,</span><span class="w"> </span><span class="nt">"min"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"max"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">},</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">"verdict"</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"categorical"</span><span class="p">,</span><span class="w"> </span><span class="nt">"direction"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">                   </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">,</span><span class="w"> </span><span class="nt">"distribution"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"fail"</span><span class="p">:</span><span class="w"> </span><span class="mi">44</span><span class="p">,</span><span class="w"> </span><span class="nt">"pass"</span><span class="p">:</span><span class="w"> </span><span class="mi">170</span><span class="p">}}</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">    </span><span class="nt">"models"</span><span class="p">:</span><span class="w">  </span><span class="p">[</span><span class="s2">"gpt-5"</span><span class="p">,</span><span class="w"> </span><span class="s2">"gpt-5-mini"</span><span class="p">],</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">    </span><span class="nt">"prompts"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-answer"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">}]</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>covered</code> is how many of the version's cases got at least one trace, and
+  <code>missing</code> the rest. <code>unknown</code> counts <strong>traces</strong>, not cases: the run's traces
+  that no case of its version accounts for — a harness that ran newer cases, a
+  mistyped id, or a trace that named the run and no case. <code>?unknown=true</code> on
+  the items view lists exactly those.</li>
+<li><code>error_count</code> counts <strong>traces</strong> that failed, the same meaning the session
+  roll-up gives the word. <code>attempts_max</code> is the largest number of traces one
+  case got, so a run that retried something three times says so.</li>
+<li>Percentiles are <strong>exact</strong> over the run's traces — a run is hundreds of them,
+  and at that size the exact number beats the ±12% of the bucketed ones in
+  <a href="../api/#statistics"><code>/stats</code></a>.</li>
+<li><code>total_cost</code> is <code>null</code> when no attempt carried a cost. Absent cost is not
+  zero.</li>
+<li>Score names report <code>mean</code>/<code>min</code>/<code>max</code> when they are numeric or boolean, a
+  <code>distribution</code> when categorical, and <code>count</code> alone for text. <code>data_type</code> is
+  the type the run's scores under that name actually used — the commonest one
+  if they used more than one — which is not always what the name's
+  <a href="../scores/#score-configs">config</a> declares: a config governs what is accepted
+  from now on and never re-types a score already stored. <code>direction</code> does come
+  from the config, and only for a numeric or boolean name; it is <code>null</code>
+  otherwise, which is what makes a comparison say <em>changed</em> rather than
+  <em>improved</em>.</li>
+<li><code>models</code> and <code>prompts</code> are derived from the run's observations — what it
+  actually ran, not what the harness declared.</li>
+</ul>
+<p>Everything is computed at read time. A run keeps taking late spans after it is
+finished, and a stored summary would be wrong in exactly the window somebody
+is watching.</p>
+<h3 id="the-cases-and-what-was-answered">The cases and what was answered</h3>
+<p><code>GET /api/v1/runs/{id}/items</code> puts the expected output beside the produced one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span><span class="nt">"run"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0e5a…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w"> </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">   </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"seq"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">   </span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"question"</span><span class="p">:</span><span class="w"> </span><span class="s2">"how do I reset my password?"</span><span class="p">},</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">   </span><span class="nt">"expected_output"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"answer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Settings, then Reset."</span><span class="p">},</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">   </span><span class="nt">"attempts"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">     </span><span class="nt">"trace_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4f8c…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-03T10:00:02Z"</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">     </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.007</span><span class="p">,</span><span class="w"> </span><span class="nt">"latency_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">640</span><span class="p">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">     </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"answer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Open Settings and choose Reset."</span><span class="p">},</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">     </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"accuracy"</span><span class="p">,</span><span class="w"> </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">}]</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">   </span><span class="p">}]</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w"> </span><span class="p">}],</span><span class="w"> </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"prev_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>output</code> is the trace's <strong>root observation's</strong> output — the earliest starting
+  observation with no parent, which is where a harness puts the answer for the
+  case. A trace whose root carried no output shows <code>null</code> rather than reaching
+  down the tree for another span's business.</li>
+<li><code>expected_output</code> and <code>output</code> are budgeted: one too large for the response
+  arrives as a marker with <code>trace_id</code> and <code>observation_id</code>, which
+  <code>/api/v1/observations/{id}/io</code> takes. The scores ride whole.</li>
+<li>A case with no attempt is still a row, with an empty <code>attempts</code>: that is what
+  "missing" looks like from here.</li>
+<li><code>?unknown=true</code> appends the run's unaccounted traces, grouped by the id they
+  named, each row marked <code>"unknown": true</code> and carrying no case body. They come
+  after every known case, so a cursor walk stays a walk.</li>
+</ul>
+<h3 id="comparing-two-runs">Comparing two runs</h3>
+<p><code>GET /api/v1/runs/{a}/compare/{b}</code> is the question the whole feature exists
+for:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0e5a…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt v7"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">        </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"finished"</span><span class="p">,</span><span class="w"> </span><span class="nt">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">},</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1f6b…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt v8"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"…"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">},</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"same_version"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-answer@7"</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-answer@8"</span><span class="p">}},</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span><span class="nt">"traces"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">},</span><span class="w"> </span><span class="nt">"error_count"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">             </span><span class="nt">"total_cost"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.42</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.10</span><span class="p">,</span><span class="w"> </span><span class="nt">"delta"</span><span class="p">:</span><span class="w"> </span><span class="mf">-0.32</span><span class="p">},</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">             </span><span class="nt">"latency_ms"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"p50"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mi">700</span><span class="p">},</span><span class="w"> </span><span class="nt">"p95"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mi">2410</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mi">2100</span><span class="p">}}},</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"accuracy"</span><span class="p">,</span><span class="w"> </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span><span class="w"> </span><span class="nt">"direction"</span><span class="p">:</span><span class="w"> </span><span class="s2">"higher"</span><span class="p">,</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">              </span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.81</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">},</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.86</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">},</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">              </span><span class="nt">"delta"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.05</span><span class="p">,</span><span class="w"> </span><span class="nt">"improved"</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="nt">"regressed"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"same"</span><span class="p">:</span><span class="w"> </span><span class="mi">181</span><span class="p">}],</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">  </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"seq"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"in"</span><span class="p">:</span><span class="w"> </span><span class="s2">"both"</span><span class="p">,</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">             </span><span class="nt">"scores"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"accuracy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"a"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="nt">"b"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"delta"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="nt">"verdict"</span><span class="p">:</span><span class="w"> </span><span class="s2">"improved"</span><span class="p">}}}],</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">  </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"prev_cursor"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>A case answered <strong>N times</strong> has one value per score name: the <strong>mean</strong> of its
+  attempts for a number, so the item rows and the header cannot disagree; for a
+  category or a piece of text, the <strong>newest</strong> attempt's value, because there is
+  no mean of a word.</li>
+<li><strong>Equality is exact.</strong> A tolerance would be a number Tracepad invented, so
+  <code>0.7999999</code> and <code>0.8</code> are a change. Round in your judge if that matters.</li>
+<li><code>verdict</code> is <code>improved</code> or <code>regressed</code> only for names whose config gives a
+  direction; without one it is <code>changed</code> or <code>same</code>, and the header row counts
+  <code>changed</code> instead of <code>improved</code>/<code>regressed</code>. A name only one run carried has
+  no verdict at all — there is nothing to compare it against.</li>
+<li><code>metadata</code> lists only the keys the two runs disagree about, both values.</li>
+<li><code>in</code> says which run had the case: <code>both</code>, <code>a</code>, <code>b</code> — or
+  <code>only_in_version_a</code> / <code>only_in_version_b</code> when the dataset moved between the
+  runs, which <code>same_version: false</code> also announces. The version labels win:
+  a case missing from the other run's version was never that run's to answer.</li>
+<li>Runs of <strong>different datasets</strong> are a <code>400</code>, and so is a run compared with
+  itself. Two runs where one is still <code>running</code> compare fine — its numbers
+  will move.</li>
+</ul>
+<p>The header counts are about the whole pair, so they do not change as you page
+through <code>items</code>.</p>
+<h3 id="what-a-run-keeps">What a run keeps</h3>
+<p>A trace that belongs to a <strong>live run is not swept by retention</strong>. The run is
+the evidence for a number somebody will act on, and the interesting run is the
+old one — the baseline from before the regression. The exception is stated in
+<a href="../retention/">retention.md</a>; its size is in <code>GET /api/v1/system</code> under
+<code>runs.pinned_traces</code>.</p>
+<p><code>DELETE /api/v1/runs/{id}</code> is the release valve. It removes one row of
+bookkeeping and answers with how many traces it released to the ordinary
+retention window — the traces themselves are not deleted:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0e5a…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"released_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">}</span>
+</code></pre></div>
+<p>A harness that creates a run per CI job prunes old ones with it, from a
+script, with no preview round-trip.</p>
+<p>Three things do outrank the pin. Erasing a user's data
+(<code>tracepad users rm-data</code>) deletes the user's traces whether or not a run
+holds them; deleting traces by hand (<code>tracepad traces rm</code>,
+<a href="../admin/#deleting-traces">admin.md</a>) does the same, for the same reason —
+the pin is a pin against <em>retention</em>, "do not age this out", not "nobody may
+remove this" — and both dry runs name the runs affected under
+<code>affected_runs</code>, so the hole is seen before it opens; the run then shows
+those items as missing. And deleting the dataset takes its runs with it.
+Deleting a run's traces on purpose is <code>DELETE /api/v1/traces?run_id=…&amp;to=</code>,
+which is what <code>DELETE /api/v1/runs/{id}</code> deliberately does <em>not</em> do.</p>
+<h2 id="orphans">Orphans</h2>
+<p>A trace naming a run that does not exist in the project is <strong>stored as any
+trace is</strong>, with its columns filled — refusing it would drop the one artifact
+that shows what went wrong. It is counted, and each unknown run id is logged
+once per process:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">"runs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pinned_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span><span class="p">,</span><span class="w"> </span><span class="nt">"orphan_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">}</span>
+</code></pre></div>
+<p>in <code>GET /api/v1/system</code>. A harness that stamps a wrong id finds out there,
+before it reads an empty run. An orphan is not pinned: it lives and dies on
+the ordinary retention window. The same happens to the traces of a run whose
+dataset was deleted mid-ingest.</p>
+<p>A trace re-delivered with a different <code>run_id</code> moves: per-field upsert, last
+delivery wins, the same rule as every other trace field.</p>
+<h2 id="where-an-item-came-from">Where an item came from</h2>
+<p><code>source_trace_id</code> is the one fact the store keeps about where an item was cut
+from, and a user-data erasure reads it: an item any row of which names one of
+the erased user's traces loses <strong>every</strong> row — its history included, the one
+exception to append-only versions besides a run's pin — and the dataset's
+version advances by one (<a href="../retention/#deleting-a-users-data">retention.md</a>).
+A run of an older version then resolves the item as absent, and its traces
+that answered it count under <code>unknown</code>. Keep <code>source_trace_id</code> on an item
+copied from a user's trace so that an erasure can reach it; drop it from an
+item you anonymised, to keep that item through one.</p>
+<h2 id="deleting-a-dataset">Deleting a dataset</h2>
+<p>The one destructive act here. It cascades every run and releases every
+pinned trace, so it is a dry run until <code>?confirm=</code> echoes the name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="nv">$TP</span>/api/v1/datasets/support-golden
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span><span class="nt">"dry_run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"dataset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span><span class="w"> </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span><span class="w"> </span><span class="nt">"runs"</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w"> </span><span class="nt">"pinned_traces"</span><span class="p">:</span><span class="w"> </span><span class="mi">2996</span><span class="p">,</span><span class="w"> </span><span class="nt">"confirm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-golden"</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w"> </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"the runs go with the dataset; their traces are not deleted but return to the retention window"</span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$AUTH</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TP</span><span class="s2">/api/v1/datasets/support-golden?confirm=support-golden"</span>
+</code></pre></div>
+<p>Every version of every item and every run go. The traces stay, unpinned.
+Deleting a run or a score config needs no confirmation: one row each, and
+nothing else is touched.</p>
+<h2 id="the-same-loop-from-python">The same loop from Python</h2>
+<p>The <a href="../sdk-python/"><code>tracepad</code> package</a> is the same endpoints with the loop's
+one hard part done for you: inside <code>run.item(case)</code>, every span the
+application starts — its own, a framework's, another SDK's — carries the run
+and the item, because a span processor writes them as each span starts. The
+harness never touches a span it does not hold.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracepad</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>  <span class="c1"># TRACEPAD_URL / TRACEPAD_API_KEY from the environment</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">tracepad</span><span class="o">.</span><span class="n">score_configs</span><span class="p">([</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"accuracy"</span><span class="p">,</span> <span class="s2">"data_type"</span><span class="p">:</span> <span class="s2">"numeric"</span><span class="p">,</span> <span class="s2">"direction"</span><span class="p">:</span> <span class="s2">"higher"</span><span class="p">,</span> <span class="s2">"min"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">"max"</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"verdict"</span><span class="p">,</span> <span class="s2">"data_type"</span><span class="p">:</span> <span class="s2">"categorical"</span><span class="p">,</span> <span class="s2">"categories"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"pass"</span><span class="p">,</span> <span class="s2">"fail"</span><span class="p">]},</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="p">])</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="n">golden</span> <span class="o">=</span> <span class="n">tracepad</span><span class="o">.</span><span class="n">dataset</span><span class="p">(</span><span class="s2">"support-golden"</span><span class="p">)</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="n">golden</span><span class="o">.</span><span class="n">put_items</span><span class="p">(</span><span class="n">cases</span><span class="p">)</span>          <span class="c1"># same cases → same version, nothing written</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="k">with</span> <span class="n">golden</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"prompt v7 / claude-sonnet-5"</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">"prompt"</span><span class="p">:</span> <span class="s2">"support-answer@7"</span><span class="p">})</span> <span class="k">as</span> <span class="n">run</span><span class="p">:</span>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>    <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="n">golden</span><span class="o">.</span><span class="n">items</span><span class="p">(</span><span class="n">version</span><span class="o">=</span><span class="n">run</span><span class="o">.</span><span class="n">dataset_version</span><span class="p">):</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>        <span class="k">with</span> <span class="n">run</span><span class="o">.</span><span class="n">item</span><span class="p">(</span><span class="n">case</span><span class="p">)</span> <span class="k">as</span> <span class="n">attempt</span><span class="p">:</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>            <span class="n">answer</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">answer</span><span class="p">(</span><span class="n">case</span><span class="o">.</span><span class="n">input</span><span class="p">[</span><span class="s2">"question"</span><span class="p">])</span>   <span class="c1"># its spans carry the run and the item</span>
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>            <span class="n">attempt</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"accuracy"</span><span class="p">,</span> <span class="n">judge</span><span class="p">(</span><span class="n">answer</span><span class="p">,</span> <span class="n">case</span><span class="o">.</span><span class="n">expected_output</span><span class="p">))</span>
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>            <span class="n">attempt</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">"verdict"</span><span class="p">,</span> <span class="n">string_value</span><span class="o">=</span><span class="s2">"pass"</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="s2">"fail"</span><span class="p">,</span>
+<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>                          <span class="n">data_type</span><span class="o">=</span><span class="s2">"categorical"</span><span class="p">)</span>
+<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a>
+<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a><span class="nb">print</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">get</span><span class="p">()[</span><span class="s2">"summary"</span><span class="p">])</span>
+</code></pre></div>
+<p><code>golden.items(version=…)</code> walks every page on its own — the loop step 4 spells
+out in shell — and <code>with … as run</code> closes the run on the way out: <code>finished</code>
+on a clean exit, <code>failed</code> with the exception's <code>repr</code> on an error, which is
+then re-raised. <code>finish</code> flushes the scores and the spans before it posts, so
+the summary on the next line is over everything the run produced.</p>
+<p><code>tracepad.item_id("cases/refund.json")</code> is the <code>sha256(key)[:32]</code> this page
+recommends for an id of your own, and <code>tracepad.compare(a, b)</code> returns the
+comparison below exactly as the server computed it.</p>
+<h2 id="the-same-loop-from-node">The same loop from Node</h2>
+<p>The <a href="../sdk-js/#evals">Node package</a> is the same harness with promises: an
+async iterable over the items, a callback for the block, <code>wrap</code> or
+<code>await using</code> for the close.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">import</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">tracepad</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">'tracepad'</span><span class="p">;</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">init</span><span class="p">();</span><span class="w"> </span><span class="c1">// TRACEPAD_URL / TRACEPAD_API_KEY from the environment</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="k">await</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">scoreConfigs</span><span class="p">([</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="s1">'accuracy'</span><span class="p">,</span><span class="w"> </span><span class="nx">data_type</span><span class="o">:</span><span class="w"> </span><span class="s1">'numeric'</span><span class="p">,</span><span class="w"> </span><span class="nx">direction</span><span class="o">:</span><span class="w"> </span><span class="s1">'higher'</span><span class="p">,</span><span class="w"> </span><span class="nx">min</span><span class="o">:</span><span class="w"> </span><span class="kt">0</span><span class="p">,</span><span class="w"> </span><span class="nx">max</span><span class="o">:</span><span class="w"> </span><span class="kt">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="s1">'verdict'</span><span class="p">,</span><span class="w"> </span><span class="nx">data_type</span><span class="o">:</span><span class="w"> </span><span class="s1">'categorical'</span><span class="p">,</span><span class="w"> </span><span class="nx">categories</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">'pass'</span><span class="p">,</span><span class="w"> </span><span class="s1">'fail'</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">]);</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="kd">const</span><span class="w"> </span><span class="nx">golden</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">dataset</span><span class="p">(</span><span class="s1">'support-golden'</span><span class="p">);</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="k">await</span><span class="w"> </span><span class="nx">golden</span><span class="p">.</span><span class="nx">putItems</span><span class="p">(</span><span class="nx">cases</span><span class="p">);</span><span class="w"> </span><span class="c1">// same cases → same version, nothing written</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="kd">const</span><span class="w"> </span><span class="nx">run</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">golden</span><span class="p">.</span><span class="nx">run</span><span class="p">(</span><span class="s1">'prompt v7 / claude-sonnet-5'</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">metadata</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">prompt</span><span class="o">:</span><span class="w"> </span><span class="s1">'support-answer@7'</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="k">await</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">wrap</span><span class="p">(</span><span class="k">async</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="p">(</span><span class="kd">const</span><span class="w"> </span><span class="nx">item</span><span class="w"> </span><span class="k">of</span><span class="w"> </span><span class="nx">golden</span><span class="p">.</span><span class="nx">items</span><span class="p">(</span><span class="nx">run</span><span class="p">.</span><span class="nx">datasetVersion</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="w">    </span><span class="k">await</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">item</span><span class="p">(</span><span class="nx">item</span><span class="p">,</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">attempt</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="w">      </span><span class="kd">const</span><span class="w"> </span><span class="nx">answer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">app</span><span class="p">.</span><span class="nx">answer</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">input</span><span class="p">.</span><span class="nx">question</span><span class="p">);</span><span class="w"> </span><span class="c1">// its spans carry the run and the item</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="w">      </span><span class="nx">attempt</span><span class="p">.</span><span class="nx">score</span><span class="p">(</span><span class="s1">'accuracy'</span><span class="p">,</span><span class="w"> </span><span class="nx">judge</span><span class="p">(</span><span class="nx">answer</span><span class="p">,</span><span class="w"> </span><span class="nx">item</span><span class="p">.</span><span class="nx">expected_output</span><span class="p">));</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="w">      </span><span class="nx">attempt</span><span class="p">.</span><span class="nx">score</span><span class="p">(</span><span class="s1">'verdict'</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">stringValue</span><span class="o">:</span><span class="w"> </span><span class="kt">ok</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="s1">'pass'</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s1">'fail'</span><span class="p">,</span><span class="w"> </span><span class="nx">dataType</span><span class="o">:</span><span class="w"> </span><span class="s1">'categorical'</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a><span class="w">    </span><span class="p">});</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a><span class="p">});</span>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">((</span><span class="k">await</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">get</span><span class="p">()).</span><span class="nx">summary</span><span class="p">);</span>
+</code></pre></div>
+<p><code>golden.items(version)</code> walks every page on its own, and <code>run.wrap</code> closes
+the run on the way out: <code>finished</code> on a clean return, <code>failed</code> with the
+error on a throw, which is then rethrown. <code>tracepad.itemId(key)</code> and
+<code>tracepad.compare(a, b)</code> are the same two helpers as in Python.</p>
+<h2 id="the-same-loop-from-go">The same loop from Go</h2>
+<p>The <a href="../sdk-go/#evals">Go package</a> is the same loop with the context in place
+of the block: <code>run.Item(ctx, item)</code> returns a context carrying the run and
+the item, and a span processor writes them on every span started under it —
+the application's own, a framework's, another SDK's.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nx">shutdown</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">Init</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span><span class="w"> </span><span class="c1">// TRACEPAD_URL / TRACEPAD_API_KEY from the environment</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">defer</span><span class="w"> </span><span class="nx">shutdown</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="nx">tracepad</span><span class="p">.</span><span class="nx">ScoreConfigs</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="p">[]</span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">ScoreConfig</span><span class="p">{</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">    </span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span><span class="w"> </span><span class="s">"accuracy"</span><span class="p">,</span><span class="w"> </span><span class="nx">DataType</span><span class="p">:</span><span class="w"> </span><span class="s">"numeric"</span><span class="p">,</span><span class="w"> </span><span class="nx">Direction</span><span class="p">:</span><span class="w"> </span><span class="s">"higher"</span><span class="p">,</span><span class="w"> </span><span class="nx">Min</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">zero</span><span class="p">,</span><span class="w"> </span><span class="nx">Max</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">one</span><span class="p">},</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">    </span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span><span class="w"> </span><span class="s">"verdict"</span><span class="p">,</span><span class="w"> </span><span class="nx">DataType</span><span class="p">:</span><span class="w"> </span><span class="s">"categorical"</span><span class="p">,</span><span class="w"> </span><span class="nx">Categories</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">"pass"</span><span class="p">,</span><span class="w"> </span><span class="s">"fail"</span><span class="p">}},</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="p">})</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="nx">golden</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">NewDataset</span><span class="p">(</span><span class="s">"support-golden"</span><span class="p">)</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="nx">golden</span><span class="p">.</span><span class="nx">PutItems</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">cases</span><span class="p">)</span><span class="w">          </span><span class="c1">// same cases → same version, nothing written</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="nx">run</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">golden</span><span class="p">.</span><span class="nx">Run</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"prompt v7 / claude-sonnet-5"</span><span class="p">,</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">    </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithRunMetadata</span><span class="p">(</span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">any</span><span class="p">{</span><span class="s">"prompt"</span><span class="p">:</span><span class="w"> </span><span class="s">"support-answer@7"</span><span class="p">}))</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="k">for</span><span class="w"> </span><span class="nx">item</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">golden</span><span class="p">.</span><span class="nx">Items</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">DatasetVersion</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="w">        </span><span class="nx">run</span><span class="p">.</span><span class="nx">Fail</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a><span class="w">    </span><span class="nx">itemCtx</span><span class="p">,</span><span class="w"> </span><span class="nx">attempt</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">Item</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">item</span><span class="p">)</span>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="w">    </span><span class="nx">answer</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">app</span><span class="p">.</span><span class="nx">Answer</span><span class="p">(</span><span class="nx">itemCtx</span><span class="p">,</span><span class="w"> </span><span class="nx">question</span><span class="p">(</span><span class="nx">item</span><span class="p">))</span><span class="w">   </span><span class="c1">// its spans carry the run and the item</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a><span class="w">    </span><span class="nx">attempt</span><span class="p">.</span><span class="nx">Score</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"accuracy"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithValue</span><span class="p">(</span><span class="nx">judge</span><span class="p">(</span><span class="nx">answer</span><span class="p">,</span><span class="w"> </span><span class="nx">item</span><span class="p">.</span><span class="nx">ExpectedOutput</span><span class="p">)))</span>
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a><span class="w">    </span><span class="nx">attempt</span><span class="p">.</span><span class="nx">Score</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">"verdict"</span><span class="p">,</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithStringValue</span><span class="p">(</span><span class="nx">verdict</span><span class="p">),</span><span class="w"> </span><span class="nx">tracepad</span><span class="p">.</span><span class="nx">WithDataType</span><span class="p">(</span><span class="s">"categorical"</span><span class="p">))</span>
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a><span class="p">}</span>
+<a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a><span class="nx">summary</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">run</span><span class="p">.</span><span class="nx">Finish</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+</code></pre></div>
+<p><code>golden.Items(ctx, version)</code> walks every page on its own, and <code>Finish</code> — or
+<code>Fail</code>, on the error path, which is yours to write since Go has no block to
+close the run for you — flushes the scores and the spans before it posts, so
+the summary it returns is over everything the run produced.</p>
+<p><code>tracepad.ItemID("cases/refund.json")</code> and <code>tracepad.Compare(ctx, a, b)</code> are
+the Python package's <code>item_id</code> and <code>compare</code>.</p>
+<h2 id="the-same-loop-from-a-shell">The same loop from a shell</h2>
+<p>Every step above is a command, and the CLI is nothing but a client of the API
+(<a href="../cli/">cli.md</a>). This is the whole of it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># 1. Declare what the score names mean. Idempotent.</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">'{"data_type": "numeric", "direction": "higher", "min": 0, "max": 1}'</span><span class="w"> </span>&gt;<span class="w"> </span>accuracy.json
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>tracepad<span class="w"> </span>score-configs<span class="w"> </span>push<span class="w"> </span>accuracy<span class="w"> </span>--file<span class="w"> </span>accuracy.json
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="c1"># 2. Push the cases: a .jsonl (one case per line) or a .json array, one batch</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1">#    (up to 10,000 cases; a longer file is several writes), one version tick.</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1">#    Re-running an unchanged file prints "unchanged at version 12" and writes</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="c1">#    nothing.</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>push<span class="w"> </span>support-golden<span class="w"> </span>--file<span class="w"> </span>cases.jsonl
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="c1"># → version 12: 3 items changed, 200 in the batch</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="c1"># 3. Open the run and read back the version it pinned.</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>tracepad<span class="w"> </span>runs<span class="w"> </span>create<span class="w"> </span>support-golden<span class="w"> </span>--name<span class="w"> </span><span class="s2">"prompt v8"</span><span class="w"> </span>--json<span class="k">)</span>
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="nv">RUN_ID</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RUN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="nv">VERSION</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RUN</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.dataset_version<span class="k">)</span>
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>
+<a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a><span class="c1"># 4. Fetch the cases at that version. --json walks every page, so this is the</span>
+<a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a><span class="c1">#    dataset's export as well as the harness's input.</span>
+<a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>tracepad<span class="w"> </span>datasets<span class="w"> </span>show<span class="w"> </span>support-golden<span class="w"> </span>--version<span class="w"> </span><span class="s2">"</span><span class="nv">$VERSION</span><span class="s2">"</span><span class="w"> </span>--json<span class="w"> </span>&gt;<span class="w"> </span>cases.json
+<a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a>
+<a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a><span class="c1"># 5. Run your function per case, stamping tracepad.run_id and</span>
+<a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a><span class="c1">#    tracepad.item_id on the trace, and post the scores as always.</span>
+<a id="__codelineno-18-23" name="__codelineno-18-23" href="#__codelineno-18-23"></a>
+<a id="__codelineno-18-24" name="__codelineno-18-24" href="#__codelineno-18-24"></a><span class="c1"># 6. Close the run, then read it back.</span>
+<a id="__codelineno-18-25" name="__codelineno-18-25" href="#__codelineno-18-25"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>finish<span class="w"> </span><span class="s2">"</span><span class="nv">$RUN_ID</span><span class="s2">"</span>
+<a id="__codelineno-18-26" name="__codelineno-18-26" href="#__codelineno-18-26"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$RUN_ID</span><span class="s2">"</span>
+<a id="__codelineno-18-27" name="__codelineno-18-27" href="#__codelineno-18-27"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$RUN_ID</span><span class="s2">"</span><span class="w"> </span>--items<span class="w">          </span><span class="c1"># the cases and what was answered</span>
+<a id="__codelineno-18-28" name="__codelineno-18-28" href="#__codelineno-18-28"></a>
+<a id="__codelineno-18-29" name="__codelineno-18-29" href="#__codelineno-18-29"></a><span class="c1"># 7. The question this was all for. BASELINE is an earlier run's id: `tracepad runs ls support-golden`.</span>
+<a id="__codelineno-18-30" name="__codelineno-18-30" href="#__codelineno-18-30"></a>tracepad<span class="w"> </span>runs<span class="w"> </span>compare<span class="w"> </span><span class="s2">"</span><span class="nv">$BASELINE</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RUN_ID</span><span class="s2">"</span>
+</code></pre></div>
+<p><code>runs compare</code> prints the header, one line per score name with the delta and
+how many cases moved, and then the cases whose verdict is not <code>same</code>; <code>--all</code>
+lists every case. A run that failed closes with its reason:
+<code>tracepad runs finish "$RUN_ID" --failed "judge timed out"</code>.</p>
+<h2 id="the-same-loop-from-the-web-interface">The same loop from the web interface</h2>
+<p>The screens are the third client of these endpoints and add nothing to them
+(<a href="../ui/">ui.md</a>, <em>Evals</em>). What the browser is good for is the half of the
+loop a person does by hand:</p>
+<ol>
+<li><strong>Declare the score names.</strong> <em>Evals → Score configs → New score config</em>:
+   the type, which direction is better, the bounds or the categories. It
+   <code>PUT</code>s the whole config, so editing one later is the same form.</li>
+<li><strong>Build the set.</strong> <em>Datasets → New dataset</em>, then <em>New item</em> for a case
+   typed by hand — or, far more often, <strong>open a trace where the model got it
+   right (or nearly right), pick the observation, and press <em>Add to
+   dataset</em></strong>. The editor opens with that observation's input as the case and
+   its output as the expected answer, both whole, with the trace and
+   observation recorded as the source. Correct the expected answer and save.
+   The dataset's version ticks once per save that changed something, and
+   <em>unchanged</em> is what a save that changed nothing says.
+   For a set that already exists as a file, <code>datasets push</code> is still the
+   import — the browser writes one case at a time.</li>
+<li><strong>Run it.</strong> From the harness, exactly as above: the interface opens no run
+   and closes none. The run page shows the two attributes to stamp while
+   nothing has arrived, and follows the run as its traces land.</li>
+<li><strong>Read it back.</strong> The run page for one pass, <em>Compare with…</em> or two ticked
+   checkboxes for two of them.</li>
+</ol>
+<p>Deleting is where the browser is deliberately not quicker than <code>curl</code>:
+deleting a dataset shows the same dry run and asks for the same echo, and
+deleting a run says what happens to its traces before it happens.</p>
+<h2 id="responses">Responses</h2>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>The read succeeded, the envelope or config was written, the run was closed, or a known run id was returned unchanged.</td>
+</tr>
+<tr>
+<td><code>201</code></td>
+<td>Items written (or found unchanged), or a run created. On disk, not merely queued.</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td>Validation: a missing <code>input</code>, a bad id, a version above the current, a run pinned above the current, an unknown field or query parameter, a wrong <code>confirm</code>. The message says which.</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>Unknown credentials.</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>No such dataset, item, or run in this project; an item already archived at the current version.</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td>A run closed twice; a run id that already exists in another dataset.</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td>The body is over <code>TRACEPAD_MAX_BODY_BYTES</code>, or an array holds more than 10,000 items.</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>The write queue is saturated; retry after the <code>Retry-After</code> delay.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

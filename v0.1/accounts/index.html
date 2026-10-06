@@ -1,0 +1,2319 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.">
+      
+      
+      
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/latest/accounts/">
+      
+      
+        <link rel="prev" href="../export/">
+      
+      
+        <link rel="next" href="../admin/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Accounts - Tracepad</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#accounts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tracepad" class="md-header__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tracepad
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Accounts
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tracepad" class="md-nav__button md-logo" aria-label="Tracepad" data-md-component="logo">
+      
+  <img src="../assets/mark-on-dark.svg" alt="logo">
+
+    </a>
+    Tracepad
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tracepad/tracepad" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tracepad/tracepad
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing the binary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Tracepad compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Send traces
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Send traces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sending traces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk-go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../media/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../langfuse-sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from the Langfuse SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scores/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scores
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets and runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotation queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read it back
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Read it back
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Read API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Taking the data out
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-first-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#signing-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing in
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Signing in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-session-may-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a session may ask
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-accounts-own-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The account's own routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preferences
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-do-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may do what
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inviting-somebody" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inviting somebody
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inviting somebody">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resetting-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resetting a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing accounts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-every-owners-password-is-lost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When every owner's password is lost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-first-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#signing-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing in
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Signing in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-session-may-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a session may ask
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-accounts-own-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The account's own routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preferences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preferences
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-do-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may do what
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inviting-somebody" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inviting somebody
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inviting somebody">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resetting-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resetting a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing accounts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-the-web-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the web interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-every-owners-password-is-lost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When every owner's password is lost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/accounts.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="accounts">Accounts</h1>
+<p>People sign in; programs use keys.</p>
+<p>A project key is a credential a program holds: it is in your SDK's config and
+in your CI, it carries exactly one project, and its <a href="../api/#scopes">scopes</a> —
+<code>ingest</code>, <code>read</code>, <code>write</code> — say what it may do there. That is the right shape
+for an exporter and the wrong one for a person. A freelancer who should see
+one project and score its traces would be handed a secret that reads and
+writes, says nothing about who holds it, and is taken back only by revoking
+it.</p>
+<p>So the server has <strong>accounts</strong>: an email, a password, and a role in each
+project. Keys stay what they are — <a href="../ingest/">ingest</a>, the
+<a href="../cli/">CLI</a>, the <a href="../mcp/">MCP server</a> — and stop being something a person
+pastes into a browser.</p>
+<h2 id="the-model">The model</h2>
+<p>Two levels of standing, and no more.</p>
+<ul>
+<li>An <strong>owner</strong> runs the server: every project, every setting, and the accounts
+  themselves. It is a flag on the account, not a membership, because an owner
+  has every project there is and every project there will be. There can be
+  several, and the last enabled one cannot be demoted, disabled or deleted.</li>
+<li>Everyone else is a <strong>member</strong> of specific projects, with a role in each:<ul>
+<li><code>viewer</code> — reads everything in the project and <strong>annotates</strong>: writes and
+  retracts scores, and works an <a href="../annotation/">annotation queue</a>. Reviewing
+  is what a viewer is for.</li>
+<li><code>editor</code> — everything a viewer does, plus what a project is made of:
+  prompts, datasets, runs, score configs, queues, the retention windows, the
+  keys, and erasing a user's data.</li>
+</ul>
+</li>
+</ul>
+<p>An account with no memberships and no owner flag can sign in and sees nothing,
+which is the state an invitation leaves it in until somebody gives it a
+project.</p>
+<h2 id="the-first-owner">The first owner</h2>
+<p>A fresh server has no accounts, so it prints a link at every start until it has
+one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>This server has no owner yet. Create the first one — it takes an email and a
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>password, and nothing is written down anywhere but this database:
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  http://localhost:4318/setup#token=…
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>The link is good for 24 hours, or until this process stops. Restart to have a
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>new one printed.
+</code></pre></div>
+<p>The token is 32 random bytes, minted per start and held <strong>in memory only</strong>: a
+link from yesterday's log file opens nothing today, and if the link is lost or
+its 24 hours have passed, restarting prints a new one. It rides in the URL fragment, which browsers never
+send to the server, so it stays out of the access log and out of the history of
+whoever opens it.</p>
+<p>Opening the link asks for an email, a password and an optional display name.
+The same thing over the API, with <code>token</code> the part of the printed link after <code>#token=</code>. It answers <code>201</code> with <code>{"account": {…}}</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:4318/api/v1/setup<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"token":"…","email":"you@example.com","password":"a long enough one"}'</span>
+</code></pre></div>
+<p>There is deliberately no environment variable for the first owner's password. A
+password in <code>docker-compose.yml</code> is the thing this exists to stop pasting.</p>
+<p><code>GET /api/v1/setup</code> answers <code>{"required": true}</code> while there is no owner and
+<code>{"required": false}</code> afterwards — the one thing the interface can ask without
+a credential. <code>"expired": true</code> beside it means no link this start printed
+works any more, so the setup screen says to restart rather than show a form
+the server would refuse.</p>
+<p>A deployment that makes its first owner with the admin token instead — a
+script, an API-only install — can switch setup off with <code>TRACEPAD_SETUP=off</code>:
+no link is minted or printed, <code>GET /api/v1/setup</code> adds <code>"enabled": false</code>, and
+<code>POST /api/v1/setup</code> answers <code>403</code>; the setup screen says so and what to do
+instead. Create the owner with the token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>accounts<span class="w"> </span>create<span class="w"> </span>you@example.com<span class="w"> </span>--owner
+</code></pre></div>
+<p>and open the invitation link it prints.</p>
+<h2 id="signing-in">Signing in</h2>
+<p>An invitation link opens the interface's password page, which calls <code>POST
+/api/v1/auth/accept-invite</code> with <code>{"token", "password"}</code>: it sets the password
+and signs in, and the token is single-use.</p>
+<p><code>POST /api/v1/auth/login</code> takes <code>{"email", "password"}</code> and sets a session
+cookie:</p>
+<ul>
+<li><code>tracepad_session</code>, <code>HttpOnly</code>, <code>SameSite=Lax</code>, <code>Path=/</code>, and <code>Secure</code>
+  whenever the request arrived over TLS or through a trusted proxy
+  (<code>TRACEPAD_TRUSTED_PROXIES</code>) that said so with <code>X-Forwarded-Proto: https</code>.</li>
+<li>Thirty days by default (<code>TRACEPAD_SESSION_DAYS</code>), <strong>sliding</strong>: a request more
+  than a day after the last one moves the expiry forward. Open this daily and
+  you sign in about once a month.</li>
+<li>What is stored is <code>sha256</code> of the cookie's value, the way a key is stored as
+  a hash. A read of the database hands out no live session.</li>
+</ul>
+<p>A wrong email, a wrong password, a disabled account and one that has never
+accepted its invitation all answer the same <code>401 wrong email or password</code>. Any
+difference between them would be a way to find out who has an account here.
+Five failures for one email inside fifteen minutes and the next answers <code>429</code>
+with <code>Retry-After</code>; an attempt counts from the moment it arrives, so fifty sent
+at once are still five guesses. A wrong current password when changing it
+counts the same way, per account and apart from the sign-in: five wrong in
+fifteen minutes and the next waits, and nobody failing at the sign-in form can
+stop a signed-in person from changing their password. The count is in memory, so it forgets on a
+restart and can never be the reason somebody cannot sign in tomorrow.</p>
+<p>Checking a password is a quarter of a second of CPU, and the routes that do it
+take requests from anybody, so the server runs only a few at once — half its
+processors, at most four — with a short queue behind them. Past that, the
+answer is <code>503</code> with <code>Retry-After: 1</code>, and a <code>WARN</code> in the log once a minute
+says how many were turned away. A person signing in never meets it in ordinary
+use, and a flood of sign-ins cannot take the CPU from ingest and reads.</p>
+<p>Each source may also ask for only so many of those checks: <strong>twenty at once,
+then one every three seconds</strong>. Past that, the answer is <code>429 too many password
+checks from your network; try again in N seconds</code>, with <code>Retry-After: N</code>. A
+source is an IPv4 address, or an IPv6 /64 (one machine is given a whole /64). A
+flood from one source therefore costs the server one check every three seconds,
+and people signing in from anywhere else never meet it. The limit covers every
+request that checks a password — signing in, setup, accepting an invitation,
+changing a password — and nothing that is refused before a check: an email
+already locked out, a made-up invitation link, an over-long email. A request
+the source limit refuses gives back its place in the email's five. What the
+limit cannot stop is a flood from many sources at once, a botnet or a whole
+IPv6 /48. Then the gate above still keeps ingest and reads running, and real
+sign-ins meet its <code>503</code> for as long as the flood lasts.</p>
+<p>Behind a reverse proxy, every request arrives from the proxy. The server takes
+the client's address from <code>X-Forwarded-For</code> only when the proxy is one it
+trusts: loopback by default, or whatever <code>TRACEPAD_TRUSTED_PROXIES</code> lists. If
+the proxy is not trusted, everybody behind it is one source and shares those
+twenty, and the log says which setting to change
+(<a href="../docker/#serving-over-tls">docker.md</a>). A TCP relay on loopback — a
+service-mesh sidecar, <code>ssh -L</code>, <code>socat</code> — is not a proxy that appends: behind
+one, set <code>TRACEPAD_TRUSTED_PROXIES=none</code> or name the real proxy, or a client
+can pick its own source. <code>GET /api/v1/system</code>, asked with a key that holds
+<code>read</code>, shows the source your own request counts as.</p>
+<p>An invitation link is checked before its password is hashed, so a request with
+a made-up link costs nothing.</p>
+<p>Passwords are <code>bcrypt</code> at cost 12, between 10 and 72 <strong>bytes</strong>, with no other
+rule: composition rules make passwords worse, and 72 bytes is where <code>bcrypt</code>
+stops reading. That is 72 Latin letters, and fewer of anything outside plain
+ASCII — a Cyrillic letter is two bytes, most emoji four. A longer one is <code>422</code>
+with that sentence.</p>
+<p>Setup, sign-in and accepting an invitation are the three routes that take a
+body from anybody, so they take a small one: at most 8 KiB of uncompressed
+JSON. A larger body is <code>413</code> and a compressed one (<code>Content-Encoding: gzip</code>
+or any other) is <code>415</code>. The body must be declared <code>Content-Type:
+application/json</code> (<code>415</code> otherwise), and a request that carries an <code>Origin</code>
+must come from this server's own address (<code>403</code> otherwise): together they stop
+a page on another site from posting a form that signs your browser into an
+account of its choosing. The CLI, the SDKs and <code>curl</code> send no <code>Origin</code> and are
+unaffected. A display name is trimmed and then at most 200 characters, here
+and wherever else one is set.</p>
+<h3 id="what-a-session-may-ask">What a session may ask</h3>
+<p>A key carries its project. A session does not, so it names one on every request
+about a project's data:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>X-Tracepad-Project: &lt;project id&gt;
+</code></pre></div>
+<p>Missing it is <code>400</code>; a project the account is not a member of is <code>403 not a
+member of this project</code>. The routes under <code>/api/v1/projects/{id}</code> take the
+project from the path instead, and <code>/api/v1/auth/*</code> needs none. A project key
+ignores the header entirely — it is its own project.</p>
+<p>A request authenticated by cookie with a method other than <code>GET</code>, <code>HEAD</code> or
+<code>OPTIONS</code> must carry an <code>Origin</code> (or, failing that, a <code>Referer</code>) whose host is
+one this server answers to; otherwise <code>403 cross-origin request refused</code>.
+Requests carrying an <code>Authorization</code> header are exempt, and that header wins
+when both are present: an explicit credential beats an ambient one.</p>
+<p>The same <code>403</code> on the sign-in form almost always means a proxy in front of the
+server that passes neither the address the browser used (<code>Host</code> or
+<code>X-Forwarded-Host</code>) nor anything the server was told to expect. The error
+says so, and the server logs a <code>WARN</code> naming the origin it was sent and the
+hosts it compared it with, once a minute for each origin. Set <code>TRACEPAD_URL</code> to the
+public address, or have the proxy forward <code>Host</code>
+(<a href="../docker/#serving-over-tls">docker.md</a>).</p>
+<p>Three hosts count as this server's: the request's own <code>Host</code>, the first value
+of <code>X-Forwarded-Host</code> when a proxy in <code>TRACEPAD_TRUSTED_PROXIES</code> sent it, and the
+host of <code>TRACEPAD_URL</code>. The last two matter
+behind a reverse proxy that rewrites <code>Host</code> — the browser sends the address
+your people typed, and without them every write from the interface would be
+refused while a project key went on working.</p>
+<h3 id="the-accounts-own-routes">The account's own routes</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/auth/me</code></td>
+<td>The account and every project it can reach, with the role in each. The one call the interface makes on load.</td>
+</tr>
+<tr>
+<td><code>PATCH /api/v1/auth/me</code></td>
+<td>Change the display name, the password with <code>{"password": {"current", "new"}}</code>, or the preferences with <code>{"preferences": {…}}</code> — any of them, together or alone. A password change signs every <strong>other</strong> session out. A wrong current password is <code>403</code>, and five in fifteen minutes make the next <code>429</code>; <code>409</code> means another change landed first — sign in again.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/auth/sessions</code></td>
+<td>Where this account is signed in, the current one marked, with the user agent and address of each: the client's own address, which behind a proxy the server reads only from a proxy it trusts (<code>TRACEPAD_TRUSTED_PROXIES</code>).</td>
+</tr>
+<tr>
+<td><code>DELETE /api/v1/auth/sessions</code></td>
+<td>Sign out everywhere but here. What you press after a laptop goes missing.</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/logout</code></td>
+<td>End this session.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="preferences">Preferences</h3>
+<p><code>account.preferences</code> on <code>GET /api/v1/auth/me</code> is how the interface is
+arranged for this person: a JSON object the interface owns the shape of and
+the server only holds — <code>{}</code> until written, at most 16 KiB, and validated as
+nothing more than <em>an object under the size</em> (<code>422</code> otherwise). <code>PATCH
+/api/v1/auth/me {"preferences": {…}}</code> replaces it <strong>whole</strong>: send back the
+object you read, with your change in it, never a fragment to be merged. The
+dashboard keeps its block order and hidden set under <code>dashboard</code>, keyed by
+project id (<a href="../ui/#dashboard">ui.md</a>); the arrangement follows the person
+between browsers because it is on the account. It is the account's own: an
+owner's <code>PATCH /api/v1/accounts/{id}</code> does not touch it, a project key has
+none, and neither the CLI nor MCP reads or writes it.</p>
+<h2 id="who-may-do-what">Who may do what</h2>
+<p>Every route in the API carries one of these, and one check reads it. A test
+walks the whole table as each of nine kinds of caller — no credential, a key
+with all three scopes, a key with each one alone, the admin token, and a
+viewer's, an editor's and an owner's session — so this is the contract rather
+than a description of it.</p>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Who gets through</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>public</code></td>
+<td>Anyone: <code>GET /api/v1</code>, <code>openapi.json</code>, <code>/health</code>, and the three ways in.</td>
+</tr>
+<tr>
+<td><code>ingest</code></td>
+<td>A project key with the <code>ingest</code> scope, and nothing else.</td>
+</tr>
+<tr>
+<td><code>member</code></td>
+<td>A project key with the route's scope, or a session whose account is an owner or has any role in the named project. Every read but the raw archive, plus writing and retracting scores and working a queue.</td>
+</tr>
+<tr>
+<td><code>editor</code></td>
+<td>A project key with the route's scope, or an owner or <code>editor</code> session. Prompts, datasets, runs, score configs, queues, retention, keys, user-data erasure, and reading the raw archive (<code>/api/v1/raw</code>) — the bulk way out of a project, which a viewer does not take — but no project key lists, mints or revokes keys: those three routes answer a key <code>403</code>, and an owner or editor session or the admin token manages them.</td>
+</tr>
+<tr>
+<td><code>owner</code></td>
+<td><code>TRACEPAD_ADMIN_TOKEN</code>, or an owner session. Creating, deleting, restoring and renaming a project; listing every project; everything under <code>/api/v1/accounts</code>.</td>
+</tr>
+<tr>
+<td><code>session</code></td>
+<td>Only a cookie. A key or the admin token is told <code>not a session</code>, which is what it is.</td>
+</tr>
+<tr>
+<td><code>diagnostic</code></td>
+<td><code>GET /api/v1/system</code> alone. Every credential gets through, and each is answered with its own half (<a href="../api/#system">api.md</a>): a key with <code>read</code>, or a member's session for its project, gets the project's figures; the admin token gets the deployment's; an owner's session gets both, or the deployment's alone when it names no project.</td>
+</tr>
+</tbody>
+</table>
+<p>A key passes the policy and then its <strong>scope</strong>: every route also names the one
+a key must hold — <code>ingest</code>, <code>read</code> or <code>write</code>, or <code>any</code>, or <code>none</code> — and a key
+without it is answered <code>403</code> with <code>WWW-Authenticate: Bearer
+error="insufficient_scope"</code> (<a href="../api/#scopes">api.md</a>). A session never meets a
+scope: its role decides, as above. The two do not line up one to one, and are
+not meant to: a viewer annotates, so a viewer's session writes scores and
+claims queue items, which for a key are <code>ingest</code> and <code>write</code>.</p>
+<p><code>GET /api/v1</code> lists every endpoint with its policy word and its scope, so an
+agent can see what a route would need before it calls it.</p>
+<p>The admin token keeps exactly the reach <a href="../admin/">administration</a> gave it,
+plus the account routes and <code>GET /api/v1/system</code> (policy <code>diagnostic</code>), which
+answers it the deployment's gauges and nothing of any project
+(<a href="../api/#system">api.md</a>). It
+still reaches no data-plane route: the reason it
+was kept off the data plane — a browser holding the key to everything — is
+what accounts replace.</p>
+<h2 id="inviting-somebody">Inviting somebody</h2>
+<p>An owner creates the account and is handed a link, once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:4318/api/v1/accounts<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"email":"helper@example.com","name":"The Helper",</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s1">       "memberships":[{"project_id":"…","role":"viewer"}]}'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"account"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"email"</span><span class="p">:</span><span class="w"> </span><span class="s2">"helper@example.com"</span><span class="p">,</span><span class="w"> </span><span class="nt">"pending"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"…"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">},</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">"invite_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:4318/invite#token=…"</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">"invite_expires_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-17T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">"note"</span><span class="p">:</span><span class="w"> </span><span class="s2">"the invitation link is shown only here; only its hash is stored"</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>Carrying the link to the person is the owner's job — there is no mail here, and
+an owner pasting a link into a chat is a smaller ask than an operator
+configuring SMTP. The token is single-use, good for seven days, and stored as a
+hash like everything else. It sets the password, which means the password never
+passes through the owner's hands: that is the whole difference between an
+invitation and "here is your password".</p>
+<p>The account reads as <code>pending</code> until the link is used and cannot sign in before
+then.</p>
+<h3 id="resetting-a-password">Resetting a password</h3>
+<p>The same door: <code>POST /api/v1/accounts/{id}/invite</code> mints a fresh link and ends
+the account's sessions. Any earlier link is void.</p>
+<p>The <strong>old password goes on working until the new link is used</strong>. An owner
+pressing this by mistake, or a link that never arrives, must not leave somebody
+locked out on a Friday.</p>
+<h2 id="managing-accounts">Managing accounts</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/accounts</code></td>
+<td>Every account: standing, <code>pending</code>, last login, and its projects with roles.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/accounts/{id}</code></td>
+<td>One of them.</td>
+</tr>
+<tr>
+<td><code>PATCH /api/v1/accounts/{id}</code></td>
+<td><code>{"name"}</code>, <code>{"owner"}</code>, <code>{"disabled"}</code>.</td>
+</tr>
+<tr>
+<td><code>DELETE /api/v1/accounts/{id}</code></td>
+<td>A dry run until <code>?confirm=</code> echoes the <strong>email</strong>.</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/accounts/{id}/invite</code></td>
+<td>A fresh link; also the reset.</td>
+</tr>
+<tr>
+<td><code>PUT /api/v1/accounts/{id}/projects/{project_id}</code></td>
+<td><code>{"role": "viewer"\|"editor"}</code>.</td>
+</tr>
+<tr>
+<td><code>DELETE /api/v1/accounts/{id}/projects/{project_id}</code></td>
+<td>Take a project away.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/projects/{id}/members</code></td>
+<td>The project side: who has a role here. Owners are not listed, because they are not rows — they have every project.</td>
+</tr>
+</tbody>
+</table>
+<p>Everything above but the project-side member listing is also <code>tracepad
+accounts …</code> from a terminal, on the admin token — <code>ls</code>, <code>show</code>, <code>create</code>,
+<code>invite</code>, <code>set</code>, <code>grant</code>, <code>revoke</code>, <code>rm</code>. The
+<a href="../cli/">CLI page</a> has the forms.</p>
+<p>Three rules worth knowing before you press something:</p>
+<ul>
+<li><strong>Disabling</strong> ends the account's sessions at once and keeps its roles, so
+  enabling puts everything back. It is how you take access away today.</li>
+<li><strong>Deleting</strong> is for people who are gone. It takes the memberships, sessions
+  and invitations and nothing else. The scores the account wrote keep its name
+  and email as they were when it wrote them, and read as <code>deleted</code>
+  (<a href="../scores/#who-wrote-a-score">scores.md</a>). The keys it minted keep working,
+  with its email still on them. The dry run counts those scores
+  (<code>scores_authored</code>) and lists those keys, in every project, so you can
+  decide whether to rotate them (<a href="../admin/#keys">admin.md</a>). The echo is the email, the one thing about
+  an account a person means.</li>
+<li><strong>Making somebody an owner</strong> deletes their memberships, because an owner has
+  every project. Demoting them leaves none, so they see nothing until they are
+  given projects again.</li>
+</ul>
+<p>The last owner <strong>who can sign in</strong> cannot be demoted, disabled or deleted:
+<code>409</code>. It is the one invariant a server needs to never be locked out of itself,
+so an owner only counts once they can actually open the door: a disabled owner
+counts as none, and so does one who was invited and has not accepted yet. That
+means you cannot stand down the moment you invite a successor — only once they
+have used their link.</p>
+<p>A server with no owner who can sign in prints a setup link again, and that
+setup takes over the existing account if you give it the same email.</p>
+<h2 id="in-the-web-interface">In the web interface</h2>
+<p>All of the above is a screen as well as a <code>curl</code>. The setup and invitation
+links open the two screens that read <code>#token=</code>; <code>/login</code> takes the email and
+the password; the sidebar's account menu leads to <em>Account</em> (<code>/settings/account</code>),
+where anybody changes their own name and password and ends their other
+sessions — an account that is a member of nothing included. A project opens
+on its <a href="../ui/#dashboard">dashboard</a>, whose arrangement is kept on the account
+(above) and so follows the person from one browser to the next.</p>
+<p>Which project a screen is about is in its address — every screen about a
+project lives under <code>/p/{project id}</code> — and the switcher at the top of the sidebar lists the
+projects the account reaches, with the traffic of the last day beside each.
+A link without the prefix lands on the project the account last looked at;
+an address under a project the account is not a member of is one screen
+saying so, not a wall of <code>403</code>s. See
+<a href="../ui/#the-project-in-the-address">ui.md</a>.</p>
+<p>Owners get a <strong>Server</strong> tab in Settings — absent for everybody else, and the
+address redirects — with the projects table, each row leading into that
+project's own settings, and an <strong>Accounts</strong> table: email,
+name, standing, last login, and the projects each account reaches with its
+role, plus <em>Invite</em>, <em>Edit</em> and <em>Delete</em>. The invitation link is shown once,
+there, with a copy button. See <a href="../ui/#settings-and-administration">ui.md</a>.</p>
+<p>The interface hides what a role cannot do and the server refuses it anyway;
+what a <code>viewer</code> keeps is every listing, every detail screen and the whole
+annotation flow, because scoring is what the role is for.</p>
+<h2 id="when-every-owners-password-is-lost">When every owner's password is lost</h2>
+<p>Keep <code>TRACEPAD_ADMIN_TOKEN</code> somewhere, or keep a second owner.</p>
+<p>The token reaches the account routes, so it is the way back in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">TRACEPAD_ADMIN_TOKEN</span><span class="o">=</span>…<span class="w"> </span><span class="c1"># set on the server, then:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">TRACEPAD_API_KEY</span><span class="o">=</span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="w"> </span>tracepad<span class="w"> </span>accounts<span class="w"> </span>invite<span class="w"> </span>you@example.com
+</code></pre></div>
+<p>Open the link it prints and set a new password. The same thing with <code>curl</code>, if
+the binary is not to hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/accounts/</span><span class="nv">$ID</span><span class="s2">/invite"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TRACEPAD_ADMIN_TOKEN</span><span class="s2">"</span>
+</code></pre></div>
+<p>A server with <strong>no</strong> owner at all prints a setup link at every start, so that
+case recovers by restarting. A server with an owner who cannot sign in and no
+admin token configured does not — which is why the sentence above is the first
+one in this section.</p>
+<h2 id="configuration">Configuration</h2>
+<p>The settings that bear on accounts; <a href="../configuration/">configuration.md</a> lists
+every variable the server reads.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRACEPAD_SESSION_DAYS</code></td>
+<td><code>30</code></td>
+<td>How long a browser session lasts. It slides, so this is "how long since you last opened it", not "how long since you signed in". Minimum 1.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_URL</code></td>
+<td>—</td>
+<td>The address your people actually use. The server prints setup and invitation links at its own guess otherwise — the listen address, or the request's <code>Host</code> — which is wrong behind a proxy, and its host is one of the three the cross-site check accepts. An <code>https://</code> address also tells the server a TLS proxy is in front, which changes what its plain-HTTP warning says but does not silence it: a client that connects to the port directly still skips the proxy (<a href="../docker/#serving-over-tls">docker.md</a>).</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_ADMIN_TOKEN</code></td>
+<td>—</td>
+<td>Unchanged from <a href="../admin/">administration</a>, and now also the account routes. At least 32 characters, or the server does not start; <code>TRACEPAD_ADMIN_TOKEN_FILE</code> reads it from a file instead.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_SETUP</code></td>
+<td><code>on</code></td>
+<td><code>off</code> mints no setup link and refuses <code>POST /api/v1/setup</code>; make the first owner with the admin token.</td>
+</tr>
+<tr>
+<td><code>TRACEPAD_TRUSTED_PROXIES</code></td>
+<td><code>loopback</code></td>
+<td>The proxies whose <code>X-Forwarded-For</code>, <code>X-Forwarded-Proto</code> and <code>X-Forwarded-Host</code> the server believes — the client's address, whether the browser is on https, and the host it typed: IP addresses and CIDR ranges, comma-separated, and <code>loopback</code> for <code>127.0.0.0/8</code> and <code>::1</code>. <code>none</code> trusts no proxy. An entry that does not parse, or a range wider than <code>/8</code> (IPv4) or <code>/16</code> (IPv6), stops the start.</td>
+</tr>
+</tbody>
+</table>
+<p>Expired sessions and invitations are removed by the
+<a href="../retention/">retention sweeper</a> on its usual pass. A session that has run out
+stops working the moment it does, not when the sweeper next runs.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache-2.0 licensed
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.action.edit", "content.code.copy", "navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
