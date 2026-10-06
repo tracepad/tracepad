@@ -77,6 +77,10 @@ escaping is the job of whatever reads it.
 | `0` | It worked. |
 | `1` | The request failed: no such trace, bad key, server unreachable. |
 | `2` | The command was typed wrong: unknown flag, missing argument, a `--limit` out of range. |
+| `3` | [`upgrade`](#upgrade) only: not upgraded — the way back ran, and the old version runs again. |
+| `4` | [`upgrade`](#upgrade) only: yours to decide (a check that needs you; with `--plan`, only what is yours is behind). |
+| `5` | [`upgrade`](#upgrade) only: stuck — a step failed and could not be undone, or the old version did not answer after a way back; the report says what is where. |
+| `10` | [`upgrade --plan`](#upgrade) only: the upgrade would change something (`0`: everything is up to date). |
 
 The split is what lets a script tell "there is no such trace" from "you
 typoed a flag".
@@ -1063,6 +1067,124 @@ container's own layer, not a `tmpfs` — and otherwise refuses, printing the
 `docker exec … skills install` is refused ([agents.md](agents.md#from-the-docker-image)).
 Exit `1` for any of these refusals, `2` for a usage error.
 The whole of it is [agents.md](agents.md).
+
+### `upgrade`
+
+```sh
+tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR] [--json]
+tracepad upgrade [--to 0.2.0] [--data-dir DIR] [--json]
+tracepad upgrade --check RUN [--json]
+tracepad upgrade --back RUN [--json]
+```
+
+Upgrades the installed binary and one server you started, to the newest
+stable release or the one `--to` names — never an older one: migrations run
+forward only. With no `--to`, the target is the later of the latest stable
+release and the installed binary: a release candidate installed is never gone
+back from, and a server still running an older version from it is yours to
+take there — the plan gives the command, with the candidate named
+(`--to 0.2.0-rc.1 --data-dir DIR`), and exits `4`. The installed binary is the `tracepad` in the directory the
+command runs from (`~/.local/bin` when it runs from a temporary directory, as
+the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
+manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
+yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a
+server only at the server's own address. It does not run on Windows in this
+release: it refuses there before it looks at anything. The design is spec 054.
+
+- `--plan` changes nothing. It lists the binary, every `tracepad serve` of
+  yours and every container of the image, says which the command may upgrade
+  and why each other is yours (a service, an address beyond this machine,
+  another binary, a container), and what the upgrade would do, step by step.
+- **A container is yours to upgrade**, in this release: the plan and the
+  upgrade name each one that runs an older version and give the commands —
+  stop it, back its volume up, pull the release, and run it again with the
+  options you created it with, the old one kept until the new one is healthy
+  ([docker.md](docker.md#upgrading-and-backing-up-first)), or Compose's
+  `docker compose up -d`. The command changes nothing of a container. Its
+  version is asked where its server listens — `--listen` or
+  `TRACEPAD_LISTEN`, as published on this machine; a container whose address
+  cannot be told is said to be not checked, not called behind.
+- Without it, the command does it. A **server** is the command's when it runs
+  the installed binary, its data directory's lock records its pid, it listens
+  on this machine only, and it is in no service manager's hands: a server in
+  a systemd service (system or `--user`) or a launchd job is yours, whatever
+  started it, and so is one whose cgroup cannot be read or names no session —
+  a container's root without systemd, a slice — since no manager can be ruled
+  out; the plan gives the `systemctl restart` or `launchctl kickstart` for a
+  service's. A terminal's session, tmux, or the `nohup … &` the setup starts a
+  server with is not a service. It
+  is backed up with
+  the server stopped (the data directory archived into
+  `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
+  against the release's `checksums.txt`, and its attestation when `gh` is
+  logged in — is put in place, and the server starts again with **the same
+  arguments, environment and working directory** — in its data directory when
+  that working directory is gone, and not at all (a refusal before the stop)
+  when its data directory or a file it reads, such as
+  `TRACEPAD_ADMIN_TOKEN_FILE`, is named relative to the one gone. A server is stopped with
+  SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
+  (exit `5`), and `--back` starts it again once it has. **No binary is put
+  under another server**: while any server but the run's own runs from the
+  installed binary, at any version, the plan and the upgrade refuse — its next
+  restart would be the new version with no backup — and say to stop it first;
+  two servers of the command's on one binary are refused up front, with the
+  order to take them in.
+  A way back puts the old binary back only where nothing runs it at a later
+  version. **What a way back needs is checked before the stop**: the copy of
+  the old version, room beside the data directory for a restore (beside the
+  archive, when both are on one disk), and a parent directory the restore can
+  be made in and the data renamed aside through, and no other server on the
+  installed binary that a way back would put the old version under; `--back`
+  checks the same before its first act. What the command cannot read — a process, a lock on a file system
+  that cannot lock, the room on a disk, a version that is not said — is a
+  reason to stop, never a yes: it refuses with nothing changed, and a server
+  or container whose version it cannot tell is named as one that may be
+  behind.
+- **The check** asks the server's `/health` at its own address, and compares
+  the trace count of `/api/v1/system` before and after, with the key in
+  `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
+  compared). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
+  but stays silent through the two-minute wait — a long migration runs before
+  the server listens — or answers but counts fewer traces, or cannot count
+  them, is left running for you to decide (exit `4`).
+- `--check RUN` asks again, for a server that was still starting — the one the
+  run started, or the same one you started again since — and never goes back
+  by itself. `--back RUN` takes a run's way back: the archive is
+  restored beside the data and checked before anything stops, what the new
+  version left is **set aside, not deleted** (`<data>.after-<run>`), and the
+  old version starts
+  with its arguments. Whether the archive is restored is decided from what
+  the run recorded when it happened — whether the new version was started on
+  the data, or a server found there started while the installed binary may
+  have been the new one — never from how fast a server answers. `--back` again
+  ends where the first did: it checks the old version, starts it again if it
+  was stopped since, and changes nothing else.
+
+A run directory is a full copy of the database and of the server's
+environment, secrets included, kept until you delete it; erasing traces or a
+user does not reach it, nor what a way back set aside. The report says so, and
+gives the commands to remove each. The command never deletes any of it.
+
+The exit status, by mode — one table, which the skill reads too:
+
+| Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
+|------|----------|-------------|---------------|--------------|
+| `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
+| `2` | a usage error | a usage error | a usage error | a usage error |
+| `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
+| `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
+| `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
+
+An upgrade that finds nothing of its own to do exits as `--plan` would on the
+same machine. Either refuses (`1`) when something runs later than the version
+asked for — after an install script put an older binary in place, say. The
+report says what runs and what is where, whatever the status. `--json`
+prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
+`from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
+`back_check` (the way back's check of the old version), `plan`, `done`,
+`set_aside`, `person`, `next` and `notes`.
 
 ## Version skew
 

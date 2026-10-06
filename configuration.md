@@ -71,8 +71,10 @@ they are. [sdk-python.md](sdk-python.md), [sdk-js.md](sdk-js.md) and
 ## The install script
 
 Read by `scripts/install.sh` — the `curl … | sh` line of the
-[quickstart](quickstart.md#with-your-coding-agent) — and by nothing in the
-binary; the server does not warn about one left exported.
+[quickstart](quickstart.md#with-your-coding-agent) — and, for
+`TRACEPAD_INSTALL_DIR` and `TRACEPAD_DOWNLOAD_URL`, by
+[`tracepad upgrade`](cli.md#upgrade), which installs the same way; the server
+does not warn about one left exported.
 
 | Variable | Default | What it does |
 |---|---|---|
