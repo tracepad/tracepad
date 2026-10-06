@@ -337,7 +337,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		if p.server != nil {
 			own = append(own, p.server.Proc.PID)
 		}
-		if err := r.nothingNewerRuns(ctx, bin.Path, p.to, own...); err != nil {
+		if err := r.serversOn(ctx, bin.Path, p.to, true, own...); err != nil {
 			return nil, err.Error()
 		}
 	}
@@ -470,14 +470,13 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return err
 }
 
-// replaceBinary puts version at the install path, after the one check every
-// replacement makes, an upgrade's or a way back's (spec 054 #26): nothing
-// may run from that binary at a version later than the one put there —
-// a server's next restart would be an older binary over a database a newer
-// one migrated, the downgrade the command refuses everywhere else. The run's
-// own server, which it stops and starts itself, is not counted.
-func (j *job) replaceBinary(ctx context.Context, src, version string) error {
-	if err := j.r.nothingNewerRuns(ctx, j.st.Binary.Path, version, j.ownPIDs()...); err != nil {
+// replaceBinary puts version at the install path, after the check every
+// replacement makes (serversOn): an upgrade's, that no other server runs
+// from the binary at all; a way back's, that none runs it at a later
+// version. The run's own server, which it stops and starts itself, is not
+// counted.
+func (j *job) replaceBinary(ctx context.Context, src, version string, upgrade bool) error {
+	if err := j.r.serversOn(ctx, j.st.Binary.Path, version, upgrade, j.ownPIDs()...); err != nil {
 		return err
 	}
 	return j.r.putInPlace(ctx, src, j.st.Binary.Path, version)
@@ -490,13 +489,24 @@ func (j *job) ownPIDs() []int {
 	return nil
 }
 
-// nothingNewerRuns is that check: every server running the binary at path,
-// found as the plan finds them, answers a version no later than version. One
-// that does not answer cannot be shown to be safe, and refuses too.
-func (r *runner) nothingNewerRuns(ctx context.Context, path, version string, own ...int) error {
-	procs, _, err := r.deps.Sys.Candidates()
-	if err != nil {
-		return fmt.Errorf("the processes could not be listed to check that nothing newer runs from %s: %w", path, err)
+// serversOn checks the servers that run from the binary at path, found as
+// the plan finds them, before version is put there (spec 054 #26, #38). For
+// an upgrade (upgrade true), there must be none but the run's own (own): a
+// server whose binary is replaced under it — a service's, a person's, a
+// second of the command's — becomes the new version at its next restart,
+// with no backup and no check, whatever version it runs now (the ninth
+// review). For a way back, none may run it at a later version than the one
+// put back: its next restart would be an older binary over a database the
+// newer one may have migrated, and one that does not say its version cannot
+// be shown not to. A process that could not be read cannot be shown not to
+// run from path, and refuses too.
+func (r *runner) serversOn(ctx context.Context, path, version string, upgrade bool, own ...int) error {
+	procs, unread, err := r.deps.Sys.Candidates()
+	switch {
+	case err != nil:
+		return fmt.Errorf("the processes could not be listed to check what runs from %s: %w", path, err)
+	case unread > 0:
+		return fmt.Errorf("%d processes of this user could not be read, and any of them may run from %s; nothing can be put there until they can", unread, path)
 	}
 	for _, p := range procs {
 		if slices.Contains(own, p.PID) || !sameFile(p.Exe, path) {
@@ -512,6 +522,9 @@ func (r *runner) nothingNewerRuns(ctx context.Context, path, version string, own
 			v, _ = health(hctx, r.deps.HTTP, url) // ignored: no answer leaves v empty, which refuses below
 			cancel()
 		}
+		if upgrade {
+			return errors.New(underAnother(p.PID, path, v, dataDir, version))
+		}
 		order, known := Compare(v, version)
 		switch {
 		case !known:
@@ -521,6 +534,16 @@ func (r *runner) nothingNewerRuns(ctx context.Context, path, version string, own
 		}
 	}
 	return nil
+}
+
+// underAnother is the refusal of a binary put under another server, the
+// plan's and the upgrade's alike.
+func underAnother(pid int, path, running, dataDir, version string) string {
+	if running == "" {
+		running = "a version it does not say"
+	}
+	return fmt.Sprintf("server pid %d runs %s (%s) on %s, and is not this run's: with %s put under it, its next restart would migrate its data with no backup and no check. "+
+		"Stop it first, and back its data directory up before you start it again (%s)", pid, path, running, dataDir, version, docsUpgrading)
 }
 
 // putInPlace puts a binary at dst the install script's way: copied beside
@@ -742,7 +765,7 @@ func (j *job) putNew(ctx context.Context) error {
 	}
 	err := j.at(stepBinaryReplacing)
 	if err == nil {
-		err = j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.To)
+		err = j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.To, true)
 	}
 	if err != nil {
 		return err

@@ -121,6 +121,10 @@ func within(path, root string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
+// goos is the system the command runs on; a variable for the test of the
+// one it refuses.
+var goos = runtime.GOOS
+
 // Run is `tracepad upgrade`.
 func Run(ctx context.Context, opt Options) int {
 	deps, err := realDeps(opt.Getenv)
@@ -144,6 +148,13 @@ func run(ctx context.Context, opt Options, deps Deps) int {
 	r := &runner{deps: deps, flags: f, version: opt.Version}
 	var rep *Report
 	switch {
+	case goos == "windows":
+		// Not a partial run: the command cannot find a server's process,
+		// its arguments or its lock there, so it does nothing at all (the
+		// ninth review).
+		rep = &Report{Mode: f.mode(), ExitCode: exitRefused,
+			Summary: "Refused: tracepad upgrade does not run on Windows in this release; nothing was looked at or changed. " +
+				"Stop the server, back its data directory up, replace the binary, and start it again (" + docsUpgrading + ")"}
 	case f.plan:
 		rep = r.planMode(ctx)
 	case f.check != "":
@@ -276,4 +287,17 @@ func runSkills(ctx context.Context, bin, dir string, args ...string) (string, er
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// mode is the report's name for the mode the flags ask for.
+func (f flags) mode() string {
+	switch {
+	case f.plan:
+		return "plan"
+	case f.check != "":
+		return "check"
+	case f.back != "":
+		return "back"
+	}
+	return "upgrade"
 }

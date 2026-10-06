@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -542,6 +543,42 @@ func TestTheInstallDirectoryIsWhereTheBinaryRuns(t *testing.T) {
 	} {
 		if got := installDirFor(tc.named, "/home/u", tc.self, tmp); got != tc.want {
 			t.Errorf("%q, %s: %s, want %s", tc.named, tc.self, got, tc.want)
+		}
+	}
+}
+
+// A package manager's binary is the person's (the ninth review), a link or
+// not: Homebrew's Cellar, the Nix store, a snap, the system's directories.
+func TestAPackageManagersBinaryIsThePersons(t *testing.T) {
+	for path, managed := range map[string]bool{
+		"/opt/homebrew/Cellar/tracepad/0.1.0/bin/tracepad":     true,
+		"/usr/local/Cellar/tracepad/0.1.0/bin/tracepad":        true,
+		"/home/linuxbrew/.linuxbrew/bin/tracepad":              true,
+		"/nix/store/abc-tracepad-0.1.0/bin/tracepad":           true,
+		"/snap/tracepad/12/bin/tracepad":                       true,
+		"/usr/bin/tracepad":                                    true,
+		"/home/u/.local/bin/tracepad":                          false,
+		"/opt/tools/tracepad":                                  false,
+		"/usr/local/bin/tracepad":                              false,
+		"/Users/u/Library/Application Support/tracepad/bin/tp": false,
+	} {
+		if got := packageManager(path) != ""; got != managed {
+			t.Errorf("%s: managed %v", path, got)
+		}
+	}
+}
+
+// On Windows the command refuses, plainly, before it looks at anything (the
+// ninth review): it cannot find a server's process or lock there.
+func TestWindowsIsRefusedPlainly(t *testing.T) {
+	saved := goos
+	goos = "windows"
+	t.Cleanup(func() { goos = saved })
+	for _, args := range [][]string{{"--plan"}, {}, {"--back", "20261006-120000-0.1.0-abc123"}} {
+		var out bytes.Buffer
+		code := run(context.Background(), Options{Args: append(args, "--json"), Stdout: &out, Stderr: io.Discard}, Deps{})
+		if code != exitRefused || !strings.Contains(out.String(), "does not run on Windows") {
+			t.Errorf("%q: %d %s", args, code, out.String())
 		}
 	}
 }

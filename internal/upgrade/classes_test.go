@@ -259,26 +259,55 @@ func TestARunIsReadOnlyUnderTheLock(t *testing.T) {
 	}
 }
 
-// What runs from the installed binary at a version that cannot be shown
-// not to be later refuses the run before anything stops (the sixth review):
-// the server the run would upgrade is never stopped.
-func TestANewerServerOnTheBinaryRefusesBeforeTheStop(t *testing.T) {
-	w := newFakeWorld(t, 2)
-	other := t.TempDir()
-	// Open beyond this machine: the person's, and not asked its version.
-	argv := []string{"tracepad", "serve", "--listen", "0.0.0.0:" + strings.Split(freeAddr(t), ":")[1], "--data-dir", other}
-	if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")}); err != nil {
-		t.Fatal(err)
-	}
-	procs, _, _ := w.host.Candidates()
-	rep, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data)
-	if code != exitRefused || !strings.Contains(rep.Summary, "cannot be shown to be safe") {
-		t.Fatalf("%d %s", code, rep.Summary)
-	}
-	for _, p := range procs {
-		if !w.host.Alive(p.PID) {
-			t.Errorf("pid %d was stopped", p.PID)
-		}
+// No binary is put under another server (spec 054 #38): an upgrade refuses
+// before anything stops while any server but its own runs from the
+// installed binary — of the old version or a later one, the command's, a
+// service's, one open beyond this machine — since that server's next
+// restart would be the new version with no backup and no check. A binary-
+// only run is refused the same way.
+func TestNoBinaryIsPutUnderAnotherServer(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		listen func(t *testing.T) string
+		args   func(w *fakeWorld) []string
+		manage bool
+	}{
+		{"an old one beside the run's", func(t *testing.T) string { return freeAddr(t) }, func(w *fakeWorld) []string { return []string{"--to", fNew, "--data-dir", w.data} }, false},
+		{"one open beyond this machine", func(t *testing.T) string { return "0.0.0.0:" + strings.Split(freeAddr(t), ":")[1] }, func(w *fakeWorld) []string { return []string{"--to", fNew, "--data-dir", w.data} }, false},
+		{"a service's, under a binary-only run", nil, func(*fakeWorld) []string { return []string{"--to", fNew} }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newFakeWorld(t, 2)
+			if tc.listen != nil {
+				other := t.TempDir()
+				argv := []string{"tracepad", "serve", "--listen", tc.listen(t), "--data-dir", other}
+				if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.manage {
+				w.host.mu.Lock()
+				for _, s := range w.host.procs {
+					s.p.Manager = "the systemd unit tracepad.service"
+				}
+				w.host.mu.Unlock()
+			}
+			procs, _, _ := w.host.Candidates()
+			for _, mode := range [][]string{{"--plan"}, nil} {
+				rep, code := runIn(t, context.Background(), w.deps(), append(mode, tc.args(w)...)...)
+				if code != exitRefused || !strings.Contains(rep.Summary, "is not this run's") {
+					t.Fatalf("%q: %d %s", mode, code, rep.Summary)
+				}
+			}
+			for _, p := range procs {
+				if !w.host.Alive(p.PID) {
+					t.Errorf("pid %d was stopped", p.PID)
+				}
+			}
+			if v, _ := scriptVersion(context.Background(), w.install); v != fOld {
+				t.Errorf("the binary is %s", v)
+			}
+		})
 	}
 }
 
@@ -532,5 +561,19 @@ func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
 	w.host.setSlow(0)
 	if code != exitRefused || !strings.Contains(rep.Summary, "does not answer") && !strings.Contains(rep.Summary, "does not say its version") {
 		t.Errorf("%d %s", code, rep.Summary)
+	}
+}
+
+// The plan calls a binary in Homebrew's Cellar the person's, a link or not,
+// with what upgrades it (the ninth review).
+func TestABinaryInTheCellarIsThePersons(t *testing.T) {
+	cellar := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.1.0", "bin")
+	_ = os.MkdirAll(cellar, 0o755)
+	scriptBinary(t, filepath.Join(cellar, "tracepad"), "0.1.0")
+	deps := containerDeps(t, newFakeDocker(t))
+	deps.InstallDir = cellar
+	rep, code := runReport(t, deps, "--plan")
+	if rep.Binary == nil || rep.Binary.Whose != "person" || !strings.Contains(rep.Binary.Reason, "brew upgrade tracepad") || code == exitPending {
+		t.Errorf("%d %+v", code, rep.Binary)
 	}
 }

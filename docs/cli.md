@@ -1081,9 +1081,11 @@ Upgrades the installed binary and one server you started, to the newest
 stable release or the one `--to` names — never an older one: migrations run
 forward only. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, as
-the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). It is local,
-like `skills`: it reads this machine's processes and containers and asks a
-server only at the server's own address. The design is spec 054.
+the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
+manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
+yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a
+server only at the server's own address. It does not run on Windows in this
+release: it refuses there before it looks at anything. The design is spec 054.
 
 - `--plan` changes nothing. It lists the binary, every `tracepad serve` of
   yours and every container of the image, says which the command may upgrade
@@ -1109,8 +1111,12 @@ server only at the server's own address. The design is spec 054.
   logged in — is put in place, and the server starts again with **the same
   arguments, environment and working directory**. A server is stopped with
   SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
-  (exit `5`), and `--back` starts it again once it has. No binary is ever put in place while a server runs
-  from it at a later version than the one put there.
+  (exit `5`), and `--back` starts it again once it has. **No binary is put
+  under another server**: while any server but the run's own runs from the
+  installed binary, at any version, the plan and the upgrade refuse — its next
+  restart would be the new version with no backup — and say to stop it first.
+  A way back puts the old binary back only where nothing runs it at a later
+  version.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not

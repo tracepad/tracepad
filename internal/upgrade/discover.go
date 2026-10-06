@@ -346,6 +346,12 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	case !st.Mode().IsRegular():
 		b.Exists = true
 		b.Reason = b.Path + " is not a regular file"
+	case packageManager(canonicalPath(b.Path)) != "":
+		// A package manager's file, though not a link: replaced under it,
+		// the manager's record and the binary part (the ninth review).
+		b.Exists = true
+		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a package manager's binary is the person's either way
+		b.Reason = b.Path + " is " + packageManager(canonicalPath(b.Path))
 	default:
 		b.Exists = true
 		b.Version, err = r.deps.Version(ctx, b.Path)
@@ -417,4 +423,25 @@ func (r *runner) attribute(p Probe, f Findings) Probe {
 func listensOnDefault(listen string) bool {
 	_, port, err := net.SplitHostPort(listen)
 	return err == nil && port == "4318"
+}
+
+// packageManager says whose a binary at path is when a package manager
+// installed it — Homebrew's Cellar, the Nix store, a snap, the system's own
+// directories that dpkg and rpm fill — with what upgrades it; empty when it
+// is none's.
+func packageManager(path string) string {
+	switch {
+	case strings.Contains(path, "/Cellar/") || strings.HasPrefix(path, "/opt/homebrew/") || strings.HasPrefix(path, "/home/linuxbrew/"):
+		return "Homebrew's: brew upgrade tracepad"
+	case strings.HasPrefix(path, "/nix/store/"):
+		return "in the Nix store: your Nix configuration upgrades it"
+	case strings.HasPrefix(path, "/snap/"):
+		return "a snap's: snap refresh tracepad"
+	}
+	for _, dir := range []string{"/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/usr/lib/", "/usr/libexec/", "/usr/share/", "/opt/local/"} {
+		if strings.HasPrefix(path, dir) {
+			return "the system's package manager's (dpkg, rpm, MacPorts): upgrade it with that manager"
+		}
+	}
+	return ""
 }

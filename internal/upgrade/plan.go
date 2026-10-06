@@ -104,6 +104,15 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", s.Proc.PID), s.Version) + " Leave it running"
 		}
 	}
+	// The plan refuses what the upgrade would (#38): a binary put under
+	// another server of it, whatever version that one runs.
+	if p.replaceBinary && len(p.choose) == 0 {
+		for _, s := range p.f.Servers {
+			if (p.server == nil || s.Proc.PID != p.server.Proc.PID) && sameFile(s.Proc.Exe, bin.Path) {
+				return nil, underAnother(s.Proc.PID, bin.Path, s.Version, s.DataDir, to)
+			}
+		}
+	}
 	r.othersBehind(p)
 	rep.From = p.from
 	return p, ""
@@ -203,8 +212,10 @@ func (r *runner) othersBehind(p *plan) {
 	if b := p.f.Binary; b.First != "" {
 		if v, err := r.deps.Version(context.Background(), b.First); err == nil && older(v) {
 			advice := "its package manager upgrades it"
-			if strings.Contains(b.First, "/homebrew/") || strings.Contains(b.First, "/Cellar/") || strings.HasPrefix(b.First, "/usr/local/bin/") {
-				advice = "brew upgrade tracepad"
+			if pm := packageManager(canonicalPath(b.First)); pm != "" {
+				advice = pm
+			} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
+				advice = "brew upgrade tracepad, if Homebrew installed it"
 			}
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
 		}

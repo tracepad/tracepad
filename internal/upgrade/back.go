@@ -88,7 +88,7 @@ func (j *job) restoreBinary(ctx context.Context, copyPath, want string) error {
 	if v, err := j.r.deps.Version(ctx, path); err == nil && v == want {
 		return nil
 	}
-	if err := j.replaceBinary(ctx, copyPath, want); err != nil {
+	if err := j.replaceBinary(ctx, copyPath, want, false); err != nil {
 		return err
 	}
 	j.done("put tracepad %s back at %s", want, path)
@@ -152,7 +152,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 				}
 			}
 		}
-		if err := r.nothingNewerRuns(ctx, st.Binary.Path, st.From, own...); err != nil {
+		if err := r.serversOn(ctx, st.Binary.Path, st.From, false, own...); err != nil {
 			return j.fail(err.Error() + "; nothing was touched")
 		}
 	}
