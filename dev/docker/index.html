@@ -2401,16 +2401,25 @@ still being written after five seconds is cut off either way.</p>
 existing <code>/data</code> and brings it forward. <strong>A downgrade is not supported</strong> — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.</p>
-<p><strong>A container is upgraded by hand</strong>, in this release. <code>tracepad upgrade --plan</code>
-on the host — or your coding agent, given
+<p><strong><code>tracepad upgrade</code> upgrades a container it can recreate exactly.</strong> On the
+host, <code>tracepad upgrade --plan</code> — or your coding agent, given
 <code>Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md</code> —
-names every container of the image that runs an older version and gives the
-steps below with its name, its volume and the release filled in, and the
-<code>docker run</code> it was created with — its ports, mounts, restart policy and
-command, read from <code>docker inspect</code> — the variables it was given passed in a
-file read from Docker, named and never printed; the command changes nothing of
-a container. A Compose project takes the new tag in its Compose file and
-<code>docker compose up -d</code>, after the same backup.</p>
+finds every container of the image. One named <code>tracepad-&lt;project&gt;</code>, as the
+agent's setup names it, or named with <code>--container</code> (<code>--container tracepad</code>
+for this page's), is the command's when it is published on this machine only,
+keeps its data on a named volume, and has nothing set that its <code>docker run</code>
+would not carry: <code>tracepad upgrade</code> stops it, archives its volume into
+<code>~/tracepad-backups/&lt;run&gt;/</code> and reads the archive back, renames it
+<code>&lt;name&gt;-before-&lt;run&gt;</code>, runs the release under its name with the options it was
+created with, checks it, and goes back by itself when the new one does not
+answer — onto a new volume restored from the archive, deleting nothing
+(<a href="../cli/#upgrade">cli.md</a>). Every other container is yours: the plan names it,
+says why, and gives the steps below with its name, its volume and the release
+filled in, and the <code>docker run</code> it was created with — its ports, mounts,
+restart policy, labels and command, read from <code>docker inspect</code> — the variables
+it was given passed in a file read from Docker, named and never printed. A
+Compose project takes the new tag in its Compose file and <code>docker compose up
+-d</code>, after the same backup.</p>
 <p>Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
 one before it worked, so a backup that is refused stops everything after it:</p>

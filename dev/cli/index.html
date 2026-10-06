@@ -3136,18 +3136,18 @@ container's own layer, not a <code>tmpfs</code> — and otherwise refuses, print
 Exit <code>1</code> for any of these refusals, <code>2</code> for a usage error.
 The whole of it is <a href="../agents/">agents.md</a>.</p>
 <h3 id="upgrade"><code>upgrade</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--plan<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
-<a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--plan<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="w"> </span><span class="p">|</span><span class="w"> </span>--container<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="w"> </span><span class="p">|</span><span class="w"> </span>--container<span class="w"> </span>NAME<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 <a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--check<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 <a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--back<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 </code></pre></div>
-<p>Upgrades the installed binary and one server you started, to the newest
+<p>Upgrades the installed binary and one server or container you started, to the newest
 stable release or the one <code>--to</code> names — never an older one: migrations run
 forward only. With no <code>--to</code>, the target is the later of the latest stable
 release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
-(<code>--to 0.2.0-rc.1 --data-dir DIR</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
+(<code>--to 0.2.0-rc.1 --data-dir DIR</code>, or <code>--container NAME</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
 command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, as
 the agent's bridge does; <code>TRACEPAD_INSTALL_DIR</code> names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, <code>/usr/bin</code> — is
@@ -3158,18 +3158,37 @@ release: it refuses there before it looks at anything. The design is spec 054.</
 <li><code>--plan</code> changes nothing. It lists the binary, every <code>tracepad serve</code> of
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
-  another binary, a container), and what the upgrade would do, step by step.</li>
-<li><strong>A container is yours to upgrade</strong>, in this release: the plan and the
-  upgrade name each one that runs an older version and give the commands —
-  stop it, back its volume up, pull the release, and run it again with the
-  options you created it with — the <code>docker run</code> read from <code>docker inspect</code>,
-  its variables passed in a file read from Docker and never printed — the old
-  one kept until the new one is healthy
-  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>), or Compose's
-  <code>docker compose up -d</code>. The command changes nothing of a container. Its
-  version is asked where its server listens — <code>--listen</code> or
-  <code>TRACEPAD_LISTEN</code>, as published on this machine; a container whose address
-  cannot be told is said to be not checked, not called behind.</li>
+  another binary, a Compose project), and what the upgrade would do, step by
+  step. More than one of the command's behind: name one with <code>--data-dir</code> or
+  <code>--container</code>.</li>
+<li><strong>A container</strong> is the command's when it is named <code>tracepad-&lt;project&gt;</code>, as
+  the setup names one, or with <code>--container NAME</code>, and a recreate of it is the
+  same container: no Compose, Swarm or Kubernetes label; running; a local named
+  volume at <code>/data</code>, without options of its own; every port published on a
+  loopback address only, at a fixed port, its server's among them; the default
+  network; the image's entrypoint, health check and stop signal; no tmpfs; no
+  mount option beyond read-only (a relabel, a propagation, a <code>--mount</code>
+  option); no link or special file in its volume, which a restore would not
+  make again; no log option that can hold a credential (rotation and tags are
+  carried); Docker neither rootless nor remapping user namespaces; and nothing
+  set in <code>docker inspect</code> that its <code>docker run</code> does not carry — each such
+  setting is named, in the plan and in the commands it gives you. It is
+  stopped with SIGTERM (its restart policy set to <code>no</code> for the stop, never
+  <code>docker stop</code>'s kill), its volume archived from <code>busybox</code> into the run's
+  directory and read back whole, renamed <code>&lt;name&gt;-before-&lt;run&gt;</code>, and the
+  release is run under its name with <strong>the <code>docker run</code> it was created with</strong>
+  — its ports, its mounts (read-only ones read-only), its restart policy, its
+  labels, a log driver of its own, its user, its command — and the variables
+  you gave it through a file of the run's (<code>0600</code>), never a command line. Its
+  version is asked where its server listens (<code>--listen</code> or <code>TRACEPAD_LISTEN</code>,
+  as published on this machine). Once it is healthy, the installed binary is
+  brought to its version when no server runs from it. Every other container
+  of the image is yours, and the plan gives the commands that upgrade it —
+  the same <code>docker run</code>, its variables in a file read from Docker and never
+  printed, the old one kept until the new one is healthy
+  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>) — or Compose's
+  <code>docker compose up -d</code>. One whose address cannot be told is said to be not
+  checked, not called behind.</li>
 <li>Without it, the command does it. A <strong>server</strong> is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -3201,7 +3220,9 @@ release: it refuses there before it looks at anything. The design is spec 054.</
   archive, when both are on one disk), and a parent directory the restore can
   be made in and the data renamed aside through, and no other server on the
   installed binary that a way back would put the old version under; <code>--back</code>
-  checks the same before its first act. What the command cannot read — a process, a lock on a file system
+  checks the same before its first act. For a container: the old image there
+  to run again, <code>busybox</code>, the names a way back makes free, and room for a
+  restore beside its volume. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
   or container that does not say its version when asked is named as one that
@@ -3226,7 +3247,11 @@ release: it refuses there before it looks at anything. The design is spec 054.</
   the data, or a server found there started while the installed binary may
   have been the new one — never from how fast a server answers. <code>--back</code> again
   ends where the first did: it checks the old version, starts it again if it
-  was stopped since, and changes nothing else.</li>
+  was stopped since, and changes nothing else. A container's way back
+  restores the archive into a new volume, <code>&lt;volume&gt;-&lt;run&gt;</code>, owned as the old
+  one's root is, sets the new container aside as <code>&lt;name&gt;-after-&lt;run&gt;</code> (restart
+  policy <code>no</code>), and runs the old image under its name on the restored volume;
+  the volume the new version migrated is kept as it was.</li>
 </ul>
 <p>A run directory is a full copy of the database and of the server's
 environment, secrets included, kept until you delete it; erasing traces or a

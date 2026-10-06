@@ -39,7 +39,9 @@ In outline: `tracepad upgrade --plan` changes nothing and says what the upgrade
 will do and what is the person's; you show it to them. `tracepad upgrade` then
 backs the data up into `~/tracepad-backups/<run>/` before it stops anything,
 puts the new binary in place, starts the server again with the same
-arguments and environment, and checks it. A new version that exits or answers
+arguments and environment, and checks it — for a container, it archives its
+volume, renames it aside and runs the release under its name with the
+`docker run` it was created with. A new version that exits or answers
 as another version is rolled back at once; one that
 runs but stays silent through the wait (a long migration runs before the
 server listens), or answers with a trace count that looks wrong, is left
@@ -51,11 +53,12 @@ package moves to the same version, and you report.
 
 - A server the command does not start or stop itself: a service (systemd,
   launchd), a server reachable from other machines, one that runs another
-  binary (Homebrew's: `brew upgrade tracepad`), and every container, Compose's
-  or not. The plan names each, with its reason and the commands for it — for a
-  container: stop it, back its volume up, pull the release, and the
-  `docker run` it was created with, read from `docker inspect`, its variables
-  passed in a file and never printed.
+  binary (Homebrew's: `brew upgrade tracepad`); and a container it cannot
+  recreate exactly — Compose's, one published beyond this machine, one with a
+  setting its `docker run` would not carry. The plan names each, with its
+  reason and the commands for it — for a container: stop it, back its volume
+  up, pull the release, and the `docker run` it was created with, read from
+  `docker inspect`, its variables passed in a file and never printed.
 - A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.
 - Free space for the backup, when there is not enough.
