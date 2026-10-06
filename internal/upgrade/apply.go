@@ -1195,6 +1195,10 @@ func backupsSentence(dir string, st *State) string {
 		switch {
 		case strings.HasPrefix(s, "container "):
 			containers = append(containers, "docker rm "+shq(strings.TrimPrefix(s, "container ")))
+		case strings.HasPrefix(s, "image "):
+			// A tag the run gave the old image; once the containers that run
+			// it are gone, removing it removes only the name.
+			containers = append(containers, "docker rmi "+shq(strings.TrimPrefix(s, "image ")))
 		case strings.HasPrefix(s, "volume "):
 			volumes = append(volumes, "docker volume rm "+shq(strings.TrimPrefix(s, "volume ")))
 		default:

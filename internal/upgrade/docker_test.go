@@ -966,13 +966,16 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 		{Type: "volume", Name: "tp", Destination: "/data", RW: true},
 		{Type: "bind", Source: "/Users/me/My Data, certs", Destination: "/tls", RW: false},
 	}
+	// What an earlier run marked it with is the command's, not the person's:
+	// never carried into a recreate.
+	ic.Config.Labels[runLabel], ic.Config.Labels[runLabel+".step"] = "an-earlier-run", "started"
 	run, names, err := createdAs(ic, img, "json-file")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := Container{Run: run, EnvNames: names, inspect: ic}
-	got := runArgs(c, "tracepad-app", "ghcr.io/tracepad/tracepad:0.2.0", "/run/env", "")
-	want := []string{"run", "-d", "--name", "tracepad-app", "--env-file", "/run/env",
+	got := runArgs(c, "tracepad-app", "ghcr.io/tracepad/tracepad:0.2.0", "/run/env", "", "R", stepStarted)
+	want := []string{"run", "-d", "--name", "tracepad-app", "--env-file", "/run/env", "--label", runLabel + "=R", "--label", runLabel + ".step=started",
 		"-p", "127.0.0.1:4317:4317", "-p", "[::1]:4318:4318",
 		"--mount", "type=volume,src=tp,dst=/data",
 		"--mount", `type=bind,"src=/Users/me/My Data, certs",dst=/tls,readonly`,
@@ -1007,7 +1010,7 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 	if env := personEnv(ic, names); !slices.Equal(env, []string{"TRACEPAD_PROJECTS=a:b:c"}) {
 		t.Errorf("the person's environment: %q", env)
 	}
-	if got := runArgs(c, "n", "r", "e", "tp-run"); !slices.Contains(got, "type=volume,src=tp-run,dst=/data") || slices.Contains(got, "type=volume,src=tp,dst=/data") {
+	if got := runArgs(c, "n", "r", "e", "tp-run", "R", stepBackStarted); !slices.Contains(got, "type=volume,src=tp-run,dst=/data") || slices.Contains(got, "type=volume,src=tp,dst=/data") {
 		t.Errorf("the volume swap: %q", got)
 	}
 	// The daemon's own log driver, with no options, is the daemon's again.

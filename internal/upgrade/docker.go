@@ -368,7 +368,7 @@ func restartArg(name string, retries int) string {
 func personLabels(container, image map[string]string) []string {
 	var out []string
 	for k, v := range container {
-		if iv, ok := image[k]; ok && iv == v {
+		if iv, ok := image[k]; (ok && iv == v) || strings.HasPrefix(k, runLabel+".") || k == runLabel {
 			continue
 		}
 		out = append(out, k+"="+v)
@@ -377,12 +377,21 @@ func personLabels(container, image map[string]string) []string {
 	return out
 }
 
+// runLabel marks a container the command made: the run that made it, and
+// (runLabel.step) the step its start records. A container under the run's
+// name is the run's own only with them (the review of #226): one the person
+// made, of the same image, is theirs, and refused with nothing touched. A
+// recreate does not carry them over (personLabels).
+const runLabel = "org.tracepad.upgrade.run"
+
 // runArgs is the command's own `docker run` for a container, from Run (the
 // plan's, createdAs): its name, its variables through envFile, the image ref,
-// and — when volume is given — that volume at /data instead of its own. Never
-// through a shell: an argument vector has no word splitting.
-func runArgs(c Container, name, ref, envFile, volume string) []string {
-	args := []string{"run", "-d", "--name", name, "--env-file", envFile}
+// and — when volume is given — that volume at /data instead of its own; the
+// run and step that make it, as labels. Never through a shell: an argument
+// vector has no word splitting.
+func runArgs(c Container, name, ref, envFile, volume, run, step string) []string {
+	args := []string{"run", "-d", "--name", name, "--env-file", envFile,
+		"--label", runLabel + "=" + run, "--label", runLabel + ".step=" + step}
 	from, to := "", ""
 	for _, m := range c.inspect.Mounts {
 		if m.Destination == "/data" && m.Type == "volume" && volume != "" {

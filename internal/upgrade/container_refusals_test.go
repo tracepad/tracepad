@@ -322,6 +322,7 @@ var containerScenarios = []struct {
 	{"ARenameCutShortAndTheOldContainerRemoved", testARenameCutShortAndTheOldContainerRemoved},
 	{"APersonsTagIsNeverMoved", testAPersonsTagIsNeverMoved},
 	{"AFailedReplacementSaysOneThing", testAFailedReplacementSaysOneThing},
+	{"APersonsContainerUnderTheNameIsNotAdopted", testAPersonsContainerUnderTheNameIsNotAdopted},
 	{"AProcessOnTheBinaryKeepsItAndTheContainerGoesOn", testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn},
 }
 
@@ -518,6 +519,11 @@ func testAPersonsTagIsNeverMoved(t *testing.T) {
 	if cur := d.container("tracepad-app"); cur.Config.Image != want {
 		t.Errorf("the old image runs as %q, not %q", cur.Config.Image, want)
 	}
+	// The run's own tag is set aside, with the command that removes it.
+	back, _ := runReport(t, deps, "--back", rep.Run.ID)
+	if !slices.Contains(back.SetAside, "image "+want) || !strings.Contains(strings.Join(back.Person, "\n"), "docker rmi "+want) {
+		t.Errorf("the run's tag is not set aside: %q %q", back.SetAside, back.Person)
+	}
 }
 
 // The host's binary cannot be put in place after a healthy container
@@ -590,5 +596,39 @@ func TestAnArchivesNamesNeverLeaveTheCheck(t *testing.T) {
 	}
 	if others, _ := filepath.Glob(filepath.Join(root, "tracepad.db*")); len(others) > 0 {
 		t.Errorf("written outside: %q", others)
+	}
+}
+
+// A container under the run's name, of the old image, that the run did not
+// make — no label of the run's — is the person's: never adopted as the way
+// back's start, and the way back refuses with nothing touched (the review of
+// #226).
+func testAPersonsContainerUnderTheNameIsNotAdopted(t *testing.T) {
+	c := newContainerCell(t)
+	rep, code := c.cmd(c.deps, "--to", "0.2.0")
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	// Killed as the way back was about to run the old image: its intent is
+	// written, nothing ran.
+	deps := c.deps
+	deps.Fault = func(point string) error {
+		if point == stepBackStarted {
+			panic(killed{})
+		}
+		return nil
+	}
+	c.cmd(deps, "--back", rep.Run.ID)
+	// The person runs the old image under the name meanwhile.
+	theirs := c.d.run(t, "--name", "tracepad-app", "--mount", "type=volume,src=theirs,dst=/data", "-p", "127.0.0.1:4500:4318", "ghcr.io/tracepad/tracepad:0.1.0")
+	back, code := c.cmd(c.deps, "--back", rep.Run.ID)
+	if code == exitOK || !strings.Contains(back.Summary, "not this run's") || !strings.Contains(back.Summary, "nothing was started") {
+		t.Errorf("%d %s", code, back.Summary)
+	}
+	if cur := c.d.container("tracepad-app"); cur == nil || cur.ID != theirs.ID || !cur.State.Running {
+		t.Errorf("the person's container was touched: %+v", cur)
+	}
+	if st, _ := loadState(rep.Run.Dir); st.Container.BackID == theirs.ID {
+		t.Error("the person's container was adopted")
 	}
 }

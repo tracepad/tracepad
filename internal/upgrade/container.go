@@ -283,7 +283,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	j.step(stepRenamedOld)
 	j.done("renamed %s to %s, restart policy no", cs.Name, j.before())
 
-	args := runArgs(j.ctr, cs.Name, cs.NewRef, filepath.Join(j.dir, "env"), "")
+	args := runArgs(j.ctr, cs.Name, cs.NewRef, filepath.Join(j.dir, "env"), "", st.Run, stepStarted)
 	var out []byte
 	err = j.act(stepStarted, "run "+cs.NewRef+" as "+cs.Name, func() (err error) {
 		out, err = docker.Run(ctx, args...)
@@ -607,7 +607,7 @@ func (j *job) runOld(ctx context.Context, vol string) (bool, wentBack, bool) {
 				return err
 			}
 		}
-		out, err := r.deps.Docker.Run(ctx, runArgs(j.ctr, cs.Name, ref, filepath.Join(j.dir, "env"), vol)...)
+		out, err := r.deps.Docker.Run(ctx, runArgs(j.ctr, cs.Name, ref, filepath.Join(j.dir, "env"), vol, j.st.Run, stepBackStarted)...)
 		made, fresh = out, err == nil
 		return err
 	})
@@ -946,6 +946,12 @@ func (j *job) oldRef(ctx context.Context) (string, error) {
 	if _, err := r.deps.Docker.Run(ctx, "tag", cs.OldImage, tag); err != nil {
 		return "", fmt.Errorf("the old image %s has no name of the release's to run it by, and could not be given %s (%s)", cs.OldImage, tag, firstLine(err.Error()))
 	}
+	// A name of the run's own is the run's to say: set aside, with the
+	// command that removes it (the review of #226).
+	if item := "image " + tag; tag != release && !slices.Contains(j.st.SetAside, item) {
+		j.st.SetAside = append(j.st.SetAside, item)
+		j.persist()
+	}
 	return tag, nil
 }
 
@@ -1072,7 +1078,7 @@ func (j *job) settleContainer(ctx context.Context, step string) (bool, error) {
 	case stepStarted:
 		// Run, and started: the new version may have written the volume.
 		// One docker made and could not start is no start.
-		if under != nil && under.ID != cs.ID && under.Config.Image == cs.NewRef && everStarted(under) {
+		if under != nil && under.ID != cs.ID && under.Config.Image == cs.NewRef && j.made(under, stepStarted) && everStarted(under) {
 			cs.NewID = under.ID
 			return true, nil
 		}
@@ -1089,12 +1095,18 @@ func (j *job) settleContainer(ctx context.Context, step string) (bool, error) {
 		case under.ID == cs.ID && under.State.Running:
 			cs.BackID = cs.ID
 			return true, nil
-		case under.ID != cs.ID && under.ID != cs.NewID && under.Image == cs.OldImage && everStarted(under):
+		case under.ID != cs.ID && under.ID != cs.NewID && under.Image == cs.OldImage && j.made(under, stepBackStarted) && everStarted(under):
 			cs.BackID = under.ID
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// made says whether a container is one this run made for step, by its
+// labels (runLabel): only such a one is adopted.
+func (j *job) made(c *inspectContainer, step string) bool {
+	return c.Config.Labels[runLabel] == j.st.Run && c.Config.Labels[runLabel+".step"] == step
 }
 
 // errKeep: the intent stays pending, for the act's own path to take up.
