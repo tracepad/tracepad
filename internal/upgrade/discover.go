@@ -29,6 +29,8 @@ type Binary struct {
 	// and the install script replaces.
 	Dev     bool
 	Version string
+	// Link is where the install path links to, when it is a link.
+	Link string
 	// Ours is whether the command may replace it; Reason says why not.
 	Ours   bool
 	Reason string
@@ -387,7 +389,8 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		b.Reason = err.Error()
 	case st.Mode()&os.ModeSymlink != 0:
 		b.Exists = true
-		target, _ := os.Readlink(b.Path)           // ignored: the message's; a link is the person's either way
+		target, _ := os.Readlink(b.Path) // ignored: the message's; a link is the person's either way
+		b.Link = target
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"
 		// A build linked from its checkout is a development build too (the

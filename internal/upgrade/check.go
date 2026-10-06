@@ -82,7 +82,7 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 		// 0.1.0: a key the project kept elsewhere left the line reading
 		// only "no TRACEPAD_API_KEY in the environment").
 		why := c.CountNote
-		if why == "" || c.After != nil {
+		if why == "" {
 			why = "the count before the upgrade was not read"
 		}
 		c.CountNote = "the trace counts were not compared: " + why
@@ -98,13 +98,16 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 	return c
 }
 
+// noKey is why there is no count when no key was given.
+const noKey = "no TRACEPAD_API_KEY in the environment"
+
 // traceCount reads `database.rows.traces` of /api/v1/system with the key in
 // TRACEPAD_API_KEY, which is read from the environment and never put on a
 // command line. note says why there is no count.
 func (r *runner) traceCount(ctx context.Context, base string) (*int64, string) {
 	key := r.deps.Getenv("TRACEPAD_API_KEY")
 	if key == "" {
-		return nil, "no TRACEPAD_API_KEY in the environment"
+		return nil, noKey
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

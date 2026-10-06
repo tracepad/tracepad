@@ -77,7 +77,8 @@ type BinaryReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	First   string `json:"first_on_path,omitempty"`
-	// Idle: the person's, and nothing behind the plan's version in it.
+	// Idle: at the plan's version, past it, or not a release — nothing to
+	// do, whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -91,8 +92,8 @@ type ServerReport struct {
 	Whose   string   `json:"whose"`
 	Reason  string   `json:"reason,omitempty"`
 	Target  bool     `json:"target,omitempty"`
-	// Idle: the person's, at the plan's version, past it, or not a
-	// release — nothing to do.
+	// Idle: at the plan's version, past it, or not a release — nothing to
+	// do, whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -105,8 +106,8 @@ type ContainerReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	Target  bool   `json:"target,omitempty"`
-	// Idle: the person's, at the plan's version, past it, or not a
-	// release — nothing to do.
+	// Idle: at the plan's version, past it, or not a release — nothing to
+	// do, whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -172,9 +173,9 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 		if v == "" {
 			v = "none"
 		}
-		item(bin.Idle, "binary    %s (%s)%s", bin.Path, v, reasonSuffix(bin.Whose, bin.Reason))
+		item(bin.Idle && bin.Whose == "person", "binary    %s (%s)%s", bin.Path, v, reasonSuffix(bin.Whose, bin.Reason))
 		if bin.First != "" {
-			item(bin.Idle, "          another tracepad comes first on PATH: %s", bin.First)
+			item(bin.Idle && bin.Whose == "person", "          another tracepad comes first on PATH: %s", bin.First)
 		}
 	}
 	for _, s := range rep.Servers {
@@ -182,15 +183,15 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 		if s.Target {
 			mark = " ← this run"
 		}
-		item(s.Idle, "server    pid %d, %s, data %s, %s%s%s", s.PID, orNone(s.Version), s.DataDir, s.Listen, mark, reasonSuffix(s.Whose, s.Reason))
-		item(s.Idle, "          %s", strings.Join(s.Command, " "))
+		item(s.Idle && s.Whose == "person", "server    pid %d, %s, data %s, %s%s%s", s.PID, orNone(s.Version), s.DataDir, s.Listen, mark, reasonSuffix(s.Whose, s.Reason))
+		item(s.Idle && s.Whose == "person", "          %s", strings.Join(s.Command, " "))
 	}
 	for _, c := range rep.Containers {
 		mark := ""
 		if c.Target {
 			mark = " ← this run"
 		}
-		item(c.Idle, "container %s, %s, %s%s%s", c.Name, c.Image, orNone(c.Version), mark, reasonSuffix(c.Whose, c.Reason))
+		item(c.Idle && c.Whose == "person", "container %s, %s, %s%s%s", c.Name, c.Image, orNone(c.Version), mark, reasonSuffix(c.Whose, c.Reason))
 	}
 	if p := rep.Probe; p != nil {
 		line("  %s answers as %s: %s", p.URL, p.Version, p.Whose)

@@ -22,6 +22,9 @@ their own headings.
   Compose really named archived — the old advice, copied, archived an empty
   volume called `tracepad` — the file to edit, and `up -d`. An image pinned by
   digest is said, since Docker keeps the digest whatever the new tag says.
+- Every command `tracepad upgrade` and the install script print quotes the
+  values it did not choose — names, paths, labels, a version a server
+  answered — so pasting one runs nothing but the command.
 - The plan lists what is yours and needs nothing apart from what needs you,
   says when the trace counts will not be compared for want of a key, and gives
   a development build at the install path the line that replaces it.

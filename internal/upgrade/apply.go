@@ -443,9 +443,12 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		}
 		count, note := r.traceCount(ctx, base)
 		st.CountBefore = count
-		if count != nil {
+		switch {
+		case count != nil:
 			j.done("read the trace count: %d", *count)
-		} else {
+		case note != noKey:
+			// No key, the check says, as the plan did; any other reason
+			// only this read knows (the second review of #228).
 			rep.Notes = append(rep.Notes, "the trace counts are not compared: "+note)
 		}
 	}

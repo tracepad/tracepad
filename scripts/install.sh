@@ -10,8 +10,7 @@
 # installed and logged in. The binary goes to ~/.local/bin, or
 # TRACEPAD_INSTALL_DIR — never with sudo. Running it again upgrades, or does
 # nothing when the version is already there. TRACEPAD_NO_SKILL=1 leaves the
-# skill alone; TRACEPAD_NO_PLAN=1 skips its look at what still runs an older
-# version; TRACEPAD_DOWNLOAD_URL points at a mirror of the releases page.
+# skill alone; TRACEPAD_DOWNLOAD_URL points at a mirror of the releases page.
 #
 # POSIX sh: it runs under dash as well as bash, and everything is inside
 # functions so that a download cut short runs nothing.
@@ -21,6 +20,13 @@ REPO=tracepad/tracepad
 SCRIPT_URL=https://tracepad.github.io/tracepad/install.sh
 AGENT_LINE='Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md'
 UPGRADE_PAGE=https://tracepad.github.io/tracepad/agent-upgrade.md
+
+# q quotes a word for the shell, for a command this script prints: a path is
+# the person's to choose, and one with a quote, a space or a `$(` in it must
+# paste as itself (the second review of #228).
+q() {
+	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -315,24 +321,24 @@ main() {
 		first="$(command -v tracepad 2>/dev/null || true)"
 		if [ -n "$first" ] && [ "$first" != "$bin" ]; then
 			say ""
-			say "Another tracepad comes first on your PATH: $first. Remove it, or run $bin."
+			say "Another tracepad comes first on your PATH: $first. Remove it, or run $(q "$bin")."
 		fi
 		;;
 	*)
 		say ""
 		say "$dir is not on your PATH. Add it in your shell's profile (~/.zshrc, ~/.bashrc), then open a new terminal:"
-		say "  export PATH=\"$dir:\$PATH\""
+		say "  export PATH=$(q "$dir"):\"\$PATH\""
 		;;
 	esac
 
 	# A server or container started from an older version keeps running it
 	# until it is restarted: the binary's plan names each, whose it is, and
 	# what to do. After a downgrade, what runs is newer, and the plan says to
-	# leave it. Not after a first install: nothing of this binary's runs yet;
-	# nor when the caller runs the plan itself (TRACEPAD_NO_PLAN=1: the
-	# agent's bridge), which would be the same look twice.
+	# leave it. Not after a first install: nothing of this binary's runs yet
+	# (the agent's bridge removes its binary first, so it is always one, and
+	# runs its own plan next).
 	plan_status=none
-	if [ "$change" != installed ] && [ "${TRACEPAD_NO_PLAN:-}" != 1 ]; then
+	if [ "$change" != installed ]; then
 		plan
 		case "$plan_status/$change" in
 		10/* | 4/*)
@@ -351,7 +357,7 @@ main() {
 			why="it did not finish in 15 seconds"
 			[ -e "$tmp/timeout" ] || why="$(head -n 1 "$tmp/plan")"
 			say ""
-			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $bin upgrade --plan"
+			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $(q "$bin") upgrade --plan"
 			;;
 		esac
 	fi

@@ -94,7 +94,6 @@ upgrade)
 		sleep 60 &
 		wait \$!
 	fi
-	[ -z "\${FAKE_PLAN_RAN:-}" ] || : >"\$FAKE_PLAN_RAN"
 	echo "\$*: \$FAKE_PLAN"
 	exit "\${FAKE_PLAN_EXIT:-0}" ;;
 skills)
@@ -266,14 +265,6 @@ lacks "$out" "Still running" hanging-plan
 has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-plan
 ends_with_agent_line hanging-plan
 
-# --- A caller that runs the plan itself (the agent's bridge) is not given
-# the same look twice.
-ran="$tmp/plan-ran"
-run no-plan 0 FAKE_PLAN="Behind" FAKE_PLAN_EXIT=10 FAKE_PLAN_RAN="$ran" TRACEPAD_NO_PLAN=1
-[ ! -e "$ran" ] || fail "no-plan: the plan ran"
-lacks "$out" "Still running" no-plan
-lacks "$out" "Could not check" no-plan
-
 # --- A binary whose answer is not a version is not quoted.
 printf '#!/bin/sh\nprintf "1.0\\033]52;c;eA==\\007\\n"\n' >"$bin"
 run weird-before 0 TRACEPAD_VERSION=0.3.0
@@ -334,6 +325,16 @@ fresh_home
 run install-dir 0 TRACEPAD_INSTALL_DIR="$home/bin/" PATH="$home/bin:$fake:$sys"
 has "$out" "installed tracepad 0.3.0 at $home/bin/tracepad" install-dir
 lacks "$out" "is not on your PATH" install-dir
+
+# --- A directory whose name the shell would read as code is printed quoted:
+# the export line, pasted, puts that very directory on the PATH.
+fresh_home
+odd="$home/it's a \$(touch $tmp/canary) dir"
+run odd-dir 0 TRACEPAD_INSTALL_DIR="$odd"
+line="$(sed -n 's/^  export PATH=/export PATH=/p' "$out")"
+got="$(PATH=/usr/bin:/bin sh -c "$line"'; printf %s "$PATH"')"
+[ "$got" = "$odd:/usr/bin:/bin" ] || fail "odd-dir: the export line puts '$got' on the PATH"
+[ ! -e "$tmp/canary" ] || fail "odd-dir: the printed line ran code"
 
 # --- Platforms.
 fresh_home

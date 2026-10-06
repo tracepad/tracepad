@@ -35,10 +35,11 @@ type plan struct {
 	binaries []string
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
-	// idle are the person's servers and containers, by index in the
-	// findings, and their binary, that need nothing: at the target, past it,
-	// or not a release. othersBehind decides it, in the one place that sorts
-	// everything (the review of #228).
+	// idle are the servers and containers, by index in the findings, and
+	// the binary, that need nothing: at the target, past it, or not a
+	// release, whoever's they are (the second review of #228). othersBehind
+	// decides it, in the one place that sorts everything (the review of
+	// #228).
 	idleServers, idleContainers map[int]bool
 	idleBinary                  bool
 	// ahead: what the command looks after runs past the latest stable
@@ -80,11 +81,14 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		to = latest
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
-	case to == r.version:
-		// This binary is that release: it is not looked up. The install
-		// script asks the binary it just put in place for its own version,
-		// and a new binary's first connection may wait on a firewall or a
-		// scan past the script's fifteen seconds (the live run of 0.1.0).
+	case r.flags.plan && to == r.version && sameFile(r.deps.Self, filepath.Join(r.deps.InstallDir, "tracepad")):
+		// The installed binary planning for its own version, as the install
+		// script asks the binary it just put in place: that release is the
+		// binary, and is not looked up, since a new binary's first
+		// connection may wait on a firewall past the script's fifteen
+		// seconds (the live run of 0.1.0). A binary elsewhere, or a run,
+		// still looks: a version stamped on a build need not be a release
+		// (the second review of #228).
 	default:
 		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
@@ -345,7 +349,7 @@ func (r *runner) othersBehind(p *plan) {
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
 		case !older(s.Version):
-			p.idleServers[i] = !s.Ours
+			p.idleServers[i] = true
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -369,7 +373,7 @@ func (r *runner) othersBehind(p *plan) {
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
 		case !older(c.Version):
-			p.idleContainers[i] = !c.Ours
+			p.idleContainers[i] = true
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -387,7 +391,12 @@ func (r *runner) othersBehind(p *plan) {
 	// replace it). Only one of the person's at the target or past it needs
 	// nothing.
 	switch b := p.f.Binary; {
-	case b.Ours || !b.Exists:
+	case !b.Exists:
+	case b.Ours:
+		p.idleBinary = !p.replaceBinary
+	case b.Dev && b.Link != "":
+		p.binaries = append(p.binaries, fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
+			b.Path, b.Link, b.Version, p.to, b.Link, r.installLine(filepath.Dir(b.Path), p.to)))
 	case b.Dev:
 		p.binaries = append(p.binaries, fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
 			b.Path, b.Version, p.to, r.installLine(filepath.Dir(b.Path), p.to)))
@@ -431,16 +440,25 @@ func (r *runner) installLine(dir, to string) string {
 }
 
 func serverAdvice(s Server) string {
-	m := s.Proc.Manager
-	switch {
-	case strings.HasPrefix(m, "the user systemd unit "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: systemctl --user restart %s (%s)", strings.TrimPrefix(m, "the user systemd unit "), docsUpgrading)
-	case strings.HasPrefix(m, "the systemd unit "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: sudo systemctl restart %s (%s)", strings.TrimPrefix(m, "the systemd unit "), docsUpgrading)
-	case strings.HasPrefix(m, "the launchd job "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: launchctl kickstart -k gui/$(id -u)/%s (%s)", strings.TrimPrefix(m, "the launchd job "), docsUpgrading)
+	if restart := serviceRestart(s.Proc.Manager); restart != "" {
+		return fmt.Sprintf("Back up its data directory, install the new binary, then: %s (%s)", restart, docsUpgrading)
 	}
 	return "Back it up and restart it yourself (" + docsUpgrading + ")"
+}
+
+// serviceRestart is the command that restarts a service, from the manager
+// a process listing named: the unit's or the job's name is the system's,
+// quoted (the second review of #228).
+func serviceRestart(m string) string {
+	switch {
+	case strings.HasPrefix(m, "the user systemd unit "):
+		return "systemctl --user restart " + shq(strings.TrimPrefix(m, "the user systemd unit "))
+	case strings.HasPrefix(m, "the systemd unit "):
+		return "sudo systemctl restart " + shq(strings.TrimPrefix(m, "the systemd unit "))
+	case strings.HasPrefix(m, "the launchd job "):
+		return "launchctl kickstart -k gui/$(id -u)/" + shq(strings.TrimPrefix(m, "the launchd job "))
+	}
+	return ""
 }
 
 // planMode is `--plan`: what would happen, and nothing done.

@@ -732,7 +732,7 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 			t.Fatalf("%q: %d %s", mode, code, rep.Summary)
 		}
 		all := strings.Join(rep.Person, "\n")
-		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", "sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/myapp-0.1.0.tar.gz'",
+		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", "sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh myapp-0.1.0.tar.gz",
 			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename myapp myapp-old", "docker/#upgrading",
 			"docker rename myapp myapp-old && (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' myapp-old | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > myapp.upgrade.env) && ",
 			"docker run -d --name myapp --env-file myapp.upgrade.env -p 127.0.0.1:4318:4318 --mount type=volume,src=myapp,dst=/data --mount 'type=bind,src=/srv/my config,dst=/etc/extra,readonly' --restart always ghcr.io/tracepad/tracepad:0.2.0 serve && rm myapp.upgrade.env. Once the new one is healthy: docker rm myapp-old",
@@ -786,7 +786,7 @@ func TestComposeAdvice(t *testing.T) {
 	all := strings.Join(rep.Person, "\n")
 	compose := "docker compose -p tracepad --env-file '/srv/my app/.env.prod' -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
 	for _, want := range []string{
-		compose + " stop tracepad && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly -v \"$PWD:/backup\" " + busybox + " sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-tracepad-1-0.1.0.tar.gz' && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
+		compose + " stop tracepad && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly -v \"$PWD:/backup\" " + busybox + " sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh tracepad-tracepad-1-0.1.0.tar.gz && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
 		"set the image of the service tracepad in whichever of /srv/my app/compose.yml, /srv/my app/compose.override.yml sets it to ghcr.io/tracepad/tracepad:0.2.0",
 		"take its digest off: it is pinned to sha256:" + strings.Repeat("d", 64),
 		"docker pull ghcr.io/tracepad/tracepad:0.2.0 prints its digest",
@@ -822,6 +822,15 @@ func TestComposeAdvice(t *testing.T) {
 		t.Errorf("env files: %s", got)
 	}
 	c.ComposeEnv = nil
+	// An env file Compose wrote relative is read from the project's
+	// directory (the second review of #228).
+	ic := inspectContainer{Name: "/obs-tracepad-1"}
+	ic.Config.Image = "ghcr.io/tracepad/tracepad:0.1.0"
+	ic.Config.Labels = map[string]string{"com.docker.compose.project": "obs", "com.docker.compose.project.working_dir": "/srv/obs",
+		"com.docker.compose.project.environment_file": "prod.env,/etc/obs/base.env"}
+	if got, _ := asContainer(ic); !slices.Equal(got.ComposeEnv, []string{"/srv/obs/prod.env", "/etc/obs/base.env"}) {
+		t.Errorf("relative env files: %q", got.ComposeEnv)
+	}
 	// Compose's labels missing: its project and directory, and what to look up.
 	c.ComposeFiles, c.Service = nil, ""
 	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop <its service>") {
@@ -946,9 +955,11 @@ const fakeDockerCLI = `#!/bin/sh
 echo "$*" >> "$LOG"
 case "$1 $2" in
 "run --rm")
-	eval "cmd=\${$#}"
-	cmd=$(printf '%s' "$cmd" | sed "s#> /backup/#> $PWD/#; s#-C /data#-C $DATA#")
-	exec sh -c "$cmd" ;;
+	# … busybox sh -c SCRIPT sh FILE: the archive's name is the script's $1.
+	eval "cmd=\${$(($# - 2))}"
+	eval "file=\${$#}"
+	cmd=$(printf '%s' "$cmd" | sed "s#\"/backup/#\"$PWD/#; s#-C /data#-C $DATA#")
+	exec sh -c "$cmd" sh "$file" ;;
 "inspect --format") printf 'TRACEPAD_PROJECTS=p\nTRACEPAD_URL=u\n' ;;
 esac
 exit 0
@@ -1979,27 +1990,39 @@ func (l *lateProcess) Candidates(context.Context) ([]Process, int, error) {
 	return []Process{l.p}, 0, nil
 }
 
-// The plan of a version that is this binary's own looks no release up (the
+// The installed binary's plan of its own version looks no release up (the
 // live run of 0.1.0): the install script asks the binary it has just put in
 // place, whose first connection a firewall may hold past the script's
-// fifteen seconds. Another version is still looked up.
+// fifteen seconds. Any other version, a binary run from elsewhere, or a run
+// still looks (the second review of #228): a version stamped on a build
+// need not be a release.
 func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 	t.Parallel()
 	d := newFakeDocker(t)
-	plan := func(version string) Report {
+	ask := func(version string, self bool, args ...string) Report {
+		deps := containerDeps(t, d, version)
+		if self {
+			deps.Self = filepath.Join(deps.InstallDir, "tracepad")
+		}
 		var out bytes.Buffer
-		run(context.Background(), Options{Args: []string{"--plan", "--to", "0.9.9", "--json"}, Version: version, Stdout: &out, Stderr: io.Discard}, containerDeps(t, d))
+		run(context.Background(), Options{Args: append(args, "--to", "0.9.9", "--json"), Version: version, Stdout: &out, Stderr: io.Discard}, deps)
 		var rep Report
 		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 			t.Fatalf("%v: %s", err, out.String())
 		}
 		return rep
 	}
-	if rep := plan("0.9.9"); strings.Contains(rep.Summary, "no release") {
-		t.Errorf("its own version was looked up: %s", rep.Summary)
+	if rep := ask("0.9.9", true, "--plan"); strings.Contains(rep.Summary, "no release") {
+		t.Errorf("the installed binary's own version was looked up: %s", rep.Summary)
 	}
-	if rep := plan("0.2.0"); !strings.Contains(rep.Summary, "there is no release v0.9.9") {
-		t.Errorf("another version was not looked up: %s", rep.Summary)
+	for name, rep := range map[string]Report{
+		"another version":             ask("0.2.0", true, "--plan"),
+		"a binary run from elsewhere": ask("0.9.9", false, "--plan"),
+		"a run":                       ask("0.9.9", true),
+	} {
+		if !strings.Contains(rep.Summary, "there is no release v0.9.9") {
+			t.Errorf("%s was not looked up: %s", name, rep.Summary)
+		}
 	}
 }
 
@@ -2020,11 +2043,12 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 		want  want
 	}{
 		"none":                   {func(*testing.T, string, *Deps) {}, want{}},
-		"the command's, current": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.2.0") }, want{}},
+		"the command's, current": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.2.0") }, want{idle: true}},
+		"the command's, behind":  {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.1.0") }, want{}},
 		"a development build": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "97d6b79") },
 			want{line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
 		"a development build, linked": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "dev") },
-			want{line: `says it is "dev", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
+			want{line: `which says it is "dev", a development build; the command replaces no link. The install script puts 0.2.0 in place of the link, which is then a file (`}},
 		"a release, linked, current": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.2.0") }, want{idle: true}},
 		"a release, linked, past it": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.3.0") }, want{idle: true}},
 		"a release, linked, behind":  {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.1.0") }, want{line: "is 0.1.0; "}},

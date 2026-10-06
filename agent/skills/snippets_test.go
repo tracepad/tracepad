@@ -195,8 +195,8 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 		}
 		cmd := exec.Command(sh, "-c", strings.Replace(line, "v=;", "v=0.2.0;", 1))
 		cmd.Env = []string{"PATH=" + failing + ":/usr/bin:/bin", "RAN=" + ran, "HOME=" + home}
-		if err := cmd.Run(); err == nil {
-			t.Errorf("%s: a failed download ended well", sh)
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "STOP: the release did not download") {
+			t.Errorf("%s: a failed download: %v %s", sh, err, out)
 		}
 		if _, err := os.Stat(ran); err == nil {
 			t.Errorf("%s: a failed download ran the bridge an earlier run left", sh)

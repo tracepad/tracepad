@@ -29,7 +29,7 @@ path asks once for, emptied first so a failed download runs no older one; `v` th
 and leaves one that is not a release's, giving the line that replaces it:
 
 ```sh
-v=; dir="${XDG_CACHE_HOME:-$HOME/.cache}/tracepad/release"; mkdir -p "$dir" && rm -f "$dir/tracepad" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 TRACEPAD_NO_PLAN=1 sh >/dev/null && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
+v=; dir="$HOME/.cache/tracepad/release"; mkdir -p "$dir" && rm -f "$dir/tracepad" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null; [ -x "$dir/tracepad" ] || { echo "STOP: the release did not download (curl said why above)"; false; } && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what

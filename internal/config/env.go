@@ -79,7 +79,6 @@ var Env = []EnvVar{
 	{Name: "TRACEPAD_VERSION", Kind: EnvInstaller},
 	{Name: "TRACEPAD_INSTALL_DIR", Kind: EnvInstaller},
 	{Name: "TRACEPAD_NO_SKILL", Kind: EnvInstaller},
-	{Name: "TRACEPAD_NO_PLAN", Kind: EnvInstaller},
 	{Name: "TRACEPAD_DOWNLOAD_URL", Kind: EnvInstaller},
 }
 

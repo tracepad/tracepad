@@ -665,16 +665,17 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 // there is a bridge, and plans for the installed one.
 func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
 	t.Parallel()
-	for _, c := range []struct{ cache, self string }{
-		{"", "/home/u/.cache/tracepad/release/tracepad"},
-		{"/srv/cache", "/srv/cache/tracepad/release/tracepad"},
+	for _, c := range []struct{ cache, self, want string }{
+		{"", "/home/u/.cache/tracepad/release/tracepad", "/home/u/.local/bin"},
+		{"/srv/cache", "/home/u/.cache/tracepad/release/tracepad", "/home/u/.local/bin"},
+		{"/srv/cache", "/srv/cache/tracepad/release/tracepad", "/home/u/.local/bin"},
+		// A relative XDG_CACHE_HOME is ignored, as os.UserCacheDir ignores it.
+		{"cache", "/work/cache/tracepad/release/tracepad", "/work/cache/tracepad/release"},
+		{"", "/home/u/.cache/tracepad/tracepad", "/home/u/.cache/tracepad"},
 	} {
-		if got := installDirFor("", "/home/u", c.self, "/tmp", bridgeDir("/home/u", c.cache)); got != "/home/u/.local/bin" {
-			t.Errorf("%s: %s", c.self, got)
+		if got := installDirFor("", "/home/u", c.self, append([]string{"/tmp"}, bridgeDirs("/home/u", c.cache)...)...); got != c.want {
+			t.Errorf("XDG_CACHE_HOME=%q, %s: %s, want %s", c.cache, c.self, got, c.want)
 		}
-	}
-	if got := installDirFor("", "/home/u", "/home/u/.cache/tracepad/tracepad", "/tmp", bridgeDir("/home/u", "")); got != "/home/u/.cache/tracepad" {
-		t.Errorf("beside the bridge's directory is not in it: %s", got)
 	}
 }
 
