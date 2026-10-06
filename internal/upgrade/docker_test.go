@@ -435,6 +435,10 @@ func (d *fakeDocker) create(args []string) ([]byte, error) {
 			user = v
 		case "--network":
 			c.HostConfig.NetworkMode = v
+		case "--cgroupns":
+			c.HostConfig.CgroupnsMode = v
+		case "--ipc":
+			c.HostConfig.IpcMode = v
 		case "--entrypoint":
 			setEntrypoint = true
 			if v != "" {

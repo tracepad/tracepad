@@ -408,6 +408,10 @@ func TestTheMatrices(t *testing.T) {
 		t.Parallel()
 		theContainersFaultMatrix(t)
 	})
+	t.Run("recreate", func(t *testing.T) {
+		t.Parallel()
+		theRecreateMatrix(t)
+	})
 	t.Run("containers", func(t *testing.T) {
 		t.Parallel()
 		for _, sc := range containerScenarios {

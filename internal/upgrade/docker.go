@@ -147,6 +147,7 @@ type inspectContainer struct {
 		IpcMode        string            `json:"IpcMode"`
 		UTSMode        string            `json:"UTSMode"`
 		UsernsMode     string            `json:"UsernsMode"`
+		CgroupnsMode   string            `json:"CgroupnsMode"`
 		Init           *bool             `json:"Init"`
 	} `json:"HostConfig"`
 	// NetworkSettings.Ports are the bindings as Docker made them: a port
@@ -270,6 +271,17 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	if n := hc.NetworkMode; n != "" && n != "default" && n != "bridge" {
 		run = append(run, "--network", n)
 	}
+	// The namespaces' modes as they are, whatever the daemon's defaults:
+	// the daemon does not say its IPC default, and a mode written out is
+	// the same on any (the audit of #226: --cgroupns host and --ipc
+	// shareable were dropped as "the daemon's own"). Sharing another's, or
+	// the host's IPC, is refused by name.
+	if m := hc.CgroupnsMode; m == "host" || m == "private" {
+		run = append(run, "--cgroupns", m)
+	}
+	if m := hc.IpcMode; m == "private" || m == "shareable" || m == "none" {
+		run = append(run, "--ipc", m)
+	}
 	for _, l := range personLabels(ic.Config.Labels, img.Config.Labels) {
 		run = append(run, "--label", l)
 	}
@@ -375,35 +387,55 @@ func runArgs(c Container, name, ref, envFile, volume string) []string {
 	return args
 }
 
-// hostKept are the HostConfig fields a recreate reproduces, refuses by name,
-// or that the daemon sets the same way again; anything else that is set is a
-// setting the recreate would silently drop (the third review).
-var hostKept = map[string]bool{
-	// reproduced
-	"RestartPolicy": true, "PortBindings": true, "NetworkMode": true, "LogConfig": true, "Binds": true, "Mounts": true,
-	// refused by name
-	"AutoRemove": true, "Privileged": true, "ReadonlyRootfs": true, "CapAdd": true, "CapDrop": true, "Devices": true,
-	"DeviceRequests": true, "ExtraHosts": true, "Links": true, "VolumesFrom": true, "GroupAdd": true, "Dns": true,
-	"DnsSearch": true, "SecurityOpt": true, "Tmpfs": true, "Sysctls": true, "Ulimits": true, "Memory": true,
-	"NanoCpus": true, "CpuShares": true, "CpuQuota": true, "PidMode": true, "IpcMode": true, "UTSMode": true,
-	"UsernsMode": true, "Init": true, "PublishAllPorts": true,
-	// the daemon's own, the same on a recreate
-	"MaskedPaths": true, "ReadonlyPaths": true, "ConsoleSize": true, "Isolation": true, "ContainerIDFile": true, "CgroupnsMode": true,
-}
+// How a recreate treats each field of a container's inspect (the review of
+// #226): every field the command reads, or the daemon sets, is in exactly one
+// of these, and a test holds the command's types to them. A field in none is
+// one the recreate does not know: set, it makes the container the person's,
+// named (unreproduced).
+var (
+	// hostReproduced are carried by createdAs: the bindings, the mounts
+	// (what a mount has beyond them is named, mountLosses), the restart
+	// policy, the network, the log driver (its options are named), the
+	// cgroup and IPC namespaces' modes.
+	hostReproduced = setOf("RestartPolicy", "PortBindings", "NetworkMode", "LogConfig", "Binds", "Mounts", "CgroupnsMode", "IpcMode")
+	// hostRefused make a container the person's by name (refusedSettings
+	// and containerRefusal).
+	hostRefused = setOf("AutoRemove", "Privileged", "ReadonlyRootfs", "CapAdd", "CapDrop", "Devices", "DeviceRequests",
+		"ExtraHosts", "Links", "VolumesFrom", "GroupAdd", "Dns", "DnsSearch", "SecurityOpt", "Tmpfs", "Sysctls", "Ulimits",
+		"Memory", "NanoCpus", "CpuShares", "CpuQuota", "PidMode", "UTSMode", "UsernsMode", "Init", "PublishAllPorts")
+	// hostDaemon are what the daemon gives every container, each with the
+	// check that the value is the daemon's own and not the person's.
+	hostDaemon = map[string]func(raw json.RawMessage) bool{
+		// The paths the daemon masks: emptied only by a security option,
+		// which is refused by name.
+		"MaskedPaths":   func(raw json.RawMessage) bool { return !unset(raw) },
+		"ReadonlyPaths": func(raw json.RawMessage) bool { return !unset(raw) },
+		// The terminal of the client that made it: a run with -t is named
+		// by Config.Tty.
+		"ConsoleSize":      func(json.RawMessage) bool { return true },
+		"Isolation":        func(raw json.RawMessage) bool { return unset(raw) || string(compactJSON(raw)) == `"default"` },
+		"ContainerIDFile":  unset,
+		"ShmSize":          func(raw json.RawMessage) bool { return unset(raw) || string(compactJSON(raw)) == "67108864" },
+		"Runtime":          func(raw json.RawMessage) bool { return unset(raw) || string(compactJSON(raw)) == `"runc"` },
+		"MemorySwappiness": func(raw json.RawMessage) bool { return unset(raw) || string(compactJSON(raw)) == "-1" },
+	}
+	// configReproduced are carried by createdAs, or checked to be what a
+	// recreate makes again (the hostname docker derives, the ports the image
+	// exposes).
+	configReproduced = setOf("Env", "Cmd", "Image", "User", "Labels", "Entrypoint", "ExposedPorts", "Hostname")
+	// configRefused make it the person's by name.
+	configRefused = setOf("WorkingDir", "Healthcheck", "StopSignal")
+	// configDaemon are the image's, or how a client attached when it was
+	// made, not how it runs.
+	configDaemon = setOf("Volumes", "ArgsEscaped", "AttachStdout", "AttachStderr")
+)
 
-// hostDefaults are values the daemon gives a field nobody set.
-var hostDefaults = map[string][]string{
-	"ShmSize":          {"67108864"},
-	"Runtime":          {`"runc"`},
-	"MemorySwappiness": {"-1"},
-}
-
-// configKept are the Config fields a recreate reproduces or checks.
-var configKept = map[string]bool{
-	"Env": true, "Cmd": true, "Image": true, "User": true, "Labels": true, "WorkingDir": true, "Entrypoint": true,
-	"Healthcheck": true, "StopSignal": true, "Volumes": true, "ArgsEscaped": true, "ExposedPorts": true, "Hostname": true,
-	// how a client attached when it was created, not how it runs
-	"AttachStdout": true, "AttachStderr": true,
+func setOf(names ...string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
 }
 
 func unset(raw json.RawMessage) bool {
@@ -425,13 +457,18 @@ func unreproduced(ic inspectContainer, img imageConfig) []string {
 		return m
 	}
 	for k, v := range section("HostConfig") {
-		if hostKept[k] || unset(v) || slices.Contains(hostDefaults[k], string(compactJSON(v))) {
-			continue
+		switch daemons, ok := hostDaemon[k]; {
+		case hostReproduced[k], hostRefused[k]:
+		case ok:
+			if !daemons(v) {
+				out = append(out, "HostConfig."+k)
+			}
+		case !unset(v):
+			out = append(out, "HostConfig."+k)
 		}
-		out = append(out, "HostConfig."+k)
 	}
 	for k, v := range section("Config") {
-		if configKept[k] || unset(v) {
+		if configReproduced[k] || configRefused[k] || configDaemon[k] || unset(v) {
 			continue
 		}
 		out = append(out, "Config."+k)
@@ -478,9 +515,23 @@ func mountLosses(ic inspectContainer) []string {
 		}
 	}
 	var hc struct {
+		Binds  []string                     `json:"Binds"`
 		Mounts []map[string]json.RawMessage `json:"Mounts"`
 	}
 	_ = json.Unmarshal(ic.raw["HostConfig"], &hc) // ignored: a section that does not read names nothing here; Mounts above are read all the same
+	// A -v's options, as it was given them: src:dst[:opts].
+	for _, b := range hc.Binds {
+		parts := strings.Split(b, ":")
+		if len(parts) < 3 {
+			continue
+		}
+		for _, opt := range strings.Split(parts[len(parts)-1], ",") {
+			if opt != "ro" && opt != "rw" {
+				out = append(out, fmt.Sprintf("HostConfig.Binds[%s]=%s", parts[len(parts)-2], parts[len(parts)-1]))
+				break
+			}
+		}
+	}
 	for _, m := range hc.Mounts {
 		var target string
 		_ = json.Unmarshal(m["Target"], &target) // ignored: the name's only; an empty one still names the option
