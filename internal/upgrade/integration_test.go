@@ -567,6 +567,11 @@ func TestTheWayBackStopsOnlyThisServer(t *testing.T) {
 	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
 	lock := filepath.Join(w.data, "tracepad.db"+store.LockSuffix)
 	_ = os.WriteFile(lock, []byte(strconv.Itoa(other.Process.Pid)+"\n"), 0o600)
+	// The record put back however the test ends: stopAll finds the server
+	// by it, and a test that failed before the end once left the server
+	// running for hours. Registered after the sleep's cleanup, it runs
+	// first.
+	t.Cleanup(func() { _ = os.WriteFile(lock, []byte(strconv.Itoa(newPID)+"\n"), 0o600) })
 	back, code := w.run(w.deps(), "--back", rep.Run.ID)
 	if code != exitStuck || !strings.Contains(back.Summary, "not this directory's server") || !strings.Contains(back.Summary, "nothing was touched") {
 		t.Fatalf("back: exit %d, %s", code, back.Summary)
@@ -577,7 +582,6 @@ func TestTheWayBackStopsOnlyThisServer(t *testing.T) {
 	if _, err := os.Stat(w.data + ".after-" + rep.Run.ID); err == nil {
 		t.Error("the data was set aside")
 	}
-	_ = os.WriteFile(lock, []byte(strconv.Itoa(newPID)+"\n"), 0o600)
 }
 
 func TestACountReadBeforeAndNotAfterIsTheirsToDecide(t *testing.T) {
