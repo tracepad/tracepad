@@ -563,7 +563,7 @@ func TestTheWayBackStopsOnlyThisServer(t *testing.T) {
 	lock := filepath.Join(w.data, "tracepad.db"+store.LockSuffix)
 	_ = os.WriteFile(lock, []byte(strconv.Itoa(other.Process.Pid)+"\n"), 0o600)
 	back, code := w.run(w.deps(), "--back", rep.Run.ID)
-	if code != exitStuck || !strings.Contains(back.Summary, "no longer this server") {
+	if code != exitStuck || !strings.Contains(back.Summary, "not this directory's server") || !strings.Contains(back.Summary, "nothing was touched") {
 		t.Fatalf("back: exit %d, %s", code, back.Summary)
 	}
 	if !alive(other.Process.Pid) || !alive(newPID) {

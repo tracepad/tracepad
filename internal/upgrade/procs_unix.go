@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // alive is kill(pid, 0): a process that exists, whether or not this user may
@@ -63,4 +64,27 @@ func startDetached(spec StartSpec) (Started, error) {
 		close(s.done)
 	}()
 	return s, nil
+}
+
+// errGone is a process that exited while it was read.
+var errGone = errors.New("gone")
+
+// settleWait is how long a process that could not be read is given before it
+// is read again: one on its way out reads as nothing for a moment, and is
+// gone after it (the tenth review's real matrix).
+var settleWait = 50 * time.Millisecond
+
+// readSettled reads a process, and once more after a moment when it could
+// not be: one that is gone by then is gone, and one still there and still
+// unread is unread.
+func readSettled(pid int, read func(int) (Process, error)) (Process, error) {
+	p, err := read(pid)
+	if err == nil || errors.Is(err, errNotMine) {
+		return p, err
+	}
+	time.Sleep(settleWait)
+	if !alive(pid) {
+		return Process{}, errGone
+	}
+	return read(pid)
 }

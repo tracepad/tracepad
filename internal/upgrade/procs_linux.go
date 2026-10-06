@@ -5,6 +5,7 @@ package upgrade
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -51,10 +52,17 @@ func (procSystem) Candidates() ([]Process, int, error) {
 		exe, exeErr := readExe(dir)
 		argv, argErr := readNulList(dir + "/cmdline")
 		if exeErr != nil && argErr != nil {
-			if alive(pid) {
+			// Read once more after a moment: one on its way out is gone, and
+			// one that reads now is looked at as any other.
+			p, err := readSettled(pid, inspectLinux)
+			switch {
+			case errors.Is(err, errNotMine), errors.Is(err, errGone):
+				continue
+			case err != nil:
 				unread++
+				continue
 			}
-			continue
+			exe, argv, exeErr, argErr = p.Exe, p.Argv, nil, nil
 		}
 		if !isTracepadName(exe) && (len(argv) == 0 || !isTracepadName(argv[0])) {
 			continue
@@ -63,11 +71,12 @@ func (procSystem) Candidates() ([]Process, int, error) {
 		if _, ok := serverFlags(argv); argErr == nil && !ok {
 			continue
 		}
-		p, err := inspectLinux(pid)
-		if err != nil {
-			if alive(pid) {
-				unread++
-			}
+		p, err := readSettled(pid, inspectLinux)
+		switch {
+		case errors.Is(err, errNotMine), errors.Is(err, errGone):
+			continue
+		case err != nil:
+			unread++
 			continue
 		}
 		procs = append(procs, p)

@@ -59,11 +59,12 @@ func (kernSystem) Candidates() ([]Process, int, error) {
 				}
 			}
 		}
-		p, err := inspectDarwin(pid)
-		if err != nil {
-			if alive(pid) {
-				unread++
-			}
+		p, err := readSettled(pid, inspectDarwin)
+		switch {
+		case errors.Is(err, errNotMine), errors.Is(err, errGone):
+			continue
+		case err != nil:
+			unread++
 			continue
 		}
 		procs = append(procs, p)
