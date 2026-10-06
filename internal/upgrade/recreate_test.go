@@ -552,7 +552,17 @@ func recreateCases(t *testing.T) []recreateCase {
 		{name: "refused/port-0.0.0.0", claim: "refused", ports: []string{"0.0.0.0:4318:4318"}},
 		{name: "refused/tmpfs", claim: "refused", args: []string{"--tmpfs", "/tmp"}},
 		{name: "refused/network", claim: "refused", args: []string{"--network", "tpnet"}},
-		{name: "refused/log-opt", claim: "refused", args: []string{"--log-opt", "max-size=10m"}},
+		// A daemon.json's max-size shows on every container of its default
+		// driver: carried as it is (#49); an option that can hold a
+		// credential is named.
+		{name: "repro/log-opt-max-size", claim: "reproduced", args: []string{"--log-opt", "max-size=10m"},
+			carried: func(n *fakeContainer, _ []string) string {
+				if n == nil || n.HostConfig.LogConfig.Config["max-size"] != "10m" {
+					return "--log-opt max-size=10m"
+				}
+				return ""
+			}},
+		{name: "refused/log-opt-token", claim: "refused", args: []string{"--log-driver", "splunk", "--log-opt", "splunk-token=t0ken"}, says: "HostConfig.LogConfig.Config[splunk-token]"},
 		{name: "refused/entrypoint-cleared", claim: "refused", args: []string{"--entrypoint", ""}},
 		refused("env-newline", func(c *fakeContainer) { c.Config.Env = append(c.Config.Env, "TRACEPAD_X=a\nb") }),
 		refused("privileged", func(c *fakeContainer) { c.HostConfig.Privileged = true }),

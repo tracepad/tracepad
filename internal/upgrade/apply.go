@@ -423,7 +423,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		need += size
 		// Its way back, before anything stops (#41, #47): a restore of the
 		// volume as it is now, into a new one beside it.
-		if err := j.wayBackPreconditions(ctx, size, 0, p.replaceBinary); err != nil {
+		if err := j.containerBackPreconditions(ctx, size); err != nil {
 			return nil, "its way back could not be taken: " + err.Error()
 		}
 	}

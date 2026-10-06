@@ -1104,7 +1104,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   loopback address only, at a fixed port, its server's among them; the default
   network; the image's entrypoint, health check and stop signal; no tmpfs; no
   mount option beyond read-only (a relabel, a propagation, a `--mount`
-  option); Docker neither rootless nor remapping user namespaces; and nothing
+  option); no link or special file in its volume, which a restore would not
+  make again; no log option that can hold a credential (rotation and tags are
+  carried); Docker neither rootless nor remapping user namespaces; and nothing
   set in `docker inspect` that its `docker run` does not carry — each such
   setting is named, in the plan and in the commands it gives you. It is
   stopped with SIGTERM (its restart policy set to `no` for the stop, never

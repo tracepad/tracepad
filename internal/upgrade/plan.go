@@ -157,13 +157,15 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", s.Proc.PID), s.Version) + " Leave it running"
 		}
 	}
+	// A container of the command's running later than the target shares no
+	// binary with anything this run touches: it is left as it is, said
+	// (the review of #226). Named as the target, it is the downgrade above.
 	for _, c := range p.f.Containers {
 		if order, ok := Compare(c.Version, to); ok && order > 0 && c.Ours {
-			if r.flags.to == "" {
-				p.ahead = true
-				continue
+			p.ahead = p.ahead || r.flags.to == ""
+			if r.flags.to != "" {
+				p.notes = append(p.notes, fmt.Sprintf("container %s runs %s, later than %s; it is left as it is", c.Name, c.Version, to))
 			}
-			return nil, downgrade(to, "container "+c.Name, c.Version) + " Leave it running"
 		}
 	}
 	// The plan refuses what the upgrade would (#38): a binary put under

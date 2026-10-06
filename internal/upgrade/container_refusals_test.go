@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -173,15 +174,6 @@ func containerRefusalCases() []refusalCase {
 				}
 			})
 		}},
-		// C10: the run's copy of the host's binary changed since.
-		{"C10-copy-wrong/b-healthy", func(c *containerCell) {
-			c.bAfterHealthy(func(_, dir string) func() {
-				copyPath := filepath.Join(dir, "tracepad-0.1.0")
-				b, _ := os.ReadFile(copyPath)
-				scriptBinary(c.t, copyPath, "0.0.9")
-				return func() { _ = os.WriteFile(copyPath, b, 0o755) }
-			})
-		}},
 		// C11: docker gone from PATH since.
 		{"C11-docker-gone/b-healthy", func(c *containerCell) {
 			c.bAfterHealthy(func(string, string) func() {
@@ -321,5 +313,134 @@ var containerScenarios = []struct {
 	{"AVolumeWithOptionsIsRefusedBeforeTheStop", testAVolumeWithOptionsIsRefusedBeforeTheStop},
 	{"AContainersStartsThatFailAreTakenUpAgain", testAContainersStartsThatFailAreTakenUpAgain},
 	{"AWayBackAsksDockerAgainForAPolicy", testAWayBackAsksDockerAgainForAPolicy},
+	{"AContainerGoesBackWhateverTheHostBinary", testAContainerGoesBackWhateverTheHostBinary},
+	{"ARunThatStartedDespiteAnErrorRestoresTheVolume", testARunThatStartedDespiteAnErrorRestoresTheVolume},
+	{"TheOldImageKeepsAName", testTheOldImageKeepsAName},
+	{"AVolumeWithALinkIsRefusedBeforeTheStop", testAVolumeWithALinkIsRefusedBeforeTheStop},
+	{"ANewerContainerDoesNotHoldAnotherRun", testANewerContainerDoesNotHoldAnotherRun},
 	{"AProcessOnTheBinaryKeepsItAndTheContainerGoesOn", testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn},
+}
+
+// The host's binary cannot be put back — its copy in the run changed, a
+// server runs it at the later version, the person put another there — and
+// the container goes back all the same: the binary stays, said (the review
+// of #226).
+func testAContainerGoesBackWhateverTheHostBinary(t *testing.T) {
+	for name, change := range map[string]func(c *containerCell, dir string){
+		"the copy changed": func(c *containerCell, dir string) { scriptBinary(c.t, filepath.Join(dir, "tracepad-0.1.0"), "0.0.9") },
+		"another version": func(c *containerCell, _ string) {
+			scriptBinary(c.t, filepath.Join(c.deps.InstallDir, "tracepad"), "0.2.1")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newContainerCell(t)
+			rep, code := c.cmd(c.deps, "--to", "0.2.0")
+			if code != exitOK {
+				t.Fatalf("%d %s", code, rep.Summary)
+			}
+			change(c, rep.Run.Dir)
+			back, code := c.cmd(c.deps, "--back", rep.Run.ID)
+			if code != exitOK || !strings.Contains(strings.Join(back.Notes, "\n"), "was not put back") || !strings.Contains(strings.Join(back.Notes, "\n"), "it stays as it is") {
+				t.Errorf("%d %s %q", code, back.Summary, back.Notes)
+			}
+			c.untouched("end", "ghcr.io/tracepad/tracepad:0.1.0")
+			c.report(name)
+		})
+	}
+}
+
+// docker run can answer an error after its container started and ran on
+// the volume: that is a start, as settle reads it, and the way back restores
+// the volume rather than start the old version on what the new one migrated
+// (the review of #226).
+func testARunThatStartedDespiteAnErrorRestoresTheVolume(t *testing.T) {
+	c := newContainerCell(t)
+	c.d.set(func() { c.d.failAfterStart = true })
+	rep, code := c.cmd(c.deps, "--to", "0.2.0")
+	if code != exitWentBack {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	st, _ := loadState(rep.Run.Dir)
+	if !st.has(stepStarted) || !st.has(stepBackVolume) {
+		t.Errorf("the volume the new version ran on was not restored: %+v", st.Steps)
+	}
+	cur := c.d.container("tracepad-app")
+	if cur == nil || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.1.0" || !slices.ContainsFunc(cur.Mounts, func(m mount) bool { return m.Name == "tracepad-app-"+rep.Run.ID }) {
+		t.Errorf("after the way back: %+v", cur)
+	}
+}
+
+// The tag the container was made from names another image by the way back
+// — latest, pulled since: the old image runs by a name of the release's, its
+// digest or its tag, never its bare ID, and the next plan still knows it as
+// the image's (the review of #226).
+func testTheOldImageKeepsAName(t *testing.T) {
+	for _, digest := range []bool{true, false} {
+		t.Run(fmt.Sprint("digest ", digest), func(t *testing.T) {
+			d := newFakeDocker(t)
+			old := d.images["ghcr.io/tracepad/tracepad:0.1.0"]
+			d.images["ghcr.io/tracepad/tracepad:latest"] = old
+			d.volumes["tracepad-app"] = 7
+			d.run(t, "--name", "tracepad-app", "--mount", "type=volume,src=tracepad-app,dst=/data", "-p", "127.0.0.1:4318:4318", "ghcr.io/tracepad/tracepad:latest")
+			deps := containerDeps(t, d)
+			rep, code := runReport(t, deps, "--to", "0.2.0")
+			if code != exitOK {
+				t.Fatalf("%d %s", code, rep.Summary)
+			}
+			byDigest := "ghcr.io/tracepad/tracepad@sha256:" + strings.Repeat("f", 64)
+			d.set(func() {
+				d.images["ghcr.io/tracepad/tracepad:latest"] = d.images["ghcr.io/tracepad/tracepad:0.2.0"]
+				delete(d.images, "ghcr.io/tracepad/tracepad:0.1.0")
+				if digest {
+					d.digests = map[string][]string{old.ID: {"elsewhere/other@sha256:" + strings.Repeat("e", 64), byDigest}}
+					d.images[byDigest] = old
+				}
+			})
+			if back, code := runReport(t, deps, "--back", rep.Run.ID); code != exitOK {
+				t.Fatalf("--back: %d %s", code, back.Summary)
+			}
+			want := "ghcr.io/tracepad/tracepad:0.1.0"
+			if digest {
+				want = byDigest
+			}
+			if cur := d.container("tracepad-app"); cur.Config.Image != want {
+				t.Errorf("the old image runs as %q, not %q", cur.Config.Image, want)
+			}
+			plan, _ := runReport(t, deps, "--plan", "--to", "0.2.0")
+			if len(plan.Containers) == 0 || plan.Containers[0].Name != "tracepad-app" || plan.Containers[0].Whose != "command" {
+				t.Errorf("the next plan does not know it: %+v", plan.Containers)
+			}
+		})
+	}
+}
+
+// A volume that holds a link, which a restore would not make again, is
+// refused before anything stops (the review of #226).
+func testAVolumeWithALinkIsRefusedBeforeTheStop(t *testing.T) {
+	c := newContainerCell(t)
+	c.d.set(func() { c.d.links = "/data/tls/cert.pem\n" })
+	rep, code := c.cmd(c.deps, "--to", "0.2.0")
+	if code != exitRefused || !strings.Contains(rep.Summary, "/data/tls/cert.pem, a link or a special file") {
+		t.Errorf("%d %s", code, rep.Summary)
+	}
+	c.untouched("refused", "ghcr.io/tracepad/tracepad:0.1.0")
+	c.report("link")
+}
+
+// One of the command's containers running later than --to shares nothing
+// with a run aimed at another: it is said, and the run goes on (the review
+// of #226).
+func testANewerContainerDoesNotHoldAnotherRun(t *testing.T) {
+	c := newContainerCell(t)
+	c.d.add("tracepad-later", "0.2.1", "127.0.0.1", "4400", "later", nil)
+	rep, code := c.cmd(c.deps, "--to", "0.2.0", "--container", "tracepad-app")
+	if code != exitOK || !strings.Contains(strings.Join(rep.Notes, "\n"), "container tracepad-later runs 0.2.1, later than 0.2.0; it is left as it is") {
+		t.Errorf("%d %s %q", code, rep.Summary, rep.Notes)
+	}
+	if later := c.d.container("tracepad-later"); !later.State.Running || later.Config.Image != "ghcr.io/tracepad/tracepad:0.2.1" {
+		t.Errorf("the later one was touched: %+v", later)
+	}
+	if rep, code := c.cmd(c.deps, "--plan", "--to", "0.2.0", "--container", "tracepad-later"); code != exitRefused || !strings.Contains(rep.Summary, "older than 0.2.1") {
+		t.Errorf("named, it is a downgrade: %d %s", code, rep.Summary)
+	}
 }

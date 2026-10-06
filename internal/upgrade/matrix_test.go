@@ -91,11 +91,11 @@ func stepsOf(t *testing.T, kind string, all bool) (swap, back []string) {
 // temporary file and a rename per write, from cells side by side, are the
 // rest.
 func inProcess(t *testing.T) {
-	retry, sync, place := store.LockRetry, syncFile, inPlace
+	retry, sync, write := store.LockRetry, syncFile, writeFile
 	store.LockRetry = time.Millisecond
 	syncFile = func(*os.File) error { return nil }
-	inPlace = true
-	t.Cleanup(func() { store.LockRetry, syncFile, inPlace = retry, sync, place })
+	writeFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o600) }
+	t.Cleanup(func() { store.LockRetry, syncFile, writeFile = retry, sync, write })
 }
 
 // The table is the steps the command records: every step any run records is

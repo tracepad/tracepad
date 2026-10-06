@@ -285,12 +285,26 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	for _, l := range personLabels(ic.Config.Labels, img.Config.Labels) {
 		run = append(run, "--label", l)
 	}
-	// A log driver of its own is carried; its options are not: they can
-	// hold a credential (a Splunk token, say), which would go on a command
-	// line and into the plan (the security review of #47). A container with
-	// options is the person's, named (unreproduced).
+	// A log driver of its own is carried, and of its options those that
+	// hold no credential (logOpts): a token would go on a command line and
+	// into the plan (the security review of #47), and a container with such
+	// an option is the person's, named. The daemon merges its own default
+	// options into every container of its default driver (moby's
+	// mergeAndVerifyLogConfig), so a host whose daemon.json sets max-size
+	// shows them on every container: they are carried as they are, and the
+	// recreate is the same on any daemon (the review of #226).
 	if lc := hc.LogConfig; lc.Type != "" && lc.Type != logDriver {
 		run = append(run, "--log-driver", lc.Type)
+	}
+	opts := make([]string, 0, len(hc.LogConfig.Config))
+	for k, v := range hc.LogConfig.Config {
+		if logOpts[k] {
+			opts = append(opts, k+"="+v)
+		}
+	}
+	sort.Strings(opts)
+	for _, o := range opts {
+		run = append(run, "--log-opt", o)
 	}
 	if ic.Config.User != img.Config.User {
 		run = append(run, "--user", ic.Config.User)
@@ -430,6 +444,10 @@ var (
 	configDaemon = setOf("Volumes", "ArgsEscaped", "AttachStdout", "AttachStderr")
 )
 
+// logOpts are the log options a recreate carries: the rotation, compression
+// and tagging of the json-file and local drivers, which hold no credential.
+var logOpts = setOf("max-size", "max-file", "compress", "mode", "max-buffer-size", "tag", "labels", "labels-regex", "env", "env-regex")
+
 func setOf(names ...string) map[string]bool {
 	m := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -473,8 +491,10 @@ func unreproduced(ic inspectContainer, img imageConfig) []string {
 		}
 		out = append(out, "Config."+k)
 	}
-	if len(ic.HostConfig.LogConfig.Config) > 0 {
-		out = append(out, "HostConfig.LogConfig.Config")
+	for k := range ic.HostConfig.LogConfig.Config {
+		if !logOpts[k] {
+			out = append(out, "HostConfig.LogConfig.Config["+k+"]")
+		}
 	}
 	out = append(out, mountLosses(ic)...)
 	if h := ic.Config.Hostname; h != "" && (len(ic.ID) < 12 || h != ic.ID[:12]) {

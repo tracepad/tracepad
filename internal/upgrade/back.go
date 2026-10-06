@@ -316,12 +316,8 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 // review); own are the run's servers, which the way back stops itself and
 // that check does not count.
 //
-// A container's way back has its own (containerBackPreconditions): servers
-// is then whether it puts the host's binary back.
+// A container's way back has its own: containerBackPreconditions.
 func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64, servers bool, own ...int) error {
-	if j.st.Kind == kindContainer {
-		return j.containerBackPreconditions(ctx, restoreBytes, servers)
-	}
 	st, ps := j.st, j.st.Process
 	if v, err := j.r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
 		return fmt.Errorf("the copy %s does not answer %s", ps.Old, st.From)

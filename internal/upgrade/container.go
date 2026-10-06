@@ -58,10 +58,17 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 		return 0, "could not pull " + newRef + ": " + firstLine(err.Error())
 	}
 	j.done("pulled %s", newRef)
-	if _, err := r.deps.Docker.Run(ctx, "image", "inspect", busybox); err != nil {
-		if _, err := r.deps.Docker.Run(ctx, "pull", "-q", busybox); err != nil {
-			return 0, "could not pull " + busybox + ", which archives the volume: " + firstLine(err.Error())
-		}
+	if err := r.ensureBusybox(ctx); err != nil {
+		return 0, err.Error()
+	}
+	// What a restore would not make again — a link, a device, a pipe —
+	// refuses the run here, before anything stops: the archive's read-back
+	// and the way back hold the same rule (the review of #226).
+	if out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+now.Volume, "dst=/data", "readonly"), busybox,
+		"find", "/data", "(", "-type", "l", "-o", "-type", "f", "-links", "+1", "-o", "!", "-type", "f", "!", "-type", "d", ")", "-print"); err != nil {
+		return 0, "could not look at what the volume " + now.Volume + " holds: " + firstLine(err.Error())
+	} else if found := strings.Fields(string(out)); len(found) > 0 {
+		return 0, fmt.Sprintf("the volume %s holds %s, a link or a special file, which a way back's restore would not make again: back it up and upgrade it yourself", now.Volume, found[0])
 	}
 	j.ctr = now
 	// What the way back recreates the container from: its inspect and its
@@ -69,7 +76,7 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 	// from a file (the security review of #47).
 	raw, err := json.Marshal(now.inspect.raw)
 	if err == nil {
-		err = writeFileAtomic(filepath.Join(j.dir, "container.json"), raw)
+		err = writeFile(filepath.Join(j.dir, "container.json"), raw)
 	}
 	if err == nil {
 		err = writeJSON(filepath.Join(j.dir, "image.json"), now.image)
@@ -95,6 +102,18 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 		OldRef: now.Ref, OldImage: now.inspect.Image, NewRef: newRef, LogDriver: info.logDriver,
 		Restart: restartArg(hc.RestartPolicy.Name, hc.RestartPolicy.MaximumRetryCount)}
 	return kb << 10, ""
+}
+
+// ensureBusybox has busybox here, pulling it when it is not: it archives and
+// restores a volume.
+func (r *runner) ensureBusybox(ctx context.Context) error {
+	if _, err := r.deps.Docker.Run(ctx, "image", "inspect", busybox); err == nil {
+		return nil
+	}
+	if _, err := r.deps.Docker.Run(ctx, "pull", "-q", busybox); err != nil {
+		return fmt.Errorf("%s, which archives and restores a volume, is not there and could not be pulled (%s)", busybox, firstLine(err.Error()))
+	}
+	return nil
 }
 
 // busyboxKB runs a measure of a volume — `du -sk` of what it holds, or `df
@@ -261,6 +280,14 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		return err
 	})
 	if err != nil {
+		// docker run can answer an error after the container started — and
+		// ran on the volume: read as a cut-short run is read (settle), it is
+		// a start, and the way back restores the volume (the review of
+		// #226). One docker cannot say of is the way back's to meet: its
+		// first look refuses.
+		if started, serr := j.settleContainer(ctx, stepStarted); serr == nil && started {
+			j.step(stepStarted)
+		}
 		j.goBack(ctx, "the new container did not start: "+firstLine(err.Error()))
 		return
 	}
@@ -396,19 +423,17 @@ func (r *runner) containerFirstLog(ctx context.Context, id string) string {
 // names it makes free, room for a restore, and the install path as the run
 // left it when it replaced the binary there — checked by the upgrade before
 // its stop and by --back before its first act (#41, #47). restoreBytes is
-// what a restore takes, -1 when none is ahead; binary is whether the way
-// back puts the host's binary back.
-func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64, binary bool) error {
+// what a restore takes, -1 when none is ahead. The host's binary is not
+// one: what keeps it from being put back is a note (hostBinaryBack).
+func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64) error {
 	r, st := j.r, j.st
 	cs := st.Container
 	if _, err := r.deps.Docker.Run(ctx, "image", "inspect", cs.OldImage); err != nil {
 		return fmt.Errorf("the old image %s is not there to run again (%s)", cs.OldImage, firstLine(err.Error()))
 	}
 	if restoreBytes >= 0 {
-		if _, err := r.deps.Docker.Run(ctx, "image", "inspect", busybox); err != nil {
-			if _, err := r.deps.Docker.Run(ctx, "pull", "-q", busybox); err != nil {
-				return fmt.Errorf("%s, which restores the archive, is not there and could not be pulled (%s)", busybox, firstLine(err.Error()))
-			}
+		if err := r.ensureBusybox(ctx); err != nil {
+			return err
 		}
 		// The volume a restore makes must be free, unless an earlier
 		// attempt of this run made it (its intent still pending): that one
@@ -439,13 +464,20 @@ func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64
 			return fmt.Errorf("no room beside the volume %s for the restore a way back may need: %d MiB free, %d MiB needed", cs.Volume, free>>10, need>>20)
 		}
 	}
-	// The host's binary, put back by the way back when the run replaced it:
-	// the install path as the run left it, the copy answering, and nothing
-	// newer running from it (#35 (a), #38; the eighth review: only when the
-	// run replaced it).
+	return nil
+}
+
+// hostBinaryBack says whether the host's binary can be put back by a
+// container's way back: the run replaced it, the install path holds what
+// the run left there, its copy answers, and nothing newer runs from it (#35
+// (a), #38). When it cannot, the container goes back all the same and the
+// binary stays, said (the review of #226): the container is what the way
+// back is for.
+func (j *job) hostBinaryBack(ctx context.Context) error {
+	r, st := j.r, j.st
 	b := st.Binary
-	if !binary || b == nil || b.Old == "" {
-		return nil
+	if b == nil || b.Old == "" || !st.has(stepBinaryReplacing) || st.has(stepBackBinary) {
+		return errNoBinaryBack
 	}
 	if err := j.pathAsRecorded(ctx); err != nil {
 		return err
@@ -478,8 +510,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 		restoreBytes = st.Archive.Bytes
 	}
-	binary := st.has(stepBinaryReplacing) && !st.has(stepBackBinary)
-	if err := j.wayBackPreconditions(ctx, restoreBytes, 0, binary); err != nil {
+	if err := j.containerBackPreconditions(ctx, restoreBytes); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
 	}
 	if !st.has(stepRenamedOld) {
@@ -682,7 +713,7 @@ func (j *job) restoreVolume(ctx context.Context) (wentBack, bool) {
 	vol := cs.Volume + "-" + st.Run
 	ours := st.Pending != nil && st.Pending.Step == stepBackVolume
 	archive := filepath.Join(j.dir, "data.tar.gz")
-	if _, err := readBack(archive, *st.Archive); err != nil {
+	if err := checkArchive(ctx, archive, *st.Archive, j.dir); err != nil {
 		return j.fail(err.Error() + "; nothing was touched"), false
 	}
 	if is, err := j.nameIs(ctx, cs.NewID); err != nil {
@@ -691,9 +722,6 @@ func (j *job) restoreVolume(ctx context.Context) (wentBack, bool) {
 		if c, err := r.inspectOne(ctx, cs.Name); err != nil || c != nil {
 			return j.fail("the container named " + cs.Name + " now is not the one this run started: a later run's, or one made since. Go back from the run that made it first; nothing was touched"), false
 		}
-	}
-	if err := checkArchiveDB(ctx, archive, j.dir); err != nil {
-		return j.fail("the archive's database fails its check (" + err.Error() + "); nothing was touched"), false
 	}
 	if err := j.intend(stepBackVolume, "make the volume %s and restore the archive into it", vol); err != nil {
 		panic(unrecorded{err: err})
@@ -781,7 +809,10 @@ func (j *job) setNewAside(ctx context.Context) (wentBack, bool) {
 func (j *job) backHostBinary(ctx context.Context) {
 	st := j.st
 	b := st.Binary
-	if b == nil || b.Old == "" || !st.has(stepBinaryReplacing) || st.has(stepBackBinary) {
+	if err := j.hostBinaryBack(ctx); errors.Is(err, errNoBinaryBack) {
+		return
+	} else if err != nil {
+		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("tracepad %s was not put back at %s: %v; it stays as it is", b.From, b.Path, err))
 		return
 	}
 	err := j.act(stepBackBinary, "put tracepad "+b.From+" back at "+b.Path, func() error {
@@ -796,16 +827,47 @@ func (j *job) backHostBinary(ctx context.Context) {
 
 // oldRef is how the old image is named to run it again: its tag while that
 // still names the old image, else the image's id (the review of #1).
+//
+// Never the bare ID: a container run from it is no longer one of the image's
+// to the plan, and drops out of every later upgrade (the review of #226).
+// The tag while it still names the old image; else the release's own tag,
+// <repo>:<from>, when that does; else the image's digest in its repository,
+// <repo>@sha256:…; else the release's tag given to the old image here.
 func (j *job) oldRef(ctx context.Context) (string, error) {
-	cs := j.st.Container
-	out, err := j.r.deps.Docker.Run(ctx, "image", "inspect", "--format", "{{.Id}}", cs.OldRef)
-	switch {
-	case err == nil && strings.TrimSpace(string(out)) == cs.OldImage:
-		return cs.OldRef, nil
-	case err == nil, strings.Contains(err.Error(), "No such image"):
-		return cs.OldImage, nil
+	r, cs := j.r, j.st.Container
+	repo, _ := imageRepo(cs.OldRef) // ignored: the run's own reference, of the image's repositories by the plan's rule
+	names := func(ref string) (bool, error) {
+		out, err := r.deps.Docker.Run(ctx, "image", "inspect", "--format", "{{.Id}}", ref)
+		switch {
+		case err == nil:
+			return strings.TrimSpace(string(out)) == cs.OldImage, nil
+		case strings.Contains(err.Error(), "No such image"):
+			return false, nil
+		}
+		return false, fmt.Errorf("docker cannot say which image %s names (%s)", ref, firstLine(err.Error()))
 	}
-	return "", fmt.Errorf("docker cannot say which image %s names (%s)", cs.OldRef, firstLine(err.Error()))
+	release := repo + ":" + j.st.From
+	for _, ref := range []string{cs.OldRef, release} {
+		if ok, err := names(ref); err != nil || ok {
+			return ref, err
+		}
+	}
+	out, err := r.deps.Docker.Run(ctx, "image", "inspect", "--format", "{{json .RepoDigests}}", cs.OldImage)
+	if err != nil {
+		return "", fmt.Errorf("docker cannot say the digests of %s (%s)", cs.OldImage, firstLine(err.Error()))
+	}
+	var digests []string
+	if json.Unmarshal(out, &digests) == nil {
+		for _, d := range digests {
+			if r, ok := imageRepo(d); ok && r == repo {
+				return d, nil
+			}
+		}
+	}
+	if _, err := r.deps.Docker.Run(ctx, "tag", cs.OldImage, release); err != nil {
+		return "", fmt.Errorf("the old image %s has no name of the release's to run it by, and could not be given %s (%s)", cs.OldImage, release, firstLine(err.Error()))
+	}
+	return release, nil
 }
 
 // nameIs says whether the container under the run's name is the one with
@@ -855,15 +917,23 @@ func (j *job) clearName(ctx context.Context, keep string) (wentBack, bool) {
 	return wentBack{}, true
 }
 
-// checkArchiveDB checks a container's archive's database on the host, from a
-// copy of its database files the command makes and removes itself.
-func checkArchiveDB(ctx context.Context, archive, runDir string) error {
+// checkArchive reads a container's archive back against what the run
+// recorded and checks its database on the host — one pass over the archive,
+// which writes the database's files into a directory of the command's own,
+// removed after.
+func checkArchive(ctx context.Context, archive string, want Archived, runDir string) error {
 	check := filepath.Join(runDir, "check-"+strconv.Itoa(os.Getpid()))
-	defer os.RemoveAll(check) // ignored: the command's own copy in the run's directory; a leftover is named for this pid and removed by none
-	if err := extractOnly(archive, check, 0o700, databaseFiles); err != nil {
+	if err := os.Mkdir(check, 0o700); err != nil {
 		return err
 	}
-	return quickCheck(ctx, filepath.Join(check, dataDBName))
+	defer os.RemoveAll(check) // ignored: the command's own copy in the run's directory; a leftover is named for this pid and removed by none
+	if _, err := readBackInto(archive, want, check); err != nil {
+		return err
+	}
+	if err := quickCheck(ctx, filepath.Join(check, dataDBName)); err != nil {
+		return fmt.Errorf("the archive's database fails its check (%v)", err)
+	}
+	return nil
 }
 
 // checkBackContainer checks the old version a way back started, or found
@@ -942,3 +1012,6 @@ func (j *job) settleContainer(ctx context.Context, step string) (bool, error) {
 
 // errKeep: the intent stays pending, for the act's own path to take up.
 var errKeep = errors.New("kept")
+
+// errNoBinaryBack: the run has no host binary to put back.
+var errNoBinaryBack = errors.New("no binary to put back")

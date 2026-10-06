@@ -176,7 +176,7 @@ func (s *State) save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(dir, stateFile), append(b, '\n'))
+	return writeFile(filepath.Join(dir, stateFile), append(b, '\n'))
 }
 
 // syncFile flushes a file the command relies on to disk before it goes on:
@@ -184,16 +184,14 @@ func (s *State) save(dir string) error {
 // matrix, whose cells cannot lose power, does without it.
 var syncFile = (*os.File).Sync
 
-// inPlace writes a file over itself instead of beside it and by rename: a
-// test seam, as syncFile is — the gate's matrices kill the command between
-// two calls, never inside a write, and the temporary file and its rename were
-// most of a cell's time on macOS.
-var inPlace = false
+// writeFile writes the files a run relies on — its state, what it saved of
+// a server or a container — by writeFileAtomic. A test seam, as syncFile is:
+// the gate's matrices kill the command between two calls, never inside a
+// write, and a temporary file and its rename per write were most of a
+// cell's time on macOS. The production path has no other.
+var writeFile = writeFileAtomic
 
 func writeFileAtomic(path string, data []byte) error {
-	if inPlace {
-		return os.WriteFile(path, data, 0o600)
-	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
@@ -219,7 +217,7 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, append(b, '\n'))
+	return writeFile(path, append(b, '\n'))
 }
 
 // private says whether a directory is the person's alone: a real directory,

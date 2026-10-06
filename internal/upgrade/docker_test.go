@@ -56,6 +56,13 @@ type fakeDocker struct {
 	failRestore bool
 	room        int64
 	failDf      bool
+	// failAfterStart makes `docker run -d` of the release start its
+	// container and answer an error.
+	failAfterStart bool
+	// links is what busybox's find of links and special files says;
+	// digests, an image's repository digests by its ID.
+	links   string
+	digests map[string][]string
 	// flakyUpdate is how many updates of a restart policy docker refuses
 	// before it takes one.
 	flakyUpdate int
@@ -216,6 +223,10 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 			if !ok {
 				return nil, errors.New("docker image: Error: No such image: " + args[4])
 			}
+			if strings.Contains(args[3], "RepoDigests") {
+				b, _ := json.Marshal(d.digests[img.ID])
+				return b, nil
+			}
 			return []byte(img.ID + "\n"), nil
 		}
 		var list []imageConfig
@@ -245,6 +256,13 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 			d.volumes[args[2]] = 0
 		}
 		return []byte(args[2]), nil
+	case args[0] == "tag":
+		img, ok := d.images[args[1]]
+		if !ok {
+			return nil, errors.New("docker tag: No such image: " + args[1])
+		}
+		d.images[args[2]] = img
+		return nil, nil
 	case args[0] == "pull":
 		if _, ok := d.images[args[len(args)-1]]; !ok {
 			return nil, errors.New("docker pull: manifest unknown")
@@ -333,6 +351,8 @@ func (d *fakeDocker) busybox(args []string) ([]byte, error) {
 	}
 	script := args[len(args)-1]
 	switch {
+	case slices.Contains(args, "find"):
+		return []byte(d.links), nil
 	case slices.Contains(args, "du"):
 		return []byte("2048\t/data\n"), nil
 	case slices.Contains(args, "df"):
@@ -495,6 +515,13 @@ func (d *fakeDocker) create(args []string) ([]byte, error) {
 	}
 	c.NetworkSettings.Ports = c.HostConfig.PortBindings
 	d.byName[name] = c
+	if d.failAfterStart && c.Config.Image != d.brokenRef && strings.HasSuffix(ref, ":0.2.0") {
+		// The container started, ran on its volume and exited, and the CLI
+		// answered an error all the same.
+		d.boot(c)
+		c.State.Running = false
+		return nil, errors.New("docker run: error waiting for container: context canceled")
+	}
 	if d.failRun {
 		return nil, errors.New("docker run: Bind for 127.0.0.1:4318 failed: port is already allocated")
 	}
@@ -944,7 +971,7 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 		"-p", "127.0.0.1:4317:4317", "-p", "[::1]:4318:4318",
 		"--mount", "type=volume,src=tp,dst=/data",
 		"--mount", `type=bind,"src=/Users/me/My Data, certs",dst=/tls,readonly`,
-		"--restart", "on-failure:3", "--label", "team=obs", "--log-driver", "local", "--user", "1000:1000",
+		"--restart", "on-failure:3", "--label", "team=obs", "--log-driver", "local", "--log-opt", "max-size=10m", "--user", "1000:1000",
 		"ghcr.io/tracepad/tracepad:0.2.0", "serve"}
 	if !slices.Equal(got, want) {
 		t.Errorf("run args\n got %q\nwant %q", got, want)
@@ -967,9 +994,11 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 	}
 	// Its log options are not carried — they can hold a credential — and
 	// are named as what the run does not carry.
-	if got := unreproduced(ic, img); !slices.Contains(got, "HostConfig.LogConfig.Config") {
-		t.Errorf("log options not named: %q", got)
+	ic.HostConfig.LogConfig.Config["splunk-token"] = "t0ken"
+	if got := unreproduced(ic, img); !slices.Equal(got, []string{"HostConfig.LogConfig.Config[splunk-token]"}) {
+		t.Errorf("a log option that can hold a credential: %q", got)
 	}
+	delete(ic.HostConfig.LogConfig.Config, "splunk-token")
 	if env := personEnv(ic, names); !slices.Equal(env, []string{"TRACEPAD_PROJECTS=a:b:c"}) {
 		t.Errorf("the person's environment: %q", env)
 	}
