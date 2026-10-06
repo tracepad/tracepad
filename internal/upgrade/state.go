@@ -112,6 +112,8 @@ type ContainerState struct {
 	// Restart is its restart policy, as --restart takes it: the stop sets
 	// it to no, and a way back puts it back.
 	Restart string `json:"restart"`
+	// LogDriver is the daemon's own, which a recreate does not name.
+	LogDriver string `json:"log_driver,omitempty"`
 	// NewID is the container this run made; BackID the old image's
 	// container a way back started, or found running.
 	NewID  string `json:"new_id,omitempty"`
@@ -349,7 +351,7 @@ func (s *State) validate(dir string) error {
 		// security review of #1).
 		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
 			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
-			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) ||
+			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.LogDriver != "" && !dockerName.MatchString(c.LogDriver)) ||
 			(c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
 			return errors.New("its container is not one a run records")
 		}

@@ -17,14 +17,6 @@ import (
 // first, settled from what docker says on the next load, and a way back that
 // checks what it needs before its first act.
 
-// recreated is a container run's run.json: the container's run as
-// createdAs wrote it — the plan's own words for it — and the names of the
-// variables it was given, whose values are in env beside it.
-type recreated struct {
-	Run      []string `json:"run"`
-	EnvNames []string `json:"env_names"`
-}
-
 func (j *job) before() string { return j.st.Container.Name + "-before-" + j.st.Run }
 func (j *job) after() string  { return j.st.Container.Name + "-after-" + j.st.Run }
 func (j *job) failed() string { return j.st.Container.Name + "-failed-" + j.st.Run }
@@ -71,12 +63,15 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 		}
 	}
 	j.ctr = now
+	// What the way back recreates the container from: its inspect and its
+	// image's, from which it writes the run again — never a run read back
+	// from a file (the security review of #47).
 	raw, err := json.Marshal(now.inspect.raw)
 	if err == nil {
 		err = writeFileAtomic(filepath.Join(j.dir, "container.json"), raw)
 	}
 	if err == nil {
-		err = writeJSON(filepath.Join(j.dir, "run.json"), recreated{Run: now.Run, EnvNames: now.EnvNames})
+		err = writeJSON(filepath.Join(j.dir, "image.json"), now.image)
 	}
 	if err != nil {
 		return 0, err.Error()
@@ -96,7 +91,7 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 	}
 	hc := now.inspect.HostConfig
 	st.Container = &ContainerState{Name: now.Name, ID: now.inspect.ID, Volume: now.Volume, URL: now.URL,
-		OldRef: now.Ref, OldImage: now.inspect.Image, NewRef: newRef,
+		OldRef: now.Ref, OldImage: now.inspect.Image, NewRef: newRef, LogDriver: info.logDriver,
 		Restart: restartArg(hc.RestartPolicy.Name, hc.RestartPolicy.MaximumRetryCount)}
 	return kb << 10, ""
 }
@@ -123,12 +118,17 @@ func (r *runner) busyboxKB(ctx context.Context, volume string, measure ...string
 	return strconv.ParseInt(f[field], 10, 64)
 }
 
-// loadContainer reads what a way back recreates the container from: its
-// inspect and its run, as the upgrade wrote them.
+// loadContainer reads what a way back recreates the container from — its
+// inspect and its image's, as the upgrade saved them — and writes its run
+// again with the plan's own function. What it reads must still be a
+// container the command recreates, by the plan's rule: a file changed since
+// to give it a setting of the person's (a privilege, a bind of their whole
+// disk) refuses the way back, rather than run (the security review of #47).
 func (j *job) loadContainer() error {
 	if j.ctr.Run != nil {
 		return nil
 	}
+	cs := j.st.Container
 	b, err := os.ReadFile(filepath.Join(j.dir, "container.json"))
 	if err != nil {
 		return err
@@ -140,18 +140,27 @@ func (j *job) loadContainer() error {
 	if err := json.Unmarshal(b, &ic.raw); err != nil {
 		return err
 	}
-	b, err = os.ReadFile(filepath.Join(j.dir, "run.json"))
+	b, err = os.ReadFile(filepath.Join(j.dir, "image.json"))
 	if err != nil {
 		return err
 	}
-	var rc recreated
-	if err := json.Unmarshal(b, &rc); err != nil {
+	var img imageConfig
+	if err := json.Unmarshal(b, &img); err != nil {
 		return err
 	}
-	if ic.ID != j.st.Container.ID || !slices.Contains(rc.Run, imageSlot) {
+	if ic.ID != cs.ID || img.ID != cs.OldImage {
 		return errors.New("they are not this run's container's")
 	}
-	j.ctr = Container{Name: j.st.Container.Name, Volume: j.st.Container.Volume, Run: rc.Run, EnvNames: rc.EnvNames, inspect: ic}
+	c, _ := asContainer(ic) // ignored: not the image's is refused just below, as a container whose run cannot be written
+	info := dockerInfo{logDriver: cs.LogDriver}
+	(&runner{}).recreate(&c, map[string]imageConfig{img.ID: img}, nil, info)
+	if reason := containerRefusal(c, cs.Name, info); reason != "" {
+		return errors.New("they describe a container the command does not recreate: " + reason)
+	}
+	if c.Name != cs.Name || c.Volume != cs.Volume || c.URL != cs.URL {
+		return errors.New("they describe another name, volume or address than the run's")
+	}
+	j.ctr = c
 	return nil
 }
 
@@ -445,7 +454,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		return j.fail("docker is not on PATH; nothing was touched")
 	}
 	if err := j.loadContainer(); err != nil {
-		return j.fail("the run's container.json or run.json does not read (" + err.Error() + "); nothing was touched")
+		return j.fail("the run's container.json or image.json does not read (" + err.Error() + "); nothing was touched")
 	}
 	restoreBytes := int64(-1)
 	if st.has(stepStarted) && !st.has(stepBackVolume) {

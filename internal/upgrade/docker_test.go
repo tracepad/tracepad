@@ -892,7 +892,7 @@ func TestTheRunIsTheContainersOwn(t *testing.T) {
 // The recreate is the container again (Decision 10, #47): its restart policy
 // with its count, its mounts as --mount takes them (a path with a comma and a
 // space, a read-only flag), its bindings on IPv4 and IPv6, its labels, a log
-// driver and options of its own, its user, its command; the variables the
+// driver of its own, its user, its command; the variables the
 // person set and none of the image's; and on a way back, the restored
 // volume in place of its own.
 func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
@@ -922,10 +922,15 @@ func TestTheRecreateKeepsWhatTheContainerHad(t *testing.T) {
 		"-p", "127.0.0.1:4317:4317", "-p", "[::1]:4318:4318",
 		"--mount", "type=volume,src=tp,dst=/data",
 		"--mount", `type=bind,"src=/Users/me/My Data, certs",dst=/tls,readonly`,
-		"--restart", "on-failure:3", "--label", "team=obs", "--log-driver", "local", "--log-opt", "max-size=10m", "--user", "1000:1000",
+		"--restart", "on-failure:3", "--label", "team=obs", "--log-driver", "local", "--user", "1000:1000",
 		"ghcr.io/tracepad/tracepad:0.2.0", "serve"}
 	if !slices.Equal(got, want) {
 		t.Errorf("run args\n got %q\nwant %q", got, want)
+	}
+	// Its log options are not carried — they can hold a credential — and
+	// are named as what the run does not carry.
+	if got := unreproduced(ic, img); !slices.Contains(got, "HostConfig.LogConfig.Config") {
+		t.Errorf("log options not named: %q", got)
 	}
 	if env := personEnv(ic, names); !slices.Equal(env, []string{"TRACEPAD_PROJECTS=a:b:c"}) {
 		t.Errorf("the person's environment: %q", env)

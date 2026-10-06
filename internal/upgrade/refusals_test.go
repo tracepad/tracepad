@@ -831,7 +831,7 @@ var refusalReasons = []refusalReason{
 	{id: "C07", fn: "containerBackPreconditions", prefix: "the room for a restore of the volume", n: 1, kind: 'M', cells: []string{"C08-room-untold/a", "C08-room-untold/b-healthy"}},
 	{id: "C08", fn: "containerBackPreconditions", prefix: "no room beside the volume", n: 1, kind: 'M', cells: []string{"C09-no-room/a", "C09-no-room/b-healthy"}},
 	{id: "C09", fn: "containerBackPreconditions", prefix: "the copy %s does not answer", n: 1, kind: 'R', cells: []string{"C10-copy-wrong/b-healthy"}},
-	{id: "C10", fn: "backContainer", prefix: "the run's container.json or run.json does not read", n: 1, kind: 'R', cells: []string{"C12-run-json-missing/b-healthy"}},
+	{id: "C10", fn: "backContainer", prefix: "the run's container.json or image.json does not read", n: 1, kind: 'R', cells: []string{"C12-image-json-missing/b-healthy", "C12-container-json-privileged/b-healthy"}},
 	{id: "C11", fn: "backContainer", prefix: "tracepad %s ran on the volume %s, and the run records no archive", n: 1, kind: 'R', why: "a container run archives before it renames and runs"},
 	{id: "C12", fn: "backContainer", prefix: "; nothing was touched", n: 1, kind: 'R', cells: []string{"C02-old-image-gone/b-healthy", "C09-no-room/b-healthy", "C10-copy-wrong/b-healthy"},
 		why: "passes on the preconditions' refusals and pathAsRecorded's"},

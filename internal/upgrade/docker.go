@@ -216,8 +216,8 @@ const imageSlot = "\x00image"
 // createdAs is how a container was created, read back from its inspect and its
 // image's (the live run of rc.3: "the options it was created with" left a
 // person to find them): its published ports, its mounts, its restart
-// policy, its network, its labels, its log driver, its user, and the command
-// and variables it was given beyond the image's own. logDriver is the
+// policy, its network, its labels, its log driver (not its options), its
+// user, and the command and variables it was given beyond the image's own. logDriver is the
 // daemon's default, "" when it could not be read. The person's commands and
 // the command's own recreate are both written from it (#47).
 func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, envNames []string, err error) {
@@ -271,16 +271,12 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	for _, l := range personLabels(ic.Config.Labels, img.Config.Labels) {
 		run = append(run, "--label", l)
 	}
-	if lc := hc.LogConfig; lc.Type != "" && (lc.Type != logDriver || len(lc.Config) > 0) {
+	// A log driver of its own is carried; its options are not: they can
+	// hold a credential (a Splunk token, say), which would go on a command
+	// line and into the plan (the security review of #47). A container with
+	// options is the person's, named (unreproduced).
+	if lc := hc.LogConfig; lc.Type != "" && lc.Type != logDriver {
 		run = append(run, "--log-driver", lc.Type)
-		opts := make([]string, 0, len(lc.Config))
-		for k, v := range lc.Config {
-			opts = append(opts, k+"="+v)
-		}
-		sort.Strings(opts)
-		for _, o := range opts {
-			run = append(run, "--log-opt", o)
-		}
 	}
 	if ic.Config.User != img.Config.User {
 		run = append(run, "--user", ic.Config.User)
@@ -437,6 +433,9 @@ func unreproduced(ic inspectContainer, img imageConfig) []string {
 			continue
 		}
 		out = append(out, "Config."+k)
+	}
+	if len(ic.HostConfig.LogConfig.Config) > 0 {
+		out = append(out, "HostConfig.LogConfig.Config")
 	}
 	if h := ic.Config.Hostname; h != "" && (len(ic.ID) < 12 || h != ic.ID[:12]) {
 		out = append(out, "Config.Hostname")

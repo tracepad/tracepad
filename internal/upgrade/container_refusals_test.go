@@ -190,9 +190,18 @@ func containerRefusalCases() []refusalCase {
 				return func() { c.deps.Docker = saved }
 			})
 		}},
-		// C12: the run's record of the container's run gone.
-		{"C12-run-json-missing/b-healthy", func(c *containerCell) {
-			c.bAfterHealthy(func(_, dir string) func() { return moveAway(filepath.Join(dir, "run.json")) })
+		// C12: the run's record of the container gone, or changed to give
+		// it a setting the command does not recreate.
+		{"C12-image-json-missing/b-healthy", func(c *containerCell) {
+			c.bAfterHealthy(func(_, dir string) func() { return moveAway(filepath.Join(dir, "image.json")) })
+		}},
+		{"C12-container-json-privileged/b-healthy", func(c *containerCell) {
+			c.bAfterHealthy(func(_, dir string) func() {
+				path := filepath.Join(dir, "container.json")
+				b, _ := os.ReadFile(path)
+				_ = os.WriteFile(path, []byte(strings.Replace(string(b), `"Privileged":false`, `"Privileged":true`, 1)), 0o600)
+				return func() { _ = os.WriteFile(path, b, 0o600) }
+			})
 		}},
 		// C33: the new container does not stop when the way back asks.
 		{"C33-new-container-slow-to-stop/b-healthy", func(c *containerCell) {
