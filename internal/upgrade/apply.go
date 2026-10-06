@@ -393,7 +393,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		need += size
 		// Its way back, before anything stops (the final review): a restore
 		// of what is there now, beside it, after an archive of it.
-		if err := j.wayBackPreconditions(ctx, size, size); err != nil {
+		if err := j.wayBackPreconditions(ctx, size, size, p.server.Proc.PID); err != nil {
 			return nil, "its way back could not be taken: " + err.Error()
 		}
 	}
@@ -657,8 +657,8 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 		// removed since): it would not start there again. It starts in its
 		// data directory — unless an argument is relative to the directory
 		// that is gone.
-		if relativeDataDir(s.Proc) {
-			return fmt.Sprintf("server pid %d's working directory %s is gone, and its arguments name paths relative to it: restart it yourself", s.Proc.PID, s.Proc.Cwd)
+		if rel := relativePaths(s.Proc); len(rel) > 0 {
+			return fmt.Sprintf("server pid %d's working directory %s is gone, and %s may be relative to it: restart it yourself", s.Proc.PID, s.Proc.Cwd, strings.Join(rel, " and "))
 		}
 		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("server pid %d's working directory %s is gone; it starts again in its data directory, %s", s.Proc.PID, s.Proc.Cwd, s.DataDir))
 		j.spec.Dir = s.DataDir
@@ -669,13 +669,33 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 	return ""
 }
 
-// relativeDataDir says whether a server's data directory, from whichever
-// source it came, is a relative path: one that means something only in the
-// directory it was started in (the final review). The source is the one
-// order the server reads (configuredDirs), never a copy of it.
-func relativeDataDir(p Process) bool {
+// serverPaths are the settings of a server's environment whose value is a
+// path it opens, beside its data directory (TRACEPAD_DATA_DIR, XDG_DATA_HOME
+// and HOME, which configuredDirs reads). A test holds the list to the
+// configuration's own (the twelfth review).
+var serverPaths = []string{"TRACEPAD_ADMIN_TOKEN_FILE"}
+
+// relativePaths names each path a server reads that means something only in
+// the directory it was started in: its data directory, from whichever source
+// it came (the one order the server reads, configuredDirs), and every path
+// in serverPaths (the twelfth review: a token file named relative to a
+// working directory that is gone fails the start from anywhere else).
+func relativePaths(p Process) []string {
+	var rel []string
 	dataDir, _, err := configuredDirs(p)
-	return !errors.Is(err, errNotServer) && (err != nil || !filepath.IsAbs(dataDir))
+	switch {
+	case errors.Is(err, errNotServer):
+	case err != nil:
+		rel = append(rel, "its data directory, from arguments that do not read ("+err.Error()+")")
+	case !filepath.IsAbs(dataDir):
+		rel = append(rel, fmt.Sprintf("its data directory %q", dataDir))
+	}
+	for _, name := range serverPaths {
+		if v := strings.TrimSpace(p.Getenv(name)); v != "" && !filepath.IsAbs(v) {
+			rel = append(rel, fmt.Sprintf("its %s %q", name, v))
+		}
+	}
+	return rel
 }
 
 // isServer checks, right before a signal, that pid is still the server of
@@ -1060,7 +1080,11 @@ func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string
 		rep.Notes = append(rep.Notes, fmt.Sprintf("the skill was not installed again: %s does not say its version (%v)", bin, err))
 		return false
 	case v != to:
-		return true
+		// Not this run's binary any more — the person put another there
+		// since: nothing was installed, and the step is not recorded as if
+		// it had been (the twelfth review).
+		rep.Notes = append(rep.Notes, fmt.Sprintf("the skill was not installed again: %s is %s now, not %s", bin, orNone(v), to))
+		return false
 	}
 	done := true
 	targets := []struct {

@@ -1118,7 +1118,10 @@ release: it refuses there before it looks at anything. The design is spec 054.
   `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
   against the release's `checksums.txt`, and its attestation when `gh` is
   logged in — is put in place, and the server starts again with **the same
-  arguments, environment and working directory**. A server is stopped with
+  arguments, environment and working directory** — in its data directory when
+  that working directory is gone, and not at all (a refusal before the stop)
+  when its data directory or a file it reads, such as
+  `TRACEPAD_ADMIN_TOKEN_FILE`, is named relative to the one gone. A server is stopped with
   SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
   (exit `5`), and `--back` starts it again once it has. **No binary is put
   under another server**: while any server but the run's own runs from the
@@ -1130,8 +1133,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   version. **What a way back needs is checked before the stop**: the copy of
   the old version, room beside the data directory for a restore (beside the
   archive, when both are on one disk), and a parent directory the restore can
-  be made in and the data renamed aside through; `--back` checks the same
-  before its first act. What the command cannot read — a process, a lock on a file system
+  be made in and the data renamed aside through, and no other server on the
+  installed binary that a way back would put the old version under; `--back`
+  checks the same before its first act. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
   or container whose version it cannot tell is named as one that may be

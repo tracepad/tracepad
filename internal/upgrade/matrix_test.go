@@ -372,8 +372,8 @@ func newKillWorld(t *testing.T, kind string) *killWorld {
 	return k
 }
 
-// The fault matrix and the walk matrix run as one, side by side: the
-// seams of inProcess are theirs for as long as both run.
+// The fault matrix, the walk matrix and the way back's refusals run as one,
+// side by side: the seams of inProcess are theirs for as long as they run.
 func TestTheMatrices(t *testing.T) {
 	inProcess(t)
 	t.Run("fault", func(t *testing.T) {
@@ -383,6 +383,10 @@ func TestTheMatrices(t *testing.T) {
 	t.Run("walk", func(t *testing.T) {
 		t.Parallel()
 		theWalkMatrix(t)
+	})
+	t.Run("refusals", func(t *testing.T) {
+		t.Parallel()
+		theWayBacksRefusals(t)
 	})
 }
 

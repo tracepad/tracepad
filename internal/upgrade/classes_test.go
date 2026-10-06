@@ -554,6 +554,28 @@ func TestAStateUnwrittenBeforeTheStopIsARefusal(t *testing.T) {
 	}
 }
 
+// A server whose working directory is gone starts again in its data
+// directory only when nothing it reads is relative to the one gone: a token
+// file named relative to it, as its data directory, refuses before the stop
+// (the twelfth review), the server still running.
+func TestARelativePathWithItsDirectoryGoneRefuses(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	pid, _ := lockedBy(w.data)
+	gone := filepath.Join(w.home, "worktree")
+	w.host.mu.Lock()
+	w.host.procs[pid].p.Cwd = gone
+	w.host.procs[pid].p.Env = append(w.host.procs[pid].p.Env, "TRACEPAD_ADMIN_TOKEN_FILE=secrets/admin-token")
+	w.host.mu.Unlock()
+	rep, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data)
+	if code != exitRefused || !strings.Contains(rep.Summary, `its TRACEPAD_ADMIN_TOKEN_FILE "secrets/admin-token" may be relative to it`) {
+		t.Errorf("%d %s", code, rep.Summary)
+	}
+	if !w.host.Alive(pid) || w.answers() != fOld {
+		t.Error("the server was stopped")
+	}
+}
+
 // What settling cannot look at is neither done nor undone (spec 054 #37): a
 // set-aside whose directories cannot be read, or an install path that cannot
 // be — which would read as "taken off" — refuses, and is not taken back.
@@ -915,78 +937,28 @@ func TestACandidatePastTheLatestIsNothingToDo(t *testing.T) {
 	}
 }
 
-// A way back's preconditions are checked before the stop, not found after
-// it (the final review): a data directory whose parent the restore cannot be
-// made in, or that has no room for the restore beside an archive on the same
-// file system, refuses the upgrade with the server still running and nothing
-// made. --back checks them before its first act too.
-func TestTheWayBacksPreconditionsComeBeforeTheStop(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root writes any directory")
-	}
+// The way back's check of what runs from the install path comes before the
+// stop too (the twelfth review): with the binary already the target, a
+// server that is not the run's runs from it and does not say its version —
+// a way back would put the old binary under it — so the upgrade refuses
+// with the run's server still running.
+func TestTheWayBacksServerCheckComesBeforeTheStop(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
-	deps := w.deps()
-	parent := filepath.Dir(w.data)
+	scriptBinary(t, w.install, fNew)
+	other := t.TempDir()
+	argv := []string{"tracepad", "serve", "--listen", "0.0.0.0:" + strings.Split(freeAddr(t), ":")[1], "--data-dir", other}
+	if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")}); err != nil {
+		t.Fatal(err)
+	}
 	pid, _ := lockedBy(w.data)
-	untouched := func(what string) {
-		t.Helper()
-		if !w.host.Alive(pid) || w.answers() != fOld {
-			t.Errorf("%s: the server was stopped", what)
-		}
-		if entries, _ := os.ReadDir(deps.Backups); len(entries) > 1 {
-			t.Errorf("%s: runs left: %v", what, entries)
-		}
+	rep, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data)
+	if code != exitRefused || !strings.Contains(rep.Summary, "nothing changed: its way back could not be taken") || !strings.Contains(rep.Summary, "cannot be shown to be safe") {
+		t.Errorf("%d %s", code, rep.Summary)
 	}
-
-	// The backups are beside the data here: made before the parent is made
-	// read-only, as they are on any machine an upgrade ran on before.
-	if err := os.MkdirAll(deps.Backups, 0o700); err != nil {
-		t.Fatal(err)
+	if !w.host.Alive(pid) || w.answers() != fOld {
+		t.Error("the server was stopped")
 	}
-	if err := os.Chmod(parent, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
-	_ = os.Chmod(parent, 0o700)
-	if code != exitRefused || !strings.Contains(rep.Summary, "nothing changed: its way back could not be taken: a restore cannot be made beside "+w.data) {
-		t.Errorf("a read-only parent: %d %s", code, rep.Summary)
-	}
-	untouched("a read-only parent")
-
-	// Room for one copy of the data beside it, not for the archive too.
-	size, _ := survey(w.data)
-	saved := freeBytes
-	t.Cleanup(func() { freeBytes = saved })
-	freeBytes = func(dir string) (int64, error) {
-		if dir == parent {
-			return size + mib100 + size/2, nil
-		}
-		return 1 << 40, nil
-	}
-	rep, code = runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
-	if code != exitRefused || !strings.Contains(rep.Summary, "no room beside "+w.data+" for the restore") {
-		t.Errorf("no room: %d %s", code, rep.Summary)
-	}
-	untouched("no room")
-	freeBytes = saved
-
-	// --back, from a healthy upgrade: refused before its first act, the new
-	// version left running; once the parent takes writes, it goes back.
-	rep, code = runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
-	if code != exitOK {
-		t.Fatalf("%d %s", code, rep.Summary)
-	}
-	_ = os.Chmod(parent, 0o500)
-	back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
-	_ = os.Chmod(parent, 0o700)
-	if code == exitOK || !strings.Contains(back.Summary, "a restore cannot be made beside") || !strings.Contains(back.Summary, "nothing was touched") || w.answers() != fNew {
-		t.Errorf("--back: %d %s", code, back.Summary)
-	}
-	if st, _ := loadState(rep.Run.Dir); st.has(stepBackBegun) {
-		t.Error("--back acted before it refused")
-	}
-	backUntilDone(t, deps, rep.Run.ID)
-	w.waitVersion(fOld)
 }
 
 // The final review's example: a release candidate installed past the latest

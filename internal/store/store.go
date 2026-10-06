@@ -137,14 +137,14 @@ func Open(path string) (*Store, error) {
 // (found by making a store per fuzz input, whose test names carry a `#`).
 // Nothing else in a path needs one, and a Windows drive letter must stay as it
 // is.
+func fileURI(path string) string {
+	return "file:" + strings.NewReplacer("%", "%25", "#", "%23", "?", "%3f").Replace(path)
+}
+
 // FileURI is a database file's DSN as the server opens it: the one spelling,
 // for any other process that opens the same file (spec 054 #40).
 func FileURI(path string) string {
 	return fileURI(path)
-}
-
-func fileURI(path string) string {
-	return "file:" + strings.NewReplacer("%", "%25", "#", "%23", "?", "%3f").Replace(path)
 }
 
 // createFile makes a fresh database file in incremental auto-vacuum mode and

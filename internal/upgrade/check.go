@@ -51,10 +51,11 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 		v, err := health(hctx, r.deps.HTTP, base)
 		cancel()
 		if err == nil {
+			// Any answer is the verdict's: one as another version does not
+			// turn into want by waiting, and meanwhile what answers runs on
+			// the data (the twelfth review).
 			c.Health, answered = v, true
-			if v == want {
-				break
-			}
+			break
 		}
 		if !r.deps.Now().Before(deadline) {
 			break

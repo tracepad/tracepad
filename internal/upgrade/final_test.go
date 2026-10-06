@@ -7,9 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tracepad/tracepad/internal/config"
 )
 
 // A zombie answers kill(pid, 0) and runs nothing: it is gone.
@@ -50,7 +54,8 @@ func TestALinkedBinaryIsNotTheCommands(t *testing.T) {
 	}
 }
 
-// Whichever source a data directory came from, a relative one is relative.
+// Whichever source a data directory came from, a relative one is relative;
+// so is any other path the server reads.
 func TestADataDirectoryFromAnySource(t *testing.T) {
 	t.Parallel()
 	serve := []string{"tracepad", "serve"}
@@ -66,8 +71,12 @@ func TestADataDirectoryFromAnySource(t *testing.T) {
 		{serve, []string{"XDG_DATA_HOME=share", "HOME=/h"}, true},
 		{serve, []string{"HOME=/h"}, false},
 		{serve, nil, true},
+		// Any path the server opens, not its data directory only (the
+		// twelfth review).
+		{append(serve, "--data-dir", "/d"), []string{"TRACEPAD_ADMIN_TOKEN_FILE=token.txt"}, true},
+		{append(serve, "--data-dir", "/d"), []string{"TRACEPAD_ADMIN_TOKEN_FILE=/run/secrets/token"}, false},
 	} {
-		if got := relativeDataDir(Process{Argv: tc.argv, Env: tc.env}); got != tc.rel {
+		if got := len(relativePaths(Process{Argv: tc.argv, Env: tc.env})) > 0; got != tc.rel {
 			t.Errorf("%q %q: relative %v", tc.argv, tc.env, got)
 		}
 	}
@@ -95,5 +104,30 @@ func TestThePlanAndTheUpgradeAgree(t *testing.T) {
 	code, summary := verdictOf(p)
 	if code != exitPending || !strings.Contains(summary, "server pid 2") {
 		t.Errorf("%d %s", code, summary)
+	}
+}
+
+// The paths a server reads are the configuration's: every variable of the
+// server's whose name or help says a file, a directory or a path is the data
+// directory's or in serverPaths, so a new one is not missed when a working
+// directory is gone (the twelfth review).
+func TestEveryPathSettingIsKnown(t *testing.T) {
+	t.Parallel()
+	pathy := regexp.MustCompile(`(?i)(_FILE|_DIR|_PATH|_HOME)$|\b(file|directory|path)\b`)
+	seen := 0
+	for _, v := range config.Env {
+		if v.Kind != config.EnvServer && v.Kind != config.EnvInternal {
+			continue
+		}
+		if !pathy.MatchString(v.Name) && !pathy.MatchString(v.Help) {
+			continue
+		}
+		seen++
+		if v.Name != "TRACEPAD_DATA_DIR" && !slices.Contains(serverPaths, v.Name) {
+			t.Errorf("the server reads %s, a path that serverPaths does not list", v.Name)
+		}
+	}
+	if seen < 2 {
+		t.Fatalf("only %d path settings found in config.Env", seen)
 	}
 }

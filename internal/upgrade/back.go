@@ -135,7 +135,22 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	if st.Archive != nil && !st.has(stepBackRestored) && !st.has(stepBackMoved) && (ps.WroteAfterSwap || j.pathMayBeNew()) {
 		restoreBytes = st.Archive.Bytes
 	}
-	if err := j.wayBackPreconditions(ctx, restoreBytes, 0); err != nil {
+	// The run's own servers, which the way back stops itself, are not
+	// counted by the check of what runs from the install path: the new one
+	// only when it is the one the way back stops — one alive and unread is
+	// counted (the audit of #223).
+	own := []int{ps.PID, ps.BackPID}
+	if ok, _ := r.startedAs(ps.NewPID, ps.NewStart, j.spec); ok { // ignored: one that cannot be read is counted, which refuses
+		own = append(own, ps.NewPID)
+	}
+	if held, _ := lockHeld(ps.DataDir); held { // ignored: an unread lock leaves the holder counted, which refuses
+		if holder, err := lockedBy(ps.DataDir); err == nil {
+			if ok, _ := r.isServer(holder, 0, ps.DataDir, j.spec); ok { // ignored: one that cannot be read is not the run's, and is counted
+				own = append(own, holder)
+			}
+		}
+	}
+	if err := j.wayBackPreconditions(ctx, restoreBytes, 0, own...); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
 	}
 	if !st.has(stepStopSent) {
@@ -143,29 +158,6 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	}
 	if err := j.pathAsRecorded(ctx); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
-	}
-	// Every check the way back makes comes before its first act (the eighth
-	// review), as the upgrade's come before its stop: the old binary is put
-	// back only where nothing runs it at a later version — the server of
-	// this run's data aside, which the way back stops itself. Put back at
-	// the end, it checks again, a second line against one started meanwhile.
-	if !st.has(stepBackBinary) {
-		// The run's own new server is not counted only when it is the one the
-		// way back stops: one alive and unread is counted (the audit of #223).
-		own := []int{ps.PID, ps.BackPID}
-		if ok, _ := r.startedAs(ps.NewPID, ps.NewStart, j.spec); ok { // ignored: one that cannot be read is counted, which refuses
-			own = append(own, ps.NewPID)
-		}
-		if held, _ := lockHeld(ps.DataDir); held { // ignored: an unread lock leaves the holder counted, which refuses
-			if holder, err := lockedBy(ps.DataDir); err == nil {
-				if ok, _ := r.isServer(holder, 0, ps.DataDir, j.spec); ok { // ignored: one that cannot be read is not the run's, and is counted
-					own = append(own, holder)
-				}
-			}
-		}
-		if err := r.serversOn(ctx, st.Binary.Path, st.From, false, own...); err != nil {
-			return j.fail(err.Error() + "; nothing was touched")
-		}
 	}
 	after, restore := ps.DataDir+".after-"+st.Run, ps.DataDir+".restore-"+st.Run
 
@@ -282,7 +274,8 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 
 // wayBackPreconditions are what a way back of a process run needs from the
 // machine rather than from the run: the copy of the old version in the run's
-// directory, and — when the archive may be restored — room for the restore
+// directory, no server but the run's own on the install path at a later
+// version than it, and — when the archive may be restored — room for the restore
 // beside the data, and a parent directory the restore can be made in and
 // the data renamed aside through. The upgrade checks them before its stop,
 // and --back before its first act (the final review): a way back found
@@ -290,11 +283,22 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 //
 // restoreBytes is what a restore takes, or -1 when none is ahead; archiveBytes
 // is what an archive not yet written takes on the run directory's file
-// system, counted too when that is the data's.
-func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64) error {
+// system, counted too when that is the data's. own are the run's servers,
+// which the way back stops itself: the check of what runs from the install
+// path (serversOn) does not count them.
+func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64, own ...int) error {
 	st, ps := j.st, j.st.Process
 	if v, err := j.r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
 		return fmt.Errorf("the copy %s does not answer %s", ps.Old, st.From)
+	}
+	// The old binary is put back only where nothing runs it at a later
+	// version (the eighth review) — the run's own servers (own) aside, which
+	// the way back stops itself. Put back at the end, it checks again, a
+	// second line against one started meanwhile.
+	if !st.has(stepBackBinary) {
+		if err := j.r.serversOn(ctx, st.Binary.Path, st.From, false, own...); err != nil {
+			return err
+		}
 	}
 	if restoreBytes < 0 {
 		return nil
@@ -531,20 +535,26 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 		return j.fail(fmt.Sprintf("tracepad %s may have had %s, and the run took no archive of it to restore: going back would start %s on data %s may have migrated. Keep %s, or restore a backup of your own; nothing was touched", st.To, ps.DataDir, st.From, st.To, st.To)), false
 	}
 	archive := filepath.Join(j.dir, "data.tar.gz")
-	rb, err := readBack(archive, *st.Archive)
-	if err != nil {
-		return j.fail(err.Error() + "; nothing was touched"), false
-	}
-	// The restore goes beside the data, on the data's file system, which
-	// may be another and fuller one than the archive's (the fourth review).
-	// Room the way back cannot tell is no room (the audit of #223), as in
-	// the upgrade's own check.
-	free, err := freeBytes(filepath.Dir(ps.DataDir))
-	switch {
-	case err != nil:
-		return j.fail(fmt.Sprintf("could not tell the room beside %s for the restore (%v); nothing was touched", ps.DataDir, err)), false
-	case free < rb.Bytes+mib100:
-		return j.fail(fmt.Sprintf("no room beside %s for the restore: %d MiB free, %d MiB needed; nothing was touched", ps.DataDir, free>>20, (rb.Bytes+mib100)>>20)), false
+	// The archive is read back, and the room for its restore asked, only
+	// while the restore is still to be made: one made and checked already
+	// takes that room itself, and a --back taken up again past it is not
+	// refused for room it no longer needs (the twelfth review).
+	if !st.has(stepBackRestored) {
+		rb, err := readBack(archive, *st.Archive)
+		if err != nil {
+			return j.fail(err.Error() + "; nothing was touched"), false
+		}
+		// The restore goes beside the data, on the data's file system, which
+		// may be another and fuller one than the archive's (the fourth
+		// review). Room the way back cannot tell is no room (the audit of
+		// #223), as in the upgrade's own check.
+		free, err := freeBytes(filepath.Dir(ps.DataDir))
+		switch {
+		case err != nil:
+			return j.fail(fmt.Sprintf("could not tell the room beside %s for the restore (%v); nothing was touched", ps.DataDir, err)), false
+		case free < rb.Bytes+mib100:
+			return j.fail(fmt.Sprintf("no room beside %s for the restore: %d MiB free, %d MiB needed; nothing was touched", ps.DataDir, free>>20, (rb.Bytes+mib100)>>20)), false
+		}
 	}
 	if _, err := os.Lstat(after); err == nil {
 		return j.fail(after + " exists already, and this run did not put it there; nothing was touched"), false

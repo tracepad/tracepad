@@ -633,7 +633,47 @@ func TestAnEmptyFlagIsTheServersToo(t *testing.T) {
 	if d, _, err := resolveServer(p); err != nil || d != "/w" {
 		t.Errorf("%q %v", d, err)
 	}
-	if !relativeDataDir(p) {
+	if len(relativePaths(p)) == 0 {
 		t.Error("an empty data directory is relative to where the server started")
+	}
+}
+
+// An answer as another version is the verdict at once (the twelfth review):
+// waiting does not turn it into the version asked for, and meanwhile what
+// answers runs on the data.
+func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok","version":"9.9.9"}`))
+	}))
+	defer srv.Close()
+	sleeps := 0
+	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour,
+		Sleep: func(context.Context, time.Duration) error { sleeps++; return nil }}}
+	c := r.check(context.Background(), srv.URL, "0.5.1", nil, func() bool { return true })
+	if c.Verdict != verdictNotHealthy || c.Health != "9.9.9" || sleeps > 0 {
+		t.Errorf("%+v after %d waits", c, sleeps)
+	}
+}
+
+// The skill is recorded as installed only when it was (the twelfth review):
+// a binary that is not the run's version any more installs nothing, says
+// so, and leaves the step for a later check.
+func TestASkillIsDoneOnlyWhenInstalled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	marker := filepath.Join(home, ".claude", "skills", "tracepad", ".version")
+	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
+	_ = os.WriteFile(marker, []byte("0.5.0\n"), 0o600)
+	installs := 0
+	r := &runner{deps: Deps{Home: home, Cwd: home,
+		Version: func(context.Context, string) (string, error) { return "0.4.0", nil },
+		Skills:  func(context.Context, string, string, ...string) (string, error) { installs++; return "ok", nil }}}
+	rep := &Report{}
+	if r.reinstallSkill(context.Background(), rep, "/bin/tracepad", "0.5.1") || installs > 0 {
+		t.Errorf("done with %d installs", installs)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, " "), "/bin/tracepad is 0.4.0 now, not 0.5.1") {
+		t.Errorf("notes: %q", rep.Notes)
 	}
 }
