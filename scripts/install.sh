@@ -215,7 +215,9 @@ skill_into() {
 plan() {
 	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
-	(sleep 15 && : >"$tmp/timeout" && kill "$planner") >/dev/null 2>&1 &
+	# The marker only for a plan still running: one that ended on its own at
+	# the fifteenth second says why itself (the sixth review of #228).
+	(sleep 15 && kill -0 "$planner" && : >"$tmp/timeout" && kill "$planner") >/dev/null 2>&1 &
 	watchdog=$!
 	plan_status=0
 	wait "$planner" || plan_status=$?

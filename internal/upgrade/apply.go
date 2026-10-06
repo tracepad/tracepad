@@ -263,7 +263,7 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	if !p.replaceBinary && p.server == nil && p.container == nil {
 		code, summary := verdictOf(p)
 		rep.ExitCode, rep.Summary = code, "Nothing upgraded by this run. "+summary
-		if bin.Ours {
+		if bin.Ours() {
 			r.reinstallSkill(ctx, rep, bin.Path, p.to)
 		}
 		rep.Next = append(rep.Next, laterOnly(next)...)

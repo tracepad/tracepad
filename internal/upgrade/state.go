@@ -54,10 +54,10 @@ type State struct {
 	SetAside []string `json:"set_aside,omitempty"`
 }
 
-// BinaryState is the installed binary's part of a run.
 // before is the count read before the stop, or why there is none.
 func (s *State) before() counted { return counted{n: s.CountBefore, why: s.CountNote} }
 
+// BinaryState is the installed binary's part of a run.
 type BinaryState struct {
 	Path string `json:"path"`
 	// From is what it answered before the run; empty when there was none.

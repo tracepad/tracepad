@@ -910,6 +910,28 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 	return cs, ""
 }
 
+// composePaths are the paths a Compose label holds. Compose joins them with
+// commas and writes them absolute, so a part that is not absolute after
+// another is the rest of that one, whose path has a comma in it (the sixth
+// review of #228: /srv/a,b/compose.yaml was -f /srv/a -f b/compose.yaml); a
+// first one that is not absolute is read from the project's directory, where
+// Compose itself looked for it (the second review of #228).
+func composePaths(label, dir string) []string {
+	var paths []string
+	for _, part := range strings.Split(label, ",") {
+		switch {
+		case part == "":
+		case len(paths) > 0 && !filepath.IsAbs(part):
+			paths[len(paths)-1] += "," + part
+		case !filepath.IsAbs(part) && dir != "":
+			paths = append(paths, filepath.Join(dir, part))
+		default:
+			paths = append(paths, part)
+		}
+	}
+	return paths
+}
+
 // asContainer reads a container of the image from its inspect; ok is false
 // for any other image's.
 func asContainer(ic inspectContainer) (Container, bool) {
@@ -921,21 +943,8 @@ func asContainer(ic inspectContainer) (Container, bool) {
 	c := Container{Name: strings.TrimPrefix(ic.Name, "/"), Ref: ic.Config.Image, Repo: repo,
 		Compose: labels["com.docker.compose.project"], Service: labels["com.docker.compose.service"],
 		ComposeDir: labels["com.docker.compose.project.working_dir"], inspect: ic}
-	// Compose writes the files it read joined by commas.
-	if files := labels["com.docker.compose.project.config_files"]; files != "" {
-		c.ComposeFiles = strings.Split(files, ",")
-	}
-	if files := labels["com.docker.compose.project.environment_file"]; files != "" {
-		// Compose writes them absolute; one that is not is read from the
-		// project's directory, where Compose itself looked for it (the
-		// second review of #228).
-		for _, f := range strings.Split(files, ",") {
-			if !filepath.IsAbs(f) && c.ComposeDir != "" {
-				f = filepath.Join(c.ComposeDir, f)
-			}
-			c.ComposeEnv = append(c.ComposeEnv, f)
-		}
-	}
+	c.ComposeFiles = composePaths(labels["com.docker.compose.project.config_files"], c.ComposeDir)
+	c.ComposeEnv = composePaths(labels["com.docker.compose.project.environment_file"], c.ComposeDir)
 	for _, m := range ic.Mounts {
 		switch {
 		case m.Destination != "/data":

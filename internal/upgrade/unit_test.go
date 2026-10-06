@@ -677,20 +677,20 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 }
 
 // The skill's bridge lives in a directory that stays the same, under the
-// user's cache, so that a firewall asks of it once (spec 054 #51); a binary
-// there is a bridge, and plans for the installed one.
+// user's cache, so that a firewall asks of it once (spec 054 #51), named as
+// mktemp names one, tmp.release: every release that knows a bridge, 0.1.0's
+// included, takes a binary there for one and plans for the installed binary
+// (the sixth review of #228: a name of this PR's own was a bridge only to
+// the releases after it).
 func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
 	t.Parallel()
-	for _, c := range []struct{ cache, self, want string }{
-		{"", "/home/u/.cache/tracepad/release/tracepad", "/home/u/.local/bin"},
-		{"/srv/cache", "/home/u/.cache/tracepad/release/tracepad", "/home/u/.local/bin"},
-		{"/srv/cache", "/srv/cache/tracepad/release/tracepad", "/home/u/.local/bin"},
-		// A relative XDG_CACHE_HOME is ignored, as os.UserCacheDir ignores it.
-		{"cache", "/work/cache/tracepad/release/tracepad", "/work/cache/tracepad/release"},
-		{"", "/home/u/.cache/tracepad/tracepad", "/home/u/.cache/tracepad"},
+	for _, c := range []struct{ self, want string }{
+		{"/home/u/.cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
+		{"/srv/cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
+		{"/home/u/.cache/tracepad/tracepad", "/home/u/.cache/tracepad"},
 	} {
-		if got := installDirFor("", "/home/u", c.self, append([]string{"/tmp"}, bridgeDirs("/home/u", c.cache)...)...); got != c.want {
-			t.Errorf("XDG_CACHE_HOME=%q, %s: %s, want %s", c.cache, c.self, got, c.want)
+		if got := installDirFor("", "/home/u", c.self, "/tmp"); got != c.want {
+			t.Errorf("%s: %s, want %s", c.self, got, c.want)
 		}
 	}
 }
@@ -711,10 +711,10 @@ func TestTheUsersTempDirIsAskedOnlyWhenItMatters(t *testing.T) {
 		{"", "/home/u/tracepad-backups/r/upgrader", 0},
 		{"", filepath.Join(os.TempDir(), "tmp.Ab12Cd", "tracepad"), 0},
 		{"", "/opt/tools/tracepad", 1},
-		{"", "/home/u/.cache/tracepad/release/tracepad", 0},
+		{"", "/home/u/.cache/tracepad/tmp.release/tracepad", 0},
 	} {
 		asked = 0
-		installTemps(tc.named, tc.self, "/home/u/.cache/tracepad/release")
+		installTemps(tc.named, tc.self)
 		if asked != tc.asks {
 			t.Errorf("%q %s: asked %d times", tc.named, tc.self, asked)
 		}

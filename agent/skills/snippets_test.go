@@ -152,7 +152,7 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 	t.Parallel()
 	var line string
 	for _, b := range shellBlocks(t) {
-		if b.file == "references/upgrade.md" && strings.Contains(b.text, "tracepad/release") {
+		if b.file == "references/upgrade.md" && strings.Contains(b.text, "tracepad/tmp.release") {
 			line = strings.TrimSpace(b.text)
 		}
 	}
@@ -181,7 +181,7 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 		// A download that fails runs no bridge an earlier run left (the
 		// review of #228): curl fails, sh reads nothing and exits 0.
 		home := t.TempDir()
-		stale := filepath.Join(home, ".cache", "tracepad", "release", "tracepad")
+		stale := filepath.Join(home, ".cache", "tracepad", "tmp.release", "tracepad")
 		ran := filepath.Join(t.TempDir(), "ran")
 		if err := os.MkdirAll(filepath.Dir(stale), 0o700); err != nil {
 			t.Fatal(err)

@@ -97,7 +97,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	// release and the installed binary (the final review): a candidate
 	// installed is not gone back from, and a server behind it is not taken
 	// to it unasked.
-	if b := p.f.Binary; r.flags.to == "" && b.Ours {
+	if b := p.f.Binary; r.flags.to == "" && b.Ours() {
 		if order, ok := Compare(b.Version, to); ok && order > 0 {
 			p.latest, p.raised = to, true
 			p.to, to = b.Version, b.Version
@@ -109,7 +109,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		return nil, err.Error()
 	}
 	bin := p.f.Binary
-	if bin.Ours {
+	if bin.Ours() {
 		order, ok := Compare(to, bin.Version)
 		if !ok {
 			return nil, fmt.Sprintf("the installed binary says %q, which cannot be ordered against %s", bin.Version, to)
@@ -124,7 +124,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	p.from = bin.Version
 	switch {
 	case p.server != nil:
-		if !bin.Ours {
+		if !bin.Ours() {
 			return nil, fmt.Sprintf("server pid %d runs %s, which the command cannot replace: %s", p.server.Proc.PID, bin.Path, bin.Reason)
 		}
 		// A server named that does not say its version — still starting, or
@@ -386,12 +386,18 @@ func (r *runner) othersBehind(p *plan) {
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(c, p.to)))
 		}
 	}
-	p.installed = r.binaryTodo(p.f.Binary, p.to)
+	var note string
+	p.installed, note = r.binaryTodo(p.f.Binary, p.to)
+	if note != "" {
+		p.notes = append(p.notes, note)
+	}
 	if b := p.f.Binary; b.First != "" {
 		v, err := b.FirstVersion, b.FirstErr
-		if err != nil {
+		switch {
+		case !firstBehind(b, p.to):
+		case err != nil:
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
-		} else if older(v) {
+		default:
 			// What put it there upgrades it: a package manager's, or the
 			// install script's, which installs into any directory it is
 			// given (the live run of rc.3: a binary in ~/.local/bin was told
@@ -410,29 +416,34 @@ func (r *runner) othersBehind(p *plan) {
 
 // binaryTodo is the plan's table of the binary at the install path: by its
 // kind (installedBinary), what the person is told to do, or "" for nothing —
-// the command's own, which a run replaces, or one that needs nothing. Every
-// line is the person's and makes the plan's exit 4 (spec 054 #56). A package
-// manager's is upgraded by its manager, whatever it says it is, and never
-// given the install script's line over its link.
-func (r *runner) binaryTodo(b Binary, to string) string {
+// the command's own, which a run replaces, or one that needs nothing — and a
+// note for one that could not be read, which is not checked, as nothing
+// else the plan could not look at is called behind. Every todo makes the
+// plan's exit 4 (spec 054 #56). A package manager's is upgraded by its
+// manager, whatever it says it is, and never given the install script's line
+// over its link.
+func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
 	switch {
+	case b.Kind == binUnread:
+		return "", fmt.Sprintf("the binary at %s was not checked: %s", b.Path, b.Reason)
 	case b.Kind == binNone || b.Kind == binOurs || needsNothing(to, b.Version):
-		return ""
+		return "", ""
 	case b.Kind == binDev:
 		return fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
-			b.Path, b.Version, to, r.installLine(filepath.Dir(b.Path), to))
+			b.Path, b.Version, to, r.installLine(filepath.Dir(b.Path), to)), ""
 	case b.Kind == binLinked && b.Version != "" && !IsRelease(b.Version):
 		// A build linked from its checkout (the review of #228).
 		return fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
-			b.Path, b.Link, b.Version, to, b.Link, r.installLine(filepath.Dir(b.Path), to))
+			b.Path, b.Link, b.Version, to, b.Link, r.installLine(filepath.Dir(b.Path), to)), ""
 	}
 	// Packaged, linked, silent, unwritable, odd: its reason says whose and
 	// what upgrades it.
-	return fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason)
+	return fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason), ""
 }
 
 // firstBehind is whether the tracepad first on PATH, another than the
-// installed one, is behind to or does not say.
+// installed one, is behind to or does not say: the one place that decides
+// it, for the line in the person's list and for nothing_to_do alike.
 func firstBehind(b Binary, to string) bool {
 	if b.First == "" {
 		return false

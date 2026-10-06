@@ -27,7 +27,13 @@ bad_links() {
 		case "$rest" in
 		"" | install.sh | llms.txt | llms-full.txt) continue ;;
 		*.md | *.md#*)
-			[[ "$rest" != */* ]] || echo "tracepad.github.io/tracepad/$rest: no Markdown page lives below the root"
+			# The root holds the Markdown of every page of docs/, and only
+			# those (the sixth review of #228: the install script prints two).
+			if [[ "$rest" == */* ]]; then
+				echo "tracepad.github.io/tracepad/$rest: no Markdown page lives below the root"
+			elif [ ! -f "$docs/${rest%%#*}" ]; then
+				echo "tracepad.github.io/tracepad/$rest: $docs/${rest%%#*} is not there"
+			fi
 			continue
 			;;
 		latest | dev | latest/* | dev/*) page="${rest#*/}" ;;
@@ -55,8 +61,8 @@ if [ "${1:-}" = --self-test ]; then
 	ok=$(printf '%s\n' \
 		'https://tracepad.github.io/tracepad/' \
 		'https://tracepad.github.io/tracepad/install.sh' \
-		'https://tracepad.github.io/tracepad/agent-setup.md' \
-		'https://tracepad.github.io/tracepad/agent-upgrade.md#x' \
+		'https://tracepad.github.io/tracepad/install.md' \
+		'https://tracepad.github.io/tracepad/docker.md#x' \
 		'https://tracepad.github.io/tracepad/llms-full.txt' \
 		'https://tracepad.github.io/tracepad/latest/' \
 		'https://tracepad.github.io/tracepad/latest/install/#upgrading' \
@@ -78,8 +84,9 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/docs/page.md' \
 		'https://tracepad.github.io/tracepad/latest/quickstart/' \
 		'https://tracepad.github.io/tracepad/latest/quickstart/#a-heading' \
-		'https://tracepad.github.io/tracepad/dev/gone/.' | bad_links "$fixture" | wc -l | tr -d ' ')
-	[ "$bad" = 8 ] || { echo "site-links self-test: found $bad of 8 links the site does not serve" >&2; exit 1; }
+		'https://tracepad.github.io/tracepad/dev/gone/.' \
+		'https://tracepad.github.io/tracepad/agent-upgade.md' | bad_links "$fixture" | wc -l | tr -d ' ')
+	[ "$bad" = 9 ] || { echo "site-links self-test: found $bad of 9 links the site does not serve" >&2; exit 1; }
 	echo "site-links: the rule answers as expected"
 	exit 0
 fi

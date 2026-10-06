@@ -1085,7 +1085,7 @@ back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, or
-from `~/.cache/tracepad/release/` as the agent's bridge does;
+from `~/.cache/tracepad/tmp.release/` as the agent's bridge does;
 `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a

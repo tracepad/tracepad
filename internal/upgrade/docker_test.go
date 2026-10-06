@@ -2148,6 +2148,16 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 			want{kind: binLinked, code: exitDecide, line: "is 0.1.0; ", never: "install.sh"}},
 		"one that does not run": {func(t *testing.T, deps *Deps) { _ = os.WriteFile(bin(deps), []byte("not a program"), 0o755) },
 			want{kind: binSilent, code: exitDecide, line: "is no answer; "}},
+		// A path that cannot be read is not checked, and said so: no step
+		// of the person's, no exit 4 (the sixth review of #228).
+		"a directory this user cannot search": {func(t *testing.T, deps *Deps) {
+			if os.Geteuid() == 0 {
+				t.Skip("root searches any directory")
+			}
+			scriptBinary(t, bin(deps), "0.1.0")
+			_ = os.Chmod(deps.InstallDir, 0o600)
+			t.Cleanup(func() { _ = os.Chmod(deps.InstallDir, 0o700) })
+		}, want{kind: binUnread, code: exitOK, note: "was not checked: "}},
 		"not a file": {func(t *testing.T, deps *Deps) { _ = os.Mkdir(bin(deps), 0o700) },
 			want{kind: binOdd, code: exitDecide, line: "is not a regular file"}},
 		"a release where this user cannot write, behind": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "0.1.0") },
@@ -2253,5 +2263,27 @@ func TestARelativeLinkIsNamedWhole(t *testing.T) {
 	want := fmt.Sprintf("%s is a link to %s, which says", bin, filepath.Join(checkout, "tracepad"))
 	if person := strings.Join(rep.Person, "\n"); !strings.Contains(person, want) {
 		t.Errorf("%s", person)
+	}
+}
+
+// Compose's path labels are comma-joined absolute paths: a part that is not
+// absolute after another is that one's rest (the sixth review of #228), and
+// a first one that is not is the project directory's.
+func TestComposePathsKeepACommaInAPath(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		label string
+		want  []string
+	}{
+		{"", nil},
+		{"/srv/obs/compose.yml", []string{"/srv/obs/compose.yml"}},
+		{"/srv/obs/a.yml,/srv/obs/b.yml", []string{"/srv/obs/a.yml", "/srv/obs/b.yml"}},
+		{"/srv/a,b/compose.yaml", []string{"/srv/a,b/compose.yaml"}},
+		{"/srv/a,b/one.yml,/srv/a,b/two.yml", []string{"/srv/a,b/one.yml", "/srv/a,b/two.yml"}},
+		{"prod.env", []string{"/srv/obs/prod.env"}},
+	} {
+		if got := composePaths(c.label, "/srv/obs"); !slices.Equal(got, c.want) {
+			t.Errorf("%q: %q, want %q", c.label, got, c.want)
+		}
 	}
 }

@@ -120,7 +120,7 @@ func whose(ours bool) string {
 
 func (rep *Report) fill(f Findings) {
 	b := f.Binary
-	rep.Binary = &BinaryReport{Path: b.Path, Version: b.Version, Whose: whose(b.Ours), Reason: b.Reason, First: b.First}
+	rep.Binary = &BinaryReport{Path: b.Path, Version: b.Version, Whose: whose(b.Ours()), Reason: b.Reason, First: b.First}
 	rep.Servers = []ServerReport{}
 	for _, s := range f.Servers {
 		rep.Servers = append(rep.Servers, ServerReport{PID: s.Proc.PID, Command: s.Proc.Argv, Exe: s.Proc.Exe,

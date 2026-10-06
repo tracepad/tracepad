@@ -23,17 +23,14 @@ import (
 // Binary is the installed binary: what the install script and this command
 // put at <install dir>/tracepad.
 type Binary struct {
-	Path   string
-	Exists bool
+	Path string
 	// Kind is what it is, which the plan's table (binaryTodo) turns into
 	// what is printed and whether it is the person's to do.
 	Kind    binaryKind
 	Version string
 	// Link is where the install path links to, when it is a link.
 	Link string
-	// Ours is whether the command may replace it (Kind binOurs); Reason
-	// says why not.
-	Ours   bool
+	// Reason says why it is not the command's to replace.
 	Reason string
 	// First is the `tracepad` first on PATH when that is another one, and
 	// what it says it is.
@@ -50,7 +47,8 @@ type binaryKind int
 
 const (
 	binNone       binaryKind = iota // nothing there
-	binOdd                          // not a file, or not read
+	binUnread                       // its path could not be read: not checked
+	binOdd                          // not a file
 	binPackaged                     // a package manager's: a file or a link in its tree
 	binLinked                       // a link of the person's
 	binSilent                       // a file that does not say its version
@@ -58,6 +56,9 @@ const (
 	binUnwritable                   // a release's file in a directory this user cannot write
 	binOurs                         // a release's file the command replaces
 )
+
+// Ours is whether the command may replace it.
+func (b Binary) Ours() bool { return b.Kind == binOurs }
 
 // Server is a `tracepad serve` process this user runs.
 type Server struct {
@@ -400,14 +401,13 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	// Lstat: a link there is someone else's install (a package manager's),
 	// never replaced with a file (the final review).
 	st, err := os.Lstat(b.Path)
-	if err == nil {
-		b.Exists = true
-	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		b.Kind, b.Reason = binNone, "no binary is installed at "+b.Path
 	case err != nil:
-		b.Kind, b.Reason = binOdd, err.Error()
+		// Not checked, and said so, as anything else the plan could not
+		// look at: no step of the person's (the sixth review of #228).
+		b.Kind, b.Reason = binUnread, err.Error()
 	case packageManager(canonicalPath(b.Path)) != "":
 		// A package manager's, a link into its tree or a file: replaced
 		// under it, the manager's record and the binary part (the ninth
@@ -436,7 +436,7 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		case !writableDir(filepath.Dir(b.Path)):
 			b.Kind, b.Reason = binUnwritable, filepath.Dir(b.Path)+" is not writable by this user"
 		default:
-			b.Kind, b.Ours = binOurs, true
+			b.Kind = binOurs
 		}
 	}
 	if first := r.deps.LookPath("tracepad"); first != "" && !sameFile(first, b.Path) {

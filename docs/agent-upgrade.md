@@ -70,7 +70,7 @@ package moves to the same version, and you report.
   download — is often a new binary's first connection, held until someone
   answers the firewall's window. The firewall asks once per path, which is why
   the skill keeps the release it fetches in one place,
-  `~/.cache/tracepad/release/`.
+  `~/.cache/tracepad/tmp.release/`.
 - Deleting the backups, and whatever a way back set aside.
 
 ## The backup, said plainly
