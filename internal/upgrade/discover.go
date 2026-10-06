@@ -85,9 +85,30 @@ func serverFlags(argv []string) (flags []string, ok bool) {
 }
 
 // resolveServer works out a server process's data directory and listen
-// address the way the server itself does: the flag, else its environment,
-// else the default, in its environment and relative to its working directory.
+// address the way the server itself does, and joins a relative data
+// directory to its working directory.
 func resolveServer(p Process) (dataDir, listen string, err error) {
+	dataDir, listen, err = configuredDirs(p)
+	if err != nil {
+		return "", "", err
+	}
+	if !filepath.IsAbs(dataDir) {
+		if p.Cwd == "" {
+			return "", "", fmt.Errorf("its data directory %q is relative, and its working directory could not be read", dataDir)
+		}
+		dataDir = filepath.Join(p.Cwd, dataDir)
+	}
+	if real, err := filepath.EvalSymlinks(dataDir); err == nil {
+		dataDir = real
+	}
+	return filepath.Clean(dataDir), listen, nil
+}
+
+// configuredDirs is a server's data directory and listen address as its
+// configuration gives them, before anything is joined: the flag, else its
+// environment, else the default — the order the server reads, in one place
+// (the eighth review: a second copy of it drifts).
+func configuredDirs(p Process) (dataDir, listen string, err error) {
 	args, ok := serverFlags(p.Argv)
 	if !ok {
 		return "", "", errNotServer
@@ -103,15 +124,6 @@ func resolveServer(p Process) (dataDir, listen string, err error) {
 	if dataDir == "" {
 		dataDir = config.DefaultDataDirFor(p.Getenv)
 	}
-	if !filepath.IsAbs(dataDir) {
-		if p.Cwd == "" {
-			return "", "", fmt.Errorf("its data directory %q is relative, and its working directory could not be read", dataDir)
-		}
-		dataDir = filepath.Join(p.Cwd, dataDir)
-	}
-	if real, err := filepath.EvalSymlinks(dataDir); err == nil {
-		dataDir = real
-	}
 	listen, given = flags.Given("listen")
 	if !given || listen == "" {
 		listen = p.Getenv("TRACEPAD_LISTEN")
@@ -119,7 +131,7 @@ func resolveServer(p Process) (dataDir, listen string, err error) {
 	if listen == "" {
 		listen = config.DefaultListen
 	}
-	return filepath.Clean(dataDir), listen, nil
+	return dataDir, listen, nil
 }
 
 var errNotServer = errors.New("not a server")
@@ -132,7 +144,7 @@ func lockedBy(dataDir string) (int, error) {
 }
 
 // lockHeld says whether a server holds the data directory's database now.
-func lockHeld(dataDir string) bool {
+func lockHeld(dataDir string) (bool, error) {
 	return store.Locked(filepath.Join(dataDir, dataDBName))
 }
 
@@ -291,7 +303,7 @@ func (r *runner) discover(ctx context.Context) Findings {
 		hw.Add(1)
 		go func(s *Server) {
 			defer hw.Done()
-			s.Version, _ = health(ctx, r.deps.HTTP, s.URL)
+			s.Version, _ = health(ctx, r.deps.HTTP, s.URL) // ignored: no answer is no version, which is never upgraded
 		}(&f.Servers[i])
 	}
 	hw.Wait()
@@ -328,8 +340,8 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		b.Reason = err.Error()
 	case st.Mode()&os.ModeSymlink != 0:
 		b.Exists = true
-		target, _ := os.Readlink(b.Path)
-		b.Version, _ = r.deps.Version(ctx, b.Path)
+		target, _ := os.Readlink(b.Path)           // ignored: the message's; a link is the person's either way
+		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"
 	case !st.Mode().IsRegular():
 		b.Exists = true
@@ -360,7 +372,7 @@ func writableDir(dir string) bool {
 		return false
 	}
 	name := f.Name()
-	f.Close()
+	f.Close() // ignored: an empty probe, removed below
 	return os.Remove(name) == nil
 }
 
@@ -389,7 +401,7 @@ func (r *runner) attribute(p Probe, f Findings) Probe {
 		}
 	}
 	for _, c := range f.Containers {
-		if c.publishesDefault() {
+		if c.Default {
 			p.Whose = "container " + c.Name
 			return p
 		}

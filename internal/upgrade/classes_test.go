@@ -5,8 +5,10 @@ package upgrade
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +143,7 @@ func TestTheDataIsHeldAcrossEveryStart(t *testing.T) {
 			deps.Fault = func(point string) error {
 				if point == stepBackRestored && !held {
 					held = true
-					if !lockHeld(w.data) {
+					if held, err := lockHeld(w.data); !held || err != nil {
 						t.Error("the way back began with the data let go")
 					}
 				}
@@ -199,7 +201,7 @@ func TestLaunchHoldsTheDataOnEitherSideOfTheStart(t *testing.T) {
 		t.Fatal("the data could not be held")
 	}
 	h.start = func(StartSpec) (Started, error) {
-		if j.holds(w.data) || lockHeld(w.data) {
+		if held, _ := lockHeld(w.data); j.holds(w.data) || held {
 			t.Error("the data is held at the start itself")
 		}
 		return nil, errInjected
@@ -293,7 +295,7 @@ func TestAStepOffTheTableIsNeverWritten(t *testing.T) {
 	rep := &Report{}
 	func() {
 		defer stopOffTable(rep)
-		_ = j.step(stepStarted)
+		j.step(stepStarted)
 		t.Error("the step off the table was let through")
 	}()
 	if rep.ExitCode != exitStuck || !strings.Contains(rep.Summary, `"started" after "prepared"`) {
@@ -333,8 +335,7 @@ func TestACheckFindsTheServerThePersonRestarted(t *testing.T) {
 
 // A way back takes back only what its run put at the install path (#31 (b),
 // the seventh review): after a later run put a newer version there, the
-// binary-only run's --back and a container run's are refused with nothing
-// touched.
+// binary-only run's --back is refused with nothing touched.
 func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
 	t.Run("binary only", func(t *testing.T) {
 		w := newFakeWorld(t, 2)
@@ -358,21 +359,178 @@ func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
 			t.Errorf("the binary is %s", v)
 		}
 	})
-	t.Run("container", func(t *testing.T) {
-		d, deps := matrixContainer(t)
-		rep, code := runIn(t, context.Background(), deps)
-		if code != exitOK {
-			t.Fatalf("%d %s", code, rep.Summary)
+}
+
+// Every check of the way back comes before its first act (spec 054 #37): a
+// refusal on any of them leaves the server running, its data and the
+// installed binary as they were, and nothing begun.
+func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		after func(w *fakeWorld, dir string)
+		says  string
+	}{
+		{"a newer server on the binary", func(w *fakeWorld, _ string) {
+			other := w.t.TempDir()
+			argv := []string{"tracepad", "serve", "--listen", freeAddr(w.t), "--data-dir", other}
+			if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")}); err != nil {
+				w.t.Fatal(err)
+			}
+		}, "its next restart would be " + fOld},
+		{"the binary changed since", func(w *fakeWorld, _ string) {
+			scriptBinary(w.t, w.install+".next", fBroken)
+			_ = os.Rename(w.install+".next", w.install)
+		}, "which this run did not put there"},
+		{"the archive changed since", func(w *fakeWorld, dir string) {
+			f, _ := os.OpenFile(filepath.Join(dir, "data.tar.gz"), os.O_APPEND|os.O_WRONLY, 0)
+			_, _ = f.Write([]byte("x"))
+			f.Close()
+		}, "data.tar.gz"},
+		{"a foreign holder of the data", func(w *fakeWorld, _ string) {
+			procs, _, _ := w.host.Candidates()
+			for _, p := range procs {
+				_ = w.host.Signal(p.PID, 15)
+			}
+			// The same arguments, from another binary: someone else's.
+			elsewhere := filepath.Join(w.t.TempDir(), "tracepad")
+			scriptBinary(w.t, elsewhere, fNew)
+			argv := []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}
+			if _, err := w.host.Start(StartSpec{Path: elsewhere, Argv: argv, Dir: w.home, Log: filepath.Join(w.data, "server.log")}); err != nil {
+				w.t.Fatal(err)
+			}
+		}, "not this directory's server"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newFakeWorld(t, 2)
+			deps := w.deps()
+			rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+			if code != exitOK {
+				t.Fatalf("%d %s", code, rep.Summary)
+			}
+			w.addTrace()
+			tc.after(w, rep.Run.Dir)
+			holder, _ := lockedBy(w.data)
+			bin, _ := scriptVersion(context.Background(), w.install)
+			back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+			if code == exitOK || !strings.Contains(back.Summary, tc.says) || !strings.Contains(back.Summary, "nothing was touched") {
+				t.Fatalf("%d %s", code, back.Summary)
+			}
+			if now, _ := lockedBy(w.data); now != holder || !w.host.Alive(holder) {
+				t.Errorf("the server on the data changed: %d, was %d", now, holder)
+			}
+			if n, _ := countTraces(filepath.Join(w.data, dataDBName)); n != 3 {
+				t.Errorf("the data changed: %d traces", n)
+			}
+			if v, _ := scriptVersion(context.Background(), w.install); v != bin {
+				t.Errorf("the binary changed: %s, was %s", v, bin)
+			}
+			if st, _ := loadState(rep.Run.Dir); st.has(stepBackBegun) {
+				t.Errorf("the way back began: %+v", st.Steps)
+			}
+		})
+	}
+}
+
+// An older tracepad first on PATH runs nothing (the eighth review): the plan
+// names it with what upgrades it, and does not call anything behind — exit
+// 0, not the 4 the install script reads as "still running an older version".
+func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	if rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	brew := filepath.Join(t.TempDir(), "homebrew", "bin", "tracepad")
+	_ = os.MkdirAll(filepath.Dir(brew), 0o700)
+	scriptBinary(t, brew, fOld)
+	deps.LookPath = func(string) string { return brew }
+	plan, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
+	if code != exitOK || !strings.Contains(strings.Join(plan.Person, "\n"), "first on PATH") {
+		t.Errorf("%d %s %q", code, plan.Summary, plan.Person)
+	}
+}
+
+// A state the disk will not take ends the run there, stuck (spec 054 #37):
+// going on would act on what is not recorded. Once the disk takes writes,
+// --back reads what is on disk and goes back.
+func TestAStateThatCannotBeWrittenStopsTheRun(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root writes any directory")
+	}
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	var dir string
+	deps.Fault = func(point string) error {
+		if point == stepArchived {
+			states, _ := filepath.Glob(filepath.Join(deps.Backups, "*", stateFile))
+			dir = filepath.Dir(states[0])
+			_ = os.Chmod(dir, 0o500)
 		}
-		path := filepath.Join(deps.InstallDir, "tracepad")
-		scriptBinary(t, path, "0.2.1")
-		image := d.byName["tracepad-app"].Config.Image
-		back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
-		if code == exitOK || !strings.Contains(back.Summary, "nothing was touched") {
-			t.Errorf("--back: %d %s", code, back.Summary)
+		return nil
+	}
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	_ = os.Chmod(dir, 0o700)
+	if code != exitStuck || !strings.Contains(rep.Summary, "could not be written") {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	deps.Fault = nil
+	backUntilDone(t, deps, filepath.Base(dir))
+	w.waitVersion(fOld)
+	if n, _ := countTraces(filepath.Join(w.data, dataDBName)); n != 2 {
+		t.Errorf("traces: %d", n)
+	}
+}
+
+// What settling cannot look at is neither done nor undone (spec 054 #37): a
+// set-aside whose directories cannot be read, or an install path that cannot
+// be — which would read as "taken off" — refuses, and is not taken back.
+func TestSettlingRefusesWhatItCannotSee(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+	parent := filepath.Join(t.TempDir(), "p")
+	if err := os.MkdirAll(filepath.Join(parent, "data"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "bin")
+	_ = os.Mkdir(bin, 0o700)
+	scriptBinary(t, filepath.Join(bin, "tracepad"), "0.2.0")
+	steps := []Step{{Name: stepPrepared}, {Name: stepStopSent}, {Name: stepStopped}, {Name: stepArchived}, {Name: stepStarted}, {Name: stepBackBegun}, {Name: stepBackRestored}}
+	for _, tc := range []struct {
+		pending string
+		steps   []Step
+		locked  string
+	}{
+		{stepBackAside, append(slices.Clone(steps), Step{Name: stepBackCleared}), parent},
+		{stepBackCleared, steps, bin},
+	} {
+		j := &job{r: &runner{deps: Deps{Now: time.Now, Version: scriptVersion}}, rep: &Report{}, dir: t.TempDir(),
+			st: &State{Kind: kindProcess, Run: "r", From: "0.1.0", Process: &ProcessState{DataDir: filepath.Join(parent, "data")},
+				Binary: &BinaryState{Path: filepath.Join(bin, "tracepad")}, Steps: tc.steps,
+				Pending: &Intent{Step: tc.pending, What: "the act"}}}
+		if err := os.Chmod(tc.locked, 0); err != nil {
+			t.Fatal(err)
 		}
-		if v, _ := scriptVersion(context.Background(), path); v != "0.2.1" || d.byName["tracepad-app"].Config.Image != image {
-			t.Errorf("touched: binary %s, image %s", v, d.byName["tracepad-app"].Config.Image)
+		err := j.settle(context.Background())
+		_ = os.Chmod(tc.locked, 0o700)
+		if err == nil || j.st.Pending == nil || j.st.has(tc.pending) {
+			t.Errorf("%s: settled what it could not see: %v, pending %v", tc.pending, err, j.st.Pending)
 		}
-	})
+	}
+}
+
+// A server named that does not say its version is not taken for current
+// (the eighth review): it is the person's (classifyServer), and the plan's
+// order of versions refuses one too, as a second line.
+func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	w.host.setSlow(time.Second)
+	deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 50 * time.Millisecond}
+	rep, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew, "--data-dir", w.data)
+	w.host.setSlow(0)
+	if code != exitRefused || !strings.Contains(rep.Summary, "does not answer") && !strings.Contains(rep.Summary, "does not say its version") {
+		t.Errorf("%d %s", code, rep.Summary)
+	}
 }

@@ -45,8 +45,8 @@ var noAct = map[string]bool{
 
 // stepOrder is the order the cells run in, and every step there is.
 var stepOrder = []string{
-	stepPrepared, stepStopSent, stepStopped, stepArchived, stepRenamedOld, stepBinaryReplacing, stepBinaryReplaced,
-	stepStarted, stepChecked, stepSkill, stepBackBegun, stepBackRestored, stepBackVolume, stepBackCleared,
+	stepPrepared, stepStopSent, stepStopped, stepArchived, stepBinaryReplacing, stepBinaryReplaced,
+	stepStarted, stepChecked, stepSkill, stepBackBegun, stepBackRestored, stepBackCleared,
 	stepBackAside, stepBackMoved, stepBackStarted, stepBackBinary, stepBackDone,
 }
 
@@ -143,8 +143,8 @@ type cell struct {
 }
 
 func (c *cell) fault(point string) error {
-	if c.kind == "kill" {
-		if point == c.point+recordPoint {
+	if mark, ok := killMoments[c.kind]; ok {
+		if point == c.point+mark {
 			c.hit.Store(true)
 			panic(killed{})
 		}
@@ -295,294 +295,126 @@ func nothingDeleted(t *testing.T, dir string, exists func(item string) bool) {
 	}
 }
 
-// matrixContainer is the container the matrix upgrades, with the host's
-// binary beside it, which a healthy run brings to the container's version.
-func matrixContainer(t *testing.T) (*fakeDocker, Deps) {
-	t.Helper()
-	d := newFakeDocker(t)
-	d.setupContainer(t, t.TempDir())
-	deps := containerDeps(t, d)
-	mirror := t.TempDir()
-	for _, v := range []string{"0.1.0", "0.2.0", "0.2.1"} {
-		mirrorRelease(t, mirror, v, v, v == "0.2.0")
-	}
-	deps.Releases = fakeReleases(t, mirror)
-	deps.Version = scriptVersion
-	if err := os.MkdirAll(deps.InstallDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	scriptBinary(t, filepath.Join(deps.InstallDir, "tracepad"), "0.1.0")
-	return d, deps
+// killMoments are the two moments of a step the matrix kills at: between
+// its act and its write, and right after its write (#34, #37).
+var killMoments = map[string]string{"kill": recordPoint, "killafter": writtenPoint}
+
+// A kill world is one kind of run's: a server's, or the binary's alone.
+type killWorld struct {
+	w    *fakeWorld
+	deps Deps
+	// args upgrade it; done checks it is back where it began; snapshot is
+	// what --back again must not change.
+	args     []string
+	done     func(t *testing.T, id string)
+	snapshot func(dir string) string
 }
 
-func TestTheFaultMatrixOfAContainer(t *testing.T) {
-	inProcess(t)
-	swapPoints, backPoints := pointsOf(t, kindContainer)
-	exists := func(d *fakeDocker) func(string) bool {
-		return func(item string) bool {
-			kind, name, _ := strings.Cut(item, " ")
-			if kind == "volume" {
-				_, ok := d.volumes[name]
-				return ok
-			}
-			return d.byName[name] != nil
-		}
+func newKillWorld(t *testing.T, kind string) *killWorld {
+	w := newFakeWorld(t, 2)
+	k := &killWorld{w: w, deps: w.deps()}
+	// A stop's wait, for the server a kill left running: a cell's, not a
+	// person's.
+	k.deps.StopWait = 300 * time.Millisecond
+	binary := func() string {
+		v, _ := scriptVersion(context.Background(), w.install)
+		return v
 	}
-	// invariants: the container runs, the old image or the new, on a
-	// volume that holds the traces it held; the fake fails any removal.
-	invariants := func(t *testing.T, d *fakeDocker, dir string, images ...string) {
-		t.Helper()
-		c := d.byName["tracepad-app"]
-		if c == nil || !c.State.Running || c.State.Restarting {
-			t.Fatalf("no container runs as tracepad-app: %+v", c)
+	steps := func(dir string) string {
+		st, err := loadState(dir)
+		if err != nil {
+			return err.Error()
 		}
-		if img := c.Config.Image; !slices.Contains(images, img) {
-			t.Errorf("it runs %s, not one of %q", img, images)
-		}
-		for _, m := range c.Mounts {
-			if m.Destination == "/data" && d.volumes[m.Name] != 7 {
-				t.Errorf("its volume %s holds %d traces, not 7", m.Name, d.volumes[m.Name])
-			}
-		}
-		if dir != "" {
-			nothingDeleted(t, dir, exists(d))
-		}
+		return fmt.Sprintf("%q %d", st.SetAside, len(st.Steps))
 	}
-	snapshot := func(d *fakeDocker, dir string) func() string {
-		return func() string {
-			st, err := loadState(dir)
-			if err != nil {
-				return err.Error()
+	switch kind {
+	case kindProcess:
+		k.args = []string{"--to", fNew, "--data-dir", w.data}
+		k.done = func(t *testing.T, id string) {
+			if v := w.answers(); v != fOld {
+				t.Fatalf("after the way back %s answers %q", w.url(), v)
 			}
-			var names []string
-			for name, c := range d.byName {
-				names = append(names, fmt.Sprintf("%s=%s:%s:%v:%s", name, c.ID[60:], c.Config.Image, c.State.Running, c.HostConfig.RestartPolicy.Name))
+			// The new version had the data: what it left is set aside, and
+			// the old one runs on the archive restored.
+			w.host.mu.Lock()
+			wrote := w.host.held[fNew+" "+w.data]
+			w.host.mu.Unlock()
+			if _, err := os.Stat(w.data + ".after-" + id); wrote && err != nil {
+				t.Errorf("the new version had the data, and nothing was set aside: %v", err)
 			}
-			slices.Sort(names)
-			return fmt.Sprintf("containers %q\nvolumes %v\nset aside %q\nsteps %d", names, d.volumes, st.SetAside, len(st.Steps))
-		}
-	}
-	const oldImage, newImage = "ghcr.io/tracepad/tracepad:0.1.0", "ghcr.io/tracepad/tracepad:0.2.0"
-	slowDeps := func(deps *Deps) {
-		deps.HTTP = &http.Client{Transport: deps.HTTP.Transport, Timeout: slowWait}
-	}
-
-	for _, kind := range faultKinds {
-		for _, point := range swapPoints {
-			t.Run("upgrade/"+kind+"/"+point, func(t *testing.T) {
-				t.Parallel()
-				d, deps := matrixContainer(t)
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				c := &cell{point: point, kind: kind, cancel: cancel, slow: func() { d.slow = slowBy }}
-				deps.Fault = c.fault
-				fast := deps.HTTP
-				if kind == "slow" {
-					slowDeps(&deps)
-				}
-				rep, code := runIn(t, ctx, deps)
-				deps.Fault, deps.HTTP, d.slow = nil, fast, 0
-				if !c.hit.Load() {
-					t.Fatalf("no upgrade passes %s, a step of the table", point)
-				}
-				if kind == "interrupt" && code != exitOK {
-					t.Errorf("interrupted at %s, the upgrade did not finish: %d %s", point, code, rep.Summary)
-				}
-				if rep.Run == nil {
-					invariants(t, d, "", oldImage)
-					return
-				}
-				if code != exitStuck {
-					// Stuck says what is down, and the --back that brings it up.
-					invariants(t, d, rep.Run.Dir, oldImage, newImage)
-				}
-				backUntilDone(t, deps, rep.Run.ID)
-				invariants(t, d, rep.Run.Dir, oldImage)
-				backAgain(t, deps, rep.Run.ID, snapshot(d, rep.Run.Dir))
-			})
-		}
-		for _, point := range backPoints {
-			t.Run("back/"+kind+"/"+point, func(t *testing.T) {
-				t.Parallel()
-				d, deps := matrixContainer(t)
-				rep, code := runIn(t, context.Background(), deps)
-				if code != exitOK {
-					t.Fatalf("upgrade: %d %s", code, rep.Summary)
-				}
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				c := &cell{point: point, kind: kind, cancel: cancel, slow: func() { d.slow = slowBy }}
-				deps.Fault = c.fault
-				fast := deps.HTTP
-				if kind == "slow" {
-					slowDeps(&deps)
-				}
-				_, code = runIn(t, ctx, deps, "--back", rep.Run.ID)
-				deps.Fault, deps.HTTP, d.slow = nil, fast, 0
-				if !c.hit.Load() {
-					t.Fatalf("no way back passes %s, a step of the table", point)
-				}
-				if kind == "interrupt" && code != exitOK {
-					t.Errorf("interrupted at %s, the way back did not finish: %d", point, code)
-				}
-				backUntilDone(t, deps, rep.Run.ID)
-				invariants(t, d, rep.Run.Dir, oldImage)
-				backAgain(t, deps, rep.Run.ID, snapshot(d, rep.Run.Dir))
-			})
-		}
-	}
-}
-
-// The kill cells (#34): every step, the command killed after what it records
-// and before the record. The run is then met as a person meets it: --check,
-// which finishes it or refuses with nothing touched, then --back until done
-// and three times more. No state a kill leaves is stuck for good.
-func TestTheKillMatrixOfAContainer(t *testing.T) {
-	inProcess(t)
-	swapSteps, backSteps := recordsOf(t, kindContainer)
-	const oldImage = "ghcr.io/tracepad/tracepad:0.1.0"
-	check := func(t *testing.T, d *fakeDocker, deps Deps, id, dir string, backFirst bool) {
-		t.Helper()
-		afterKill(t, deps, id, backFirst)
-		c := d.byName["tracepad-app"]
-		if c == nil || !c.State.Running || c.Config.Image != oldImage {
-			t.Fatalf("after the way back: %+v", c)
-		}
-		// The new version ran on the volume: the old one runs on the
-		// archive restored, never on what the new one may have migrated.
-		if d.ranOn["tracepad-app ghcr.io/tracepad/tracepad:0.2.0"] {
-			for _, m := range c.Mounts {
-				if m.Destination == "/data" && m.Name != "tracepad-app-"+id {
-					t.Errorf("the old version runs on %s, which the new one ran on", m.Name)
-				}
+			if n, err := countTraces(filepath.Join(w.data, dataDBName)); err != nil || n != 2 {
+				t.Errorf("traces: %d (%v), not 2", n, err)
 			}
 		}
-		for _, m := range c.Mounts {
-			if m.Destination == "/data" && d.volumes[m.Name] != 7 {
-				t.Errorf("its volume %s holds %d traces, not 7", m.Name, d.volumes[m.Name])
-			}
-		}
-		backAgain(t, deps, id, func() string {
-			st, err := loadState(dir)
-			if err != nil {
-				return err.Error()
-			}
-			var names []string
-			for name, c := range d.byName {
-				names = append(names, fmt.Sprintf("%s=%s:%v:%s", name, c.Config.Image, c.State.Running, c.HostConfig.RestartPolicy.Name))
-			}
-			slices.Sort(names)
-			return fmt.Sprintf("%q %v %q %d", names, d.volumes, st.SetAside, len(st.Steps))
-		})
-	}
-	for order, backFirst := range orders {
-		for _, point := range swapSteps {
-			t.Run(order+"/upgrade/"+point, func(t *testing.T) {
-				t.Parallel()
-				d, deps := matrixContainer(t)
-				c := &cell{point: point, kind: "kill"}
-				deps.Fault = c.fault
-				if _, code := runIn(t, context.Background(), deps); code != codeKilled || !c.hit.Load() {
-					t.Fatalf("no upgrade records %s: %d", point, code)
-				}
-				deps.Fault = nil
-				id, dir := runOf(t, deps)
-				check(t, d, deps, id, dir, backFirst)
-			})
-		}
-	}
-	for order, backFirst := range orders {
-		for _, point := range backSteps {
-			t.Run(order+"/back/"+point, func(t *testing.T) {
-				t.Parallel()
-				d, deps := matrixContainer(t)
-				rep, code := runIn(t, context.Background(), deps)
-				if code != exitOK {
-					t.Fatalf("upgrade: %d %s", code, rep.Summary)
-				}
-				c := &cell{point: point, kind: "kill"}
-				deps.Fault = c.fault
-				if _, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
-					t.Fatalf("no way back records %s: %d", point, code)
-				}
-				deps.Fault = nil
-				check(t, d, deps, rep.Run.ID, rep.Run.Dir, backFirst)
-			})
-		}
-	}
-}
-
-func TestTheKillMatrixOfAServer(t *testing.T) {
-	inProcess(t)
-	swapSteps, backSteps := recordsOf(t, kindProcess)
-	check := func(t *testing.T, w *fakeWorld, deps Deps, id, dir string, traces int64, backFirst bool) {
-		t.Helper()
-		afterKill(t, deps, id, backFirst)
-		if v := w.answers(); v != fOld {
-			t.Fatalf("after the way back %s answers %q", w.url(), v)
-		}
-		// The new version had the data: what it left is set aside, and the
-		// old one runs on the archive restored.
-		w.host.mu.Lock()
-		wrote := w.host.held[fNew+" "+w.data]
-		w.host.mu.Unlock()
-		if _, err := os.Stat(w.data + ".after-" + id); wrote && err != nil {
-			t.Errorf("the new version had the data, and nothing was set aside: %v", err)
-		}
-		if n, err := countTraces(filepath.Join(w.data, dataDBName)); err != nil || n != traces {
-			t.Errorf("traces: %d (%v), not %d", n, err, traces)
-		}
-		backAgain(t, deps, id, func() string {
-			st, err := loadState(dir)
-			if err != nil {
-				return err.Error()
-			}
+		k.snapshot = func(dir string) string {
 			pid, _ := lockedBy(w.data)
 			n, _ := countTraces(filepath.Join(w.data, dataDBName))
 			beside, _ := filepath.Glob(w.data + ".*")
-			v, _ := scriptVersion(context.Background(), w.install)
-			return fmt.Sprintf("%s %d %d %s %q %q %d", w.answers(), pid, n, v, beside, st.SetAside, len(st.Steps))
-		})
-	}
-	for order, backFirst := range orders {
-		for _, point := range swapSteps {
-			t.Run(order+"/upgrade/"+point, func(t *testing.T) {
-				t.Parallel()
-				w := newFakeWorld(t, 2)
-				deps := w.deps()
-				c := &cell{point: point, kind: "kill"}
-				deps.Fault = c.fault
-				if _, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != codeKilled || !c.hit.Load() {
-					t.Fatalf("no upgrade records %s: %d", point, code)
-				}
-				deps.Fault = nil
-				id, dir := runOf(t, deps)
-				check(t, w, deps, id, dir, 2, backFirst)
-			})
+			return fmt.Sprintf("%s %d %d %s %q %s", w.answers(), pid, n, binary(), beside, steps(dir))
 		}
+	case kindBinary:
+		procs, _, _ := w.host.Candidates()
+		for _, p := range procs {
+			_ = w.host.Signal(p.PID, 15)
+		}
+		k.args = []string{"--to", fNew}
+		k.done = func(t *testing.T, _ string) {
+			if v := binary(); v != fOld {
+				t.Fatalf("after the way back the binary is %s", v)
+			}
+		}
+		k.snapshot = func(dir string) string { return binary() + " " + steps(dir) }
 	}
-	for order, backFirst := range orders {
-		for _, point := range backSteps {
-			t.Run(order+"/back/"+point, func(t *testing.T) {
-				t.Parallel()
-				w := newFakeWorld(t, 2)
-				deps := w.deps()
-				rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
-				if code != exitOK {
-					t.Fatalf("upgrade: %d %s", code, rep.Summary)
+	return k
+}
+
+// The kill cells (#34, #37), from both tables: every step of a server's run
+// and of the binary's alone, the command killed between the step's act and
+// its write, and right after its write. A person then meets the run in
+// either order, --check or --back first: never a step off the table, never a
+// refusal for good — --back ends at 0, and three more change nothing.
+func TestTheKillMatrix(t *testing.T) {
+	inProcess(t)
+	for _, kind := range []string{kindProcess, kindBinary} {
+		swapSteps, backSteps := recordsOf(t, kind)
+		for moment := range killMoments {
+			for order, backFirst := range orders {
+				for _, point := range swapSteps {
+					t.Run(kind+"/"+moment+"/"+order+"/upgrade/"+point, func(t *testing.T) {
+						t.Parallel()
+						k := newKillWorld(t, kind)
+						c := &cell{point: point, kind: moment}
+						k.deps.Fault = c.fault
+						if _, code := runIn(t, context.Background(), k.deps, k.args...); code != codeKilled || !c.hit.Load() {
+							t.Fatalf("no upgrade records %s: %d", point, code)
+						}
+						k.deps.Fault = nil
+						id, dir := runOf(t, k.deps)
+						afterKill(t, k.deps, id, backFirst)
+						k.done(t, id)
+						backAgain(t, k.deps, id, func() string { return k.snapshot(dir) })
+					})
 				}
-				w.addTrace()
-				c := &cell{point: point, kind: "kill"}
-				deps.Fault = c.fault
-				if _, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
-					t.Fatalf("no way back records %s: %d", point, code)
+				for _, point := range backSteps {
+					t.Run(kind+"/"+moment+"/"+order+"/back/"+point, func(t *testing.T) {
+						t.Parallel()
+						k := newKillWorld(t, kind)
+						rep, code := runIn(t, context.Background(), k.deps, k.args...)
+						if code != exitOK {
+							t.Fatalf("upgrade: %d %s", code, rep.Summary)
+						}
+						c := &cell{point: point, kind: moment}
+						k.deps.Fault = c.fault
+						if _, code := runIn(t, context.Background(), k.deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
+							t.Fatalf("no way back records %s: %d", point, code)
+						}
+						k.deps.Fault = nil
+						afterKill(t, k.deps, rep.Run.ID, backFirst)
+						k.done(t, rep.Run.ID)
+						backAgain(t, k.deps, rep.Run.ID, func() string { return k.snapshot(rep.Run.Dir) })
+					})
 				}
-				deps.Fault = nil
-				check(t, w, deps, rep.Run.ID, rep.Run.Dir, 2, backFirst)
-				if n, err := countTraces(filepath.Join(w.data+".after-"+rep.Run.ID, dataDBName)); err != nil || n != 3 {
-					t.Errorf("set aside: %d traces (%v), not 3", n, err)
-				}
-			})
+			}
 		}
 	}
 }

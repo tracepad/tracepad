@@ -1,5 +1,5 @@
 // Package upgrade is `tracepad upgrade` (spec 054): it plans an upgrade of
-// the installed binary and of one server or container this user started,
+// the installed binary and of one server this user started,
 // backs up before it stops anything, swaps, checks, and goes back when the new
 // version does not answer, deleting nothing on the way.
 package upgrade
@@ -65,13 +65,12 @@ type Deps struct {
 }
 
 type flags struct {
-	plan      bool
-	to        string
-	check     string
-	back      string
-	dataDir   string
-	container string
-	json      bool
+	plan    bool
+	to      string
+	check   string
+	back    string
+	dataDir string
+	json    bool
 }
 
 type runner struct {
@@ -81,19 +80,46 @@ type runner struct {
 }
 
 const usage = `Usage:
-  tracepad upgrade --plan [--to X] [--data-dir DIR | --container NAME] [--json]
-  tracepad upgrade [--to X] [--data-dir DIR | --container NAME] [--json]
+  tracepad upgrade --plan [--to X] [--data-dir DIR] [--json]
+  tracepad upgrade [--to X] [--data-dir DIR] [--json]
   tracepad upgrade --check RUN [--json]
   tracepad upgrade --back RUN [--json]
 
-Upgrades the installed binary and one server or container this user started,
-with a backup first and a way back. --plan changes nothing. The latest stable
-release unless --to names one; never an older one.
+Upgrades the installed binary and one server this user started, with a
+backup first and a way back; a container gets the commands that upgrade it.
+--plan changes nothing. The latest stable release unless --to names one;
+never an older one.
 
 Exit status: 0 done or nothing to do, 1 refused (nothing changed), 2 usage,
 3 not healthy and the way back ran, 4 yours to decide, 5 stuck (see the
 report); --plan: 10 when the upgrade would change something.
 `
+
+// installDirFor is where the installed binary is (the eighth review): the
+// directory named, else the one the running `tracepad` is in — a person who
+// installed to a directory of their own runs it from there — else
+// ~/.local/bin, the install script's default. A binary run from the system's
+// temporary directory is the agent's bridge (docs/agent-upgrade.md), which
+// upgrades the installed one, never itself.
+func installDirFor(named, home, self, tmp string) string {
+	dir := strings.TrimRight(named, "/")
+	if dir == "" {
+		dir = filepath.Join(home, ".local", "bin")
+		if filepath.Base(self) == "tracepad" && !within(canonicalPath(self), canonicalDir(tmp)) {
+			dir = filepath.Dir(self)
+		}
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return dir
+}
+
+// within says whether path is under root.
+func within(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+}
 
 // Run is `tracepad upgrade`.
 func Run(ctx context.Context, opt Options) int {
@@ -139,7 +165,6 @@ func newFlagSet(f *flags) *flag.FlagSet {
 	fs.StringVar(&f.check, "check", "", "")
 	fs.StringVar(&f.back, "back", "", "")
 	fs.StringVar(&f.dataDir, "data-dir", "", "")
-	fs.StringVar(&f.container, "container", "", "")
 	fs.BoolVar(&f.json, "json", false, "")
 	return fs
 }
@@ -175,10 +200,8 @@ func parseFlags(args []string) (flags, error) {
 	switch {
 	case modes > 1:
 		return f, errors.New("--plan, --check and --back are three modes; give one")
-	case (f.check != "" || f.back != "") && (f.to != "" || f.dataDir != "" || f.container != ""):
+	case (f.check != "" || f.back != "") && (f.to != "" || f.dataDir != ""):
 		return f, errors.New("--check and --back take a run, which already says what it upgraded")
-	case f.dataDir != "" && f.container != "":
-		return f, errors.New("--data-dir names a server and --container a container; one run upgrades one of them")
 	}
 	if f.to != "" {
 		f.to = normalizeVersion(f.to)
@@ -195,18 +218,12 @@ func realDeps(getenv func(string) string) (Deps, error) {
 		}
 		home = h
 	}
-	installDir := strings.TrimRight(getenv("TRACEPAD_INSTALL_DIR"), "/")
-	if installDir == "" {
-		installDir = filepath.Join(home, ".local", "bin")
-	}
-	if abs, err := filepath.Abs(installDir); err == nil {
-		installDir = abs
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return Deps{}, err
 	}
-	cwd, _ := os.Getwd()
+	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, os.TempDir())
+	cwd, _ := os.Getwd() // ignored: none, and no project's copy of the skill is found there
 	base, mirror := getenv("TRACEPAD_DOWNLOAD_URL"), true
 	if base == "" {
 		base, mirror = githubReleases, false
@@ -229,7 +246,7 @@ func realDeps(getenv func(string) string) (Deps, error) {
 		Self:       self,
 		Getenv:     getenv,
 		LookPath: func(name string) string {
-			p, _ := exec.LookPath(name)
+			p, _ := exec.LookPath(name) // ignored: not on PATH is none
 			return p
 		},
 		Version:      binaryVersion,

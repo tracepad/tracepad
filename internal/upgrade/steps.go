@@ -13,13 +13,12 @@ import (
 // from the table.
 const (
 	stepPrepared        = "prepared"         // nothing changed yet
-	stepStopSent        = "stop_sent"        // SIGTERM sent, or docker kill asked
+	stepStopSent        = "stop_sent"        // SIGTERM sent
 	stepStopped         = "stopped"          // the old server is down
 	stepArchived        = "archived"         // data.tar.gz read back whole
-	stepRenamedOld      = "renamed_old"      // container: <name>-before-<run>
 	stepBinaryReplacing = "binary_replacing" // the new binary may be at the install path from here
 	stepBinaryReplaced  = "binary_replaced"  // the installed binary is the new one
-	stepStarted         = "started"          // the new server or container runs
+	stepStarted         = "started"          // the new server runs
 	stepChecked         = "checked"          // the verdict is in `verdict`
 	stepSkill           = "skill"            // the skill's copies reinstalled
 	stepBackBegun       = "back_begun"       // the way back changes what runs from here
@@ -27,7 +26,6 @@ const (
 	stepBackCleared     = "back_cleared"     // the install path holds the old version or nothing
 	stepBackAside       = "back_set_aside"   // what the new version left is set aside
 	stepBackMoved       = "back_moved"       // the restore is in the data's place
-	stepBackVolume      = "back_volume"      // container: the archive restored into <vol>-<run>
 	stepBackBinary      = "back_binary"      // the old binary is back
 	stepBackStarted     = "back_started"     // the old version runs again
 	stepBackDone        = "back_done"        // the way back finished, and the old version is healthy
@@ -41,7 +39,7 @@ type machine map[string][]string
 // the stop on.
 func swapSteps(m machine) []string {
 	var out []string
-	for _, s := range []string{stepStopSent, stepStopped, stepArchived, stepRenamedOld, stepBinaryReplacing, stepBinaryReplaced, stepStarted, stepChecked, stepSkill} {
+	for _, s := range []string{stepStopSent, stepStopped, stepArchived, stepBinaryReplacing, stepBinaryReplaced, stepStarted, stepChecked, stepSkill} {
 		if _, ok := m[s]; ok {
 			out = append(out, s)
 		}
@@ -67,37 +65,12 @@ var machines = func() map[string]machine {
 		stepBackBinary:      {stepBackCleared, stepBackMoved},
 		// Again after it is done: a --back repeated finds the old version
 		// stopped since, and starts it (#31).
-		stepBackStarted: {stepBackBinary, stepBackStarted, stepBackDone},
+		stepBackStarted: {stepBackBegun, stepBackBinary, stepBackStarted, stepBackDone},
 		// Nothing to undo — a run cut short before its stop, or before its
 		// first step — is a way back done (#34).
 		stepBackDone: {"", stepPrepared, stepBackStarted},
 	}
 	process[stepBackBegun] = swapSteps(process)
-
-	container := machine{
-		stepPrepared:   {""},
-		stepStopSent:   {stepPrepared},
-		stepStopped:    {stepStopSent},
-		stepArchived:   {stepStopped},
-		stepRenamedOld: {stepArchived},
-		stepStarted:    {stepRenamedOld},
-		stepChecked:    {stepStarted},
-		// The host's binary, brought to the container's version once it is
-		// healthy; a replacement that failed is a note, and the skill follows.
-		stepBinaryReplacing: {stepChecked},
-		stepBinaryReplaced:  {stepBinaryReplacing},
-		stepSkill:           {stepChecked, stepBinaryReplacing, stepBinaryReplaced},
-		// The restore into a new volume changes nothing that runs: --check
-		// still works after one that failed (the review of #1).
-		stepBackAside:   {stepBackBegun},
-		stepBackStarted: {stepBackBegun, stepBackAside, stepBackStarted, stepBackDone},
-		// Again after it is done: the host's binary, when it could not be
-		// put back before, is put back by a --back repeated.
-		stepBackBinary: {stepBackStarted, stepBackDone},
-		stepBackDone:   {"", stepPrepared, stepBackStarted, stepBackBinary},
-	}
-	container[stepBackVolume] = swapSteps(container)
-	container[stepBackBegun] = append(swapSteps(container), stepBackVolume)
 
 	binary := machine{
 		stepPrepared:        {""},
@@ -108,7 +81,7 @@ var machines = func() map[string]machine {
 		stepBackBinary:      {stepBackBegun},
 		stepBackDone:        {"", stepPrepared, stepBackBinary},
 	}
-	return map[string]machine{kindProcess: process, kindContainer: container, kindBinary: binary}
+	return map[string]machine{kindProcess: process, kindBinary: binary}
 }()
 
 // allows says whether next may be recorded after last in a run of kind.

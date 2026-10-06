@@ -59,7 +59,7 @@ func startDetached(spec StartSpec) (Started, error) {
 	}
 	s := &started{pid: cmd.Process.Pid, done: make(chan struct{})}
 	go func() {
-		_ = cmd.Wait()
+		_ = cmd.Wait() // ignored: the reaping of a server that exited; its exit is what Exited says
 		close(s.done)
 	}()
 	return s, nil

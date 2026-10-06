@@ -334,7 +334,9 @@ secrets included, until someone deletes it; erasing traces or a user's data
 way back set aside. Remove them once the new version has proved itself.
 
 A service, or a server open beyond this machine, is upgraded by hand — the
-command's plan says which, and these are the steps:
+command's plan says which, and these are the steps (a container's are in
+[docker.md](docker.md#upgrading-and-backing-up-first), and the plan gives them
+with its names filled in):
 
 1. Read the release notes, and [CHANGELOG.md](../CHANGELOG.md) for anything
    marked *Changed*.

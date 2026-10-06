@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,9 +15,8 @@ import (
 
 // Kinds of run.
 const (
-	kindProcess   = "process"
-	kindContainer = "container"
-	kindBinary    = "binary"
+	kindProcess = "process"
+	kindBinary  = "binary"
 )
 
 // State is a run's record, state.json in its directory: data, read into this
@@ -27,14 +25,13 @@ type State struct {
 	Run     string    `json:"run"`
 	Kind    string    `json:"kind"`
 	Created time.Time `json:"created"`
-	// From is the running version of the server or container, or the
+	// From is the running version of the server, or the
 	// binary's for a run with neither; To is the version gone to.
 	From string `json:"from"`
 	To   string `json:"to"`
 
-	Binary    *BinaryState    `json:"binary,omitempty"`
-	Process   *ProcessState   `json:"process,omitempty"`
-	Container *ContainerState `json:"container,omitempty"`
+	Binary  *BinaryState  `json:"binary,omitempty"`
+	Process *ProcessState `json:"process,omitempty"`
 
 	// CountBefore is the trace count read before the stop; nil when it was
 	// not read (no key, or it could not be).
@@ -89,21 +86,6 @@ type ProcessState struct {
 	Old string `json:"old"`
 }
 
-// ContainerState is a container's part of a run.
-type ContainerState struct {
-	Name     string `json:"name"`
-	ID       string `json:"id"`
-	Volume   string `json:"volume"`
-	URL      string `json:"url"`
-	OldRef   string `json:"old_ref"`
-	OldImage string `json:"old_image"`
-	NewRef   string `json:"new_ref"`
-	Restart  string `json:"restart"`
-	NewID    string `json:"new_id,omitempty"`
-	// BackID is the old image's container a way back ran.
-	BackID string `json:"back_id,omitempty"`
-}
-
 // Step is one thing a run did, and when.
 type Step struct {
 	Name string    `json:"name"`
@@ -138,7 +120,7 @@ const idAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 func newRunID(now time.Time, from string) string {
 	b := make([]byte, 6)
-	_, _ = rand.Read(b)
+	_, _ = rand.Read(b) // ignored: crypto/rand.Read does not fail (it panics, since Go 1.24)
 	for i := range b {
 		b[i] = idAlphabet[int(b[i])%len(idAlphabet)]
 	}
@@ -178,7 +160,7 @@ func writeFileAtomic(path string, data []byte) error {
 		err = os.Rename(tmp.Name(), path)
 	}
 	if err != nil {
-		os.Remove(tmp.Name())
+		os.Remove(tmp.Name()) // ignored: the state's own temporary, never renamed into place
 	}
 	return err
 }
@@ -261,11 +243,7 @@ func loadState(dir string) (*State, error) {
 }
 
 var (
-	restartPolicy = regexp.MustCompile(`^(no|always|unless-stopped|on-failure(:[1-9][0-9]*)?)$`)
-	containerID   = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	dockerName    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-	imageRef      = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]*$`)
-	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func (s *State) validate(dir string) error {
@@ -314,19 +292,6 @@ func (s *State) validate(dir string) error {
 		if url, ok := loopbackURL(p.Listen); !ok || p.URL != url {
 			return fmt.Errorf("its server's address %q is not this machine's %q", p.URL, p.Listen)
 		}
-	case kindContainer:
-		c := s.Container
-		if c == nil && early {
-			break
-		}
-		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
-			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
-			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
-			return errors.New("its container is not one a run records")
-		}
-		if !isLoopbackBase(c.URL) {
-			return fmt.Errorf("its container's address %q is not this machine's", c.URL)
-		}
 	case kindBinary:
 		if s.Binary == nil && !early {
 			return errors.New("it has no binary")
@@ -335,19 +300,4 @@ func (s *State) validate(dir string) error {
 		return fmt.Errorf("its kind %q is not one", s.Kind)
 	}
 	return nil
-}
-
-// isLoopbackBase says whether u is exactly what loopbackBase makes: http, a
-// loopback IP and a port, and nothing else — no name, no user, no path.
-func isLoopbackBase(u string) bool {
-	rest, ok := strings.CutPrefix(u, "http://")
-	if !ok {
-		return false
-	}
-	host, port, err := net.SplitHostPort(rest)
-	if err != nil {
-		return false
-	}
-	want, ok := loopbackBase(host, port)
-	return ok && want == u
 }

@@ -615,27 +615,13 @@ existing `/data` and brings it forward. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.
 
-**A container named `tracepad-<project>`, publishing on `127.0.0.1` only** —
-the one a coding agent starts in a setup — is upgraded by
-[`tracepad upgrade`](cli.md#upgrade) on the host (`--container NAME` for any
-other name), or by the agent, given
-`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md`.
-It pulls the new tag, stops the container, archives the volume into
-`~/tracepad-backups/<run>/` as below, renames the old container
-`<name>-before-<run>` with its restart policy set to `no`, and runs the new
-image with the same mounts, ports, restart policy and labels, and the
-variables you set (not the old image's own), through an env file. A new
-version that exits, crash-loops or answers as another version goes back at
-once (one that runs but stays silent is left for you to decide): the archive is restored into a
-new volume, `<volume>-<run>`, and the old image runs on it; the volume the new
-version migrated is left as it was. Nothing is removed — not a container, not
-a volume — and the report gives the commands for what is set aside. Like any
-backup, the run directory holds every prompt and completion and the
-container's variables until you delete it, and an erasure does not reach it.
-Compose, a container open beyond this machine, rootless Docker or user
-namespace remapping, and a container with any setting the command cannot
-reproduce exactly (privileges, devices, a network of its own, resource limits,
-a hostname, a runtime — the plan names each one) are yours, as follows.
+**A container is upgraded by hand**, in this release. `tracepad upgrade --plan`
+on the host — or your coding agent, given
+`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md` —
+names every container of the image that runs an older version and gives the
+steps below with its name, its volume and the release filled in; the command
+changes nothing of a container. A Compose project takes the new tag in its
+Compose file and `docker compose up -d`, after the same backup.
 
 Back the volume up by tarring it from a throwaway container:
 
@@ -644,7 +630,9 @@ docker stop tracepad
 docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
   sh -c 'umask 077 && tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .'
 docker pull ghcr.io/tracepad/tracepad:X.Y.Z        # the release you are moving to
-docker rm -f tracepad && docker run -d --name tracepad … ghcr.io/tracepad/tracepad:X.Y.Z
+docker rename tracepad tracepad-old                 # kept, to go back to
+docker run -d --name tracepad … ghcr.io/tracepad/tracepad:X.Y.Z   # the options you created it with
+docker rm tracepad-old                              # once the new one has proved itself
 ```
 
 Stopping first matters: SQLite's write-ahead log is part of the database, and a

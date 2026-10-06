@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tracepad/tracepad/internal/config"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -35,9 +34,6 @@ type job struct {
 	spec ServerSpec
 	// newProc is the server this run started, while the command runs.
 	newProc Started
-	// inspect and image are the old container's (a container run).
-	inspect inspectContainer
-	image   inspectImage
 	// held are the database locks the command holds, by data directory:
 	// from the stop until a server starts on the data, and through a way
 	// back (spec 054 #26, #28, #32).
@@ -103,31 +99,48 @@ func (j *job) unstep(name string) {
 		}
 	}
 	j.st.Steps = steps
-	_ = j.st.save(j.dir)
+	j.persist()
+}
+
+// save writes the run's state. A state that cannot be written ends the run
+// there, stuck (#37): going on would act on what the disk does not record.
+// What is on disk — the last whole state, with any intent written before an
+// act — is what the next --back or --check settles.
+func (j *job) persist() {
+	if err := j.st.save(j.dir); err != nil {
+		panic(unrecorded{err: err})
+	}
 }
 
 // step records a step, along the run's table, and clears the intent it
 // records the act of. A step off the table is never written (#34): the run
 // stops there, stuck, and says what it was about to record.
-func (j *job) step(name string) error {
+func (j *job) step(name string) {
 	if last := j.st.last(); !allows(j.st.Kind, last, name) {
 		badStep(j.st.Kind, last, name)
 		panic(offTable{kind: j.st.Kind, last: last, next: name})
 	}
 	// The matrix's kill: the act done, its record not yet written.
 	if j.r.deps.Fault != nil {
-		_ = j.r.deps.Fault(name + recordPoint)
+		_ = j.r.deps.Fault(name + recordPoint) // ignored: a record point fails nothing; the matrix kills there
 	}
 	if p := j.st.Pending; p != nil && p.Step == name {
 		j.st.Pending = nil
 	}
 	j.st.Steps = append(j.st.Steps, Step{Name: name, At: j.r.deps.Now().UTC()})
-	return j.st.save(j.dir)
+	j.persist()
+	// The matrix's other kill: the step written, nothing after it done.
+	if j.r.deps.Fault != nil {
+		_ = j.r.deps.Fault(name + writtenPoint) // ignored: a written point fails nothing; the matrix kills there
+	}
 }
 
 // recordPoint marks, for the fault matrix, the moment between an act and
 // the write of the step that records it.
 const recordPoint = "/record"
+
+// writtenPoint marks the moment right after a step is written.
+const writtenPoint = "/written"
 
 // intend writes what is about to happen before it happens (#34): a run cut
 // short between an act and its step is settled from it on its next load.
@@ -157,7 +170,7 @@ func (j *job) act(step, what string, do func() error) error {
 func (j *job) drop() {
 	if j.st.Pending != nil {
 		j.st.Pending = nil
-		_ = j.st.save(j.dir)
+		j.persist()
 	}
 }
 
@@ -169,14 +182,25 @@ func (e offTable) Error() string {
 	return fmt.Sprintf("the command was about to record %q after %q, which a %s run's steps do not allow; nothing was recorded, and the run stops here. Report this; --back and --check still read the run as it was", e.next, e.last, e.kind)
 }
 
-// stopOffTable turns an off-table step into the run's end: exit 5, said.
+// unrecorded is a state the disk would not take.
+type unrecorded struct{ err error }
+
+func (e unrecorded) Error() string {
+	return fmt.Sprintf("the run's state could not be written (%v), so the run stops here rather than act on what is not recorded. Once the disk takes writes, run --back: it reads what is on disk", e.err)
+}
+
+// stopOffTable turns an off-table step, or a state that could not be
+// written, into the run's end: exit 5, said.
 func stopOffTable(rep *Report) {
 	if v := recover(); v != nil {
-		e, ok := v.(offTable)
-		if !ok {
+		switch e := v.(type) {
+		case offTable:
+			rep.ExitCode, rep.Summary = exitStuck, "Stuck: "+e.Error()
+		case unrecorded:
+			rep.ExitCode, rep.Summary = exitStuck, "Stuck: "+e.Error()
+		default:
 			panic(v)
 		}
-		rep.ExitCode, rep.Summary = exitStuck, "Stuck: "+e.Error()
 	}
 }
 
@@ -199,12 +223,12 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	rep.Next = nil
 	if len(p.choose) > 0 {
 		rep.ExitCode = exitRefused
-		rep.Summary = "Refused: more than one server or container is the command's; name the one this run upgrades."
+		rep.Summary = "Refused: more than one server is the command's; name the one this run upgrades."
 		rep.Next = next
 		return rep
 	}
 	bin := p.f.Binary
-	if !p.replaceBinary && p.server == nil && p.container == nil {
+	if !p.replaceBinary && p.server == nil {
 		code, summary := verdictOf(p)
 		rep.ExitCode, rep.Summary = code, "Nothing upgraded by this run. "+summary
 		if bin.Ours {
@@ -223,23 +247,21 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	j, refusal := r.prepare(ctx, p, rep)
 	if j == nil {
 		if rep.Run != nil {
-			r.discard(rep.Run.Dir)
+			r.discard(rep, rep.Run.Dir)
 			rep.Run = nil
 		}
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+refusal
 		return rep
 	}
 	// From here a run changes what runs; an interrupt must not leave a
-	// server or a container down half way (the second review), so every swap
-	// and its way back finish on a context of their own. Everything before
-	// this — downloads, pulls, the archive's room — stays interruptible.
+	// server down half way (the second review), so every swap and its way
+	// back finish on a context of their own. Everything before this —
+	// downloads, the archive's room — stays interruptible.
 	ctx, cancel := afterStop(ctx)
 	defer cancel()
 	switch {
 	case p.server != nil:
 		j.swapProcess(ctx, p)
-	case p.container != nil:
-		j.swapContainer(ctx, p)
 	default:
 		j.swapBinaryOnly(ctx)
 	}
@@ -271,8 +293,6 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 	switch {
 	case p.server != nil:
 		st.Kind = kindProcess
-	case p.container != nil:
-		st.Kind = kindContainer
 	}
 	st.Run = newRunID(now, p.from)
 	dir := filepath.Join(r.deps.Backups, st.Run)
@@ -333,12 +353,6 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			return nil, err.Error()
 		}
 		need += size
-	case p.container != nil:
-		size, refusal := j.prepareContainer(ctx, p)
-		if refusal != "" {
-			return nil, refusal
-		}
-		need += size
 	}
 	if st.Kind != kindBinary {
 		free, err := freeBytes(dir)
@@ -348,13 +362,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		if free < need {
 			return nil, fmt.Sprintf("no room for a backup in %s: %d MiB free, %d MiB needed", dir, free>>20, need>>20)
 		}
-		base := ""
-		if st.Process != nil {
-			base = st.Process.URL
-		} else {
-			base = st.Container.URL
-		}
-		count, note := r.traceCount(ctx, base)
+		count, note := r.traceCount(ctx, st.Process.URL)
 		st.CountBefore = count
 		if count != nil {
 			j.done("read the trace count: %d", *count)
@@ -362,9 +370,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			rep.Notes = append(rep.Notes, "the trace counts are not compared: "+note)
 		}
 	}
-	if err := j.step(stepPrepared); err != nil {
-		return nil, err.Error()
-	}
+	j.step(stepPrepared)
 	return j, ""
 }
 
@@ -396,11 +402,13 @@ func (r *runner) lockRuns(rep *Report) (release func(), ok bool) {
 // anything was stopped: left, it would hold secrets for nothing and eat into
 // the next run's room (the review of #1). Only a directory of a run's name,
 // directly under the backups directory, is ever removed.
-func (r *runner) discard(dir string) {
+func (r *runner) discard(rep *Report, dir string) {
 	if filepath.Dir(dir) != r.deps.Backups || !runID.MatchString(filepath.Base(dir)) {
 		return
 	}
-	_ = os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("%s, made by this refused run, could not be removed (%v); it may hold the server's environment: rm -r %s", dir, err, shq(dir)))
+	}
 }
 
 // afterStop is the context a swap takes once it may stop a server: an
@@ -501,7 +509,7 @@ func (r *runner) nothingNewerRuns(ctx context.Context, path, version string, own
 		v := ""
 		if url, ok := loopbackURL(listen); ok && err == nil {
 			hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			v, _ = health(hctx, r.deps.HTTP, url)
+			v, _ = health(hctx, r.deps.HTTP, url) // ignored: no answer leaves v empty, which refuses below
 			cancel()
 		}
 		order, known := Compare(v, version)
@@ -520,19 +528,19 @@ func (r *runner) nothingNewerRuns(ctx context.Context, path, version string, own
 // and a binary that does not run here changes nothing.
 func (r *runner) putInPlace(ctx context.Context, src, dst, version string) error {
 	tmp := filepath.Join(filepath.Dir(dst), ".tracepad."+strconv.Itoa(os.Getpid())+".new")
-	_ = os.Remove(tmp)
+	_ = os.Remove(tmp) // ignored: a leftover of an earlier attempt; the copy below fails on one that stays
 	if err := copyFile(src, tmp, 0o755); err != nil {
 		return err
 	}
 	if v, err := r.deps.Version(ctx, tmp); err != nil || v != version {
-		os.Remove(tmp)
+		os.Remove(tmp) // ignored: the command's own copy, never in place; the next attempt removes it first
 		if err != nil {
 			return fmt.Errorf("the binary does not run at %s (%v)", filepath.Dir(dst), err)
 		}
 		return fmt.Errorf("the binary says %q at %s, not %s", v, filepath.Dir(dst), version)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		os.Remove(tmp) // ignored: the command's own copy, never in place; the next attempt removes it first
 		return err
 	}
 	return nil
@@ -549,7 +557,7 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 	case r.keepCopy(ctx, "/proc/"+strconv.Itoa(s.Proc.PID)+"/exe", old, s.Version) == nil:
 		// Linux keeps the running executable readable even once replaced.
 	default:
-		os.Remove(old)
+		os.Remove(old) // ignored: a copy that failed its check, in the run's own directory; the download below refuses if it stays
 		if _, err := r.deps.Releases.Fetch(ctx, s.Version, j.dir, "tracepad-"+s.Version); err != nil {
 			return fmt.Sprintf("no copy of the running %s to go back to: %v", s.Version, err)
 		}
@@ -580,27 +588,12 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 }
 
 // relativeDataDir says whether a server's data directory, from whichever
-// source it came — --data-dir, TRACEPAD_DATA_DIR, XDG_DATA_HOME, HOME — is a
-// relative path: one that means something only in the directory it was
-// started in (the final review).
+// source it came, is a relative path: one that means something only in the
+// directory it was started in (the final review). The source is the one
+// order the server reads (configuredDirs), never a copy of it.
 func relativeDataDir(p Process) bool {
-	args, ok := serverFlags(p.Argv)
-	if !ok {
-		return false
-	}
-	flags, err := config.ParseFlags(args)
-	if err != nil {
-		return true
-	}
-	if d, given := flags.Given("data-dir"); given && d != "" {
-		return !filepath.IsAbs(d)
-	}
-	for _, key := range []string{"TRACEPAD_DATA_DIR", "XDG_DATA_HOME", "HOME"} {
-		if v := p.Getenv(key); v != "" {
-			return !filepath.IsAbs(v)
-		}
-	}
-	return true
+	dataDir, _, err := configuredDirs(p)
+	return !errors.Is(err, errNotServer) && (err != nil || !filepath.IsAbs(dataDir))
 }
 
 // isServer checks, right before a signal, that pid is still the server of
@@ -644,14 +637,11 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 			why = err.Error()
 		}
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: server pid "+strconv.Itoa(ps.PID)+" changed since the plan: "+why
-		r.discard(j.dir)
+		r.discard(rep, j.dir)
 		rep.Run = nil
 		return
 	}
-	if err := j.step(stepStopSent); err != nil {
-		j.stuck("could not record the run's state: " + err.Error())
-		return
-	}
+	j.step(stepStopSent)
 	err := j.at(stepStopSent)
 	if err == nil {
 		err = r.signal(ps.PID)
@@ -660,7 +650,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		// Not asked to stop after all: nothing changed, and nothing waits.
 		j.unstep(stepStopSent)
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: server pid "+strconv.Itoa(ps.PID)+" could not be asked to stop: "+err.Error()
-		r.discard(j.dir)
+		r.discard(rep, j.dir)
 		rep.Run = nil
 		return
 	}
@@ -670,7 +660,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		rep.Next = append(rep.Next, "when it has stopped, start it again as it was: "+j.upgradeCmd("--back "+st.Run))
 		return
 	}
-	_ = j.step(stepStopped)
+	j.step(stepStopped)
 	j.done("stopped server pid %d", ps.PID)
 	// From the stop the command holds the database, so a server brought
 	// back by something else cannot write into what it archives (the fourth
@@ -679,7 +669,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	if ok, err := j.hold(ps.DataDir); !ok {
 		why := "the data directory's lock could not be taken"
 		if err == nil {
-			holder, _ := lockedBy(ps.DataDir)
+			holder, _ := lockedBy(ps.DataDir) // ignored: the pid is the message's; one that cannot be read is no server, and is refused
 			why = fmt.Sprintf("pid %d took %s after the stop (a supervisor, a shell loop?)", holder, ps.DataDir)
 		} else {
 			why += ": " + err.Error()
@@ -703,7 +693,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		return
 	}
 	st.Archive = &a
-	_ = j.step(stepArchived)
+	j.step(stepArchived)
 	j.done("archived %s into %s and read it back whole", ps.DataDir, archive)
 
 	if p.replaceBinary {
@@ -723,7 +713,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		return
 	}
 	ps.NewPID = started.PID()
-	_ = j.step(stepStarted)
+	j.step(stepStarted)
 	j.done("started tracepad %s as pid %d, with the old server's arguments and environment", p.to, ps.NewPID)
 
 	if err := j.at(stepChecked); err != nil {
@@ -748,9 +738,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 func (j *job) putNew(ctx context.Context) error {
 	st := j.st
 	if st.last() != stepBinaryReplacing {
-		if err := j.step(stepBinaryReplacing); err != nil {
-			return err
-		}
+		j.step(stepBinaryReplacing)
 	}
 	err := j.at(stepBinaryReplacing)
 	if err == nil {
@@ -759,7 +747,7 @@ func (j *job) putNew(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_ = j.step(stepBinaryReplaced)
+	j.step(stepBinaryReplaced)
 	j.done("put tracepad %s at %s", st.To, st.Binary.Path)
 	return nil
 }
@@ -780,7 +768,7 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 		if err != nil {
 			return nil, fmt.Errorf("the lock of %s could not be taken: %w", ps.DataDir, err)
 		}
-		holder, _ := lockedBy(ps.DataDir)
+		holder, _ := lockedBy(ps.DataDir) // ignored: the pid is the message's; one that cannot be read is no server, and is refused
 		return nil, fmt.Errorf("pid %d holds %s", holder, ps.DataDir)
 	}
 	if info, err := os.Stat(ps.Log); err == nil {
@@ -791,13 +779,11 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 	if newVersion {
 		ps.WroteAfterSwap = true
 	}
-	if err := j.st.save(j.dir); err != nil {
-		return nil, err
-	}
+	j.persist()
 	j.letGo(ps.DataDir)
 	started, err := j.r.deps.Sys.Start(StartSpec{Path: j.spec.Exe, Argv: j.spec.Argv, Env: j.spec.Env, Dir: j.spec.Dir, Log: ps.Log})
 	if err != nil {
-		_, _ = j.hold(ps.DataDir)
+		_, _ = j.hold(ps.DataDir) // ignored: the start's error is what the run acts on; a holder found instead is the way back's to meet
 		return nil, err
 	}
 	j.newProc = started
@@ -806,15 +792,18 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 	} else {
 		ps.BackPID = started.PID()
 	}
-	_ = j.st.save(j.dir)
+	j.persist()
 	// The child holds the data now, or it does not and the command holds it
 	// again: one that exited, or opened another directory, leaves the data
 	// to the way back and its check says why. Only something else that took
 	// the lock in that moment stops here.
 	j.r.waitRecorded(ctx, started.PID(), ps.DataDir)
-	if !(j.r.deps.Sys.Alive(started.PID()) && lockHeld(ps.DataDir) && recordsPID(ps.DataDir, started.PID())) {
-		if ok, _ := j.hold(ps.DataDir); !ok {
-			holder, _ := lockedBy(ps.DataDir)
+	held, _ := lockHeld(ps.DataDir) // ignored: an unread lock is not the child's; it is taken back below, which says why it cannot be
+	if !(j.r.deps.Sys.Alive(started.PID()) && held && recordsPID(ps.DataDir, started.PID())) {
+		if ok, err := j.hold(ps.DataDir); err != nil {
+			return nil, fmt.Errorf("the lock of %s could not be taken back after the start: %w", ps.DataDir, err)
+		} else if !ok {
+			holder, _ := lockedBy(ps.DataDir) // ignored: the pid is the message's; one that cannot be read is no server, and is refused
 			return nil, fmt.Errorf("pid %d took %s in the moment it was free for the start", holder, ps.DataDir)
 		}
 	}
@@ -823,7 +812,9 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 		named := strings.TrimSpace(string(b))
 		for _, pid := range []int{ps.PID, ps.NewPID, ps.BackPID} {
 			if pid > 0 && named == strconv.Itoa(pid) {
-				_ = writeFileAtomic(pidFile, []byte(strconv.Itoa(started.PID())+"\n"))
+				if err := writeFileAtomic(pidFile, []byte(strconv.Itoa(started.PID())+"\n")); err != nil {
+					j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("%s still names pid %s, not %d: %v", pidFile, named, started.PID(), err))
+				}
 				break
 			}
 		}
@@ -836,7 +827,7 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 	st, rep := j.st, j.rep
 	rep.Check = &c
 	st.Verdict = c.Verdict
-	_ = j.step(stepChecked)
+	j.step(stepChecked)
 	switch c.Verdict {
 	case verdictHealthy:
 		rep.ExitCode = exitOK
@@ -855,18 +846,15 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 
 // finishHealthy is what a healthy new version is followed by, whichever check
 // found it healthy — the upgrade's own, or a later --check after a decide
-// (the fourth review): the host's binary for a container run, and the skill.
+// (the fourth review): the skill.
 func (j *job) finishHealthy(ctx context.Context) {
 	st := j.st
 	if st.has(stepSkill) {
 		return
 	}
-	if st.Kind == kindContainer && !st.has(stepBinaryReplaced) {
-		j.replaceHostBinary(ctx)
-	}
 	if st.Binary != nil && st.Binary.Path != "" {
 		j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, st.To)
-		_ = j.step(stepSkill)
+		j.step(stepSkill)
 	}
 }
 
@@ -925,19 +913,8 @@ func (j *job) refresh(ctx context.Context) {
 		case j.st.Process.NewPID > 0:
 			s.PID = j.st.Process.NewPID
 		}
-		s.Version, _ = health(ctx, r.deps.HTTP, j.st.Process.URL)
+		s.Version, _ = health(ctx, r.deps.HTTP, j.st.Process.URL) // ignored: the report's line only; no answer is said as none
 	}
-	for i := range rep.Containers {
-		c := &rep.Containers[i]
-		if c.Target && j.st.Container != nil {
-			c.Version, _ = health(ctx, r.deps.HTTP, j.st.Container.URL)
-		}
-	}
-}
-
-func (j *job) stuck(why string) {
-	j.rep.ExitCode = exitStuck
-	j.rep.Summary = "Stuck: " + why
 }
 
 // swapBinaryOnly replaces the installed binary when no server of the
@@ -946,27 +923,15 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 	r, st, rep := j.r, j.st, j.rep
 	if err := j.putNew(ctx); err != nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+err.Error()
-		r.discard(j.dir)
+		r.discard(rep, j.dir)
 		rep.Run = nil
 		return
 	}
 	r.reinstallSkill(ctx, rep, st.Binary.Path, st.To)
-	_ = j.step(stepSkill)
+	j.step(stepSkill)
 	rep.ExitCode = exitOK
 	rep.Summary = fmt.Sprintf("Upgraded the binary to %s; no server of the command's runs it.", st.To)
 	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: "+j.upgradeCmd("--back "+st.Run))
-}
-
-// replaceHostBinary brings the host's CLI to the container's version after a
-// healthy container upgrade.
-func (j *job) replaceHostBinary(ctx context.Context) {
-	st := j.st
-	if st.Binary == nil || st.Binary.Old == "" {
-		return
-	}
-	if err := j.putNew(ctx); err != nil {
-		j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not replaced: "+err.Error())
-	}
 }
 
 // reinstallSkill installs the skill again, with the binary at bin when it is
@@ -1009,20 +974,10 @@ func (j *job) privacy() {
 }
 
 func backupsSentence(dir string, st *State) string {
-	// Containers before volumes: docker refuses to remove a volume that any
-	// container, a stopped one too, still mounts (the review of #1).
-	dirs, containers, volumes := []string{"rm -r " + shq(dir)}, []string{}, []string{}
+	cmds := []string{"rm -r " + shq(dir)}
 	for _, s := range st.SetAside {
-		switch {
-		case strings.HasPrefix(s, "container "):
-			containers = append(containers, "docker rm "+shq(strings.TrimPrefix(s, "container ")))
-		case strings.HasPrefix(s, "volume "):
-			volumes = append(volumes, "docker volume rm "+shq(strings.TrimPrefix(s, "volume ")))
-		default:
-			dirs = append(dirs, "rm -r "+shq(s))
-		}
+		cmds = append(cmds, "rm -r "+shq(s))
 	}
-	cmds := append(append(dirs, containers...), volumes...)
 	return dir + " is a full copy of the database — every prompt and completion — and of the server's environment, secrets included. " +
 		"It stays until someone deletes it, and erasing traces or a user reaches neither it nor what a way back set aside. " +
 		"Once the new version has run for a while, remove it and what is set aside: " + strings.Join(cmds, "; ")

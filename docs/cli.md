@@ -1071,22 +1071,30 @@ The whole of it is [agents.md](agents.md).
 ### `upgrade`
 
 ```sh
-tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
-tracepad upgrade [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
+tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR] [--json]
+tracepad upgrade [--to 0.2.0] [--data-dir DIR] [--json]
 tracepad upgrade --check RUN [--json]
 tracepad upgrade --back RUN [--json]
 ```
 
-Upgrades the binary at `~/.local/bin/tracepad` (or `TRACEPAD_INSTALL_DIR`) and
-one server or container you started, to the newest stable release or the one
-`--to` names — never an older one: migrations run forward only. It is local,
+Upgrades the installed binary and one server you started, to the newest
+stable release or the one `--to` names — never an older one: migrations run
+forward only. The installed binary is the `tracepad` in the directory the
+command runs from (`~/.local/bin` when it runs from a temporary directory, as
+the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). It is local,
 like `skills`: it reads this machine's processes and containers and asks a
 server only at the server's own address. The design is spec 054.
 
 - `--plan` changes nothing. It lists the binary, every `tracepad serve` of
   yours and every container of the image, says which the command may upgrade
-  and why each other is yours (a service, Compose, an address beyond this
-  machine, another binary), and what the upgrade would do, step by step.
+  and why each other is yours (a service, an address beyond this machine,
+  another binary, a container), and what the upgrade would do, step by step.
+- **A container is yours to upgrade**, in this release: the plan and the
+  upgrade name each one that runs an older version and give the commands —
+  stop it, back its volume up, pull the release, and run it again with the
+  options you created it with, the old one kept until the new one is healthy
+  ([docker.md](docker.md#upgrading-and-backing-up-first)), or Compose's
+  `docker compose up -d`. The command changes nothing of a container.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -1099,22 +1107,14 @@ server only at the server's own address. The design is spec 054.
   `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
   against the release's `checksums.txt`, and its attestation when `gh` is
   logged in — is put in place, and the server starts again with **the same
-  arguments, environment and working directory**. A **container** is the
-  command's when it is named `tracepad-<project>` (or `--container`),
-  publishes on loopback only, keeps its data in a volume at `/data`, is not
-  Compose's, has no setting a recreate would drop (the plan names any it
-  finds), and Docker is neither rootless nor remapping user namespaces; it is
-  recreated from `docker inspect` with the same mounts,
-  ports, restart policy, labels and the variables you set, the old one renamed
-  `<name>-before-<run>`. A server or a container is stopped with SIGTERM and
-  never killed; one that has not stopped in the wait leaves the run stuck
+  arguments, environment and working directory**. A server is stopped with
+  SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
   (exit `5`), and `--back` starts it again once it has. No binary is ever put in place while a server runs
   from it at a later version than the one put there.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
-  compared). A new version that exits (a container that crash-loops counts),
-  or answers as another version, goes back at once (exit `3`). One that runs
+  compared). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit `4`).
@@ -1122,8 +1122,8 @@ server only at the server's own address. The design is spec 054.
   run started, or the same one you started again since — and never goes back
   by itself. `--back RUN` takes a run's way back: the archive is
   restored beside the data and checked before anything stops, what the new
-  version left is **set aside, not deleted** (`<data>.after-<run>`, or the
-  container `<name>-after-<run>` and its volume), and the old version starts
+  version left is **set aside, not deleted** (`<data>.after-<run>`), and the
+  old version starts
   with its arguments. Whether the archive is restored is decided from what
   the run recorded when it happened — whether the new version was started on
   the data, or a server found there started while the installed binary may
@@ -1140,11 +1140,11 @@ The exit status, by mode — one table, which the skill reads too:
 
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
-| `0` | everything is up to date | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
 | `1` | refused | refused, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
-| `4` | only what is yours is behind | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
 | `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
 | `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
 

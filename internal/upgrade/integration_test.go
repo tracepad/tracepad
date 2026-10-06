@@ -817,30 +817,28 @@ func TestAnUnreapedServerIsGoneOnceItStops(t *testing.T) {
 	w.waitVersion(vNew)
 }
 
-// A terminal closed under the run after the stop — SIGHUP, as an ssh session
-// that drops sends — interrupts it as Ctrl-C does, and no more (#35): the
-// swap goes on to the end, and a second SIGHUP is caught as the first.
-func TestATerminalClosedAfterTheStopDoesNotEndTheRun(t *testing.T) {
-	w := newWorld(t)
-	w.start()
-	w.sendTrace(1)
-	w.waitCount(1)
-	path := t.TempDir()
+// hangUp runs the built binary's upgrade with args, as a person's terminal
+// runs it, and hangs it up twice — SIGHUP, as a terminal or an ssh session
+// that closes sends — once the run's state records step (#35). It answers
+// the report the command still wrote.
+func (w *world) hangUp(step string, args ...string) Report {
+	w.t.Helper()
+	path := w.t.TempDir()
 	if _, err := os.Stat("/usr/sbin/lsof"); err == nil {
 		_ = os.Symlink("/usr/sbin/lsof", filepath.Join(path, "lsof"))
 	}
 	var out bytes.Buffer
-	cmd := exec.Command(filepath.Join(builtBinaries(t), vNew), "upgrade", "--to", vNew, "--data-dir", w.data, "--json")
-	cmd.Env = []string{"HOME=" + w.home, "PATH=" + path, "TRACEPAD_DOWNLOAD_URL=file://" + w.mirror, "TRACEPAD_API_KEY=" + testSK}
+	cmd := exec.Command(filepath.Join(builtBinaries(w.t), vNew), append(append([]string{"upgrade"}, args...), "--json")...)
+	cmd.Env = []string{"HOME=" + w.home, "PATH=" + path, "TRACEPAD_INSTALL_DIR=" + w.bin, "TRACEPAD_DOWNLOAD_URL=file://" + w.mirror, "TRACEPAD_API_KEY=" + testSK}
 	cmd.Stdout = &out
 	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+		w.t.Fatal(err)
 	}
 	hung := false
 	for i := 0; i < 3000 && !hung; i++ {
 		states, _ := filepath.Glob(filepath.Join(w.home, "tracepad-backups", "*", stateFile))
 		for _, s := range states {
-			if b, _ := os.ReadFile(s); strings.Contains(string(b), `"`+stepStopped+`"`) {
+			if b, _ := os.ReadFile(s); strings.Contains(string(b), `"`+step+`"`) {
 				_ = cmd.Process.Signal(syscall.SIGHUP)
 				_ = cmd.Process.Signal(syscall.SIGHUP)
 				hung = true
@@ -850,13 +848,53 @@ func TestATerminalClosedAfterTheStopDoesNotEndTheRun(t *testing.T) {
 	}
 	err := cmd.Wait()
 	if !hung {
-		t.Fatalf("the run never reached its stop: %v %s", err, out.String())
+		w.t.Fatalf("the run never reached %s: %v %s", step, err, out.String())
 	}
 	var rep Report
-	if jerr := json.Unmarshal(out.Bytes(), &rep); err != nil || jerr != nil || rep.ExitCode != exitOK {
-		t.Fatalf("after SIGHUP: %v, %v: %s", err, jerr, out.String())
+	if jerr := json.Unmarshal(out.Bytes(), &rep); err != nil || jerr != nil {
+		w.t.Fatalf("after SIGHUP: %v, %v: %s", err, jerr, out.String())
+	}
+	return rep
+}
+
+// A terminal closed under the upgrade after the stop interrupts it as
+// Ctrl-C does, and no more (#35): the swap goes on to the end, and a second
+// SIGHUP is caught as the first. The binary runs as a child here, and reads
+// this machine's own cgroup: where that is a service's — a CI runner's agent
+// — its servers are the person's (#29), and the way back below is the test.
+func TestATerminalClosedAfterTheStopDoesNotEndTheRun(t *testing.T) {
+	if b, err := os.ReadFile("/proc/self/cgroup"); err == nil && systemdUnit(string(b)) != "" {
+		t.Skipf("this machine's processes are in %s, and its servers are the person's", systemdUnit(string(b)))
+	}
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.waitCount(1)
+	if rep := w.hangUp(stepStopped, "--to", vNew, "--data-dir", w.data); rep.ExitCode != exitOK {
+		t.Fatalf("after SIGHUP: %d %s", rep.ExitCode, rep.Summary)
 	}
 	w.waitVersion(vNew)
+	if got := w.count(); got != 1 {
+		t.Errorf("traces: %d", got)
+	}
+}
+
+// A terminal closed under a way back (#35): it goes on to the end, the old
+// version running on its data. --back reads no service manager, so it runs
+// as it would anywhere, a CI runner too.
+func TestATerminalClosedDuringAWayBackDoesNotEndIt(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.waitCount(1)
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("upgrade: %d %s", code, rep.Summary)
+	}
+	if back := w.hangUp(stepBackRestored, "--back", rep.Run.ID); back.ExitCode != exitOK {
+		t.Fatalf("after SIGHUP: %d %s", back.ExitCode, back.Summary)
+	}
+	w.waitVersion(vOld)
 	if got := w.count(); got != 1 {
 		t.Errorf("traces: %d", got)
 	}

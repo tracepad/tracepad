@@ -39,9 +39,8 @@ In outline: `tracepad upgrade --plan` changes nothing and says what the upgrade
 will do and what is the person's; you show it to them. `tracepad upgrade` then
 backs the data up into `~/tracepad-backups/<run>/` before it stops anything,
 puts the new binary in place, starts the server again with the same
-arguments and environment (or recreates the container with the same mounts,
-ports, restart policy and variables), and checks it. A new version that exits,
-crash-loops or answers as another version is rolled back at once; one that
+arguments and environment, and checks it. A new version that exits or answers
+as another version is rolled back at once; one that
 runs but stays silent through the wait (a long migration runs before the
 server listens), or answers with a trace count that looks wrong, is left
 running, and the person decides (exit `4`). Nothing is ever deleted:
@@ -51,9 +50,11 @@ package moves to the same version, and you report.
 ## What needs the person
 
 - A server the command does not start or stop itself: a service (systemd,
-  launchd), a container Compose runs, a server reachable from other machines,
-  one that runs another binary (Homebrew's: `brew upgrade tracepad`). The plan
-  names each, with its reason and the commands for it.
+  launchd), a server reachable from other machines, one that runs another
+  binary (Homebrew's: `brew upgrade tracepad`), and every container, Compose's
+  or not. The plan names each, with its reason and the commands for it — for a
+  container: stop it, back its volume up, pull the release, run it again with
+  the options it was created with.
 - A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.
 - Free space for the backup, when there is not enough.

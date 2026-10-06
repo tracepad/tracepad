@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,9 +24,9 @@ type DataLock struct {
 var takeLock = lockFile
 
 // LockDatabase takes the exclusive lock of the database at dbPath, creating
-// its directory and the lock file if they are missing, and returns at once:
-// when another process holds it, it says so, and gives the pid that process
-// last recorded. The lock is the operating system's, on the open file, so it is
+// its directory and the lock file if they are missing, and returns within a
+// moment: when another process holds it, it says so, and gives the pid that
+// process last recorded. The lock is the operating system's, on the open file, so it is
 // gone the moment the holder is — a killed server leaves nothing to clean up,
 // which a pid file would. A file system that cannot lock at all is a warning and
 // not a refusal to start (spec 001 #20): a deployment that ran on it yesterday
@@ -41,7 +42,17 @@ func LockDatabase(dbPath string) (*DataLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	if err := takeLock(file); err != nil {
+	// A lock found held is asked again for a moment before it counts as
+	// held (spec 054 #37): a process may hold it only to ask whether it is
+	// held (`tracepad upgrade` does, while a person or a shell loop may be
+	// starting this server), and a child another process is starting holds
+	// a copy of its descriptors between its fork and its exec.
+	err = takeLock(file)
+	for try := 0; err != nil && isLockHeld(err) && try < lockTries; try++ {
+		time.Sleep(LockRetry)
+		err = takeLock(file)
+	}
+	if err != nil {
 		switch {
 		case isLockHeld(err):
 			hint := recordedPid(file)
@@ -152,20 +163,23 @@ func TryLock(dbPath string) (release func(), ok bool, err error) {
 }
 
 // Locked says whether a process holds the lock of the database at dbPath now.
-// A lock taken here to ask is let go at once; a missing lock file is no
-// holder.
-func Locked(dbPath string) bool {
-	if _, err := os.Stat(dbPath + LockSuffix); err != nil {
-		return false
+// A lock taken here to ask is let go at once — a server starting in that
+// moment asks again (LockDatabase) — and a missing lock file is no holder.
+// A lock that cannot be asked is an error, never "free" (spec 054 #37).
+func Locked(dbPath string) (bool, error) {
+	if _, err := os.Stat(dbPath + LockSuffix); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
 	}
 	release, ok, err := TryLock(dbPath)
 	if err != nil {
-		return false
+		return false, err
 	}
 	if ok {
 		release()
 	}
-	return !ok
+	return !ok, nil
 }
 
 // RecordedPID is the pid the last server to hold the database at dbPath

@@ -17,21 +17,24 @@ type plan struct {
 	// replaceBinary: the installed binary is the command's and older.
 	replaceBinary bool
 	server        *Server
-	container     *Container
 	// from is the target's running version, or the binary's.
 	from string
-	// choose is set when more than one server or container is the
-	// command's and none was named.
+	// choose is set when more than one server is the command's and none
+	// was named.
 	choose []string
-	// later are the command's own servers or containers, older than to,
-	// that this run does not take (another run will).
+	// later are the command's own servers, older than to, that this run
+	// does not take (another run will).
 	later []string
-	// person are the person's, older than to, each with what to do.
-	person []string
+	// person are the person's servers and containers, older than to, each
+	// with what to do; binaries, the person's binaries older than to — what
+	// runs older is the first, and only it makes the plan's exit 4 (the
+	// eighth review: an older tracepad first on PATH runs nothing).
+	person   []string
+	binaries []string
 }
 
 func (p *plan) pending() bool {
-	return p.replaceBinary || p.server != nil || p.container != nil || len(p.choose) > 0
+	return p.replaceBinary || p.server != nil || len(p.choose) > 0
 }
 
 // makePlan resolves the target version and works out the plan. A refusal is
@@ -61,7 +64,10 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	}
 	bin := p.f.Binary
 	if bin.Ours {
-		order, _ := Compare(to, bin.Version)
+		order, ok := Compare(to, bin.Version)
+		if !ok {
+			return nil, fmt.Sprintf("the installed binary says %q, which cannot be ordered against %s", bin.Version, to)
+		}
 		if order < 0 {
 			return nil, downgrade(to, "the installed binary", bin.Version)
 		}
@@ -73,7 +79,12 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		if !bin.Ours {
 			return nil, fmt.Sprintf("server pid %d runs %s, which the command cannot replace: %s", p.server.Proc.PID, bin.Path, bin.Reason)
 		}
-		order, _ := Compare(to, p.server.Version)
+		// A server named that does not say its version — still starting, or
+		// hung — is not taken for current (the eighth review).
+		order, ok := Compare(to, p.server.Version)
+		if !ok {
+			return nil, fmt.Sprintf("server pid %d does not say its version at %s, so whether it is behind %s cannot be told; run the plan again once it answers", p.server.Proc.PID, p.server.URL, to)
+		}
 		if order < 0 {
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", p.server.Proc.PID), p.server.Version)
 		}
@@ -82,30 +93,15 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		} else {
 			p.from = p.server.Version
 		}
-	case p.container != nil:
-		order, _ := Compare(to, p.container.Version)
-		if order < 0 {
-			return nil, downgrade(to, "container "+p.container.Name, p.container.Version)
-		}
-		if order == 0 {
-			p.container = nil
-		} else {
-			p.from = p.container.Version
-		}
 	}
-	// A server or container running later than the target, from the
-	// installed binary or the command's own, is a downgrade too: after an
+	// A server running later than the target, from the installed binary or
+	// the command's own, is a downgrade too: after an
 	// install script put an older binary in place (TRACEPAD_VERSION), the
 	// plan refuses, and says to leave what runs as it is (#15; the final
 	// review: the plan used to say everything was current).
 	for _, s := range p.f.Servers {
 		if order, ok := Compare(s.Version, to); ok && order > 0 && (s.Ours || sameFile(s.Proc.Exe, bin.Path)) {
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", s.Proc.PID), s.Version) + " Leave it running"
-		}
-	}
-	for _, c := range p.f.Containers {
-		if order, ok := Compare(c.Version, to); ok && order > 0 && c.Ours {
-			return nil, downgrade(to, "container "+c.Name, c.Version) + " Leave it running"
 		}
 	}
 	r.othersBehind(p)
@@ -118,8 +114,8 @@ func downgrade(to, what, running string) string {
 		"The way back from an upgrade is that upgrade's: tracepad upgrade --back <run>", to, running, what)
 }
 
-// pickTarget chooses the server or container this run upgrades: the one the
-// flags name, or the only one that is the command's.
+// pickTarget chooses the server this run upgrades: the one --data-dir
+// names, or the only one that is the command's.
 func (r *runner) pickTarget(p *plan) error {
 	// Only what runs older than the target is a choice: two servers already
 	// at it would otherwise keep a plan pending that the upgrade refuses (the
@@ -132,16 +128,8 @@ func (r *runner) pickTarget(p *plan) error {
 	for i, s := range p.f.Servers {
 		if s.Ours && behind(s.Version) {
 			ours = append(ours, "--data-dir "+shq(s.DataDir))
-			if r.flags.dataDir == "" && r.flags.container == "" {
+			if r.flags.dataDir == "" {
 				p.server = &p.f.Servers[i]
-			}
-		}
-	}
-	for i, c := range p.f.Containers {
-		if c.Ours && behind(c.Version) {
-			ours = append(ours, "--container "+shq(c.Name))
-			if r.flags.dataDir == "" && r.flags.container == "" {
-				p.container = &p.f.Containers[i]
 			}
 		}
 	}
@@ -163,20 +151,8 @@ func (r *runner) pickTarget(p *plan) error {
 			return nil
 		}
 		return fmt.Errorf("no server runs on %s", want)
-	case r.flags.container != "":
-		for i, c := range p.f.Containers {
-			if c.Name != r.flags.container {
-				continue
-			}
-			if !c.Ours {
-				return fmt.Errorf("the container %s is yours: %s", c.Name, c.Reason)
-			}
-			p.container = &p.f.Containers[i]
-			return nil
-		}
-		return fmt.Errorf("no running container of Tracepad's image is named %s", r.flags.container)
 	case len(ours) > 1:
-		p.server, p.container = nil, nil
+		p.server = nil
 		p.choose = ours
 	}
 	return nil
@@ -213,18 +189,16 @@ func (r *runner) othersBehind(p *plan) {
 			p.person = append(p.person, fmt.Sprintf("server pid %d runs %s; %s. %s", s.Proc.PID, s.Version, s.Reason, serverAdvice(*s)))
 		}
 	}
-	for i := range p.f.Containers {
-		c := &p.f.Containers[i]
-		switch {
-		case c == p.container || !older(c.Version):
-		case c.Ours:
-			p.later = append(p.later, fmt.Sprintf("container %s (%s): %s --container %s", c.Name, c.Version, r.self(), shq(c.Name)))
-		default:
-			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(*c, p.to)))
+	// A container is the person's (#36): one behind gets the commands that
+	// upgrade it. One that does not say its version on this machine is in
+	// the report's list of containers, and is not called behind.
+	for _, c := range p.f.Containers {
+		if older(c.Version) {
+			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(c, p.to)))
 		}
 	}
 	if b := p.f.Binary; !b.Ours && b.Exists && older(b.Version) {
-		p.person = append(p.person, fmt.Sprintf("%s is %s; %s", b.Path, b.Version, b.Reason))
+		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, b.Version, b.Reason))
 	}
 	if b := p.f.Binary; b.First != "" {
 		if v, err := r.deps.Version(context.Background(), b.First); err == nil && older(v) {
@@ -232,16 +206,9 @@ func (r *runner) othersBehind(p *plan) {
 			if strings.Contains(b.First, "/homebrew/") || strings.Contains(b.First, "/Cellar/") || strings.HasPrefix(b.First, "/usr/local/bin/") {
 				advice = "brew upgrade tracepad"
 			}
-			p.person = append(p.person, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
+			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
 		}
 	}
-}
-
-func containerAdvice(c Container, to string) string {
-	if project := c.inspect.Config.Labels["com.docker.compose.project"]; project != "" {
-		return fmt.Sprintf("Back up its volume, set the image to %s:%s in its Compose file, then: docker compose up -d (%s)", c.Repo, to, docsDocker)
-	}
-	return fmt.Sprintf("Back up its volume and recreate it on %s:%s (%s)", c.Repo, to, docsDocker)
 }
 
 func serverAdvice(s Server) string {
@@ -276,7 +243,7 @@ func (r *runner) planMode(ctx context.Context) *Report {
 func verdictOf(p *plan) (int, string) {
 	switch {
 	case len(p.choose) > 0:
-		return exitPending, fmt.Sprintf("An upgrade to %s is pending; more than one server or container is the command's, so name one.", p.to)
+		return exitPending, fmt.Sprintf("An upgrade to %s is pending; more than one server is the command's, so name one.", p.to)
 	case p.pending():
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending.", p.to)
 	case len(p.later) > 0:
@@ -293,10 +260,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 	for i := range rep.Servers {
 		rep.Servers[i].Target = p.server != nil && rep.Servers[i].PID == p.server.Proc.PID
 	}
-	for i := range rep.Containers {
-		rep.Containers[i].Target = p.container != nil && rep.Containers[i].Name == p.container.Name
-	}
-	rep.Person = append(rep.Person, p.person...)
+	rep.Person = append(append(rep.Person, p.person...), p.binaries...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {
@@ -306,7 +270,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 	}
 	bin := p.f.Binary
 	steps := []string{}
-	if p.replaceBinary || p.server != nil || p.container != nil {
+	if p.replaceBinary || p.server != nil {
 		steps = append(steps, fmt.Sprintf("download tracepad %s and check it against the release's checksums.txt (and its attestation when gh is logged in)", p.to))
 	}
 	count := "read the trace count with TRACEPAD_API_KEY, to compare after"
@@ -326,19 +290,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 			fmt.Sprintf("check that %s answers as %s, and the trace count", s.URL, p.to),
 			"no answer as "+p.to+": go back at once; a lower or unreadable count: stop and leave it to you",
 		)
-	case p.container != nil:
-		c := p.container
-		steps = append(steps,
-			fmt.Sprintf("pull %s:%s, make a run directory under %s, and check there is room for a backup of the volume %s", c.Repo, p.to, r.deps.Backups, c.Volume),
-			count,
-			fmt.Sprintf("stop %s, archive its volume with %s, and read the archive back whole", c.Name, busybox),
-			fmt.Sprintf("rename it %s-before-<run> (restart policy no), and run %s:%s as %s with its mounts, ports, restart policy, labels and the variables you set (through an env file)", c.Name, c.Repo, p.to, c.Name),
-			fmt.Sprintf("check that %s answers as %s, and the trace count", c.URL, p.to),
-			"no answer as "+p.to+": go back at once; a lower or unreadable count: stop and leave it to you",
-		)
-		if p.replaceBinary {
-			steps = append(steps, fmt.Sprintf("then put tracepad %s at %s", p.to, bin.Path))
-		}
 	case p.replaceBinary:
 		steps = append(steps, fmt.Sprintf("keep a copy of %s in a run directory under %s, and put tracepad %s at %s; no server of the command's runs it", bin.Version, r.deps.Backups, p.to, bin.Path))
 	}
@@ -351,9 +302,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 		}
 		if p.server != nil && r.flags.dataDir != "" {
 			next += " --data-dir " + shq(p.server.DataDir)
-		}
-		if p.container != nil && r.flags.container != "" {
-			next += " --container " + shq(p.container.Name)
 		}
 		rep.Next = append(rep.Next, next)
 	}

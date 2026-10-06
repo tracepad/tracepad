@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strings"
 )
 
 // settle finishes, or takes back, the act a run was cut short in (#34). Each
@@ -34,9 +33,7 @@ func (j *job) settle(ctx context.Context) error {
 	case !allows(j.st.Kind, j.st.last(), it.Step):
 		return fmt.Errorf("the run was cut short after it %s, and its steps cannot record that after %q; nothing was touched", it.What, j.st.last())
 	}
-	if err := j.step(it.Step); err != nil {
-		return fmt.Errorf("could not record the run's state: %w", err)
-	}
+	j.step(it.Step)
 	j.done("found that the run had done this before it was cut short, and recorded it: %s", it.What)
 	return nil
 }
@@ -47,44 +44,69 @@ func (j *job) settle(ctx context.Context) error {
 // again.
 func (j *job) happened(ctx context.Context, step string) (bool, error) {
 	st := j.st
-	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+	// What cannot be looked at is neither there nor not (the eighth review):
+	// the first such error stops the settling, and nothing is touched.
+	var unread error
+	exists := func(p string) bool {
+		_, err := os.Lstat(p)
+		if err != nil && !errors.Is(err, os.ErrNotExist) && unread == nil {
+			unread = err
+		}
+		return err == nil
+	}
+	version := func() (string, error) {
+		v, err := j.r.deps.Version(ctx, st.Binary.Path)
+		if err != nil {
+			return "", fmt.Errorf("%s does not say its version: %w", st.Binary.Path, err)
+		}
+		return v, nil
+	}
 	switch {
 	case step == stepBackBinary:
-		v, err := j.r.deps.Version(ctx, st.Binary.Path)
+		if !exists(st.Binary.Path) {
+			return false, unread
+		}
+		v, err := version()
 		want := st.Binary.From
 		if st.Kind == kindProcess {
 			want = st.From
 		}
-		return err == nil && v == want, nil
+		return v == want, err
 	case st.Kind == kindProcess:
 		ps := st.Process
 		after, restore := ps.DataDir+".after-"+st.Run, ps.DataDir+".restore-"+st.Run
 		switch step {
 		case stepBackAside:
+			a, d := exists(after), exists(ps.DataDir)
 			switch {
-			case exists(after) && !exists(ps.DataDir):
+			case unread != nil:
+				return false, unread
+			case a && !d:
 				if !slices.Contains(st.SetAside, after) {
 					st.SetAside = append(st.SetAside, after)
 				}
 				return true, nil
-			case exists(ps.DataDir) && !exists(after):
+			case d && !a:
 				return false, nil
 			}
 			return false, fmt.Errorf("%s and %s are both there, or neither is", ps.DataDir, after)
 		case stepBackMoved:
+			d, r := exists(ps.DataDir), exists(restore)
 			switch {
-			case exists(ps.DataDir) && !exists(restore):
+			case unread != nil:
+				return false, unread
+			case d && !r:
 				return true, nil
-			case exists(restore) && !exists(ps.DataDir):
+			case r && !d:
 				return false, nil
 			}
 			return false, fmt.Errorf("%s and %s are both there, or neither is", restore, ps.DataDir)
 		case stepBackCleared:
 			if !exists(st.Binary.Path) {
-				return true, nil
+				return unread == nil, unread
 			}
-			v, err := j.r.deps.Version(ctx, st.Binary.Path)
-			return err == nil && v == st.From, nil
+			v, err := version()
+			return v == st.From, err
 		case stepStarted, stepBackStarted:
 			// The server it started holds the data, as the run recorded it.
 			if j.spec.Exe == "" {
@@ -94,11 +116,22 @@ func (j *job) happened(ctx context.Context, step string) (bool, error) {
 				}
 				j.spec = spec
 			}
-			if !lockHeld(ps.DataDir) {
+			held, err := lockHeld(ps.DataDir)
+			if err != nil {
+				return false, err
+			}
+			if !held {
 				return false, nil
 			}
-			holder, _ := lockedBy(ps.DataDir)
-			if ok, _ := j.r.isServer(holder, ps.DataDir, j.spec); !ok {
+			holder, err := lockedBy(ps.DataDir)
+			if err != nil {
+				return false, fmt.Errorf("%s is locked, and its lock does not say by whom: %w", ps.DataDir, err)
+			}
+			ok, err := j.r.isServer(holder, ps.DataDir, j.spec)
+			if err != nil && j.r.deps.Sys.Alive(holder) {
+				return false, err
+			}
+			if !ok {
 				return false, nil
 			}
 			if step == stepStarted {
@@ -108,60 +141,9 @@ func (j *job) happened(ctx context.Context, step string) (bool, error) {
 			}
 			return true, nil
 		}
-	case st.Kind == kindContainer:
-		cs := st.Container
-		if j.r.deps.Docker == nil {
-			return false, errors.New("docker is not on PATH")
-		}
-		named, _ := j.r.inspectContainers(ctx, cs.Name)
-		under := func() *inspectContainer {
-			if len(named) == 1 {
-				return &named[0]
-			}
-			return nil
-		}()
-		switch step {
-		case stepRenamedOld:
-			before, _ := j.r.inspectContainers(ctx, j.before())
-			switch {
-			case len(before) == 1 && before[0].ID == cs.ID:
-				if item := "container " + j.before(); !slices.Contains(st.SetAside, item) {
-					st.SetAside = append(st.SetAside, item)
-				}
-				return true, nil
-			case under != nil && under.ID == cs.ID:
-				return false, nil
-			}
-			return false, fmt.Errorf("the container %s is neither %s nor %s", cs.ID[:12], cs.Name, j.before())
-		case stepStarted:
-			// Run, and started: the new version may have written the volume.
-			// One docker made and could not start is no start.
-			if under != nil && under.ID != cs.ID && everStarted(under) {
-				cs.NewID = under.ID
-				return true, nil
-			}
-			return false, nil
-		case stepBackVolume:
-			// Kept: the way back fills a volume it began again, and knows it
-			// for the run's by this intent.
-			return false, errKeep
-		case stepBackStarted:
-			// The old image run on the restored volume, and started; one
-			// docker made and could not start is set aside by the next try.
-			if under != nil && under.ID != cs.ID && under.ID != cs.NewID && under.Image == cs.OldImage && everStarted(under) {
-				cs.BackID = under.ID
-				return true, nil
-			}
-			return false, nil
-		}
 	}
 	return false, nil
 }
 
 // errKeep: the intent stays pending, for the act's own path to take up.
 var errKeep = errors.New("kept")
-
-// everStarted: a container docker has started at least once.
-func everStarted(c *inspectContainer) bool {
-	return c.State.Running || (c.State.StartedAt != "" && !strings.HasPrefix(c.State.StartedAt, "0001-01-01"))
-}

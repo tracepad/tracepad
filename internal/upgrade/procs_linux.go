@@ -22,7 +22,7 @@ func (procSystem) Candidates() ([]Process, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	self, _ := os.Readlink("/proc/self/ns/pid")
+	self, _ := os.Readlink("/proc/self/ns/pid") // ignored: unread, every process is in another namespace, and the person's
 	uid := os.Getuid()
 	var procs []Process
 	unread := 0
@@ -93,7 +93,7 @@ func inspectLinux(pid int) (Process, error) {
 	p := Process{PID: pid, Argv: argv, Env: env, Exe: exe}
 	// A working directory removed since reads as "<dir> (deleted)", as an
 	// executable does (the third review).
-	p.Cwd, _ = os.Readlink(dir + "/cwd")
+	p.Cwd, _ = os.Readlink(dir + "/cwd") // ignored: unread, no working directory: the start falls back, or refuses (prepareProcess)
 	p.Cwd = strings.TrimSuffix(p.Cwd, " (deleted)")
 	if out, err := os.Readlink(dir + "/fd/1"); err == nil && strings.HasPrefix(out, "/") {
 		if st, err := os.Stat(out); err == nil && st.Mode().IsRegular() {
@@ -184,6 +184,6 @@ func isZombie(pid int) bool {
 
 // cgroupOf is /proc/<pid>/cgroup; a test gives a runner's.
 var cgroupOf = func(dir string) string {
-	b, _ := os.ReadFile(dir + "/cgroup")
+	b, _ := os.ReadFile(dir + "/cgroup") // ignored: unread, a manager cannot be ruled out (systemdUnit), and the server is the person's
 	return string(b)
 }

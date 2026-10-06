@@ -91,10 +91,10 @@ func (r *Releases) open(ctx context.Context, address string) (io.ReadCloser, err
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		resp.Body.Close()
+		resp.Body.Close() // ignored: a response not read
 		return nil, errNotFound
 	case resp.StatusCode != http.StatusOK:
-		resp.Body.Close()
+		resp.Body.Close() // ignored: a response not read
 		return nil, fmt.Errorf("%s answered HTTP %d", address, resp.StatusCode)
 	}
 	return resp.Body, nil
@@ -214,7 +214,7 @@ func (r *Releases) Fetch(ctx context.Context, v, dir, name string) (Fetched, err
 	}
 	hash := sha256.New()
 	_, err = io.Copy(io.MultiWriter(tmp, hash), body)
-	body.Close()
+	body.Close() // ignored: read whole, or not, as io.Copy says; the checksum decides
 	if err != nil {
 		return Fetched{}, fmt.Errorf("could not download %s: %w", archive, err)
 	}

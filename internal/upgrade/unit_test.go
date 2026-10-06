@@ -271,11 +271,7 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		"[::1] for localhost": func(s *State) { s.Process.URL = "http://[::1]:4318" },
 		"a relative path":     func(s *State) { s.Process.DataDir = "d" },
 		"no kind":             func(s *State) { s.Kind = "shell" },
-		"a container's policy": func(s *State) {
-			s.Kind = kindContainer
-			s.Container = &ContainerState{Name: "tracepad-a", ID: strings.Repeat("a", 64), Volume: "v", URL: "http://127.0.0.1:4318",
-				OldRef: "ghcr.io/tracepad/tracepad:0.1.0", OldImage: "sha256:aa", NewRef: "ghcr.io/tracepad/tracepad:0.2.0", Restart: "always --privileged"}
-		},
+		"a container's run":   func(s *State) { s.Kind = "container" },
 	} {
 		s := *good
 		p := *good.Process
@@ -357,24 +353,15 @@ func TestTheArchiveCountsOnlyWhenItReadsBackWhole(t *testing.T) {
 
 	outside := t.TempDir()
 	for name, hdr := range map[string]tar.Header{
-		"dot-dot":            {Name: "../escape", Typeflag: tar.TypeReg},
-		"dot-dot inside":     {Name: "./a/../../escape", Typeflag: tar.TypeReg},
-		"absolute":           {Name: filepath.Join(outside, "escape"), Typeflag: tar.TypeReg},
-		"symlink out":        {Name: "./tracepad.db", Typeflag: tar.TypeSymlink, Linkname: filepath.Join(outside, "escape")},
-		"hardlink out":       {Name: "./tracepad.db", Typeflag: tar.TypeLink, Linkname: "../../escape"},
-		"dot-dot, extractDB": {Name: "../tracepad.db", Typeflag: tar.TypeReg},
+		"dot-dot":        {Name: "../escape", Typeflag: tar.TypeReg},
+		"dot-dot inside": {Name: "./a/../../escape", Typeflag: tar.TypeReg},
+		"absolute":       {Name: filepath.Join(outside, "escape"), Typeflag: tar.TypeReg},
+		"symlink out":    {Name: "./tracepad.db", Typeflag: tar.TypeSymlink, Linkname: filepath.Join(outside, "escape")},
+		"hardlink out":   {Name: "./tracepad.db", Typeflag: tar.TypeLink, Linkname: "../../escape"},
 	} {
 		evil := filepath.Join(t.TempDir(), "evil.tar.gz")
 		_ = os.WriteFile(evil, rawArchive(t, hdr, []byte("x")), 0o600)
 		target := filepath.Join(t.TempDir(), "r")
-		if strings.Contains(name, "extractDB") {
-			_ = os.Mkdir(target, 0o700)
-			err := extractDB(evil, target)
-			if _, statErr := os.Stat(filepath.Join(filepath.Dir(target), "tracepad.db")); err == nil && statErr == nil {
-				t.Errorf("%s: written outside", name)
-			}
-			continue
-		}
 		if err := extractArchive(evil, target, 0o700); err == nil {
 			t.Errorf("%s: extracted", name)
 		}
@@ -454,7 +441,7 @@ func TestTheFlags(t *testing.T) {
 		{"--plan", "--back", "x"},
 		{"--check", "x", "--back", "y"},
 		{"--back", "x", "--to", "0.2.0"},
-		{"--data-dir", "d", "--container", "c"},
+		{"--container", "c"},
 		{"extra"},
 		{"--back", ""},
 		{"--check", ""},
@@ -484,13 +471,10 @@ func TestCommandsArePastedAsTheyAreMeant(t *testing.T) {
 			t.Errorf("shq(%q) = %s, want %s", in, got, want)
 		}
 	}
-	st := &State{SetAside: []string{"/Users/me/Library/Application Support/tracepad.after-r", "container c-after-r", "volume v", "container c-before-r"}}
+	st := &State{SetAside: []string{"/Users/me/Library/Application Support/tracepad.after-r"}}
 	got := backupsSentence("/Users/me/tracepad-backups/r", st)
 	if !strings.Contains(got, "rm -r '/Users/me/Library/Application Support/tracepad.after-r'") {
 		t.Errorf("an unquoted path: %s", got)
-	}
-	if strings.Index(got, "docker volume rm v") < strings.Index(got, "docker rm c-before-r") {
-		t.Errorf("a volume before a container: %s", got)
 	}
 }
 
@@ -539,5 +523,25 @@ func TestARunIsTakenOnlyFromThePersonsOwnDirectory(t *testing.T) {
 	st := &State{Run: id, Kind: kindBinary, From: "0.1.0", To: "0.2.0", Binary: &BinaryState{Path: "/x/tracepad", From: "0.1.0", Old: "/tmp/tracepad-0.1.0"}}
 	if err := st.validate(filepath.Join(backups, id)); err == nil {
 		t.Error("a copy outside its run: accepted")
+	}
+}
+
+// The installed binary is where the running one is (the eighth review): a
+// person who installed to a directory of their own runs it from there. The
+// agent's bridge runs one from a temporary directory, and upgrades the
+// installed one; a run's own copy is named upgrader, and does too.
+func TestTheInstallDirectoryIsWhereTheBinaryRuns(t *testing.T) {
+	tmp := t.TempDir()
+	scriptBinary(t, filepath.Join(tmp, "tracepad"), "0.1.0")
+	for _, tc := range []struct{ named, self, want string }{
+		{"", "/opt/tools/tracepad", "/opt/tools"},
+		{"", "/home/u/.local/bin/tracepad", "/home/u/.local/bin"},
+		{"", filepath.Join(tmp, "tracepad"), "/home/u/.local/bin"},
+		{"", "/home/u/tracepad-backups/r/upgrader", "/home/u/.local/bin"},
+		{"/srv/bin/", "/opt/tools/tracepad", "/srv/bin"},
+	} {
+		if got := installDirFor(tc.named, "/home/u", tc.self, tmp); got != tc.want {
+			t.Errorf("%q, %s: %s, want %s", tc.named, tc.self, got, tc.want)
+		}
 	}
 }

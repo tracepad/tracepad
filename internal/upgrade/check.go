@@ -139,6 +139,6 @@ func firstLogLine(path string, offset int64) string {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return ""
 	}
-	line, _ := bufio.NewReader(io.LimitReader(f, 4096)).ReadString('\n')
+	line, _ := bufio.NewReader(io.LimitReader(f, 4096)).ReadString('\n') // ignored: a line cut short by the end of the log is the line there is
 	return strings.TrimSpace(line)
 }
