@@ -590,7 +590,9 @@ In outline: `tracepad upgrade --plan` changes nothing and says what the upgrade
 will do and what is the person's; you show it to them. `tracepad upgrade` then
 backs the data up into `~/tracepad-backups/<run>/` before it stops anything,
 puts the new binary in place, starts the server again with the same
-arguments and environment, and checks it. A new version that exits or answers
+arguments and environment, and checks it — for a container, it archives its
+volume, renames it aside and runs the release under its name with the
+`docker run` it was created with. A new version that exits or answers
 as another version is rolled back at once; one that
 runs but stays silent through the wait (a long migration runs before the
 server listens), or answers with a trace count that looks wrong, is left
@@ -602,11 +604,12 @@ package moves to the same version, and you report.
 
 - A server the command does not start or stop itself: a service (systemd,
   launchd), a server reachable from other machines, one that runs another
-  binary (Homebrew's: `brew upgrade tracepad`), and every container, Compose's
-  or not. The plan names each, with its reason and the commands for it — for a
-  container: stop it, back its volume up, pull the release, and the
-  `docker run` it was created with, read from `docker inspect`, its variables
-  passed in a file and never printed.
+  binary (Homebrew's: `brew upgrade tracepad`); and a container it cannot
+  recreate exactly — Compose's, one published beyond this machine, one with a
+  setting its `docker run` would not carry. The plan names each, with its
+  reason and the commands for it — for a container: stop it, back its volume
+  up, pull the release, and the `docker run` it was created with, read from
+  `docker inspect`, its variables passed in a file and never printed.
 - A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.
 - Free space for the backup, when there is not enough.
@@ -1650,16 +1653,25 @@ existing `/data` and brings it forward. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.
 
-**A container is upgraded by hand**, in this release. `tracepad upgrade --plan`
-on the host — or your coding agent, given
+**`tracepad upgrade` upgrades a container it can recreate exactly.** On the
+host, `tracepad upgrade --plan` — or your coding agent, given
 `Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md` —
-names every container of the image that runs an older version and gives the
-steps below with its name, its volume and the release filled in, and the
-`docker run` it was created with — its ports, mounts, restart policy and
-command, read from `docker inspect` — the variables it was given passed in a
-file read from Docker, named and never printed; the command changes nothing of
-a container. A Compose project takes the new tag in its Compose file and
-`docker compose up -d`, after the same backup.
+finds every container of the image. One named `tracepad-<project>`, as the
+agent's setup names it, or named with `--container` (`--container tracepad`
+for this page's), is the command's when it is published on this machine only,
+keeps its data on a named volume, and has nothing set that its `docker run`
+would not carry: `tracepad upgrade` stops it, archives its volume into
+`~/tracepad-backups/<run>/` and reads the archive back, renames it
+`<name>-before-<run>`, runs the release under its name with the options it was
+created with, checks it, and goes back by itself when the new one does not
+answer — onto a new volume restored from the archive, deleting nothing
+([cli.md](cli.md#upgrade)). Every other container is yours: the plan names it,
+says why, and gives the steps below with its name, its volume and the release
+filled in, and the `docker run` it was created with — its ports, mounts,
+restart policy, labels and command, read from `docker inspect` — the variables
+it was given passed in a file read from Docker, named and never printed. A
+Compose project takes the new tag in its Compose file and `docker compose up
+-d`, after the same backup.
 
 Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
@@ -10707,19 +10719,19 @@ The whole of it is [agents.md](agents.md).
 ### `upgrade`
 
 ```sh
-tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR] [--json]
-tracepad upgrade [--to 0.2.0] [--data-dir DIR] [--json]
+tracepad upgrade --plan [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
+tracepad upgrade [--to 0.2.0] [--data-dir DIR | --container NAME] [--json]
 tracepad upgrade --check RUN [--json]
 tracepad upgrade --back RUN [--json]
 ```
 
-Upgrades the installed binary and one server you started, to the newest
+Upgrades the installed binary and one server or container you started, to the newest
 stable release or the one `--to` names — never an older one: migrations run
 forward only. With no `--to`, the target is the later of the latest stable
 release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
-(`--to 0.2.0-rc.1 --data-dir DIR`), and exits `4`. The installed binary is the `tracepad` in the directory the
+(`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, as
 the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
@@ -10730,18 +10742,37 @@ release: it refuses there before it looks at anything. The design is spec 054.
 - `--plan` changes nothing. It lists the binary, every `tracepad serve` of
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
-  another binary, a container), and what the upgrade would do, step by step.
-- **A container is yours to upgrade**, in this release: the plan and the
-  upgrade name each one that runs an older version and give the commands —
-  stop it, back its volume up, pull the release, and run it again with the
-  options you created it with — the `docker run` read from `docker inspect`,
-  its variables passed in a file read from Docker and never printed — the old
-  one kept until the new one is healthy
-  ([docker.md](docker.md#upgrading-and-backing-up-first)), or Compose's
-  `docker compose up -d`. The command changes nothing of a container. Its
-  version is asked where its server listens — `--listen` or
-  `TRACEPAD_LISTEN`, as published on this machine; a container whose address
-  cannot be told is said to be not checked, not called behind.
+  another binary, a Compose project), and what the upgrade would do, step by
+  step. More than one of the command's behind: name one with `--data-dir` or
+  `--container`.
+- **A container** is the command's when it is named `tracepad-<project>`, as
+  the setup names one, or with `--container NAME`, and a recreate of it is the
+  same container: no Compose, Swarm or Kubernetes label; running; a local named
+  volume at `/data`, without options of its own; every port published on a
+  loopback address only, at a fixed port, its server's among them; the default
+  network; the image's entrypoint, health check and stop signal; no tmpfs; no
+  mount option beyond read-only (a relabel, a propagation, a `--mount`
+  option); no link or special file in its volume, which a restore would not
+  make again; no log option that can hold a credential (rotation and tags are
+  carried); Docker neither rootless nor remapping user namespaces; and nothing
+  set in `docker inspect` that its `docker run` does not carry — each such
+  setting is named, in the plan and in the commands it gives you. It is
+  stopped with SIGTERM (its restart policy set to `no` for the stop, never
+  `docker stop`'s kill), its volume archived from `busybox` into the run's
+  directory and read back whole, renamed `<name>-before-<run>`, and the
+  release is run under its name with **the `docker run` it was created with**
+  — its ports, its mounts (read-only ones read-only), its restart policy, its
+  labels, a log driver of its own, its user, its command — and the variables
+  you gave it through a file of the run's (`0600`), never a command line. Its
+  version is asked where its server listens (`--listen` or `TRACEPAD_LISTEN`,
+  as published on this machine). Once it is healthy, the installed binary is
+  brought to its version when no server runs from it. Every other container
+  of the image is yours, and the plan gives the commands that upgrade it —
+  the same `docker run`, its variables in a file read from Docker and never
+  printed, the old one kept until the new one is healthy
+  ([docker.md](docker.md#upgrading-and-backing-up-first)) — or Compose's
+  `docker compose up -d`. One whose address cannot be told is said to be not
+  checked, not called behind.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -10773,7 +10804,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   archive, when both are on one disk), and a parent directory the restore can
   be made in and the data renamed aside through, and no other server on the
   installed binary that a way back would put the old version under; `--back`
-  checks the same before its first act. What the command cannot read — a process, a lock on a file system
+  checks the same before its first act. For a container: the old image there
+  to run again, `busybox`, the names a way back makes free, and room for a
+  restore beside its volume. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
   or container that does not say its version when asked is named as one that
@@ -10798,7 +10831,11 @@ release: it refuses there before it looks at anything. The design is spec 054.
   the data, or a server found there started while the installed binary may
   have been the new one — never from how fast a server answers. `--back` again
   ends where the first did: it checks the old version, starts it again if it
-  was stopped since, and changes nothing else.
+  was stopped since, and changes nothing else. A container's way back
+  restores the archive into a new volume, `<volume>-<run>`, owned as the old
+  one's root is, sets the new container aside as `<name>-after-<run>` (restart
+  policy `no`), and runs the old image under its name on the restored volume;
+  the volume the new version migrated is kept as it was.
 
 A run directory is a full copy of the database and of the server's
 environment, secrets included, kept until you delete it; erasing traces or a
