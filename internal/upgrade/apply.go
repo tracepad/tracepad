@@ -37,9 +37,6 @@ type job struct {
 	// ctr is the container a container run recreates: its inspect and its
 	// run, as the plan read them (#47).
 	ctr Container
-	// volumeFreeKB is the room on a container's volume's file system, as
-	// the preparation's look at it found; 0 when it did not look.
-	volumeFreeKB int64
 	// held are the database locks the command holds, by data directory:
 	// from the stop until a server starts on the data, and through a way
 	// back (spec 054 #26, #28, #32).
@@ -426,7 +423,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		need += size
 		// Its way back, before anything stops (#41, #47): a restore of the
 		// volume as it is now, into a new one beside it.
-		if err := j.containerBackPreconditions(ctx, size); err != nil {
+		if err := j.containerBackPreconditions(ctx, size, j.ctr.freeKB); err != nil {
 			return nil, "its way back could not be taken: " + err.Error()
 		}
 	}

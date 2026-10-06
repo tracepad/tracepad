@@ -5,6 +5,7 @@ package upgrade
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -323,6 +324,7 @@ var containerScenarios = []struct {
 	{"APersonsTagIsNeverMoved", testAPersonsTagIsNeverMoved},
 	{"AFailedReplacementSaysOneThing", testAFailedReplacementSaysOneThing},
 	{"APersonsContainerUnderTheNameIsNotAdopted", testAPersonsContainerUnderTheNameIsNotAdopted},
+	{"TheWayBackLooksAgainForRoom", testTheWayBackLooksAgainForRoom},
 	{"AProcessOnTheBinaryKeepsItAndTheContainerGoesOn", testAProcessOnTheBinaryKeepsItAndTheContainerGoesOn},
 }
 
@@ -630,5 +632,43 @@ func testAPersonsContainerUnderTheNameIsNotAdopted(t *testing.T) {
 	}
 	if st, _ := loadState(rep.Run.Dir); st.Container.BackID == theirs.ID {
 		t.Error("the person's container was adopted")
+	}
+}
+
+// The upgrade's own way back looks at the room beside the volume again: the
+// preparation's look serves the preparation (the review of #226). Room gone
+// since the stop stops the way back before its first act.
+func testTheWayBackLooksAgainForRoom(t *testing.T) {
+	c := newContainerCell(t)
+	c.d.brokenRef = "ghcr.io/tracepad/tracepad:0.2.1"
+	c.d.onCall = func(args []string) {
+		if args[0] == "kill" {
+			c.d.set(func() { c.d.room = 1 })
+		}
+	}
+	rep, code := c.cmd(c.deps, "--to", "0.2.1")
+	if code != exitStuck || !strings.Contains(rep.Summary, "no room beside the volume") {
+		t.Errorf("%d %s", code, rep.Summary)
+	}
+}
+
+// The look at a volume fails when any of its commands fails: a find that
+// cannot read never reads as "nothing odd" (the review of #226). Run here
+// with this machine's sh and tools on a directory of the test's.
+func TestTheLookAtAVolumeFailsClosed(t *testing.T) {
+	t.Parallel()
+	data := t.TempDir()
+	_ = os.WriteFile(filepath.Join(data, dataDBName), []byte("db"), 0o600)
+	script := strings.ReplaceAll(lookScript, "/data", data)
+	out, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "===") {
+		t.Fatalf("the look: %v %s", err, out)
+	}
+	shim := t.TempDir()
+	_ = os.WriteFile(filepath.Join(shim, "find"), []byte("#!/bin/sh\necho 'find: permission denied' >&2\nexit 1\n"), 0o755)
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = []string{"PATH=" + shim + ":/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Errorf("a find that failed passed: %s", out)
 	}
 }

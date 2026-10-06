@@ -209,8 +209,11 @@ type Container struct {
 	RunWhy string
 	// Unreproduced are the settings it has that Run does not carry.
 	Unreproduced []string
-	inspect      inspectContainer
-	image        imageConfig
+	// freeKB is the room on its volume's file system, as the preparation's
+	// look found it: for that preparation's own check alone.
+	freeKB  int64
+	inspect inspectContainer
+	image   imageConfig
 }
 
 // imageSlot stands for the image in Container.Run.

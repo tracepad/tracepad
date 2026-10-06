@@ -100,7 +100,7 @@ func (j *job) prepareContainer(ctx context.Context, p *plan) (int64, string) {
 	st.Container = &ContainerState{Name: now.Name, ID: now.inspect.ID, Volume: now.Volume, URL: now.URL,
 		OldRef: now.Ref, OldImage: now.inspect.Image, NewRef: newRef, LogDriver: info.logDriver,
 		Restart: restartArg(hc.RestartPolicy.Name, hc.RestartPolicy.MaximumRetryCount)}
-	j.volumeFreeKB = look.freeKB
+	j.ctr.freeKB = look.freeKB
 	return look.usedKB << 10, ""
 }
 
@@ -124,10 +124,13 @@ type volumeLook struct {
 	usedKB, freeKB int64
 }
 
+// lookScript is lookAt's: set -e, so a find, du or df that fails fails the
+// look, never reads as "nothing odd" (the review of #226).
+const lookScript = `set -e; find /data \( -type l -o -type f -links +1 -o ! -type f ! -type d \) -print; echo ===; du -sk /data; df -Pk /data`
+
 // lookAt looks at a volume, mounted read-only, from one busybox container.
 func (r *runner) lookAt(ctx context.Context, volume string) (volumeLook, error) {
-	script := `find /data \( -type l -o -type f -links +1 -o ! -type f ! -type d \) -print; echo ===; du -sk /data; df -Pk /data`
-	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox, "sh", "-c", script)
+	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox, "sh", "-c", lookScript)
 	if err != nil {
 		return volumeLook{}, err
 	}
@@ -433,9 +436,12 @@ func (r *runner) containerFirstLog(ctx context.Context, id string) string {
 // names it makes free, room for a restore, and the install path as the run
 // left it when it replaced the binary there — checked by the upgrade before
 // its stop and by --back before its first act (#41, #47). restoreBytes is
-// what a restore takes, -1 when none is ahead. The host's binary is not
-// one: what keeps it from being put back is a note (hostBinaryBack).
-func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64) error {
+// what a restore takes, -1 when none is ahead; freeKB is the room on the
+// volume's file system as a look just found it, 0 to look now — the
+// preparation's look serves its own check, and a way back looks again (the
+// review of #226). The host's binary is not one: what keeps it from being put
+// back is a note (hostBinaryBack).
+func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes, freeKB int64) error {
 	r, st := j.r, j.st
 	cs := st.Container
 	if _, err := r.deps.Docker.Run(ctx, "image", "inspect", cs.OldImage); err != nil {
@@ -465,9 +471,8 @@ func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes int64
 			}
 		}
 		// The restore goes into a new volume on the old one's file system:
-		// room for it there, and 100 MiB — as the preparation's look at it
-		// found, or a look of its own.
-		free := j.volumeFreeKB
+		// room for it there, and 100 MiB.
+		free := freeKB
 		if free <= 0 {
 			look, err := r.lookAt(ctx, cs.Volume)
 			if err != nil {
@@ -536,7 +541,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 		restoreBytes = st.Archive.Bytes
 	}
-	if err := j.containerBackPreconditions(ctx, restoreBytes); err != nil {
+	if err := j.containerBackPreconditions(ctx, restoreBytes, 0); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
 	}
 	if !st.has(stepRenamedOld) {
