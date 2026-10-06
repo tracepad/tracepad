@@ -634,9 +634,11 @@ API. This file routes; it does not duplicate what specs and docs say.
   (#8), the check asks the server's own address (#9), and the way back sets
   aside and restores into a new place, deleting nothing (#11). The install
   script asks the new binary's plan what still runs an older version, and its
-  `awk` copy of `termsafe` is gone (#15). A container is the person's: the
-  plan gives the commands that upgrade it, and the automation for containers
-  waits on its branch for a release after 0.1.0 (#36).
+  `awk` copy of `termsafe` is gone (#15). A container the command can
+  recreate exactly is upgraded and gone back from on the same machinery — one
+  table, one recreate shared with the plan's commands for the person's, a way
+  back onto a new volume restored from the archive — with a real docker under
+  `upgradeint`; every other container gets the plan's commands (#47).
 
 ## Where things are
 

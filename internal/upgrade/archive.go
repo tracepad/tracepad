@@ -344,3 +344,54 @@ func quickCheck(ctx context.Context, dbPath string) error {
 	}
 	return nil
 }
+
+// extractDB writes the archive's database files (tracepad.db and its -wal and
+// -shm) into dir, for a check of a container's archive on the host.
+func extractDB(path, dir string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(bufio.NewReader(f))
+	if err != nil {
+		return err
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		// The name written is one of three the command knows, never the
+		// archive's own.
+		var target string
+		switch cleanEntry(h.Name) {
+		case dataDBName:
+			target = filepath.Join(dir, dataDBName)
+		case dataDBName + "-wal":
+			target = filepath.Join(dir, dataDBName+"-wal")
+		case dataDBName + "-shm":
+			target = filepath.Join(dir, dataDBName+"-shm")
+		default:
+			continue
+		}
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, tr)
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
+	}
+}

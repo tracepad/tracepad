@@ -615,16 +615,25 @@ existing `/data` and brings it forward. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.
 
-**A container is upgraded by hand**, in this release. `tracepad upgrade --plan`
-on the host — or your coding agent, given
+**`tracepad upgrade` upgrades a container it can recreate exactly.** On the
+host, `tracepad upgrade --plan` — or your coding agent, given
 `Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md` —
-names every container of the image that runs an older version and gives the
-steps below with its name, its volume and the release filled in, and the
-`docker run` it was created with — its ports, mounts, restart policy and
-command, read from `docker inspect` — the variables it was given passed in a
-file read from Docker, named and never printed; the command changes nothing of
-a container. A Compose project takes the new tag in its Compose file and
-`docker compose up -d`, after the same backup.
+finds every container of the image. One named `tracepad-<project>`, as the
+agent's setup names it, or named with `--container` (`--container tracepad`
+for this page's), is the command's when it is published on this machine only,
+keeps its data on a named volume, and has nothing set that its `docker run`
+would not carry: `tracepad upgrade` stops it, archives its volume into
+`~/tracepad-backups/<run>/` and reads the archive back, renames it
+`<name>-before-<run>`, runs the release under its name with the options it was
+created with, checks it, and goes back by itself when the new one does not
+answer — onto a new volume restored from the archive, deleting nothing
+([cli.md](cli.md#upgrade)). Every other container is yours: the plan names it,
+says why, and gives the steps below with its name, its volume and the release
+filled in, and the `docker run` it was created with — its ports, mounts,
+restart policy, labels and command, read from `docker inspect` — the variables
+it was given passed in a file read from Docker, named and never printed. A
+Compose project takes the new tag in its Compose file and `docker compose up
+-d`, after the same backup.
 
 Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,13 +30,25 @@ import (
 // branches together must pass every step of every table: a step no branch
 // reaches fails the matrix, so a branch cannot be missing its cells.
 
-// walkBranch is a walk: the kind of run it is, what its upgrade ends with
-// uncut, and its events.
+// walkBranch is a walk: the kind of run it is, what its upgrade and its
+// first --back end with uncut, and its events.
 type walkBranch struct {
 	name, kind string
 	upgrade    int
-	// late: the server does not stop on SIGTERM until its stop completes.
-	late bool
+	firstBack  int
+	// late: the server does not stop on SIGTERM until its stop completes;
+	// stubborn, a container likewise.
+	late, stubborn bool
+	// fail are the acts that fail, each the given number of times, in
+	// every cell of the branch.
+	fail map[string]int
+	// like names an earlier branch whose walk this one's is, point for
+	// point, until they part: the cells before that point are like's, and
+	// this branch's begin where the walks part — or at from, when its world
+	// or its meeting differs from there on before its points do (the gate's
+	// budget, spec 054 #43). The matrix checks the walks are the same up to
+	// where this one's cells begin.
+	like, from string
 	// binaries are what the install path may end with: the old version, or
 	// the one there before the run when the run never stopped anything.
 	binaries []string
@@ -59,20 +72,68 @@ var walkBranches = []walkBranch{
 	// The same, its stop completing before the person meets a run cut short.
 	{name: "keptexits", kind: kindProcess, upgrade: exitStuck, late: true, again: (*walk).stopLate, beforeMeet: (*walk).stopLate},
 	// The stop times out, and completes before the person's --back.
-	{name: "slowstop", kind: kindProcess, upgrade: exitStuck, late: true, between: (*walk).stopLate},
+	{name: "slowstop", kind: kindProcess, upgrade: exitStuck, late: true, between: (*walk).stopLate, like: "kept"},
 	// A new version that does not start: the upgrade goes back by itself.
 	{name: "wentback", kind: kindProcess, upgrade: exitWentBack, setup: func(c *walk) {
 		c.k.args = []string{"--to", fBroken, "--data-dir", c.k.w.data}
 	}},
 	// After the way back, the person restarts the old server, and runs
 	// --back again: the server is another process, the same one.
-	{name: "restarted", kind: kindProcess, upgrade: exitOK, again: (*walk).restart, beforeMeet: (*walk).restart},
+	{name: "restarted", kind: kindProcess, upgrade: exitOK, again: (*walk).restart, beforeMeet: (*walk).restart, like: "process", from: stepBackStarted + writtenPoint},
+	// A container's (#47): setup's container upgraded, the host's binary
+	// brought along, and its way back.
+	{name: "container", kind: kindContainer, upgrade: exitOK},
+	// The host's binary is the target already: nothing is replaced.
+	{name: "containerbinaryfirst", kind: kindContainer, upgrade: exitOK, binaries: []string{fOld, fNew}, setup: func(c *walk) { scriptBinary(c.t, c.k.w.install, fNew) }},
+	// The host's binary cannot be replaced: a note, and the skill after it.
+	{name: "containerbinaryfails", kind: kindContainer, upgrade: exitOK, fail: map[string]int{stepBinaryReplacing: 1}, like: "container"},
+	// The host's binary cannot be put back by the first --back: the next
+	// puts it back.
+	{name: "containerbackbinaryfails", kind: kindContainer, upgrade: exitOK, fail: map[string]int{stepBackBinary: 1}, again: func(*walk) {}, like: "container"},
+	// A new image that does not start: the upgrade goes back by itself.
+	{name: "containerwentback", kind: kindContainer, upgrade: exitWentBack, setup: func(c *walk) { c.k.args = []string{"--to", fBroken} },
+		like: "container", from: stepStarted + recordPoint},
+	// The container does not stop on SIGTERM in time: the upgrade is stuck,
+	// --back keeps it, its stop completes later, and the next --back starts
+	// it again.
+	{name: "containerkept", kind: kindContainer, upgrade: exitStuck, stubborn: true, again: (*walk).stopLate, like: "container"},
+	// The old image on the restored volume does not answer: the first
+	// --back is not done; once it answers, stopped since, the next --back
+	// starts it again — after the host's binary was put back, and without.
+	// Met after a kill, it answers again.
+	{name: "containersilent", kind: kindContainer, upgrade: exitOK, firstBack: exitStuck, between: (*walk).silence, again: (*walk).stopSilenced, beforeMeet: (*walk).unsilence, like: "container"},
+	{name: "containersilentnobinary", kind: kindContainer, upgrade: exitOK, firstBack: exitStuck, binaries: []string{fOld, fNew},
+		setup: func(c *walk) { scriptBinary(c.t, c.k.w.install, fNew) }, between: (*walk).silence, again: (*walk).stopSilenced, beforeMeet: (*walk).unsilence, like: "containerbinaryfirst"},
+}
+
+// silence makes the old image, on a volume a way back restored, answer
+// nothing.
+func (c *walk) silence() {
+	c.k.d.set(func() { c.k.d.silentRef = "ghcr.io/tracepad/tracepad:" + fOld })
+}
+
+// unsilence lets it answer again.
+func (c *walk) unsilence() {
+	c.k.d.set(func() { c.k.d.silentRef = "" })
+}
+
+// stopSilenced lets it answer again, and stops it: the person's, say.
+func (c *walk) stopSilenced() {
+	c.k.d.set(func() {
+		c.k.d.silentRef = ""
+		if ctr := c.k.d.byName["tracepad-app"]; ctr != nil {
+			ctr.State.Running = false
+		}
+	})
 }
 
 // stopLate completes a late stop, when there is one.
 func (c *walk) stopLate() {
 	if c.late != nil {
 		c.late.exit()
+	}
+	if c.k.d != nil {
+		c.k.d.stopLate()
 	}
 }
 
@@ -142,7 +203,9 @@ type walk struct {
 	b        walkBranch
 	k        *killWorld
 	late     *lateStopper
+	failLeft map[string]int
 	target   int
+
 	seen     []string
 	killedAt string
 	problems []string
@@ -150,7 +213,10 @@ type walk struct {
 }
 
 func newWalk(t *testing.T, b walkBranch, target int) *walk {
-	c := &walk{t: t, b: b, k: newKillWorld(t, b.kind), target: target}
+	c := &walk{t: t, b: b, k: newKillWorld(t, b.kind), target: target, failLeft: maps.Clone(b.fail)}
+	if b.stubborn {
+		c.k.d.stubborn = true
+	}
 	if b.late {
 		procs, _, _ := c.k.w.host.Candidates(context.Background())
 		c.late = &lateStopper{fakeHost: c.k.w.host, pid: procs[0].PID, late: true}
@@ -163,6 +229,10 @@ func newWalk(t *testing.T, b walkBranch, target int) *walk {
 }
 
 func (c *walk) fault(point string) error {
+	if c.failLeft[point] > 0 {
+		c.failLeft[point]--
+		return errInjected
+	}
 	if !strings.HasSuffix(point, recordPoint) && !strings.HasSuffix(point, writtenPoint) {
 		return nil
 	}
@@ -250,7 +320,7 @@ func (c *walk) run() bool {
 		c.problem("uncut: no run after the upgrade")
 		return false
 	}
-	if !step(exitOK, "--back", id) {
+	if !step(c.b.firstBack, "--back", id) {
 		return true
 	}
 	if c.b.again != nil {
@@ -306,6 +376,10 @@ func (c *walk) meet(backFirst bool) {
 		c.late.exit()
 		back("after the late stop")
 	}
+	if c.k.d != nil && c.b.stubborn {
+		c.k.d.stopLate()
+		back("after the late stop")
+	}
 	if _, err := loadState(dir); err != nil {
 		c.problem("the state does not load at the end: %v", err)
 	}
@@ -323,7 +397,16 @@ func (c *walk) end() {
 	if v, _ := scriptVersion(context.Background(), w.install); !slices.Contains(want, v) {
 		c.problem("the installed binary is %q, not one of %q", v, want)
 	}
-	if c.b.kind == kindBinary {
+	switch c.b.kind {
+	case kindBinary:
+		return
+	case kindContainer:
+		if v := c.k.d.answers(); v != fOld {
+			c.problem("the container answers %q, not %s", v, fOld)
+		}
+		if n := c.k.d.traces("tracepad-app"); n < 2 {
+			c.problem("the container's volume holds %d traces", n)
+		}
 		return
 	}
 	if v := w.answers(); v != fOld {
@@ -378,7 +461,8 @@ func theWalkMatrix(t *testing.T) {
 			}
 		}
 	})
-	reached := map[string]map[string]bool{kindProcess: {}, kindBinary: {}}
+	reached := map[string]map[string]bool{kindProcess: {}, kindContainer: {}, kindBinary: {}}
+	walks := map[string][]string{}
 	for _, b := range walkBranches {
 		uncut := newWalk(t, b, -1)
 		uncut.run()
@@ -395,7 +479,29 @@ func theWalkMatrix(t *testing.T) {
 		for _, p := range uncut.seen {
 			reached[b.kind][p] = true
 		}
+		walks[b.name] = uncut.seen
+		first := 0
+		if b.like != "" {
+			other, ok := walks[b.like]
+			if !ok {
+				t.Fatalf("%s is like %s, which is no earlier branch", b.name, b.like)
+			}
+			for first < len(other) && first < len(uncut.seen) && other[first] == uncut.seen[first] {
+				first++
+			}
+			if i := slices.Index(uncut.seen, b.from); b.from != "" && (i < 0 || i > first) {
+				t.Errorf("%s: its cells are to begin at %s, which its walk does not pass before it parts from %s's", b.name, b.from, b.like)
+			} else if i >= 0 {
+				first = i
+			}
+			if first == 0 {
+				t.Errorf("%s is like %s and shares no point with it", b.name, b.like)
+			}
+		}
 		for i, point := range uncut.seen {
+			if i < first {
+				continue
+			}
 			for order, backFirst := range orders {
 				t.Run(fmt.Sprintf("%s/%02d-%s/%s", b.name, i, point, order), func(t *testing.T) {
 					t.Parallel()

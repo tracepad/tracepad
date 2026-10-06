@@ -49,6 +49,8 @@ func (j *job) wayBack(ctx context.Context) wentBack {
 	switch st.Kind {
 	case kindProcess:
 		out = j.backProcess(ctx)
+	case kindContainer:
+		out = j.backContainer(ctx)
 	default:
 		out = j.backBinary(ctx)
 	}
@@ -72,7 +74,15 @@ func (j *job) wayBack(ctx context.Context) wentBack {
 func (j *job) backSkill(ctx context.Context) {
 	st := j.st
 	want := st.From
-	if st.Kind == kindBinary {
+	switch st.Kind {
+	case kindBinary:
+		want = st.Binary.From
+	case kindContainer:
+		// The skill follows the host's binary, which a container run puts
+		// back only when it replaced it.
+		if !st.has(stepBinaryReplacing) {
+			return
+		}
 		want = st.Binary.From
 	}
 	j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, want)
@@ -305,7 +315,13 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 // this one would, and one look at the processes is enough (the thirteenth
 // review); own are the run's servers, which the way back stops itself and
 // that check does not count.
+//
+// A container's way back has its own (containerBackPreconditions): servers
+// is then whether it puts the host's binary back.
 func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64, servers bool, own ...int) error {
+	if j.st.Kind == kindContainer {
+		return j.containerBackPreconditions(ctx, restoreBytes, servers)
+	}
 	st, ps := j.st, j.st.Process
 	if v, err := j.r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
 		return fmt.Errorf("the copy %s does not answer %s", ps.Old, st.From)
@@ -850,9 +866,16 @@ func (r *runner) backMode(ctx context.Context) (rep *Report) {
 		rep.ExitCode = exitStuck
 		rep.Summary = "The way back did not finish: " + out.why
 	}
-	if j.st.Kind == kindProcess && j.st.Process != nil {
-		if v, err := health(ctx, r.deps.HTTP, j.st.Process.URL); err == nil {
-			rep.Notes = append(rep.Notes, j.st.Process.URL+" answers as "+v)
+	url := ""
+	switch {
+	case j.st.Kind == kindProcess && j.st.Process != nil:
+		url = j.st.Process.URL
+	case j.st.Kind == kindContainer && j.st.Container != nil:
+		url = j.st.Container.URL
+	}
+	if url != "" {
+		if v, err := health(ctx, r.deps.HTTP, url); err == nil {
+			rep.Notes = append(rep.Notes, url+" answers as "+v)
 		}
 	}
 	j.privacy()
@@ -878,7 +901,9 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 		return rep
 	}
 	st := j.st
-	if !st.has(stepStarted) || st.has(stepBackBegun) {
+	// A way back begun — its restore into a new volume too, which changes
+	// nothing that runs — is the way back's to finish: --back.
+	if !st.has(stepStarted) || st.has(stepBackBegun) || st.has(stepBackVolume) || (st.Pending != nil && st.Pending.Step == stepBackVolume) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run has no new version running to check."
 		return rep
 	}
@@ -919,6 +944,23 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 		}
 		c = r.checkWatched(ctx, ps.URL, st.To, st.CountBefore, pid, start, ps.DataDir, spec)
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	case kindContainer:
+		cs := st.Container
+		if r.deps.Docker == nil {
+			rep.ExitCode, rep.Summary = exitRefused, "Refused: docker is not on PATH; nothing was recorded."
+			return rep
+		}
+		// The run's container, under its name: one the person made since is
+		// not the run's to check.
+		if is, err := j.nameIs(ctx, cs.NewID); err != nil || !is {
+			why := "it is not the container this run made"
+			if err != nil {
+				why = "docker cannot say what it is (" + firstLine(err.Error()) + ")"
+			}
+			rep.ExitCode, rep.Summary = exitRefused, fmt.Sprintf("Refused: the container named %s: %s; nothing was recorded.", cs.Name, why)
+			return rep
+		}
+		c = r.checkContainer(ctx, cs.URL, st.To, st.CountBefore, cs.NewID, false)
 	default:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: a run of the binary alone has no server to check."
 		return rep

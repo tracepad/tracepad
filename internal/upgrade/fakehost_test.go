@@ -277,6 +277,22 @@ const (
 
 func newFakeWorld(t *testing.T, traces int) *fakeWorld {
 	t.Helper()
+	w := newBareWorld(t)
+	if err := os.WriteFile(filepath.Join(w.data, dataDBName), templateDB(t, traces), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	argv := []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}
+	if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Env: []string{"HOME=" + w.home}, Dir: w.home, Log: filepath.Join(w.data, "server.log")}); err != nil {
+		t.Fatal(err)
+	}
+	w.waitVersion(fOld)
+	return w
+}
+
+// newBareWorld is a fake world with the old version installed and no
+// server: a container's run, or the binary's alone.
+func newBareWorld(t *testing.T) *fakeWorld {
+	t.Helper()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	w := &fakeWorld{t: t, host: newFakeHost(t), home: filepath.Join(root, "home"), mirror: filepath.Join(root, "mirror")}
 	w.install = filepath.Join(w.home, ".local", "bin", "tracepad")
@@ -289,20 +305,7 @@ func newFakeWorld(t *testing.T, traces int) *fakeWorld {
 	scriptBinary(t, w.install, fOld)
 	w.mirror = sharedMirror(t)
 	w.host.broken[fBroken] = true
-	if err := os.WriteFile(filepath.Join(w.data, dataDBName), templateDB(t, traces), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.listen = l.Addr().String()
-	l.Close()
-	argv := []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}
-	if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Env: []string{"HOME=" + w.home}, Dir: w.home, Log: filepath.Join(w.data, "server.log")}); err != nil {
-		t.Fatal(err)
-	}
-	w.waitVersion(fOld)
+	w.listen = freeAddr(t)
 	return w
 }
 
@@ -372,11 +375,19 @@ func sharedMirror(t *testing.T) string {
 	return shared.mirror
 }
 
-// TestMain removes the shared mirror once the package's tests are done.
+// atExit are what tests made once for the package — images, say — to
+// remove when they are done.
+var atExit []func()
+
+// TestMain removes the shared mirror, and what atExit names, once the
+// package's tests are done.
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if shared.mirror != "" {
 		_ = os.RemoveAll(shared.mirror) // ignored: a test's temporary directory
+	}
+	for _, f := range atExit {
+		f()
 	}
 	os.Exit(code)
 }

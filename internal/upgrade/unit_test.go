@@ -278,7 +278,9 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		"[::1] for localhost": func(s *State) { s.Process.URL = "http://[::1]:4318" },
 		"a relative path":     func(s *State) { s.Process.DataDir = "d" },
 		"no kind":             func(s *State) { s.Kind = "shell" },
-		"a container's run":   func(s *State) { s.Kind = "container" },
+		"a container's run without its container": func(s *State) {
+			s.Kind, s.Steps = kindContainer, []Step{{Name: stepPrepared}}
+		},
 	} {
 		s := *good
 		p := *good.Process
@@ -289,6 +291,40 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 		}
 		if _, err := loadState(dir); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+	// A container's: every field that goes to docker, and the address the
+	// key goes to, held to their shapes.
+	ctr := &State{Run: id, Kind: kindContainer, From: "0.1.0", To: "0.2.0", Steps: []Step{{Name: stepPrepared}},
+		Container: &ContainerState{Name: "tracepad-app", ID: strings.Repeat("a", 64), Volume: "tracepad-app", URL: "http://127.0.0.1:4318",
+			OldRef: "ghcr.io/tracepad/tracepad:0.1.0", OldImage: "sha256:" + strings.Repeat("b", 64), NewRef: "ghcr.io/tracepad/tracepad:0.2.0", Restart: "on-failure:3"}}
+	if err := ctr.save(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadState(dir); err != nil {
+		t.Fatalf("a good container state: %v", err)
+	}
+	for name, mutate := range map[string]func(*ContainerState){
+		"a name with a space":     func(c *ContainerState) { c.Name = "tracepad app" },
+		"an option for a name":    func(c *ContainerState) { c.Volume = "--privileged" },
+		"a policy of its own":     func(c *ContainerState) { c.Restart = "always --privileged" },
+		"an id that is not one":   func(c *ContainerState) { c.NewID = "$(id)" },
+		"an image with a space":   func(c *ContainerState) { c.OldRef = "ghcr.io/x y" },
+		"an address of its own":   func(c *ContainerState) { c.URL = "http://127.attacker.example:4318" },
+		"an address with a path":  func(c *ContainerState) { c.URL = "http://127.0.0.1:4318/x" },
+		"an address beyond":       func(c *ContainerState) { c.URL = "http://0.0.0.0:4318" },
+		"localhost, not its IP":   func(c *ContainerState) { c.URL = "http://localhost:4318" },
+		"a back id that is a ref": func(c *ContainerState) { c.BackID = "tracepad-app" },
+	} {
+		s := *ctr
+		c := *ctr.Container
+		s.Container = &c
+		mutate(&c)
+		if err := s.save(dir); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadState(dir); err == nil {
+			t.Errorf("a container's %s: accepted", name)
 		}
 	}
 	_ = os.WriteFile(filepath.Join(dir, stateFile), []byte(`{"run":"`+id+`","exec":"rm -rf /"}`), 0o600)
@@ -451,7 +487,8 @@ func TestTheFlags(t *testing.T) {
 		{"--plan", "--back", "x"},
 		{"--check", "x", "--back", "y"},
 		{"--back", "x", "--to", "0.2.0"},
-		{"--container", "c"},
+		{"--container", "c", "--data-dir", "d"},
+		{"--back", "x", "--container", "c"},
 		{"extra"},
 		{"--back", ""},
 		{"--check", ""},
