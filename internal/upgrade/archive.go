@@ -10,9 +10,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/tracepad/tracepad/internal/store"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,6 +215,12 @@ func cleanEntry(name string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(name), "./"), "/")
 }
 
+// dirMode is a directory's mode, applied once its contents are written.
+type dirMode struct {
+	path string
+	mode os.FileMode
+}
+
 // safeJoin is where an archive's entry goes under dest, or an error when it
 // would go anywhere else: an absolute name, `..`, or a name that leaves dest
 // once joined and cleaned.
@@ -234,9 +240,10 @@ func safeJoin(dest, name string) (string, error) {
 // extractArchive restores an archive into dest, which must not exist. Only
 // directories and regular files are made, and no entry may leave dest.
 func extractArchive(path, dest string, mode os.FileMode) error {
-	if err := os.Mkdir(dest, mode); err != nil {
+	if err := os.Mkdir(dest, 0o700); err != nil {
 		return err
 	}
+	modes := []dirMode{{dest, mode}}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -250,6 +257,13 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			// The deepest first: a directory's own mode can take away the
+			// write its children's need.
+			for i := len(modes) - 1; i >= 0; i-- {
+				if err := os.Chmod(modes[i].path, modes[i].mode); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if err != nil {
@@ -268,9 +282,10 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 			if err := os.MkdirAll(target, 0o700); err != nil {
 				return err
 			}
-			if err := os.Chmod(target, os.FileMode(h.Mode).Perm()); err != nil {
-				return err
-			}
+			// Its mode once everything in it is written: one archived
+			// without its owner's write would refuse its own files (the
+			// tenth review).
+			modes = append(modes, dirMode{target, os.FileMode(h.Mode).Perm()})
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return err
@@ -297,8 +312,7 @@ func extractArchive(path, dest string, mode os.FileMode) error {
 
 // quickCheck runs SQLite's quick_check over a restored database.
 func quickCheck(ctx context.Context, dbPath string) error {
-	dsn := (&url.URL{Scheme: "file", Path: dbPath}).String()
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", store.FileURI(dbPath))
 	if err != nil {
 		return err
 	}

@@ -113,7 +113,7 @@ func (s *State) followsTable() error {
 	return nil
 }
 
-// badStep is told of a step recorded off the table: a fault in the command,
-// which the tests turn into a failure. The step is recorded all the same —
-// the state says what happened.
+// badStep is told of a step about to be recorded off the table: a fault in
+// the command, which the tests turn into a failure. The step is never
+// written; job.step then ends the run stuck (#34).
 var badStep = func(kind, last, next string) {}

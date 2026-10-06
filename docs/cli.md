@@ -1079,7 +1079,8 @@ tracepad upgrade --back RUN [--json]
 
 Upgrades the installed binary and one server you started, to the newest
 stable release or the one `--to` names — never an older one: migrations run
-forward only. The installed binary is the `tracepad` in the directory the
+forward only (a release candidate past the latest stable release, with no
+`--to`, is nothing to do). The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, as
 the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
@@ -1116,7 +1117,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   (exit `5`), and `--back` starts it again once it has. **No binary is put
   under another server**: while any server but the run's own runs from the
   installed binary, at any version, the plan and the upgrade refuse — its next
-  restart would be the new version with no backup — and say to stop it first.
+  restart would be the new version with no backup — and say to stop it first;
+  two servers of the command's on one binary are refused up front, with the
+  order to take them in.
   A way back puts the old binary back only where nothing runs it at a later
   version. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a

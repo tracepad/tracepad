@@ -29,8 +29,11 @@ type Binary struct {
 	// Ours is whether the command may replace it; Reason says why not.
 	Ours   bool
 	Reason string
-	// First is the `tracepad` first on PATH when that is another one.
-	First string
+	// First is the `tracepad` first on PATH when that is another one, and
+	// what it says it is.
+	First        string
+	FirstVersion string
+	FirstErr     error
 }
 
 // Server is a `tracepad serve` process this user runs.
@@ -119,21 +122,19 @@ func configuredDirs(p Process) (dataDir, listen string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("its arguments are not a server's: %w", err)
 	}
-	dataDir, given := flags.Given("data-dir")
-	if !given || dataDir == "" {
-		dataDir = p.Getenv("TRACEPAD_DATA_DIR")
+	// As the server reads them (config.FromEnv): a flag given wins, empty
+	// too (the tenth review); then the environment's value when it is not
+	// empty; then the default.
+	or := func(flag, env, def string) string {
+		if v, given := flags.Given(flag); given {
+			return v
+		}
+		if v := p.Getenv(env); v != "" {
+			return v
+		}
+		return def
 	}
-	if dataDir == "" {
-		dataDir = config.DefaultDataDirFor(p.Getenv)
-	}
-	listen, given = flags.Given("listen")
-	if !given || listen == "" {
-		listen = p.Getenv("TRACEPAD_LISTEN")
-	}
-	if listen == "" {
-		listen = config.DefaultListen
-	}
-	return dataDir, listen, nil
+	return or("data-dir", "TRACEPAD_DATA_DIR", config.DefaultDataDirFor(p.Getenv)), or("listen", "TRACEPAD_LISTEN", config.DefaultListen), nil
 }
 
 var errNotServer = errors.New("not a server")
@@ -372,7 +373,10 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		}
 	}
 	if first := r.deps.LookPath("tracepad"); first != "" && !sameFile(first, b.Path) {
+		// Asked here, under the look at the machine's deadline (the tenth
+		// review).
 		b.First = first
+		b.FirstVersion, b.FirstErr = r.deps.Version(ctx, first)
 	}
 	return b
 }

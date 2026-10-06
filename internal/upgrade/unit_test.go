@@ -595,3 +595,45 @@ func TestWindowsIsRefusedPlainly(t *testing.T) {
 		}
 	}
 }
+
+// A directory archived without its owner's write restores whole, its mode
+// set once its contents are in (the tenth review).
+func TestAReadOnlyDirectoryRestores(t *testing.T) {
+	t.Parallel()
+	data := t.TempDir()
+	_ = os.WriteFile(filepath.Join(data, dataDBName), []byte("db"), 0o600)
+	sub := filepath.Join(data, "payloads")
+	_ = os.Mkdir(sub, 0o700)
+	_ = os.WriteFile(filepath.Join(sub, "a"), []byte("a"), 0o600)
+	_ = os.Chmod(sub, 0o500)
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o700) })
+	archive := filepath.Join(t.TempDir(), "data.tar.gz")
+	if _, err := writeArchive(data, archive); err != nil {
+		t.Fatal(err)
+	}
+	restore := filepath.Join(t.TempDir(), "restore")
+	if err := extractArchive(archive, restore, 0o700); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(restore, "payloads"), 0o700) })
+	if b, err := os.ReadFile(filepath.Join(restore, "payloads", "a")); err != nil || string(b) != "a" {
+		t.Errorf("payloads/a: %q %v", b, err)
+	}
+	if info, err := os.Stat(filepath.Join(restore, "payloads")); err != nil || info.Mode().Perm() != 0o500 {
+		t.Errorf("payloads' mode: %v %v", info, err)
+	}
+}
+
+// A server's flag given empty is what it reads (the tenth review), as
+// config.FromEnv applies it: --data-dir= is its working directory, not the
+// environment's directory.
+func TestAnEmptyFlagIsTheServersToo(t *testing.T) {
+	t.Parallel()
+	p := Process{Argv: []string{"tracepad", "serve", "--data-dir="}, Env: []string{"TRACEPAD_DATA_DIR=/x"}, Cwd: "/w"}
+	if d, _, err := resolveServer(p); err != nil || d != "/w" {
+		t.Errorf("%q %v", d, err)
+	}
+	if !relativeDataDir(p) {
+		t.Error("an empty data directory is relative to where the server started")
+	}
+}

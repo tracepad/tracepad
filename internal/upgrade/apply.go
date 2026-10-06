@@ -264,6 +264,15 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+refusal
 		return rep
 	}
+	// An interrupt that came during the preparation ends the run here, with
+	// nothing changed (the tenth review): the preparation's own steps turn a
+	// cancelled context into notes, and the stop would otherwise follow.
+	if err := ctx.Err(); err != nil {
+		r.discard(rep, j.dir)
+		rep.Run = nil
+		rep.ExitCode, rep.Summary = exitRefused, "Interrupted before anything stopped, and nothing changed."
+		return rep
+	}
 	// From here a run changes what runs; an interrupt must not leave a
 	// server down half way (the second review), so every swap and its way
 	// back finish on a context of their own. Everything before this —
@@ -606,7 +615,7 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 		log = filepath.Join(s.DataDir, "server.log")
 		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("where server pid %d writes its output is not a file the command can tell (a terminal, a pipe, or unread); the restarted server writes to %s", s.Proc.PID, log))
 	}
-	st.Process = &ProcessState{PID: s.Proc.PID, DataDir: s.DataDir, Listen: s.Listen, URL: s.URL, Log: log, Old: old}
+	st.Process = &ProcessState{PID: s.Proc.PID, PIDStart: s.Proc.Start, DataDir: s.DataDir, Listen: s.Listen, URL: s.URL, Log: log, Old: old}
 	j.spec = ServerSpec{Exe: st.Binary.Path, Argv: s.Proc.Argv, Env: s.Proc.Env, Dir: s.Proc.Cwd}
 	info, err := os.Stat(j.spec.Dir)
 	switch {
@@ -645,18 +654,36 @@ func relativeDataDir(p Process) bool {
 // isServer checks, right before a signal, that pid is still the server of
 // dataDir started as spec: its executable, its arguments and the lock's
 // record (Decision 8).
-func (r *runner) isServer(pid int, dataDir string, spec ServerSpec) (bool, error) {
-	if !r.deps.Sys.Alive(pid) {
+//
+// start is when the process the run recorded started, 0 when none was
+// recorded (spec 054 #40). A process that is not the server — another
+// user's, another start, another executable or arguments, another lock — is
+// someone else's, and answers false; only one of this user's that cannot be
+// read is an error, which a caller refuses on.
+func (r *runner) isServer(pid int, start int64, dataDir string, spec ServerSpec) (bool, error) {
+	if pid <= 0 || !r.deps.Sys.Alive(pid) {
 		return false, nil
 	}
 	p, err := r.deps.Sys.Inspect(pid)
-	if err != nil {
+	switch {
+	case errors.Is(err, errNotMine):
+		return false, nil
+	case err != nil:
 		return false, fmt.Errorf("pid %d cannot be read: %w", pid, err)
+	case start != 0 && p.Start != 0 && p.Start != start:
+		return false, nil // the PID reused by another process
 	}
-	if !sameFile(p.Exe, spec.Exe) || !slices.Equal(p.Argv, spec.Argv) || !recordsPID(dataDir, pid) {
-		return false, fmt.Errorf("pid %d is no longer this server", pid)
+	return sameFile(p.Exe, spec.Exe) && slices.Equal(p.Argv, spec.Argv) && recordsPID(dataDir, pid), nil
+}
+
+// startOf is when a process started, for the run to record beside its PID;
+// 0 when it cannot be read, which compares with nothing.
+func (r *runner) startOf(pid int) int64 {
+	p, err := r.deps.Sys.Inspect(pid)
+	if err != nil {
+		return 0
 	}
-	return true, nil
+	return p.Start
 }
 
 // stop sends SIGTERM and waits for the exit; it never kills.
@@ -677,7 +704,7 @@ func (r *runner) signal(pid int) error {
 func (j *job) swapProcess(ctx context.Context, p *plan) {
 	r, st, rep := j.r, j.st, j.rep
 	ps := st.Process
-	if ok, err := r.isServer(ps.PID, ps.DataDir, j.spec); !ok {
+	if ok, err := r.isServer(ps.PID, ps.PIDStart, ps.DataDir, j.spec); !ok {
 		why := "it is no longer running"
 		if err != nil {
 			why = err.Error()
@@ -842,9 +869,9 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 	}
 	j.newProc = started
 	if newVersion {
-		ps.NewPID = started.PID()
+		ps.NewPID, ps.NewStart = started.PID(), j.r.startOf(started.PID())
 	} else {
-		ps.BackPID = started.PID()
+		ps.BackPID, ps.BackStart = started.PID(), j.r.startOf(started.PID())
 	}
 	j.persist()
 	// The child holds the data now, or it does not and the command holds it

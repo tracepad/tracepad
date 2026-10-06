@@ -31,6 +31,9 @@ type plan struct {
 	// eighth review: an older tracepad first on PATH runs nothing).
 	person   []string
 	binaries []string
+	// ahead: what the command looks after runs past the latest stable
+	// release, and no version was named.
+	ahead bool
 }
 
 func (p *plan) pending() bool {
@@ -68,7 +71,12 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		if !ok {
 			return nil, fmt.Sprintf("the installed binary says %q, which cannot be ordered against %s", bin.Version, to)
 		}
-		if order < 0 {
+		switch {
+		case order < 0 && r.flags.to == "":
+			// Past the latest stable release (a candidate), and no version
+			// named: nothing to do, not a downgrade (the tenth review).
+			p.ahead = true
+		case order < 0:
 			return nil, downgrade(to, "the installed binary", bin.Version)
 		}
 		p.replaceBinary = order > 0
@@ -85,10 +93,11 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		if !ok {
 			return nil, fmt.Sprintf("server pid %d does not say its version at %s, so whether it is behind %s cannot be told; run the plan again once it answers", p.server.Proc.PID, p.server.URL, to)
 		}
-		if order < 0 {
+		if order < 0 && r.flags.to != "" {
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", p.server.Proc.PID), p.server.Version)
 		}
-		if order == 0 {
+		if order <= 0 {
+			p.ahead = p.ahead || order < 0
 			p.server = nil
 		} else {
 			p.from = p.server.Version
@@ -101,19 +110,39 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	// review: the plan used to say everything was current).
 	for _, s := range p.f.Servers {
 		if order, ok := Compare(s.Version, to); ok && order > 0 && (s.Ours || sameFile(s.Proc.Exe, bin.Path)) {
+			if r.flags.to == "" {
+				p.ahead = true
+				continue
+			}
 			return nil, downgrade(to, fmt.Sprintf("server pid %d", s.Proc.PID), s.Version) + " Leave it running"
 		}
 	}
 	// The plan refuses what the upgrade would (#38): a binary put under
 	// another server of it, whatever version that one runs.
-	if p.replaceBinary && len(p.choose) == 0 {
+	// Two of the command's, or more, on one binary that needs replacing
+	// refuse up front too (the tenth review): naming one with --data-dir
+	// would put the binary under the other, which #38 refuses.
+	if p.replaceBinary {
 		if !p.f.processes {
 			return nil, fmt.Sprintf("processes of this user could not be read, and any of them may run from %s; nothing can be put there until they can (the report's notes say how many)", bin.Path)
 		}
+		var on []Server
 		for _, s := range p.f.Servers {
 			if (p.server == nil || s.Proc.PID != p.server.Proc.PID) && (s.Proc.Exe == "" || sameFile(s.Proc.Exe, bin.Path)) {
-				return nil, underAnother(s.Proc.PID, bin.Path, s.Version, s.DataDir, to)
+				on = append(on, s)
 			}
+		}
+		switch {
+		case len(on) > 1 || (len(on) == 1 && len(p.choose) > 0):
+			var names []string
+			for _, s := range on {
+				names = append(names, fmt.Sprintf("pid %d on %s", s.Proc.PID, s.DataDir))
+			}
+			return nil, fmt.Sprintf("servers %s all run %s, and its replacement would go under each of them but one: "+
+				"stop all of them but one, backing their data directories up first, upgrade the one left with --data-dir, then start the others again, which migrates them on %s (%s)",
+				strings.Join(names, " and "), bin.Path, to, docsUpgrading)
+		case len(on) == 1:
+			return nil, underAnother(on[0].Proc.PID, bin.Path, on[0].Version, on[0].DataDir, to)
 		}
 	}
 	r.othersBehind(p)
@@ -222,7 +251,7 @@ func (r *runner) othersBehind(p *plan) {
 		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
 	}
 	if b := p.f.Binary; b.First != "" {
-		v, err := r.deps.Version(context.Background(), b.First)
+		v, err := b.FirstVersion, b.FirstErr
 		if err != nil {
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
 		} else if older(v) {
@@ -276,6 +305,9 @@ func verdictOf(p *plan) (int, string) {
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
 	case len(p.person) > 0:
 		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, or may be, is yours.", p.to)
+	}
+	if p.ahead {
+		return exitOK, fmt.Sprintf("Nothing to do: what this command looks after runs %s or a later release than that, the latest stable one; --to names another.", p.to)
 	}
 	return exitOK, fmt.Sprintf("Everything this command looks after runs %s already.", p.to)
 }

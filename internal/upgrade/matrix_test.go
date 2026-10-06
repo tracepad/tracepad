@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -619,6 +620,63 @@ func theFaultMatrix(t *testing.T) {
 		if n, err := countTraces(filepath.Join(w.data+".after-"+rep.Run.ID, dataDBName)); err != nil || n != 3 {
 			t.Errorf("what it wrote, set aside: %d (%v)", n, err)
 		}
+		backAgain(t, deps, rep.Run.ID, snapshot(w, rep.Run.Dir))
+	})
+	// A PID the run recorded, reused since by another process — the same
+	// user's, or another user's — is someone else's (spec 054 #40): the way
+	// back neither waits for it, nor adopts it, nor stops it, and goes back.
+	for _, tc := range []struct {
+		name    string
+		new     bool // the new server's PID, else the stopped one's
+		foreign bool
+	}{
+		{"the stopped server's pid, by this user's process", false, false},
+		{"the stopped server's pid, by another user's", false, true},
+		{"the new server's pid, by this user's process", true, false},
+		{"the new server's pid, by another user's", true, true},
+	} {
+		t.Run("scenario/reused: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newFakeWorld(t, 2)
+			deps := w.deps()
+			rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+			if code != exitOK {
+				t.Fatalf("upgrade: %d %s", code, rep.Summary)
+			}
+			st, _ := loadState(rep.Run.Dir)
+			pid := st.Process.PID
+			if tc.new {
+				// The person stopped the new server; its PID is taken since.
+				pid = st.Process.NewPID
+				_ = w.host.Signal(pid, syscall.SIGTERM)
+			}
+			w.host.plant(pid, []string{"sleep", "600"}, tc.foreign)
+			backUntilDone(t, deps, rep.Run.ID)
+			invariants(t, w, rep.Run.Dir, 2, fOld)
+			if !w.host.Alive(pid) {
+				t.Error("the process on the reused pid was stopped")
+			}
+			backAgain(t, deps, rep.Run.ID, snapshot(w, rep.Run.Dir))
+		})
+	}
+	// A stop that timed out, its server gone since and its PID reused: not
+	// the kept server, and the way back starts the old version.
+	t.Run("scenario/reused: a late stop's pid", func(t *testing.T) {
+		t.Parallel()
+		w := newFakeWorld(t, 2)
+		procs, _, _ := w.host.Candidates()
+		late := &lateStopper{fakeHost: w.host, pid: procs[0].PID, late: true}
+		deps := w.deps()
+		deps.Sys = late
+		deps.StopWait = 50 * time.Millisecond
+		rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+		if code != exitStuck {
+			t.Fatalf("upgrade: %d %s", code, rep.Summary)
+		}
+		late.exit()
+		w.host.plant(procs[0].PID, []string{"tracepad", "mcp"}, false)
+		backUntilDone(t, deps, rep.Run.ID)
+		invariants(t, w, rep.Run.Dir, 2, fOld)
 		backAgain(t, deps, rep.Run.ID, snapshot(w, rep.Run.Dir))
 	})
 	// Between the install path's clearing and the old binary's return,

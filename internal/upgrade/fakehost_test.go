@@ -50,6 +50,23 @@ type fakeHost struct {
 	// the pids Inspect cannot read (the audit of #223).
 	unread     int
 	unreadable map[int]bool
+	// foreign are pids of another user's processes; clock gives each start
+	// its own time.
+	foreign map[int]bool
+	clock   int64
+}
+
+// plant puts a process that is not a server at pid — a reused PID: the same
+// user's (another program), or, foreign, another user's.
+func (h *fakeHost) plant(pid int, argv []string, foreign bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if old, ok := h.procs[pid]; ok && !old.stopped {
+		old.stop()
+	}
+	h.clock++
+	h.procs[pid] = &fakeServer{p: Process{PID: pid, Argv: argv, Exe: "/usr/bin/" + argv[0], Start: h.clock}, done: make(chan struct{})}
+	h.foreign[pid] = foreign
 }
 
 // lag waits as a slow server does before it answers.
@@ -83,7 +100,7 @@ type fakeServer struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}, unreadable: map[int]bool{}}
+	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}, unreadable: map[int]bool{}, foreign: map[int]bool{}}
 	t.Cleanup(func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -112,8 +129,8 @@ func (h *fakeHost) Candidates() ([]Process, int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out []Process
-	for _, s := range h.procs {
-		if !s.stopped {
+	for pid, s := range h.procs {
+		if !s.stopped && !h.foreign[pid] {
 			out = append(out, s.p)
 		}
 	}
@@ -124,6 +141,9 @@ func (h *fakeHost) Candidates() ([]Process, int, error) {
 func (h *fakeHost) Inspect(pid int) (Process, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.foreign[pid] {
+		return Process{}, fmt.Errorf("pid %d: %w", pid, errNotMine)
+	}
 	if h.unreadable[pid] {
 		return Process{}, fmt.Errorf("pid %d: permission denied", pid)
 	}
@@ -160,8 +180,9 @@ func (h *fakeHost) Start(spec StartSpec) (Started, error) {
 	}
 	h.mu.Lock()
 	h.next++
+	h.clock++
 	pid := h.next
-	s := &fakeServer{p: Process{PID: pid, PPID: os.Getpid(), Argv: spec.Argv, Env: spec.Env, Exe: spec.Path, Cwd: spec.Dir}, done: make(chan struct{})}
+	s := &fakeServer{p: Process{PID: pid, PPID: os.Getpid(), Argv: spec.Argv, Env: spec.Env, Exe: spec.Path, Cwd: spec.Dir, Start: h.clock}, done: make(chan struct{})}
 	h.procs[pid] = s
 	h.mu.Unlock()
 

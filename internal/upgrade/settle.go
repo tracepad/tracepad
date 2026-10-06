@@ -127,7 +127,7 @@ func (j *job) happened(ctx context.Context, step string) (bool, error) {
 			if err != nil {
 				return false, fmt.Errorf("%s is locked, and its lock does not say by whom: %w", ps.DataDir, err)
 			}
-			ok, err := j.r.isServer(holder, ps.DataDir, j.spec)
+			ok, err := j.r.isServer(holder, 0, ps.DataDir, j.spec)
 			if err != nil && j.r.deps.Sys.Alive(holder) {
 				return false, err
 			}
@@ -135,9 +135,9 @@ func (j *job) happened(ctx context.Context, step string) (bool, error) {
 				return false, nil
 			}
 			if step == stepStarted {
-				ps.NewPID = holder
+				ps.NewPID, ps.NewStart = holder, j.r.startOf(holder)
 			} else {
-				ps.BackPID = holder
+				ps.BackPID, ps.BackStart = holder, j.r.startOf(holder)
 			}
 			return true, nil
 		}

@@ -32,22 +32,14 @@ func (procSystem) Candidates() ([]Process, int, error) {
 			continue
 		}
 		dir := "/proc/" + e.Name()
-		owner, ok := procUID(dir)
+		owner, ok := procOwner(dir)
 		if !ok {
-			// Its status unread (hidepid, or a race): the directory's owner
-			// is the process's. One that cannot be told may be this user's,
-			// and counts as unread (the audit of #223).
-			if info, err := os.Stat(dir); err == nil {
-				if st, sok := info.Sys().(*syscall.Stat_t); sok {
-					owner, ok = int(st.Uid), true
-				}
+			// One whose owner cannot be told may be this user's, and counts
+			// as unread (the audit of #223).
+			if alive(pid) {
+				unread++
 			}
-			if !ok {
-				if alive(pid) {
-					unread++
-				}
-				continue
-			}
+			continue
 		}
 		if owner != uid {
 			continue
@@ -92,8 +84,12 @@ func (procSystem) Start(spec StartSpec) (Started, error) { return startDetached(
 
 func inspectLinux(pid int) (Process, error) {
 	dir := "/proc/" + strconv.Itoa(pid)
-	if owner, ok := procUID(dir); !ok || owner != os.Getuid() {
-		return Process{}, fmt.Errorf("pid %d is not this user's, or is gone", pid)
+	owner, ok := procOwner(dir)
+	switch {
+	case !ok:
+		return Process{}, fmt.Errorf("pid %d: its owner cannot be read, or it is gone", pid)
+	case owner != os.Getuid():
+		return Process{}, fmt.Errorf("pid %d: %w", pid, errNotMine)
 	}
 	exe, err := readExe(dir)
 	if err != nil {
@@ -118,6 +114,7 @@ func inspectLinux(pid int) (Process, error) {
 		}
 	}
 	p.PPID = procPPID(dir)
+	p.Start = procStart(dir)
 	p.Manager = systemdUnit(cgroupOf(dir))
 	return p, nil
 }
@@ -203,4 +200,42 @@ func isZombie(pid int) bool {
 var cgroupOf = func(dir string) string {
 	b, _ := os.ReadFile(dir + "/cgroup") // ignored: unread, a manager cannot be ruled out (systemdUnit), and the server is the person's
 	return string(b)
+}
+
+// procOwner is a process's owner: its status's, else — its status unread,
+// under hidepid or in a race — its directory's.
+func procOwner(dir string) (int, bool) {
+	if owner, ok := procUID(dir); ok {
+		return owner, true
+	}
+	if info, err := os.Stat(dir); err == nil {
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			return int(st.Uid), true
+		}
+	}
+	return 0, false
+}
+
+// procStart is the process's start time, /proc/<pid>/stat's 22nd field, in
+// clock ticks since the boot; 0 when it cannot be read.
+func procStart(dir string) int64 {
+	b, err := os.ReadFile(dir + "/stat")
+	if err != nil {
+		return 0
+	}
+	// The command's name, in parentheses, may hold spaces: the fields are
+	// counted after its closing one, where the 3rd field begins.
+	i := bytes.LastIndexByte(b, ')')
+	if i < 0 {
+		return 0
+	}
+	fields := strings.Fields(string(b[i+1:]))
+	if len(fields) < 20 {
+		return 0
+	}
+	n, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

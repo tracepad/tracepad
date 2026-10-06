@@ -62,11 +62,18 @@ type BinaryState struct {
 // environment are in server.json beside it, mode 0600, because the
 // environment can hold secrets.
 type ProcessState struct {
-	PID     int    `json:"pid"`
-	DataDir string `json:"data_dir"`
-	Listen  string `json:"listen"`
-	URL     string `json:"url"`
-	Log     string `json:"log"`
+	PID int `json:"pid"`
+	// PIDStart, NewStart and BackStart are when the processes of PID,
+	// NewPID and BackPID started: with its start, a PID names one process,
+	// and a PID reused since is someone else's (spec 054 #40). 0 when it
+	// could not be read.
+	PIDStart  int64  `json:"pid_start,omitempty"`
+	NewStart  int64  `json:"new_start,omitempty"`
+	BackStart int64  `json:"back_start,omitempty"`
+	DataDir   string `json:"data_dir"`
+	Listen    string `json:"listen"`
+	URL       string `json:"url"`
+	Log       string `json:"log"`
 	// LogOffset is the log's size when the new server started: its first
 	// line is the one after it.
 	LogOffset int64 `json:"log_offset"`

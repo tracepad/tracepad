@@ -79,6 +79,12 @@ func (kernSystem) Signal(pid int, sig syscall.Signal) error {
 func (kernSystem) Start(spec StartSpec) (Started, error) { return startDetached(spec) }
 
 func inspectDarwin(pid int) (Process, error) {
+	// The table first: another user's process is not ours, and its
+	// arguments are not this user's to read (the tenth review).
+	k, kerr := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if kerr == nil && k.Eproc.Pcred.P_ruid != uint32(os.Getuid()) {
+		return Process{}, fmt.Errorf("pid %d: %w", pid, errNotMine)
+	}
 	raw, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
 		return Process{}, fmt.Errorf("pid %d: its arguments cannot be read (another user's, or gone): %w", pid, err)
@@ -96,8 +102,9 @@ func inspectDarwin(pid int) (Process, error) {
 			p.Exe = filepath.Join(p.Cwd, p.Exe)
 		}
 	}
-	if k, err := unix.SysctlKinfoProc("kern.proc.pid", pid); err == nil {
+	if kerr == nil {
 		p.PPID = int(k.Eproc.Ppid)
+		p.Start = k.Proc.P_starttime.Sec*1_000_000 + int64(k.Proc.P_starttime.Usec)
 	}
 	p.Manager = launchdJob(p)
 	return p, nil

@@ -796,3 +796,120 @@ func TestASkillNotInstalledIsNotRecorded(t *testing.T) {
 		t.Error("a skill not installed is recorded as installed")
 	}
 }
+
+// An interrupt during the preparation ends the run before the stop, with
+// nothing changed (the tenth review).
+func TestAnInterruptBeforeTheStopStopsNothing(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The last thing the preparation does is ask the count; the interrupt
+	// arrives with it.
+	deps.Getenv = func(k string) string {
+		if k == "TRACEPAD_API_KEY" {
+			cancel()
+			return testSKFake
+		}
+		return ""
+	}
+	pid, _ := lockedBy(w.data)
+	rep, code := runIn(t, ctx, deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitRefused || !strings.Contains(rep.Summary, "Interrupted before anything stopped") {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	if !w.host.Alive(pid) || w.answers() != fOld {
+		t.Error("the server was stopped")
+	}
+	if entries, _ := os.ReadDir(deps.Backups); len(entries) > 1 {
+		t.Errorf("runs left: %v", entries)
+	}
+}
+
+// Past the latest stable release — a candidate installed — with no version
+// named, there is nothing to do: not a downgrade (the tenth review). Named,
+// the older version is refused as before.
+func TestACandidatePastTheLatestIsNothingToDo(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	if rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	// The latest stable release is the old one.
+	latest := filepath.Join(t.TempDir(), "mirror")
+	mirrorRelease(t, latest, fOld, fOld, true)
+	mirrorRelease(t, latest, fNew, fNew, false)
+	deps.Releases = fakeReleases(t, latest)
+	for _, mode := range [][]string{{"--plan"}, nil} {
+		rep, code := runIn(t, context.Background(), deps, mode...)
+		if code != exitOK || !strings.Contains(rep.Summary, "Nothing to do") {
+			t.Errorf("%q: %d %s", mode, code, rep.Summary)
+		}
+	}
+	if rep, code := runIn(t, context.Background(), deps, "--plan", "--to", fOld); code != exitRefused {
+		t.Errorf("--to the older: %d %s", code, rep.Summary)
+	}
+	if w.answers() != fNew {
+		t.Error("something changed")
+	}
+}
+
+// Two of the command's servers on one binary that needs replacing: the plan
+// refuses up front, as an upgrade of either one would (the tenth review),
+// and says how to go on.
+func TestTwoServersOnOneBinaryAreRefusedUpFront(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	other := filepath.Join(w.home, "other")
+	_ = os.MkdirAll(other, 0o700)
+	_ = os.WriteFile(filepath.Join(other, dataDBName), templateDB(t, 1), 0o600)
+	argv := []string{"tracepad", "serve", "--listen", freeAddr(t), "--data-dir", other}
+	if _, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")}); err != nil {
+		t.Fatal(err)
+	}
+	deps := w.deps()
+	plan, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
+	if code != exitRefused || !strings.Contains(plan.Summary, "stop all of them but one") {
+		t.Errorf("--plan: %d %s", code, plan.Summary)
+	}
+	for _, dir := range []string{w.data, other} {
+		if rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", dir); code != exitRefused || !strings.Contains(rep.Summary, "is not this run's") {
+			t.Errorf("--data-dir %s: %d %s", dir, code, rep.Summary)
+		}
+	}
+}
+
+// A PID with its start names one process (spec 054 #40): the server as the
+// run recorded it, or someone else's — another start, another user's — and
+// only one of this user's that cannot be read is an error.
+func TestAProcessIsItsPIDAndItsStart(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	r := &runner{deps: w.deps()}
+	procs, _, _ := w.host.Candidates()
+	p := procs[0]
+	spec := ServerSpec{Exe: p.Exe, Argv: p.Argv}
+	for _, tc := range []struct {
+		name  string
+		start int64
+		ok    bool
+	}{{"as recorded", p.Start, true}, {"no start recorded", 0, true}, {"another start: the pid reused", p.Start + 1, false}} {
+		if ok, err := r.isServer(p.PID, tc.start, w.data, spec); ok != tc.ok || err != nil {
+			t.Errorf("%s: %v %v", tc.name, ok, err)
+		}
+		if ok, err := r.startedAs(p.PID, tc.start, spec); ok != tc.ok || err != nil {
+			t.Errorf("startedAs, %s: %v %v", tc.name, ok, err)
+		}
+	}
+	w.host.foreign[p.PID] = true
+	if ok, err := r.isServer(p.PID, 0, w.data, spec); ok || err != nil {
+		t.Errorf("another user's: %v %v", ok, err)
+	}
+	delete(w.host.foreign, p.PID)
+	w.host.unreadable[p.PID] = true
+	if _, err := r.isServer(p.PID, 0, w.data, spec); err == nil {
+		t.Error("one of this user's that cannot be read: no error")
+	}
+}

@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -22,6 +23,10 @@ type Process struct {
 	Stdout string
 	// PPID is its parent's.
 	PPID int
+	// Start is when it started, in the system's own units: with its PID, it
+	// names one process, which a PID alone does not once the PID is reused
+	// (spec 054 #40). 0 when it could not be read.
+	Start int64
 	// Manager names the service manager it runs under — "the systemd unit
 	// tracepad.service", "the user systemd unit X", "the launchd job X" — or
 	// says why one cannot be ruled out ("its cgroup …"). Such a server is
@@ -69,6 +74,10 @@ type System interface {
 	Signal(pid int, sig syscall.Signal) error
 	Start(spec StartSpec) (Started, error)
 }
+
+// errNotMine is a process of another user's: never one this command started
+// or may touch, so never "cannot be read" either (the tenth review).
+var errNotMine = errors.New("another user's process")
 
 // isTracepadName says whether a path's last element is the binary's name.
 func isTracepadName(path string) bool { return filepath.Base(path) == "tracepad" }
