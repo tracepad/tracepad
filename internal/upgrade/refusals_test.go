@@ -284,6 +284,9 @@ func (c *refusalCell) bDuringUpgrade(make func() (undo func())) {
 // Conditions.
 
 func (c *refusalCell) readOnly(dir string) func() {
+	if os.Geteuid() == 0 {
+		c.t.Skip("root writes any directory")
+	}
 	_ = os.MkdirAll(c.deps.Backups, 0o700)
 	if err := os.Chmod(dir, 0o500); err != nil {
 		c.problem("chmod: %v", err)
