@@ -1,4 +1,4 @@
-<!-- https://tracepad.github.io/tracepad/dev/index.md -->
+<!-- https://tracepad.github.io/tracepad/latest/index.md -->
 
 # Tracepad documentation
 
@@ -62,7 +62,7 @@ The source is on [GitHub](https://github.com/tracepad/tracepad); the
 what changed in each release.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/quickstart.md -->
+<!-- https://tracepad.github.io/tracepad/latest/quickstart.md -->
 
 # Quickstart
 
@@ -391,7 +391,7 @@ curl -H "Authorization: Bearer tp-sk-…" \
 - [accounts.md](accounts.md) — inviting somebody, and what a `viewer` may do.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/agent-setup.md -->
+<!-- https://tracepad.github.io/tracepad/latest/agent-setup.md -->
 
 # Agent setup
 
@@ -547,7 +547,7 @@ The person reads this, not your transcript. It says:
   did not pass, with the answer you got.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/agent-upgrade.md -->
+<!-- https://tracepad.github.io/tracepad/latest/agent-upgrade.md -->
 
 # Agent upgrade
 
@@ -625,7 +625,7 @@ and gives the commands to remove them; deleting is the person's, once the new
 version has run for a while.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/install.md -->
+<!-- https://tracepad.github.io/tracepad/latest/install.md -->
 
 # Installing the binary
 
@@ -1034,7 +1034,7 @@ holds the erased data, and the erasure does not reach it —
 where an erasure's reach ends.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/docker.md -->
+<!-- https://tracepad.github.io/tracepad/latest/docker.md -->
 
 # Docker
 
@@ -1762,7 +1762,7 @@ Without `--build-arg VERSION`, the image reports `dev`. `make image` and `make
 image-check` are the same build and the boot test CI runs against it.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/configuration.md -->
+<!-- https://tracepad.github.io/tracepad/latest/configuration.md -->
 
 # Configuration
 
@@ -1866,7 +1866,7 @@ The Langfuse SDKs take `LANGFUSE_BASE_URL` (older ones `LANGFUSE_HOST`),
 ([langfuse-sdk.md](langfuse-sdk.md#the-switch)).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/compare.md -->
+<!-- https://tracepad.github.io/tracepad/latest/compare.md -->
 
 # How Tracepad compares
 
@@ -1964,7 +1964,7 @@ verdicts as scores ([datasets.md](datasets.md), [scores.md](scores.md)).
   ([What beta means](https://github.com/tracepad/tracepad/blob/main/README.md#what-beta-means)).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/ingest.md -->
+<!-- https://tracepad.github.io/tracepad/latest/ingest.md -->
 
 # Sending traces to Tracepad
 
@@ -2601,7 +2601,7 @@ being data loss. Turning them off makes ingest work exactly the same and
 leaves nothing to replay.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/sdk-python.md -->
+<!-- https://tracepad.github.io/tracepad/latest/sdk-python.md -->
 
 # The Python package
 
@@ -3234,7 +3234,7 @@ written.
   program, and this is the part of it that talks to the store.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/sdk-js.md -->
+<!-- https://tracepad.github.io/tracepad/latest/sdk-js.md -->
 
 # The Node package
 
@@ -3928,7 +3928,7 @@ drift apart without a test saying so.
   thing written from inside a request handler — a score — is queued instead.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/sdk-go.md -->
+<!-- https://tracepad.github.io/tracepad/latest/sdk-go.md -->
 
 # The Go package
 
@@ -4543,7 +4543,7 @@ exporter — pins it.
   of it that talks to the store.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/media.md -->
+<!-- https://tracepad.github.io/tracepad/latest/media.md -->
 
 # Media: images and files in traces
 
@@ -4803,7 +4803,7 @@ where a whole string was. A trace moved to another backend is whole, and
 posted into another Tracepad it is extracted again to the same reference. See [export.md](export.md).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/langfuse-sdk.md -->
+<!-- https://tracepad.github.io/tracepad/latest/langfuse-sdk.md -->
 
 # Coming from the Langfuse SDK
 
@@ -4923,7 +4923,7 @@ the receiver's keys are Langfuse's `pk-lf-…`/`sk-lf-…` pair. The `LANGFUSE_*
 variables on a machine that sends to Tracepad hold Tracepad's keys.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/ui.md -->
+<!-- https://tracepad.github.io/tracepad/latest/ui.md -->
 
 # Web interface
 
@@ -6011,7 +6011,7 @@ The TypeScript types of the API are generated from
 them, and the gate fails if the committed copy has drifted.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/scores.md -->
+<!-- https://tracepad.github.io/tracepad/latest/scores.md -->
 
 # Scores
 
@@ -6385,7 +6385,7 @@ A `201` means the score is on disk, not merely queued — the same guarantee a
 `200` gives on the ingest endpoint.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/prompts.md -->
+<!-- https://tracepad.github.io/tracepad/latest/prompts.md -->
 
 # Prompts
 
@@ -6696,7 +6696,7 @@ button here is one of the requests on this page. See [ui.md](ui.md#prompts).
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |
 
 
-<!-- https://tracepad.github.io/tracepad/dev/datasets.md -->
+<!-- https://tracepad.github.io/tracepad/latest/datasets.md -->
 
 # Datasets and runs
 
@@ -7407,7 +7407,7 @@ deleting a run says what happens to its traces before it happens.
 | `429` | The write queue is saturated; retry after the `Retry-After` delay. |
 
 
-<!-- https://tracepad.github.io/tracepad/dev/annotation.md -->
+<!-- https://tracepad.github.io/tracepad/latest/annotation.md -->
 
 # Annotation queues
 
@@ -7790,7 +7790,7 @@ header or an observation panel, and *Add to queue…* beside the filter bar on
   is enabled at once.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/quality.md -->
+<!-- https://tracepad.github.io/tracepad/latest/quality.md -->
 
 # Quality
 
@@ -8000,7 +8000,7 @@ opens the detail view with the trend and the model, environment and release
 breakdowns. See [ui.md](ui.md#quality).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/users.md -->
+<!-- https://tracepad.github.io/tracepad/latest/users.md -->
 
 # Users
 
@@ -8178,7 +8178,7 @@ a user is a set of sessions, and their page is the dashboard's charts for one
 of them. See [ui.md](ui.md#screens).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/api.md -->
+<!-- https://tracepad.github.io/tracepad/latest/api.md -->
 
 # Read API
 
@@ -9644,7 +9644,7 @@ still holds — is rendered as `null`, this API's word for "no number", rather
 than failing the answer.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/cli.md -->
+<!-- https://tracepad.github.io/tracepad/latest/cli.md -->
 
 # CLI
 
@@ -10871,7 +10871,7 @@ skew is usually fine, and a client that refused to run would be worse than one
 that says what it noticed.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/mcp.md -->
+<!-- https://tracepad.github.io/tracepad/latest/mcp.md -->
 
 # MCP
 
@@ -11131,7 +11131,7 @@ marker, so a missing picture is a reference past the preview and not a lost one
    happening all week.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/agents.md -->
+<!-- https://tracepad.github.io/tracepad/latest/agents.md -->
 
 # Coding agents
 
@@ -11280,7 +11280,7 @@ task: `read` for looking, all three scopes for running evals. It never mints or
 revokes a key; that is a person's act.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/export.md -->
+<!-- https://tracepad.github.io/tracepad/latest/export.md -->
 
 # Taking the data out
 
@@ -11659,7 +11659,7 @@ manifest says which they are — before replaying them.
 - **OTLP over gRPC.**
 
 
-<!-- https://tracepad.github.io/tracepad/dev/accounts.md -->
+<!-- https://tracepad.github.io/tracepad/latest/accounts.md -->
 
 # Accounts
 
@@ -12081,7 +12081,7 @@ Expired sessions and invitations are removed by the
 stops working the moment it does, not when the sweeper next runs.
 
 
-<!-- https://tracepad.github.io/tracepad/dev/admin.md -->
+<!-- https://tracepad.github.io/tracepad/latest/admin.md -->
 
 # Administration
 
@@ -12718,7 +12718,7 @@ oversight. An agent should not hold destructive capability at all, so that a
 hallucinated tool call has nothing to destroy. See [mcp.md](mcp.md).
 
 
-<!-- https://tracepad.github.io/tracepad/dev/retention.md -->
+<!-- https://tracepad.github.io/tracepad/latest/retention.md -->
 
 # Retention
 
