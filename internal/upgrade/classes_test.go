@@ -1131,26 +1131,39 @@ func TestAProcessIsItsPIDAndItsStart(t *testing.T) {
 	}
 }
 
-// Without a key every verdict says the counts were not compared, and why
-// (the fourth review of #228): a check that ends before it reads a count —
-// a server that exits, exit 3; one that does not answer, exit 4 — said
-// nothing, and the run's notes leave it to the check.
-func TestWithoutAKeyEveryVerdictSaysTheCountsWereNotCompared(t *testing.T) {
+// Counts not compared are said by the check in one sentence, whatever its
+// verdict, with the reason the read before the stop found (the fourth and
+// fifth reviews of #228): no key, and a server that exits (exit 3) or does
+// not answer (exit 4); a key the old server refused. The run's notes do not
+// say it again.
+func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
 	t.Parallel()
-	const want = "the trace counts were not compared: no TRACEPAD_API_KEY in the environment"
+	const noKeyNote = "the trace counts were not compared: no TRACEPAD_API_KEY in the environment"
 	for name, c := range map[string]struct {
-		to   string
-		slow bool
-		code int
+		to      string
+		key     bool
+		slow    bool
+		refused bool
+		code    int
+		want    string
 	}{
-		"a server that exits":           {fBroken, false, exitWentBack},
-		"a server that does not answer": {fNew, true, exitDecide},
+		"no key, a server that exits":           {to: fBroken, code: exitWentBack, want: noKeyNote},
+		"no key, a server that does not answer": {to: fNew, slow: true, code: exitDecide, want: noKeyNote},
+		"a key the old server refused": {to: fNew, key: true, refused: true, code: exitOK,
+			want: "the trace counts were not compared: /api/v1/system answered HTTP 401"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := newFakeWorld(t, 2)
 			deps := w.deps()
-			deps.Getenv = func(string) string { return "" }
+			if !c.key {
+				deps.Getenv = func(string) string { return "" }
+			}
+			if c.refused {
+				w.host.mu.Lock()
+				w.host.uncounted[fOld] = true
+				w.host.mu.Unlock()
+			}
 			deps.HealthWait = 300 * time.Millisecond
 			// Not answering is a request past the client's deadline,
 			// kept short: the wait is the test's whole length.
@@ -1163,8 +1176,8 @@ func TestWithoutAKeyEveryVerdictSaysTheCountsWereNotCompared(t *testing.T) {
 			}
 			rep, code := runIn(t, context.Background(), deps, "--to", c.to, "--data-dir", w.data)
 			w.host.setSlow(0)
-			if code != c.code || rep.Check == nil || rep.Check.CountNote != want ||
-				strings.Contains(strings.Join(rep.Notes, "\n"), "TRACEPAD_API_KEY") {
+			if code != c.code || rep.Check == nil || rep.Check.CountNote != c.want ||
+				strings.Contains(strings.Join(rep.Notes, "\n"), "not compared") {
 				t.Fatalf("exit %d, %s, check %+v, notes %q", code, rep.Summary, rep.Check, rep.Notes)
 			}
 		})

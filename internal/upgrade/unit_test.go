@@ -489,7 +489,7 @@ func TestTheCheckVerdicts(t *testing.T) {
 		Sleep: func(context.Context, time.Duration) error { now = now.Add(time.Second); return nil }}}
 	ctx := context.Background()
 	up := func() bool { return true }
-	n := func(v int64) *int64 { return &v }
+	n := func(v int64) counted { return counted{n: &v} }
 
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictHealthy {
 		t.Errorf("healthy: %+v", c)
@@ -498,10 +498,13 @@ func TestTheCheckVerdicts(t *testing.T) {
 		t.Errorf("fewer: %+v", c)
 	}
 	system = http.StatusInternalServerError
-	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "cannot be read now") {
+	// Read before and not after: the one sentence too, with why (the
+	// fifth review of #228).
+	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "cannot be read now") ||
+		c.CountNote != "the trace counts were not compared: /api/v1/system answered HTTP 500" {
 		t.Errorf("unreadable after: %+v", c)
 	}
-	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictHealthy {
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{}, up); c.Verdict != verdictHealthy {
 		t.Errorf("not read before: %+v", c)
 	}
 	system = http.StatusOK
@@ -512,21 +515,19 @@ func TestTheCheckVerdicts(t *testing.T) {
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), func() bool { return false }); c.Verdict != verdictNotHealthy || !strings.Contains(c.Why, "exited") {
 		t.Errorf("exited: %+v", c)
 	}
-	// Counts not compared are said whatever the verdict, with why (the
-	// fourth review of #228): a verdict that comes before any count read
-	// said nothing.
-	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictNotHealthy || c.CountNote != "the trace counts were not compared: the count before the upgrade was not read" {
+	// Counts not compared are said whatever the verdict, with the reason
+	// the read before found (the fourth and fifth reviews of #228): a
+	// verdict that comes before any count read said nothing.
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{}, up); c.Verdict != verdictNotHealthy || c.CountNote != "the trace counts were not compared: the count before the upgrade was not read" {
 		t.Errorf("another version, not read before: %+v", c)
 	}
-	key = ""
-	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{why: noKey}, up); c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
 		t.Errorf("another version, no key: %+v", c)
 	}
 	srv.Close()
-	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictDecide || c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
-		t.Errorf("alive and silent, no key: %+v", c)
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{why: "/api/v1/system answered HTTP 401"}, up); c.Verdict != verdictDecide || c.CountNote != "the trace counts were not compared: /api/v1/system answered HTTP 401" {
+		t.Errorf("alive and silent, a key refused before: %+v", c)
 	}
-	key = "tp-sk-x"
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "has not answered") || c.CountNote != "" {
 		t.Errorf("alive and silent: %+v", c)
 	}
@@ -811,7 +812,7 @@ func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
 	sleeps := 0
 	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour, Getenv: func(string) string { return "" },
 		Sleep: func(context.Context, time.Duration) error { sleeps++; return nil }}}
-	c := r.check(context.Background(), srv.URL, "0.5.1", nil, func() bool { return true })
+	c := r.check(context.Background(), srv.URL, "0.5.1", counted{}, func() bool { return true })
 	if c.Verdict != verdictNotHealthy || c.Health != "9.9.9" || sleeps > 0 {
 		t.Errorf("%+v after %d waits", c, sleeps)
 	}

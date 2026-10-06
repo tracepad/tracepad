@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"bytes"
+	"encoding/csv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,7 +93,7 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 
 	t.Run("a container's", func(t *testing.T) {
 		c := Container{Name: v("name"), Repo: "ghcr.io/tracepad/tracepad", Version: v("0.1.0"),
-			DataMount: "type=bind,src=" + v("/srv/data"),
+			DataMount: dataMount("bind", v("/srv/data")+",b"),
 			Run:       []string{"-p", "127.0.0.1:4318:4318", "--label", v("label="), imageSlot, "serve", v("arg")},
 			EnvNames:  []string{"TRACEPAD_URL", "OTHER_1"}}
 		chain, _ := containerSteps(c, "0.2.0")
@@ -102,8 +103,13 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 		}
 		sameArgs(t, "stop", calls[0], []string{"docker", "stop", c.Name})
 		// A version that is not a release's is not in the archive's name.
-		sameArgs(t, "backup", calls[1], []string{"docker", "run", "--rm", "--mount", c.DataMount + ",dst=/data,readonly", "-v", calls[1][6], busybox,
+		sameArgs(t, "backup", calls[1], []string{"docker", "run", "--rm", "--mount", c.DataMount, "-v", calls[1][6], busybox,
 			"sh", "-c", `umask 077 && set -C && tar czf - -C /data . > "/backup/$1"`, "sh", c.Name + "-backup.tar.gz"})
+		// Docker reads the value as CSV: the source, a comma and quotes in
+		// it, is one field.
+		if f, err := csv.NewReader(strings.NewReader(calls[1][4])).Read(); err != nil || len(f) != 4 || f[1] != "src="+v("/srv/data")+",b" {
+			t.Errorf("the mount reads as %q (%v)", f, err)
+		}
 		sameArgs(t, "pull", calls[2], []string{"docker", "pull", "ghcr.io/tracepad/tracepad:0.2.0"})
 		sameArgs(t, "rename", calls[3], []string{"docker", "rename", c.Name, c.Name + "-old"})
 		sameArgs(t, "inspect", calls[4], []string{"docker", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", c.Name + "-old"})
@@ -113,15 +119,15 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 		// a run.
 		ic := inspectContainer{}
 		ic.Config.Env = []string{v("ENV") + "=x"}
-		if _, _, err := createdAs(ic, imageConfig{}, ""); err == nil || !strings.Contains(err.Error(), "has a name an env file cannot carry") {
+		if _, _, err := createdAs(ic, imageConfig{}, ""); err == nil || !strings.Contains(err.Error(), "an env file cannot carry") {
 			t.Errorf("a variable named %q: %v", v("ENV"), err)
 		}
-		sameArgs(t, "the archive of a release's version", []string{backupStep(Container{Name: "n", Version: "0.1.0", DataMount: "type=volume,src=v"})},
+		sameArgs(t, "the archive of a release's version", []string{backupStep(Container{Name: "n", Version: "0.1.0", DataMount: dataMount("volume", "v")})},
 			[]string{`docker run --rm --mount type=volume,src=v,dst=/data,readonly -v "$PWD:/backup" ` + busybox + ` sh -c 'umask 077 && set -C && tar czf - -C /data . > "/backup/$1"' sh n-0.1.0.tar.gz`})
 	})
 
 	t.Run("a Compose project's", func(t *testing.T) {
-		c := Container{Name: v("name"), Repo: "ghcr.io/tracepad/tracepad", Version: "0.1.0", DataMount: "type=volume,src=" + v("vol"),
+		c := Container{Name: v("name"), Repo: "ghcr.io/tracepad/tracepad", Version: "0.1.0", DataMount: dataMount("volume", v("vol")),
 			Compose: v("proj"), Service: v("svc"), ComposeDir: v("/srv/dir"),
 			ComposeFiles: []string{v("/etc/a.yml"), v("/etc/b.yml")}, ComposeEnv: []string{v("/srv/a.env")}}
 		chain, up, start := composeSteps(c, "0.2.0")
@@ -131,7 +137,7 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 			t.Fatalf("%d calls: %q", len(calls), calls)
 		}
 		sameArgs(t, "stop", calls[0], append(compose, "stop", c.Service))
-		sameArgs(t, "backup's mount", calls[1][3:5], []string{"--mount", c.DataMount + ",dst=/data,readonly"})
+		sameArgs(t, "backup's mount", calls[1][3:5], []string{"--mount", c.DataMount})
 		sameArgs(t, "backup's name", calls[1][len(calls[1])-1:], []string{c.Name + "-0.1.0.tar.gz"})
 		sameArgs(t, "up", calls[3], append(compose, "up", "-d", c.Service))
 		sameArgs(t, "start", calls[4], append(compose, "start", c.Service))

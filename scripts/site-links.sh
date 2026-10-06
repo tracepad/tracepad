@@ -39,6 +39,9 @@ bad_links() {
 		esac
 		[ "$page" != "$rest" ] || page=""
 		page="${page%%#*}"
+		# A page is a path with no extension; what the build adds beside
+		# the pages — assets/, search/, sitemap.xml, a file — is not docs/'s.
+		case "$page" in assets/* | search/* | *.*) continue ;; esac
 		page="${page%/}"
 		md="$docs/${page:-index}.md"
 		[ -f "$md" ] || echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"
@@ -57,6 +60,9 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/llms-full.txt' \
 		'https://tracepad.github.io/tracepad/latest/' \
 		'https://tracepad.github.io/tracepad/latest/install/#upgrading' \
+		'https://tracepad.github.io/tracepad/latest/assets/images/logo.png' \
+		'https://tracepad.github.io/tracepad/latest/sitemap.xml' \
+		'https://tracepad.github.io/tracepad/latest/search/' \
 		'see https://tracepad.github.io/tracepad/latest/install/.' \
 		'https://tracepad.github.io/tracepad/latest/docker/#upgrading-and-backing-up-first.' \
 		'https://tracepad.github.io/tracepad/dev/' \

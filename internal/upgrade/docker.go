@@ -207,8 +207,8 @@ type Container struct {
 	// could not: a container not checked is said, not called behind (the
 	// final review).
 	Unchecked string
-	// DataMount is its /data as busybox's --mount takes it, empty when it
-	// has none.
+	// DataMount is its /data, read-only, as busybox's --mount takes it
+	// (dataMount), empty when it has none.
 	DataMount string
 	// Run is how it was created, as `docker run` takes it — the options,
 	// the image's place (imageSlot), its command — and EnvNames the
@@ -346,18 +346,21 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	run = append(run, imageSlot)
 	run = append(run, args...)
 	for _, kv := range ic.Config.Env {
-		if name, _, ok := strings.Cut(kv, "="); ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
-			// A variable goes through an env file, one line each, and the
-			// person's commands pick it by name with grep. What an env file
-			// cannot carry — a line break in its value, which grep would
-			// cut short; a name with a space, which docker refuses there —
-			// leaves no run written, for the command and the person alike:
-			// this is the one place that says so (the reviews of #228).
+		// A variable goes through an env file, one line each, and the
+		// person's commands pick it by name with grep from every variable
+		// the container has, the image's too. What an env file cannot
+		// carry — a line break in any value, which grep would cut short or
+		// read as a variable of its own; a name with a space, which docker
+		// refuses there — leaves no run written, for the command and the
+		// person alike: this is the one place that says so (the reviews of
+		// #228).
+		name, _, ok := strings.Cut(kv, "=")
+		if strings.ContainsAny(kv, "\r\n") {
+			return nil, nil, fmt.Errorf("its variable %s holds a line break, which an env file cannot carry", name)
+		}
+		if ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
 			if !envName.MatchString(name) {
 				return nil, nil, fmt.Errorf("its variable %q has a name an env file cannot carry", name)
-			}
-			if strings.ContainsAny(kv, "\r\n") {
-				return nil, nil, fmt.Errorf("its variable %s holds a line break, which an env file cannot carry", name)
 			}
 			envNames = append(envNames, name)
 		}
@@ -937,9 +940,9 @@ func asContainer(ic inspectContainer) (Container, bool) {
 		switch {
 		case m.Destination != "/data":
 		case m.Type == "volume":
-			c.Volume, c.DataMount = m.Name, "type=volume,src="+m.Name
+			c.Volume, c.DataMount = m.Name, dataMount("volume", m.Name)
 		case m.Type == "bind":
-			c.DataMount = "type=bind,src=" + m.Source
+			c.DataMount = dataMount("bind", m.Source)
 		}
 	}
 	c.URL, c.Default, c.Unchecked = containerAddress(ic)
@@ -1109,10 +1112,17 @@ func backupStep(c Container) string {
 	}
 	data := c.DataMount
 	if data == "" {
-		data = "type=volume,src=<its /data volume>"
+		data = dataMount("volume", "<its /data volume>")
 	}
 	return fmt.Sprintf("docker run --rm --mount %s -v \"$PWD:/backup\" %s sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh %s",
-		shq(data+",dst=/data,readonly"), busybox, shq(c.Name+"-"+version+".tar.gz"))
+		shq(data), busybox, shq(c.Name+"-"+version+".tar.gz"))
+}
+
+// dataMount is a /data of the given type and source, read-only, written as
+// docker reads --mount, CSV: a source with a comma or a quote stays one field
+// (the fifth review of #228).
+func dataMount(typ, src string) string {
+	return csvField("type="+typ, "src="+src, "dst=/data", "readonly")
 }
 
 // composeCommand is `docker compose` for a container's project, from any

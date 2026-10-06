@@ -441,15 +441,11 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		} else {
 			base = st.Container.URL
 		}
-		count, note := r.traceCount(ctx, base)
-		st.CountBefore = count
-		switch {
-		case count != nil:
-			j.done("read the trace count: %d", *count)
-		case r.hasKey():
-			// No key, the check says, whatever its verdict; any other
-			// reason only this read knows (the reviews of #228).
-			rep.Notes = append(rep.Notes, "the trace counts are not compared: "+note)
+		// Why there is no count is kept with it, and the check says it,
+		// whatever its verdict, in one sentence (the reviews of #228).
+		st.CountBefore, st.CountNote = r.traceCount(ctx, base)
+		if st.CountBefore != nil {
+			j.done("read the trace count: %d", *st.CountBefore)
 		}
 	}
 	// Not written, nothing stopped: a refusal, and the run's directory, which
@@ -877,7 +873,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		j.goBack(ctx, "not healthy: "+err.Error())
 		return
 	}
-	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
+	c := r.check(ctx, ps.URL, p.to, st.before(), running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	// What answered must have opened this data directory: the lock of it
 	// records the new server. A server that resolved its data elsewhere — a

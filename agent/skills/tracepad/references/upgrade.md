@@ -34,7 +34,8 @@ v=; dir="$HOME/.cache/tracepad/release"; mkdir -p "$dir" && rm -f "$dir/tracepad
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
-is the human's is behind (a server behind an installed candidate too); `1`
+is the human's is behind (a server behind an installed candidate, or the
+binary step 1 replaces, too); `1`
 refused or interrupted — say why (*no stable release*, from the plan or the install script: name the candidate it gives, and ask). Show the human what it will do, and what it says
 is theirs: a service, a Compose project, a server or container open beyond
 this machine — show them the commands the plan gives for each. More than one

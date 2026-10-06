@@ -28,19 +28,17 @@ type plan struct {
 	// that this run does not take (another run will).
 	later []string
 	// person are the person's servers and containers, older than to, each
-	// with what to do; binaries, the person's binaries older than to — what
-	// runs older is the first, and only it makes the plan's exit 4 (the
-	// eighth review: an older tracepad first on PATH runs nothing).
-	person   []string
-	binaries []string
+	// with what to do; installed, what the person does with the binary at
+	// the install path (binaryTodo); binaries, the tracepad first on PATH
+	// when it is behind. The first two make the plan's exit 4; the last
+	// does not (the eighth review: an older tracepad first on PATH runs
+	// nothing, and the install path is where the command and the skill
+	// look — the fifth review of #228).
+	person    []string
+	installed string
+	binaries  []string
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
-	// idle are the servers and containers, by index in the findings, and
-	// the binary, that need nothing, whoever's they are: needsNothing is
-	// the rule, and othersBehind, the one place that sorts everything,
-	// applies it (the reviews of #228).
-	idleServers, idleContainers map[int]bool
-	idleBinary                  bool
 	// ahead: what the command looks after runs past the latest stable
 	// release, and no version was named.
 	ahead bool
@@ -344,7 +342,6 @@ func (r *runner) othersBehind(p *plan) {
 		order, ok := Compare(p.to, v)
 		return ok && order > 0
 	}
-	p.idleServers, p.idleContainers = map[int]bool{}, map[int]bool{}
 	for i := range p.f.Servers {
 		s := &p.f.Servers[i]
 		switch {
@@ -357,7 +354,6 @@ func (r *runner) othersBehind(p *plan) {
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
 		case !older(s.Version):
-			p.idleServers[i] = needsNothing(p.to, s.Version)
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -381,7 +377,6 @@ func (r *runner) othersBehind(p *plan) {
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
 		case !older(c.Version):
-			p.idleContainers[i] = needsNothing(p.to, c.Version)
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -391,35 +386,9 @@ func (r *runner) othersBehind(p *plan) {
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(c, p.to)))
 		}
 	}
-	// A binary runs nothing (#37 (e)): one behind, or one that does not say
-	// its version, is named, and not counted. A development build is its
-	// builder's, and the command does not replace it; the install script
-	// puts the release in its place, and the plan gives its line (the live
-	// run of 0.1.0: the plan named the build and said nothing of how to
-	// replace it).
-	switch b := p.f.Binary; {
-	case !b.Exists:
-	case b.Ours:
-		// Whether it is behind, never whether this run replaces it: a
-		// binary a container's run leaves is still behind (the third
-		// review of #228).
-		p.idleBinary = needsNothing(p.to, b.Version)
-	case b.Dev && b.Link != "":
-		p.binaries = append(p.binaries, fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
-			b.Path, b.Link, b.Version, p.to, b.Link, r.installLine(filepath.Dir(b.Path), p.to)))
-	case b.Dev:
-		p.binaries = append(p.binaries, fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
-			b.Path, b.Version, p.to, r.installLine(filepath.Dir(b.Path), p.to)))
-	case b.Version == "" || older(b.Version):
-		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
-	default:
-		p.idleBinary = needsNothing(p.to, b.Version)
-	}
+	p.installed = r.binaryTodo(p.f.Binary, p.to)
 	if b := p.f.Binary; b.First != "" {
 		v, err := b.FirstVersion, b.FirstErr
-		if err != nil || older(v) {
-			p.idleBinary = false
-		}
 		if err != nil {
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
 		} else if older(v) {
@@ -437,6 +406,39 @@ func (r *runner) othersBehind(p *plan) {
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
 		}
 	}
+}
+
+// binaryTodo is the plan's table of the binary at the install path: by its
+// kind (installedBinary), what the person is told to do, or "" for nothing —
+// the command's own, which a run replaces, or one that needs nothing. Every
+// line is the person's and makes the plan's exit 4 (spec 054 #56). A package
+// manager's is upgraded by its manager, whatever it says it is, and never
+// given the install script's line over its link.
+func (r *runner) binaryTodo(b Binary, to string) string {
+	switch {
+	case b.Kind == binNone || b.Kind == binOurs || needsNothing(to, b.Version):
+		return ""
+	case b.Kind == binDev:
+		return fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
+			b.Path, b.Version, to, r.installLine(filepath.Dir(b.Path), to))
+	case b.Kind == binLinked && b.Version != "" && !IsRelease(b.Version):
+		// A build linked from its checkout (the review of #228).
+		return fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
+			b.Path, b.Link, b.Version, to, b.Link, r.installLine(filepath.Dir(b.Path), to))
+	}
+	// Packaged, linked, silent, unwritable, odd: its reason says whose and
+	// what upgrades it.
+	return fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason)
+}
+
+// firstBehind is whether the tracepad first on PATH, another than the
+// installed one, is behind to or does not say.
+func firstBehind(b Binary, to string) bool {
+	if b.First == "" {
+		return false
+	}
+	order, ok := Compare(to, b.FirstVersion)
+	return b.FirstErr != nil || (ok && order > 0)
 }
 
 // installLine is the install script's command that puts version to into
@@ -513,7 +515,7 @@ func verdictOf(p *plan) (int, string) {
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
 	case len(p.held) > 0:
 		return exitDecide, fmt.Sprintf("The installed binary is %s, a release candidate past the latest stable release %s, and a server or container runs behind it: yours to take there by naming it, as said below.", p.to, p.latest)
-	case len(p.person) > 0:
+	case len(p.person) > 0 || p.installed != "":
 		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, or may be, is yours.", p.to)
 	}
 	switch {
@@ -528,22 +530,26 @@ func verdictOf(p *plan) (int, string) {
 // describe writes the plan's steps, what is the person's, and the next
 // command into the report.
 func (r *runner) describe(p *plan, rep *Report) {
+	// Idle is needsNothing of each entry's own version; never the target,
+	// which is behind by its choice (the reviews of #228).
 	for i := range rep.Servers {
-		rep.Servers[i].Target = p.server != nil && rep.Servers[i].PID == p.server.Proc.PID
+		s := &rep.Servers[i]
+		s.Target = p.server != nil && s.PID == p.server.Proc.PID
+		s.Idle = !s.Target && needsNothing(p.to, s.Version)
 	}
 	for i := range rep.Containers {
-		rep.Containers[i].Target = p.container != nil && rep.Containers[i].Name == p.container.Name
-	}
-	rep.Person = append(append(append(rep.Person, p.held...), p.person...), p.binaries...)
-	for i := range rep.Servers {
-		rep.Servers[i].Idle = p.idleServers[i]
-	}
-	for i := range rep.Containers {
-		rep.Containers[i].Idle = p.idleContainers[i]
+		c := &rep.Containers[i]
+		c.Target = p.container != nil && c.Name == p.container.Name
+		c.Idle = !c.Target && needsNothing(p.to, c.Version)
 	}
 	if rep.Binary != nil {
-		rep.Binary.Idle = p.idleBinary
+		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version) && !firstBehind(p.f.Binary, p.to)
 	}
+	rep.Person = append(append(rep.Person, p.held...), p.person...)
+	if p.installed != "" {
+		rep.Person = append(rep.Person, p.installed)
+	}
+	rep.Person = append(rep.Person, p.binaries...)
 	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
@@ -558,8 +564,8 @@ func (r *runner) describe(p *plan, rep *Report) {
 		steps = append(steps, fmt.Sprintf("download tracepad %s and check it against the release's checksums.txt (and its attestation when gh is logged in)", p.to))
 	}
 	count := "read the trace count with TRACEPAD_API_KEY, to compare after"
-	if r.deps.Getenv("TRACEPAD_API_KEY") == "" {
-		count = "no TRACEPAD_API_KEY in the environment: the trace counts will not be compared"
+	if r.apiKey() == "" {
+		count = noKey + ": the trace counts will not be compared"
 	}
 	switch {
 	case p.server != nil:

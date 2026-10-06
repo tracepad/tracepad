@@ -26,8 +26,10 @@ their own headings.
   values it did not choose — names, paths, labels, a version a server
   answered — so pasting one runs nothing but the command.
 - The plan lists what is yours and needs nothing apart from what needs you,
-  says when the trace counts will not be compared for want of a key, and gives
-  a development build at the install path the line that replaces it.
+  says when the trace counts will not be compared and why, and gives a
+  development build at the install path the line that replaces it, exiting
+  `4` (yours to do) rather than `0`; a package manager's binary there is
+  always given its manager's command.
 - The install script's check of what still runs an older version no longer
   goes to the network, which a firewall could hold past its fifteen seconds,
   and says why when it cannot check.

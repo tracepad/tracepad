@@ -1214,11 +1214,11 @@ The exit status, by mode — one table, which the skill reads too:
 
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
-| `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `0` | nothing runs older (an older `tracepad` first on `PATH` is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
 | `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
-| `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `4` | only what is yours is behind: servers or containers of yours, or the binary at the install path when it is yours to replace (a development build, a package manager's, a link) | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
 | `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
 | `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
 

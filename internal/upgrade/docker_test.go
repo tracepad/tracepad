@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -804,7 +805,7 @@ func TestComposeAdvice(t *testing.T) {
 	// One file in another directory than the project's is named with it;
 	// an image not pinned says nothing of a digest.
 	c := Container{Name: "obs-tracepad-1", Repo: "ghcr.io/tracepad/tracepad", Ref: "ghcr.io/tracepad/tracepad:0.1", Version: "0.1.0",
-		Compose: "obs", Service: "tp", ComposeDir: "/srv/obs", ComposeFiles: []string{"/etc/obs/compose.yml"}, DataMount: "type=volume,src=obs_data"}
+		Compose: "obs", Service: "tp", ComposeDir: "/srv/obs", ComposeFiles: []string{"/etc/obs/compose.yml"}, DataMount: dataMount("volume", "obs_data")}
 	got := composeAdvice(c, "0.2.0")
 	for _, want := range []string{"docker compose -p obs --project-directory /srv/obs -f /etc/obs/compose.yml stop tp", "in /etc/obs/compose.yml to ghcr.io/tracepad/tracepad:0.2.0, and"} {
 		if !strings.Contains(got, want) {
@@ -981,7 +982,7 @@ func TestAContainersStepsStopAtTheFirstThatFails(t *testing.T) {
 	}
 	data := t.TempDir()
 	_ = os.WriteFile(filepath.Join(data, dataDBName), []byte("db"), 0o600)
-	c := Container{Name: "tracepad-app", Repo: "ghcr.io/tracepad/tracepad", Version: "0.1.0", DataMount: "type=volume,src=tracepad-app",
+	c := Container{Name: "tracepad-app", Repo: "ghcr.io/tracepad/tracepad", Version: "0.1.0", DataMount: dataMount("volume", "tracepad-app"),
 		Run: []string{"-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=tracepad-app,dst=/data", imageSlot, "serve"}, EnvNames: []string{"TRACEPAD_PROJECTS", "TRACEPAD_URL"}}
 	chain, _ := containerSteps(c, "0.2.0")
 	run := func(t *testing.T, before func(dir string)) (calls string, err error, dir string) {
@@ -1229,6 +1230,19 @@ func TestWhatContainerIsTheCommands(t *testing.T) {
 		if c.Run != nil || !strings.Contains(c.Reason, "its docker run could not be written: ") || strings.Contains(advice, "docker run -d") || !strings.Contains(advice, "which the command could not write") {
 			t.Errorf("%s: run %q, reason %q, advice %s", name, c.Run, c.Reason, advice)
 		}
+	}
+	// The image's own variables are in what the printed grep reads too: a
+	// line break there would write a carried name's line nobody set (the
+	// fifth review of #228).
+	{
+		bad := "BANNER=a\nTRACEPAD_PROJECTS=x"
+		img.Config.Env = append(slices.Clone(img.Config.Env), bad)
+		ic := base
+		ic.Config.Env = append(slices.Clone(base.Config.Env), bad)
+		if c := classify(ic, ""); c.Run != nil || !strings.Contains(c.Reason, "BANNER holds a line break") {
+			t.Errorf("an image's variable with a line break: run %q, reason %q", c.Run, c.Reason)
+		}
+		img = d.images["ghcr.io/tracepad/tracepad:0.1.0"]
 	}
 	for name, change := range map[string]func(*inspectContainer){
 		"another name": func(c *inspectContainer) { c.Name = "/myapp" },
@@ -2073,60 +2087,111 @@ func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 	}
 }
 
-// Every kind of binary at the install path is sorted in one place (the
-// review of #228): a development build, a regular file or linked from its
-// checkout, gets the install script's line and is never "nothing to do"; one
-// of the person's at the target or past it is; one behind, or silent, is
-// named; the command's own is neither. A tracepad first on PATH that is
-// behind keeps the installed one off "nothing to do".
+// The binary at the install path is one of a closed set of kinds, sorted in
+// one place, and the plan's table says for each what is printed and what the
+// plan exits (spec 054 #56): every kind has a cell here, and each cell holds
+// the classification, the line, "nothing to do" and the exit status. A
+// development build is the person's to replace, exit 4, never 0; a package
+// manager's is its manager's, whatever it says, never the install script's
+// line over its link (the fifth review of #228). A tracepad first on PATH
+// that is behind is named and not counted.
 func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 	t.Parallel()
 	type want struct {
-		idle bool
-		line string // in the person's list, "" for none of the binary's
-		note string // in the notes, when the case is about one
+		kind  binaryKind
+		code  int
+		idle  bool
+		line  string // in the person's list, "" for none of the binary's
+		never string // never in the person's list
+		note  string // in the notes, when the case is about one
 	}
-	for name, c := range map[string]struct {
-		setup func(t *testing.T, bin string, deps *Deps)
+	cellar := func(t *testing.T, deps *Deps) string {
+		deps.InstallDir = filepath.Join(t.TempDir(), "Cellar", "tracepad", "HEAD", "bin")
+		_ = os.MkdirAll(deps.InstallDir, 0o755)
+		return filepath.Join(deps.InstallDir, "tracepad")
+	}
+	readOnly := func(t *testing.T, deps *Deps, version string) {
+		if os.Geteuid() == 0 {
+			t.Skip("root writes into any directory")
+		}
+		scriptBinary(t, filepath.Join(deps.InstallDir, "tracepad"), version)
+		_ = os.Chmod(deps.InstallDir, 0o500)
+		t.Cleanup(func() { _ = os.Chmod(deps.InstallDir, 0o700) })
+	}
+	bin := func(deps *Deps) string { return filepath.Join(deps.InstallDir, "tracepad") }
+	type cell struct {
+		setup func(t *testing.T, deps *Deps)
 		want  want
-	}{
-		"none":                   {func(*testing.T, string, *Deps) {}, want{}},
-		"the command's, current": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.2.0") }, want{idle: true}},
-		"the command's, behind":  {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.1.0") }, want{}},
+	}
+	cases := map[string]cell{
+		"nothing there": {func(*testing.T, *Deps) {}, want{kind: binNone, code: exitOK}},
+		"the command's, current": {func(t *testing.T, deps *Deps) { scriptBinary(t, bin(deps), "0.2.0") },
+			want{kind: binOurs, code: exitOK, idle: true}},
+		"the command's, behind": {func(t *testing.T, deps *Deps) { scriptBinary(t, bin(deps), "0.1.0") },
+			want{kind: binOurs, code: exitPending}},
 		// The container is upgraded and the binary kept back: still behind,
 		// whatever the run does with it (the third review of #228).
-		"the command's, behind, kept by a container's run": {func(t *testing.T, bin string, deps *Deps) {
-			scriptBinary(t, bin, "0.1.0")
+		"the command's, behind, kept by a container's run": {func(t *testing.T, deps *Deps) {
+			scriptBinary(t, bin(deps), "0.1.0")
 			deps.Sys = unreadableProcesses{}
 			deps.Docker.(*fakeDocker).add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "app", nil)
-		}, want{note: "stays 0.1.0 after the container's upgrade"}},
-		"a development build": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "97d6b79") },
-			want{line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
-		"a development build, linked": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "dev") },
-			want{line: `which says it is "dev", a development build; the command replaces no link. The install script puts 0.2.0 in place of the link, which is then a file (`}},
-		"a release, linked, current": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.2.0") }, want{idle: true}},
-		"a release, linked, past it": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.3.0") }, want{idle: true}},
-		"a release, linked, behind":  {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.1.0") }, want{line: "is 0.1.0; "}},
-		"one that does not run": {func(t *testing.T, bin string, _ *Deps) {
-			_ = os.WriteFile(bin, []byte("not a program"), 0o755)
-		}, want{line: "is no answer; "}},
-		"current, and one behind first on PATH": {func(t *testing.T, bin string, deps *Deps) {
-			linked(t, bin, "0.2.0")
+		}, want{kind: binOurs, code: exitPending, note: "stays 0.1.0 after the container's upgrade"}},
+		"a development build": {func(t *testing.T, deps *Deps) { scriptBinary(t, bin(deps), "97d6b79") },
+			want{kind: binDev, code: exitDecide, line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
+		"a development build, linked": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "dev") },
+			want{kind: binLinked, code: exitDecide, line: `which says it is "dev", a development build; the command replaces no link. The install script puts 0.2.0 in place of the link, which is then a file (`}},
+		"a release, linked, current": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "0.2.0") },
+			want{kind: binLinked, code: exitOK, idle: true}},
+		"a release, linked, past it": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "0.3.0") },
+			want{kind: binLinked, code: exitOK, idle: true}},
+		"a release, linked, behind": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "0.1.0") },
+			want{kind: binLinked, code: exitDecide, line: "is 0.1.0; ", never: "install.sh"}},
+		"one that does not run": {func(t *testing.T, deps *Deps) { _ = os.WriteFile(bin(deps), []byte("not a program"), 0o755) },
+			want{kind: binSilent, code: exitDecide, line: "is no answer; "}},
+		"not a file": {func(t *testing.T, deps *Deps) { _ = os.Mkdir(bin(deps), 0o700) },
+			want{kind: binOdd, code: exitDecide, line: "is not a regular file"}},
+		"a release where this user cannot write, behind": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "0.1.0") },
+			want{kind: binUnwritable, code: exitDecide, line: "is not writable by this user"}},
+		"a release where this user cannot write, current": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "0.2.0") },
+			want{kind: binUnwritable, code: exitOK, idle: true}},
+		"Homebrew's, behind": {func(t *testing.T, deps *Deps) { scriptBinary(t, cellar(t, deps), "0.1.0") },
+			want{kind: binPackaged, code: exitDecide, line: "is Homebrew's: brew upgrade tracepad", never: "install.sh"}},
+		"Homebrew's, current": {func(t *testing.T, deps *Deps) { scriptBinary(t, cellar(t, deps), "0.2.0") },
+			want{kind: binPackaged, code: exitOK, idle: true}},
+		"Homebrew's link to a build of its HEAD": {func(t *testing.T, deps *Deps) {
+			path := cellar(t, deps)
+			target := filepath.Join(filepath.Dir(filepath.Dir(path)), "libexec", "tracepad")
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			scriptBinary(t, target, "HEAD-abc1234")
+			if err := os.Symlink("../libexec/tracepad", path); err != nil {
+				t.Fatal(err)
+			}
+		}, want{kind: binPackaged, code: exitDecide, line: "is Homebrew's: brew upgrade tracepad", never: "install.sh"}},
+		"current, and one behind first on PATH": {func(t *testing.T, deps *Deps) {
+			linked(t, bin(deps), "0.2.0")
 			first := filepath.Join(t.TempDir(), "tracepad")
 			scriptBinary(t, first, "0.1.0")
 			deps.LookPath = func(string) string { return first }
-		}, want{line: ", first on PATH, is 0.1.0: "}},
-	} {
+		}, want{kind: binLinked, code: exitOK, line: ", first on PATH, is 0.1.0: "}},
+	}
+	for kind := binNone; kind <= binOurs; kind++ {
+		if !slices.ContainsFunc(slices.Collect(maps.Values(cases)), func(c cell) bool { return c.want.kind == kind }) {
+			t.Errorf("no cell for the kind %d", kind)
+		}
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			deps := containerDeps(t, newFakeDocker(t))
-			bin := filepath.Join(deps.InstallDir, "tracepad")
-			c.setup(t, bin, &deps)
-			rep, _ := runReport(t, deps, "--plan")
+			c.setup(t, &deps)
+			if got := (&runner{deps: deps}).installedBinary(context.Background()).Kind; got != c.want.kind {
+				t.Errorf("kind %d, want %d", got, c.want.kind)
+			}
+			rep, code := runReport(t, deps, "--plan")
 			person := strings.Join(rep.Person, "\n")
-			if rep.Binary.Idle != c.want.idle || (c.want.line == "") != (person == "") || !strings.Contains(person, c.want.line) ||
-				!strings.Contains(strings.Join(rep.Notes, "\n"), c.want.note) {
-				t.Errorf("idle %v, person %q; want %+v", rep.Binary.Idle, person, c.want)
+			if code != c.want.code || rep.Binary.Idle != c.want.idle || (c.want.line == "") != (person == "") || !strings.Contains(person, c.want.line) ||
+				(c.want.never != "" && strings.Contains(person, c.want.never)) || !strings.Contains(strings.Join(rep.Notes, "\n"), c.want.note) {
+				t.Errorf("exit %d, idle %v, person %q; want %+v (%s)", code, rep.Binary.Idle, person, c.want, rep.Summary)
 			}
 		})
 	}
