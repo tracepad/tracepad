@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-const docsUpgrading = "https://tracepad.github.io/tracepad/install/#upgrading"
-const docsDocker = "https://tracepad.github.io/tracepad/docker/#upgrading-and-backing-up-first"
+const docsUpgrading = "https://tracepad.github.io/tracepad/latest/install/#upgrading"
+const docsDocker = "https://tracepad.github.io/tracepad/latest/docker/#upgrading-and-backing-up-first"
 
 // plan is what an upgrade would do, worked out from the findings.
 type plan struct {
