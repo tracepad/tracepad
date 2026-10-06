@@ -1079,8 +1079,11 @@ tracepad upgrade --back RUN [--json]
 
 Upgrades the installed binary and one server you started, to the newest
 stable release or the one `--to` names — never an older one: migrations run
-forward only (a release candidate past the latest stable release, with no
-`--to`, is nothing to do). The installed binary is the `tracepad` in the directory the
+forward only. With no `--to`, the target is the later of the latest stable
+release and the installed binary: a release candidate installed is never gone
+back from, and a server still running an older version from it is yours to
+take there — the plan gives the command, with the candidate named
+(`--to 0.2.0-rc.1 --data-dir DIR`), and exits `4`. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, as
 the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
@@ -1097,7 +1100,10 @@ release: it refuses there before it looks at anything. The design is spec 054.
   stop it, back its volume up, pull the release, and run it again with the
   options you created it with, the old one kept until the new one is healthy
   ([docker.md](docker.md#upgrading-and-backing-up-first)), or Compose's
-  `docker compose up -d`. The command changes nothing of a container.
+  `docker compose up -d`. The command changes nothing of a container. Its
+  version is asked where its server listens — `--listen` or
+  `TRACEPAD_LISTEN`, as published on this machine; a container whose address
+  cannot be told is said to be not checked, not called behind.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -1121,7 +1127,11 @@ release: it refuses there before it looks at anything. The design is spec 054.
   two servers of the command's on one binary are refused up front, with the
   order to take them in.
   A way back puts the old binary back only where nothing runs it at a later
-  version. What the command cannot read — a process, a lock on a file system
+  version. **What a way back needs is checked before the stop**: the copy of
+  the old version, room beside the data directory for a restore (beside the
+  archive, when both are on one disk), and a parent directory the restore can
+  be made in and the data renamed aside through; `--back` checks the same
+  before its first act. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
   or container whose version it cannot tell is named as one that may be
@@ -1156,7 +1166,7 @@ The exit status, by mode — one table, which the skill reads too:
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
 | `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
-| `1` | refused | refused, with nothing changed | refused | refused, with nothing touched |
+| `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
 | `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |

@@ -25,7 +25,7 @@ type slowSystem struct {
 	events    []string
 }
 
-func (s *slowSystem) Candidates() ([]Process, int, error) { return nil, 0, nil }
+func (s *slowSystem) Candidates(context.Context) ([]Process, int, error) { return nil, 0, nil }
 func (s *slowSystem) Inspect(pid int) (Process, error) {
 	if pid == s.old.PID && s.looksLeft > 0 {
 		return s.old, nil

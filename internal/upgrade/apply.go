@@ -127,6 +127,16 @@ func (j *job) persist() {
 // records the act of. A step off the table is never written (#34): the run
 // stops there, stuck, and says what it was about to record.
 func (j *job) step(name string) {
+	if err := j.record(name); err != nil {
+		panic(unrecorded{err: err})
+	}
+}
+
+// record is step, answering a state the disk would not take instead of
+// ending the run there: the one caller that may still refuse with nothing
+// changed — the preparation's last step, before anything stopped (the final
+// review) — takes the step back and refuses.
+func (j *job) record(name string) error {
 	if last := j.st.last(); !allows(j.st.Kind, last, name) {
 		badStep(j.st.Kind, last, name)
 		panic(offTable{kind: j.st.Kind, last: last, next: name})
@@ -135,15 +145,20 @@ func (j *job) step(name string) {
 	if j.r.deps.Fault != nil {
 		_ = j.r.deps.Fault(name + recordPoint) // ignored: a record point fails nothing; the matrix kills there
 	}
-	if p := j.st.Pending; p != nil && p.Step == name {
+	pending := j.st.Pending
+	if pending != nil && pending.Step == name {
 		j.st.Pending = nil
 	}
 	j.st.Steps = append(j.st.Steps, Step{Name: name, At: j.r.deps.Now().UTC()})
-	j.persist()
+	if err := j.st.save(j.dir); err != nil {
+		j.st.Steps, j.st.Pending = j.st.Steps[:len(j.st.Steps)-1], pending
+		return err
+	}
 	// The matrix's other kill: the step written, nothing after it done.
 	if j.r.deps.Fault != nil {
 		_ = j.r.deps.Fault(name + writtenPoint) // ignored: a written point fails nothing; the matrix kills there
 	}
+	return nil
 }
 
 // recordPoint marks, for the fault matrix, the moment between an act and
@@ -224,6 +239,9 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	rep = &Report{Mode: "upgrade"}
 	defer stopOffTable(rep)
 	p, refusal := r.makePlan(ctx, rep)
+	if interrupted(ctx, rep) {
+		return rep
+	}
 	if p == nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+refusal
 		return rep
@@ -373,6 +391,11 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			return nil, err.Error()
 		}
 		need += size
+		// Its way back, before anything stops (the final review): a restore
+		// of what is there now, beside it, after an archive of it.
+		if err := j.wayBackPreconditions(ctx, size, size); err != nil {
+			return nil, "its way back could not be taken: " + err.Error()
+		}
 	}
 	if st.Kind != kindBinary {
 		free, err := freeBytes(dir)
@@ -390,7 +413,11 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			rep.Notes = append(rep.Notes, "the trace counts are not compared: "+note)
 		}
 	}
-	j.step(stepPrepared)
+	// Not written, nothing stopped: a refusal, and the run's directory, which
+	// holds the server's environment, is removed (the final review).
+	if err := j.record(stepPrepared); err != nil {
+		return nil, fmt.Sprintf("the run's state could not be written (%v), so nothing was stopped", err)
+	}
 	return j, ""
 }
 
@@ -521,7 +548,7 @@ func (j *job) ownPIDs() []int {
 // be shown not to. A process that could not be read cannot be shown not to
 // run from path, and refuses too.
 func (r *runner) serversOn(ctx context.Context, path, version string, upgrade bool, own ...int) error {
-	procs, unread, err := r.deps.Sys.Candidates()
+	procs, unread, err := r.deps.Sys.Candidates(ctx)
 	switch {
 	case err != nil:
 		return fmt.Errorf("the processes could not be listed to check what runs from %s: %w", path, err)

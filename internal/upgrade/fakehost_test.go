@@ -125,7 +125,7 @@ func (s *fakeServer) stop() {
 	close(s.done)
 }
 
-func (h *fakeHost) Candidates() ([]Process, int, error) {
+func (h *fakeHost) Candidates(context.Context) ([]Process, int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out []Process

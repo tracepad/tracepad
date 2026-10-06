@@ -31,9 +31,20 @@ type plan struct {
 	// eighth review: an older tracepad first on PATH runs nothing).
 	person   []string
 	binaries []string
+	// notes are what the plan could not check, said without a verdict.
+	notes []string
 	// ahead: what the command looks after runs past the latest stable
 	// release, and no version was named.
 	ahead bool
+	// latest is the latest stable release when no version was named and the
+	// installed binary is past it — a release candidate — which is then the
+	// target (raised): the plan never takes a server back from the binary it
+	// runs, nor forward to a candidate nobody named (the final review).
+	latest string
+	raised bool
+	// held are the command's servers behind a raised target: the person's
+	// to take there, by naming it.
+	held []string
 }
 
 func (p *plan) pending() bool {
@@ -58,9 +69,19 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 			return nil, err.Error()
 		}
 	}
-	rep.To = to
 	p := &plan{f: r.discover(ctx), to: to}
 	rep.fill(p.f)
+	// With no version named, the target is the later of the latest stable
+	// release and the installed binary (the final review): a candidate
+	// installed is not gone back from, and a server behind it is not taken
+	// to it unasked.
+	if b := p.f.Binary; r.flags.to == "" && b.Ours {
+		if order, ok := Compare(b.Version, to); ok && order > 0 {
+			p.latest, p.raised = to, true
+			p.to, to = b.Version, b.Version
+		}
+	}
+	rep.To = to
 
 	if err := r.pickTarget(p); err != nil {
 		return nil, err.Error()
@@ -71,12 +92,9 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		if !ok {
 			return nil, fmt.Sprintf("the installed binary says %q, which cannot be ordered against %s", bin.Version, to)
 		}
-		switch {
-		case order < 0 && r.flags.to == "":
-			// Past the latest stable release (a candidate), and no version
-			// named: nothing to do, not a downgrade (the tenth review).
-			p.ahead = true
-		case order < 0:
+		if order < 0 {
+			// Only a version named gets here: one not named was raised to
+			// the installed binary's above.
 			return nil, downgrade(to, "the installed binary", bin.Version)
 		}
 		p.replaceBinary = order > 0
@@ -165,6 +183,11 @@ func (r *runner) pickTarget(p *plan) error {
 		order, ok := Compare(p.to, v)
 		return ok && order > 0
 	}
+	// Behind a raised target, a server is the person's to take there by
+	// naming it: neither picked nor a choice.
+	if p.raised {
+		behind = func(string) bool { return false }
+	}
 	var ours []string
 	for i, s := range p.f.Servers {
 		if s.Ours && behind(s.Version) {
@@ -187,6 +210,9 @@ func (r *runner) pickTarget(p *plan) error {
 			}
 			if !s.Ours {
 				return fmt.Errorf("the server on %s is yours: %s", want, s.Reason)
+			}
+			if order, ok := Compare(p.to, s.Version); p.raised && ok && order > 0 {
+				return nil // named, and still the person's to take to a candidate
 			}
 			p.server = &p.f.Servers[i]
 			return nil
@@ -228,6 +254,9 @@ func (r *runner) othersBehind(p *plan) {
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
 		case !older(s.Version):
+		case s.Ours && p.raised:
+			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
+				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
 		case s.Ours:
 			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): %s --data-dir %s", s.Proc.PID, s.Version, r.self(), shq(s.DataDir)))
 		default:
@@ -239,6 +268,10 @@ func (r *runner) othersBehind(p *plan) {
 	// upgrade it.
 	for _, c := range p.f.Containers {
 		switch {
+		case c.Unchecked != "":
+			// Where it answers cannot be told: not checked, and said so —
+			// not called behind (the final review).
+			p.notes = append(p.notes, fmt.Sprintf("container %s was not checked: %s. Whether it is behind %s is yours to look at: docker exec %s /tracepad version", c.Name, c.Unchecked, p.to, shq(c.Name)))
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
 		case older(c.Version):
@@ -283,6 +316,9 @@ func serverAdvice(s Server) string {
 func (r *runner) planMode(ctx context.Context) *Report {
 	rep := &Report{Mode: "plan"}
 	p, refusal := r.makePlan(ctx, rep)
+	if interrupted(ctx, rep) {
+		return rep
+	}
 	if p == nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+refusal
 		return rep
@@ -290,6 +326,19 @@ func (r *runner) planMode(ctx context.Context) *Report {
 	r.describe(p, rep)
 	rep.ExitCode, rep.Summary = verdictOf(p)
 	return rep
+}
+
+// interrupted ends a plan an interrupt cut short — SIGTERM from the install
+// script's watchdog, Ctrl-C — with no verdict (the final review): what it
+// looked at in part is no finding, and the install script reads exit 1 as
+// "could not check", never as "something runs older".
+func interrupted(ctx context.Context, rep *Report) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	*rep = Report{Mode: rep.Mode, ExitCode: exitRefused,
+		Summary: "Interrupted: the look at the machine was cut short, so this says nothing of what runs; nothing was changed."}
+	return true
 }
 
 // verdictOf is what a plan finds, for --plan and for an upgrade that finds
@@ -303,10 +352,15 @@ func verdictOf(p *plan) (int, string) {
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending.", p.to)
 	case len(p.later) > 0:
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
+	case len(p.held) > 0:
+		return exitDecide, fmt.Sprintf("The installed binary is %s, a release candidate past the latest stable release %s, and a server runs behind it: yours to take there by naming it, as said below.", p.to, p.latest)
 	case len(p.person) > 0:
 		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, or may be, is yours.", p.to)
 	}
-	if p.ahead {
+	switch {
+	case p.raised:
+		return exitOK, fmt.Sprintf("Nothing to do: what this command looks after runs %s, the installed release candidate, past the latest stable release %s; --to names another.", p.to, p.latest)
+	case p.ahead:
 		return exitOK, fmt.Sprintf("Nothing to do: what this command looks after runs %s or a later release than that, the latest stable one; --to names another.", p.to)
 	}
 	return exitOK, fmt.Sprintf("Everything this command looks after runs %s already.", p.to)
@@ -318,7 +372,8 @@ func (r *runner) describe(p *plan, rep *Report) {
 	for i := range rep.Servers {
 		rep.Servers[i].Target = p.server != nil && rep.Servers[i].PID == p.server.Proc.PID
 	}
-	rep.Person = append(append(rep.Person, p.person...), p.binaries...)
+	rep.Person = append(append(append(rep.Person, p.held...), p.person...), p.binaries...)
+	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {

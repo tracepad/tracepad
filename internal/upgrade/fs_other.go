@@ -12,3 +12,5 @@ func isMountPoint(string) bool { return false }
 func statFree(string) (int64, error) { return 0, errors.New("not supported on this system") }
 
 func ownedByMe(os.FileInfo) bool { return true }
+
+func sameDevice(string, string) bool { return true }

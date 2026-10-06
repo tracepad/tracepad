@@ -23,8 +23,6 @@ func (j *job) settle(ctx context.Context) error {
 	}
 	done, err := j.happened(ctx, it.Step)
 	switch {
-	case errors.Is(err, errKeep):
-		return nil
 	case err != nil:
 		return fmt.Errorf("the run was cut short as it was to %s, and what is on disk does not say whether that happened: %v. Nothing was touched", it.What, err)
 	case !done:
@@ -144,6 +142,3 @@ func (j *job) happened(ctx context.Context, step string) (bool, error) {
 	}
 	return false, nil
 }
-
-// errKeep: the intent stays pending, for the act's own path to take up.
-var errKeep = errors.New("kept")

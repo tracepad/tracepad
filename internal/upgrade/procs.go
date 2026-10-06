@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,9 @@ type System interface {
 	// Candidates lists this user's processes, in this PID namespace, whose
 	// executable or first argument is named `tracepad`. unread counts the
 	// ones that could not be read, which makes "none found" a weaker claim.
-	Candidates() (procs []Process, unread int, err error)
+	// A listing ctx cuts short is an error, never a shorter list (the final
+	// review).
+	Candidates(ctx context.Context) (procs []Process, unread int, err error)
 	// Inspect reads one process; an error when it is gone or not readable.
 	Inspect(pid int) (Process, error)
 	Alive(pid int) bool

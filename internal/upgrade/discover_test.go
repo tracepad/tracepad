@@ -15,11 +15,11 @@ import (
 // listed is a machine whose processes are given.
 type listed struct{ procs []Process }
 
-func (l listed) Candidates() ([]Process, int, error) { return l.procs, 0, nil }
-func (listed) Inspect(int) (Process, error)          { return Process{}, os.ErrNotExist }
-func (listed) Alive(int) bool                        { return false }
-func (listed) Signal(int, syscall.Signal) error      { return nil }
-func (listed) Start(StartSpec) (Started, error)      { return nil, os.ErrInvalid }
+func (l listed) Candidates(context.Context) ([]Process, int, error) { return l.procs, 0, nil }
+func (listed) Inspect(int) (Process, error)                         { return Process{}, os.ErrNotExist }
+func (listed) Alive(int) bool                                       { return false }
+func (listed) Signal(int, syscall.Signal) error                     { return nil }
+func (listed) Start(StartSpec) (Started, error)                     { return nil, os.ErrInvalid }
 
 // Servers that take a connection and never answer are asked side by side,
 // under one deadline: three of them must not add up past it (the fourth

@@ -199,9 +199,10 @@ skill_into() {
 # plan asks the binary just put in place what still runs an older version
 # (spec 054 #15): each server and container, whose it is, and what to do. Its
 # report escapes what other programs supplied. Fifteen seconds at most: this is
-# advice, not a step that may hang. plan_status is its exit status: 10 or 4
-# when something runs older, 0 when nothing does; anything else (a binary from
-# before the command, the watchdog) adds nothing.
+# advice, not a step that may hang: the watchdog's SIGTERM ends it with exit 1
+# and no verdict. plan_status is its exit status: 10 or 4 when something runs
+# older, 0 when nothing does, 2 from a binary from before the command; anything
+# else — a refusal, the watchdog — is "could not check", never "runs older".
 plan() {
 	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
@@ -337,6 +338,11 @@ main() {
 		1/downgraded)
 			say ""
 			sed 's/^/  /' "$tmp/plan"
+			;;
+		0/* | 2/*) ;;
+		*)
+			say ""
+			say "Could not check what still runs an older version; to see it: $bin upgrade --plan"
 			;;
 		esac
 	fi

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -69,12 +70,20 @@ type inspectContainer struct {
 	ID     string `json:"Id"`
 	Name   string `json:"Name"`
 	Config struct {
-		Image  string            `json:"Image"`
-		Labels map[string]string `json:"Labels"`
+		Image      string            `json:"Image"`
+		Labels     map[string]string `json:"Labels"`
+		Env        []string          `json:"Env"`
+		Entrypoint []string          `json:"Entrypoint"`
+		Cmd        []string          `json:"Cmd"`
 	} `json:"Config"`
 	HostConfig struct {
 		PortBindings map[string][]portBinding `json:"PortBindings"`
 	} `json:"HostConfig"`
+	// NetworkSettings.Ports are the bindings as Docker made them: a port
+	// asked for as any (`-p 127.0.0.1::4318`) has its number only here.
+	NetworkSettings struct {
+		Ports map[string][]portBinding `json:"Ports"`
+	} `json:"NetworkSettings"`
 	Mounts []mount `json:"Mounts"`
 }
 
@@ -94,6 +103,48 @@ type Container struct {
 	Reason  string
 	// Default is whether it publishes the default port, 4318, on the host.
 	Default bool
+	// Unchecked says why the plan could not tell where to ask it, when it
+	// could not: a container not checked is said, not called behind (the
+	// final review).
+	Unchecked string
+}
+
+// containerAddress is where a container's server answers on this machine:
+// the port it listens on inside, read as the server reads its listen
+// address (its arguments, then TRACEPAD_LISTEN, then the default), published
+// on the host. A binding on every address is asked on loopback. why says
+// what kept the address from being told.
+func containerAddress(ic inspectContainer) (url string, onDefault bool, why string) {
+	p := Process{Argv: append(slices.Clone(ic.Config.Entrypoint), ic.Config.Cmd...), Env: ic.Config.Env}
+	_, listen, err := configuredDirs(p)
+	if err != nil {
+		return "", false, "what it runs is not a server's command line Tracepad can read (" + strings.Join(p.Argv, " ") + ")"
+	}
+	_, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", false, fmt.Sprintf("its listen address %q has no port the plan can read", listen)
+	}
+	bindings := ic.NetworkSettings.Ports[port+"/tcp"]
+	if len(bindings) == 0 {
+		bindings = ic.HostConfig.PortBindings[port+"/tcp"]
+	}
+	for _, b := range bindings {
+		onDefault = onDefault || b.HostPort == "4318"
+		host := b.HostIP
+		switch host {
+		case "", "0.0.0.0":
+			host = "127.0.0.1"
+		case "::":
+			host = "::1"
+		}
+		if u, ok := loopbackBase(host, b.HostPort); ok && url == "" {
+			url = u
+		}
+	}
+	if url == "" {
+		return "", onDefault, fmt.Sprintf("its server listens on port %s inside, which it does not publish on this machine's loopback", port)
+	}
+	return url, onDefault, ""
 }
 
 // imageRepo is the repository of ref when it is one of the image's, without
@@ -112,14 +163,6 @@ func imageRepo(ref string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func isLoopbackHost(h string) bool {
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
 }
 
 // containerReason is why a container is the person's: all are, in this
@@ -159,12 +202,7 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 				c.Volume = m.Name
 			}
 		}
-		for _, b := range ic.HostConfig.PortBindings["4318/tcp"] {
-			if isLoopbackHost(b.HostIP) {
-				c.URL, _ = loopbackBase(b.HostIP, b.HostPort)
-			}
-			c.Default = c.Default || b.HostPort == "4318"
-		}
+		c.URL, c.Default, c.Unchecked = containerAddress(ic)
 		cs = append(cs, c)
 	}
 	// Every container's address is asked at once, under the plan's deadline.

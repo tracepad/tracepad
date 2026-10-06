@@ -34,3 +34,13 @@ func ownedByMe(info os.FileInfo) bool {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	return ok && int(st.Uid) == os.Getuid()
 }
+
+// sameDevice says whether two paths are on one file system; one that cannot
+// be looked at is taken to be, which counts its room twice, never once.
+func sameDevice(a, b string) bool {
+	var x, y syscall.Stat_t
+	if syscall.Stat(a, &x) != nil || syscall.Stat(b, &y) != nil {
+		return true
+	}
+	return x.Dev == y.Dev
+}

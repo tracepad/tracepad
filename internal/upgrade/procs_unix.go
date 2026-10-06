@@ -43,12 +43,18 @@ func startDetached(spec StartSpec) (Started, error) {
 	// A server is the one process the command starts outside child(): a
 	// session of its own, so it outlives the command. A binary just put in
 	// place may be busy for a moment (ETXTBSY); each try is a fresh command.
+	// An empty environment is the server's, and is given it as it is: a nil
+	// one would hand it this command's own (the final review).
+	env := spec.Env
+	if env == nil {
+		env = []string{}
+	}
 	var cmd *exec.Cmd
 	if err := retryBusy(func() error {
 		cmd = &exec.Cmd{
 			Path:        spec.Path,
 			Args:        spec.Argv,
-			Env:         spec.Env,
+			Env:         env,
 			Dir:         spec.Dir,
 			Stdout:      log,
 			Stderr:      log,

@@ -25,8 +25,10 @@ dir="$(mktemp -d)"; curl -fsSL https://tracepad.github.io/tracepad/install.sh | 
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
-is the human's is behind; `1` refused — say why (*no stable release*: name the
-candidate it gives and ask). Show the human what it will do, and what it says
+is the human's is behind — a server behind an installed release candidate is
+too: show the command the plan gives, and run it only if they say so; `1`
+refused or interrupted — say why (*no stable release*: name the candidate it
+gives and ask), and run the plan again after an interrupt. Show the human what it will do, and what it says
 is theirs: a service, a Compose project, a server open beyond this machine.
 More than one server that is the command's: ask which, and pass its
 `--data-dir` to the upgrade. A container is the human's: show them the

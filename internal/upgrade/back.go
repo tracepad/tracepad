@@ -129,8 +129,14 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		}
 		j.spec = spec
 	}
-	if v, err := r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
-		return j.fail(fmt.Sprintf("the copy %s does not answer %s; nothing was touched", ps.Old, st.From))
+	// What the machine must give the way back, checked before its first
+	// act, as the upgrade checked it before its stop (the final review).
+	restoreBytes := int64(-1)
+	if st.Archive != nil && !st.has(stepBackRestored) && !st.has(stepBackMoved) && (ps.WroteAfterSwap || j.pathMayBeNew()) {
+		restoreBytes = st.Archive.Bytes
+	}
+	if err := j.wayBackPreconditions(ctx, restoreBytes, 0); err != nil {
+		return j.fail(err.Error() + "; nothing was touched")
 	}
 	if !st.has(stepStopSent) {
 		return wentBack{ok: true}
@@ -272,6 +278,80 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	j.step(stepBackStarted)
 	j.done("started %s again as pid %d, with its arguments and environment", st.From, ps.BackPID)
 	return j.checkBack(ctx, started, ps.BackPID, ps.BackStart)
+}
+
+// wayBackPreconditions are what a way back of a process run needs from the
+// machine rather than from the run: the copy of the old version in the run's
+// directory, and — when the archive may be restored — room for the restore
+// beside the data, and a parent directory the restore can be made in and
+// the data renamed aside through. The upgrade checks them before its stop,
+// and --back before its first act (the final review): a way back found
+// impossible only after the stop leaves a server down.
+//
+// restoreBytes is what a restore takes, or -1 when none is ahead; archiveBytes
+// is what an archive not yet written takes on the run directory's file
+// system, counted too when that is the data's.
+func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64) error {
+	st, ps := j.st, j.st.Process
+	if v, err := j.r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
+		return fmt.Errorf("the copy %s does not answer %s", ps.Old, st.From)
+	}
+	if restoreBytes < 0 {
+		return nil
+	}
+	if restoreBytes == 0 {
+		// An archive recorded without its size: the data's own is the
+		// nearest measure.
+		size, err := survey(ps.DataDir)
+		if err != nil {
+			return fmt.Errorf("the room a restore of %s needs cannot be told: %v", ps.DataDir, err)
+		}
+		restoreBytes = size
+	}
+	parent := filepath.Dir(ps.DataDir)
+	if !st.has(stepBackAside) {
+		after := ps.DataDir + ".after-" + st.Run
+		if _, err := os.Lstat(after); err == nil {
+			return fmt.Errorf("%s exists already, and this run did not put it there", after)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s cannot be looked at (%v)", after, err)
+		}
+		if info, err := os.Stat(parent); err != nil {
+			return fmt.Errorf("%s cannot be looked at (%v)", parent, err)
+		} else if info.Mode()&os.ModeSticky != 0 && !ownedByMe(info) {
+			// Only a file's owner renames it in a sticky directory of
+			// another's.
+			if d, err := os.Lstat(ps.DataDir); err != nil || !ownedByMe(d) {
+				return fmt.Errorf("%s is in %s, another user's sticky directory, and a way back could not rename it aside", ps.DataDir, parent)
+			}
+		}
+	}
+	// The way back makes the restore in the parent and renames through it:
+	// a directory made, renamed and removed there shows it can.
+	probe, err := os.MkdirTemp(parent, ".tracepad-probe-")
+	if err != nil {
+		return fmt.Errorf("a restore cannot be made beside %s (%v)", ps.DataDir, err)
+	}
+	moved := probe + "-moved"
+	if err := os.Rename(probe, moved); err != nil {
+		os.Remove(probe) // ignored: an empty directory of the command's own; its name says whose
+		return fmt.Errorf("nothing can be renamed in %s (%v), as a way back renames %s aside", parent, err, ps.DataDir)
+	}
+	if err := os.Remove(moved); err != nil {
+		return fmt.Errorf("%s does not let the way back remove what it makes there (%v)", parent, err)
+	}
+	free, err := freeBytes(parent)
+	if err != nil {
+		return fmt.Errorf("the room beside %s for a restore cannot be told (%v)", ps.DataDir, err)
+	}
+	need := restoreBytes + mib100
+	if sameDevice(parent, j.dir) {
+		need += archiveBytes
+	}
+	if free < need {
+		return fmt.Errorf("no room beside %s for the restore a way back may need: %d MiB free, %d MiB needed", ps.DataDir, free>>20, need>>20)
+	}
+	return nil
 }
 
 // pathMayBeNew says, from the steps alone, whether the install path may have

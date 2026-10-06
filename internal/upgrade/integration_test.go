@@ -124,6 +124,8 @@ type world struct {
 	url     string
 	mirror  string
 	env     map[string]string
+	// bare starts the server with no environment at all, as `env -i` does.
+	bare bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -182,6 +184,9 @@ func (w *world) startWith(dir string, reap bool) int {
 	cmd.Args[0] = "tracepad"
 	cmd.Env = []string{"HOME=" + w.home, "PATH=/usr/bin:/bin",
 		"TRACEPAD_PROJECTS=demo:" + testPK + ":" + testSK, "TRACEPAD_SWEEP_INTERVAL=2h", "TRACEPAD_SETUP=off"}
+	if w.bare {
+		cmd.Env = []string{}
+	}
 	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -897,5 +902,31 @@ func TestATerminalClosedDuringAWayBackDoesNotEndIt(t *testing.T) {
 	w.waitVersion(vOld)
 	if got := w.count(); got != 1 {
 		t.Errorf("traces: %d", got)
+	}
+}
+
+// A server started with no environment (`env -i`) is upgraded and starts
+// again with none: an empty environment is read, not unread, and a nil one
+// would have handed it the command's own (the final review).
+func TestAServerWithNoEnvironmentKeepsNone(t *testing.T) {
+	w := newWorld(t)
+	w.bare = true
+	oldPID := w.start()
+	w.waitVersion(vOld)
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, rep.Summary)
+	}
+	w.waitVersion(vNew)
+	newPID, err := lockedBy(w.data)
+	if err != nil || newPID == oldPID {
+		t.Fatalf("lock records %d (%v)", newPID, err)
+	}
+	p, err := newSystem().Inspect(newPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Env) > 0 {
+		t.Errorf("the server was started with an environment: %q", p.Env)
 	}
 }

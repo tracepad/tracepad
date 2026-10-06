@@ -26,14 +26,13 @@ type kernSystem struct{}
 
 func newSystem() System { return kernSystem{} }
 
-func (kernSystem) Candidates() ([]Process, int, error) {
+func (kernSystem) Candidates(ctx context.Context) ([]Process, int, error) {
 	table, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
 		return nil, 0, err
 	}
 	uid := uint32(os.Getuid())
-	var procs []Process
-	unread := 0
+	var pids []int
 	for _, k := range table {
 		pid := int(k.Proc.P_pid)
 		if pid <= 0 || pid == os.Getpid() || k.Eproc.Pcred.P_ruid != uid {
@@ -59,7 +58,19 @@ func (kernSystem) Candidates() ([]Process, int, error) {
 				}
 			}
 		}
-		p, err := readSettled(pid, inspectDarwin)
+		pids = append(pids, pid)
+	}
+	// One lsof for all of them, under the caller's deadline (the final
+	// review): one each, in turn, took as long as there were servers.
+	files := lsofFiles(ctx, pids)
+	if err := ctx.Err(); err != nil {
+		return nil, 0, fmt.Errorf("the processes were not all read in time: %w", err)
+	}
+	read := func(pid int) (Process, error) { return inspectWith(pid, files[pid]) }
+	var procs []Process
+	unread := 0
+	for _, pid := range pids {
+		p, err := readSettled(pid, read)
 		switch {
 		case errors.Is(err, errNotMine), errors.Is(err, errGone):
 			continue
@@ -80,6 +91,14 @@ func (kernSystem) Signal(pid int, sig syscall.Signal) error {
 func (kernSystem) Start(spec StartSpec) (Started, error) { return startDetached(spec) }
 
 func inspectDarwin(pid int) (Process, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return inspectWith(pid, lsofFiles(ctx, []int{pid})[pid])
+}
+
+// inspectWith reads a process, with what lsof said of its working directory
+// and output.
+func inspectWith(pid int, f openFiles) (Process, error) {
 	// The table first: another user's process is not ours, and its
 	// arguments are not this user's to read (the tenth review).
 	k, kerr := unix.SysctlKinfoProc("kern.proc.pid", pid)
@@ -95,7 +114,7 @@ func inspectDarwin(pid int) (Process, error) {
 		return Process{}, fmt.Errorf("pid %d: %w", pid, err)
 	}
 	p := Process{PID: pid, Argv: argv, Env: env, Exe: exe}
-	p.Cwd, p.Stdout = lsofCwdStdout(pid)
+	p.Cwd, p.Stdout = f.cwd, f.stdout
 	if p.Exe != "" && !filepath.IsAbs(p.Exe) {
 		if p.Cwd == "" {
 			p.Exe = ""
@@ -158,33 +177,48 @@ func parseProcargs2(raw []byte) (exe string, argv, env []string, err error) {
 	return exe, argv, env, nil
 }
 
-// lsofCwdStdout asks lsof for the working directory and descriptor 1. Either
-// is empty when lsof cannot say; descriptor 1 counts only as a regular file.
-func lsofCwdStdout(pid int) (cwd, stdout string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := child(ctx, "lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd,1", "-Fftn").Output()
-	if err != nil && len(out) == 0 {
-		return "", ""
+// openFiles is what lsof says of a process: its working directory, and
+// descriptor 1 when that is a regular file. Either is empty when lsof cannot
+// say.
+type openFiles struct{ cwd, stdout string }
+
+// lsofFiles asks lsof, once, for the working directory and descriptor 1 of
+// each of pids.
+func lsofFiles(ctx context.Context, pids []int) map[int]openFiles {
+	files := map[int]openFiles{}
+	if len(pids) == 0 {
+		return files
 	}
-	var fd, typ string
+	list := make([]string, len(pids))
+	for i, pid := range pids {
+		list[i] = strconv.Itoa(pid)
+	}
+	// lsof exits 1 when one of them is gone; what it printed of the others
+	// stands.
+	out, _ := child(ctx, "lsof", "-a", "-p", strings.Join(list, ","), "-d", "cwd,1", "-Fpftn").Output() // ignored: what lsof could not say is empty, and the start refuses on it
+	pid, fd, typ := 0, "", ""
 	for _, line := range strings.Split(string(out), "\n") {
 		if line == "" {
 			continue
 		}
 		switch line[0] {
+		case 'p':
+			pid, _ = strconv.Atoi(line[1:]) // ignored: a number lsof printed; one that is not names no process asked
+			fd, typ = "", ""
 		case 'f':
 			fd, typ = line[1:], ""
 		case 't':
 			typ = line[1:]
 		case 'n':
+			f := files[pid]
 			switch {
 			case fd == "cwd":
-				cwd = line[1:]
+				f.cwd = line[1:]
 			case fd == "1" && typ == "REG":
-				stdout = line[1:]
+				f.stdout = line[1:]
 			}
+			files[pid] = f
 		}
 	}
-	return cwd, stdout
+	return files
 }

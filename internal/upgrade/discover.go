@@ -283,7 +283,7 @@ func (r *runner) discover(ctx context.Context) Findings {
 	go func() { defer wg.Done(); f.Binary = r.installedBinary(ctx) }()
 	go func() { defer wg.Done(); containers, note = r.containers(ctx) }()
 	go func() { defer wg.Done(); probe = r.ask(ctx) }()
-	procs, unread, err := r.deps.Sys.Candidates()
+	procs, unread, err := r.deps.Sys.Candidates(ctx)
 	switch {
 	case err != nil:
 		f.complete, f.processes = false, false

@@ -152,7 +152,7 @@ type walk struct {
 func newWalk(t *testing.T, b walkBranch, target int) *walk {
 	c := &walk{t: t, b: b, k: newKillWorld(t, b.kind), target: target}
 	if b.late {
-		procs, _, _ := c.k.w.host.Candidates()
+		procs, _, _ := c.k.w.host.Candidates(context.Background())
 		c.late = &lateStopper{fakeHost: c.k.w.host, pid: procs[0].PID, late: true}
 		c.k.deps.Sys = c.late
 	}

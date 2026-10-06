@@ -357,7 +357,7 @@ func newKillWorld(t *testing.T, kind string) *killWorld {
 			return fmt.Sprintf("%s %d %d %s %q %s", w.answers(), pid, n, binary(), beside, steps(dir))
 		}
 	case kindBinary:
-		procs, _, _ := w.host.Candidates()
+		procs, _, _ := w.host.Candidates(context.Background())
 		for _, p := range procs {
 			_ = w.host.Signal(p.PID, 15)
 		}
@@ -664,7 +664,7 @@ func theFaultMatrix(t *testing.T) {
 	t.Run("scenario/reused: a late stop's pid", func(t *testing.T) {
 		t.Parallel()
 		w := newFakeWorld(t, 2)
-		procs, _, _ := w.host.Candidates()
+		procs, _, _ := w.host.Candidates(context.Background())
 		late := &lateStopper{fakeHost: w.host, pid: procs[0].PID, late: true}
 		deps := w.deps()
 		deps.Sys = late

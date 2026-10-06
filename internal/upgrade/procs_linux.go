@@ -5,6 +5,7 @@ package upgrade
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ type procSystem struct{}
 
 func newSystem() System { return procSystem{} }
 
-func (procSystem) Candidates() ([]Process, int, error) {
+func (procSystem) Candidates(ctx context.Context) ([]Process, int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, 0, err
@@ -28,6 +29,9 @@ func (procSystem) Candidates() ([]Process, int, error) {
 	var procs []Process
 	unread := 0
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, fmt.Errorf("the processes were not all read in time: %w", err)
+		}
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid == os.Getpid() {
 			continue

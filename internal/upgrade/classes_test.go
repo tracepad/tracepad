@@ -59,7 +59,7 @@ func TestNoReplacementPutsAnOlderBinaryUnderANewerServer(t *testing.T) {
 	deps := w.deps()
 	// The binary alone: stop the world's server first, so no server is the
 	// command's.
-	procs, _, _ := w.host.Candidates()
+	procs, _, _ := w.host.Candidates(context.Background())
 	for _, p := range procs {
 		_ = w.host.Signal(p.PID, 15)
 	}
@@ -192,7 +192,7 @@ func TestTheDataIsHeldAcrossEveryStart(t *testing.T) {
 func TestLaunchHoldsTheDataOnEitherSideOfTheStart(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
-	procs, _, _ := w.host.Candidates()
+	procs, _, _ := w.host.Candidates(context.Background())
 	for _, p := range procs {
 		_ = w.host.Signal(p.PID, 15)
 	}
@@ -300,7 +300,7 @@ func TestNoBinaryIsPutUnderAnotherServer(t *testing.T) {
 				}
 				w.host.mu.Unlock()
 			}
-			procs, _, _ := w.host.Candidates()
+			procs, _, _ := w.host.Candidates(context.Background())
 			for _, mode := range [][]string{{"--plan"}, nil} {
 				rep, code := runIn(t, context.Background(), w.deps(), append(mode, tc.args(w)...)...)
 				if code != exitRefused || !strings.Contains(rep.Summary, "is not this run's") {
@@ -378,7 +378,7 @@ func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
 	t.Parallel()
 	t.Run("binary only", func(t *testing.T) {
 		w := newFakeWorld(t, 2)
-		procs, _, _ := w.host.Candidates()
+		procs, _, _ := w.host.Candidates(context.Background())
 		for _, p := range procs {
 			_ = w.host.Signal(p.PID, 15)
 		}
@@ -427,7 +427,7 @@ func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
 			f.Close()
 		}, "data.tar.gz"},
 		{"a foreign holder of the data", func(w *fakeWorld, _ string) {
-			procs, _, _ := w.host.Candidates()
+			procs, _, _ := w.host.Candidates(context.Background())
 			for _, p := range procs {
 				_ = w.host.Signal(p.PID, 15)
 			}
@@ -521,6 +521,36 @@ func TestAStateThatCannotBeWrittenStopsTheRun(t *testing.T) {
 	w.waitVersion(fOld)
 	if n, _ := countTraces(filepath.Join(w.data, dataDBName)); n != 2 {
 		t.Errorf("traces: %d", n)
+	}
+}
+
+// A state the disk will not take at "prepared" — the last step before the
+// stop — is a refusal with nothing stopped, and the run's directory, which
+// holds the server's environment, is removed (the final review).
+func TestAStateUnwrittenBeforeTheStopIsARefusal(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	deps.Fault = func(point string) error {
+		if point == stepPrepared+recordPoint {
+			// The state's name taken by a directory with something in it:
+			// the rename that writes the state fails.
+			states, _ := filepath.Glob(filepath.Join(deps.Backups, "*", stateFile))
+			_ = os.Remove(states[0])
+			_ = os.MkdirAll(filepath.Join(states[0], "x"), 0o700)
+		}
+		return nil
+	}
+	pid, _ := lockedBy(w.data)
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitRefused || !strings.Contains(rep.Summary, "could not be written") || !strings.Contains(rep.Summary, "nothing was stopped") || rep.Run != nil {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	if !w.host.Alive(pid) || w.answers() != fOld {
+		t.Error("the server was stopped")
+	}
+	if runs, _ := filepath.Glob(filepath.Join(deps.Backups, "*", "server.json")); len(runs) > 0 {
+		t.Errorf("the run's environment was left: %v", runs)
 	}
 }
 
@@ -705,7 +735,7 @@ func TestWhatCannotBeReadRefuses(t *testing.T) {
 			saved := freeBytes
 			freeBytes = func(string) (int64, error) { return 0, errors.New("statfs: not implemented") }
 			w.t.Cleanup(func() { freeBytes = saved })
-		}, "could not tell the room", true},
+		}, "for a restore cannot be told", true},
 		{"the run's own server that could not be read (9)", func(w *fakeWorld, newPID int) { w.host.unreadable[newPID] = true }, "nothing was touched", false},
 	} {
 		t.Run("back/"+tc.name, func(t *testing.T) {
@@ -827,6 +857,35 @@ func TestAnInterruptBeforeTheStopStopsNothing(t *testing.T) {
 	}
 }
 
+// A plan an interrupt cuts short — the install script's watchdog sends
+// SIGTERM — ends with exit 1 and no verdict, whatever it had found by then
+// (the final review): the install script reads that as "could not check".
+// The upgrade's own plan stops the same way, with nothing made.
+func TestAnInterruptedPlanSaysNothing(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	for _, mode := range [][]string{{"--plan"}, {}} {
+		deps := w.deps()
+		ctx, cancel := context.WithCancel(context.Background())
+		version := deps.Version
+		deps.Version = func(c context.Context, path string) (string, error) {
+			cancel()
+			return version(c, path)
+		}
+		rep, code := runIn(t, ctx, deps, append(mode, "--to", fNew)...)
+		cancel()
+		if code != exitRefused || !strings.HasPrefix(rep.Summary, "Interrupted:") || len(rep.Servers) > 0 || len(rep.Person) > 0 || rep.Run != nil {
+			t.Errorf("%q: %d %s %+v", mode, code, rep.Summary, rep)
+		}
+		if entries, _ := os.ReadDir(deps.Backups); len(entries) > 0 {
+			t.Errorf("%q: made %v", mode, entries)
+		}
+	}
+	if w.answers() != fOld {
+		t.Error("the server changed")
+	}
+}
+
 // Past the latest stable release — a candidate installed — with no version
 // named, there is nothing to do: not a downgrade (the tenth review). Named,
 // the older version is refused as before.
@@ -853,6 +912,115 @@ func TestACandidatePastTheLatestIsNothingToDo(t *testing.T) {
 	}
 	if w.answers() != fNew {
 		t.Error("something changed")
+	}
+}
+
+// A way back's preconditions are checked before the stop, not found after
+// it (the final review): a data directory whose parent the restore cannot be
+// made in, or that has no room for the restore beside an archive on the same
+// file system, refuses the upgrade with the server still running and nothing
+// made. --back checks them before its first act too.
+func TestTheWayBacksPreconditionsComeBeforeTheStop(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root writes any directory")
+	}
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	parent := filepath.Dir(w.data)
+	pid, _ := lockedBy(w.data)
+	untouched := func(what string) {
+		t.Helper()
+		if !w.host.Alive(pid) || w.answers() != fOld {
+			t.Errorf("%s: the server was stopped", what)
+		}
+		if entries, _ := os.ReadDir(deps.Backups); len(entries) > 1 {
+			t.Errorf("%s: runs left: %v", what, entries)
+		}
+	}
+
+	// The backups are beside the data here: made before the parent is made
+	// read-only, as they are on any machine an upgrade ran on before.
+	if err := os.MkdirAll(deps.Backups, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	_ = os.Chmod(parent, 0o700)
+	if code != exitRefused || !strings.Contains(rep.Summary, "nothing changed: its way back could not be taken: a restore cannot be made beside "+w.data) {
+		t.Errorf("a read-only parent: %d %s", code, rep.Summary)
+	}
+	untouched("a read-only parent")
+
+	// Room for one copy of the data beside it, not for the archive too.
+	size, _ := survey(w.data)
+	saved := freeBytes
+	t.Cleanup(func() { freeBytes = saved })
+	freeBytes = func(dir string) (int64, error) {
+		if dir == parent {
+			return size + mib100 + size/2, nil
+		}
+		return 1 << 40, nil
+	}
+	rep, code = runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitRefused || !strings.Contains(rep.Summary, "no room beside "+w.data+" for the restore") {
+		t.Errorf("no room: %d %s", code, rep.Summary)
+	}
+	untouched("no room")
+	freeBytes = saved
+
+	// --back, from a healthy upgrade: refused before its first act, the new
+	// version left running; once the parent takes writes, it goes back.
+	rep, code = runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	_ = os.Chmod(parent, 0o500)
+	back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+	_ = os.Chmod(parent, 0o700)
+	if code == exitOK || !strings.Contains(back.Summary, "a restore cannot be made beside") || !strings.Contains(back.Summary, "nothing was touched") || w.answers() != fNew {
+		t.Errorf("--back: %d %s", code, back.Summary)
+	}
+	if st, _ := loadState(rep.Run.Dir); st.has(stepBackBegun) {
+		t.Error("--back acted before it refused")
+	}
+	backUntilDone(t, deps, rep.Run.ID)
+	w.waitVersion(fOld)
+}
+
+// The final review's example: a release candidate installed past the latest
+// stable release, and the command's server still running the stable one
+// from it. With no version named the target is the candidate, not the
+// stable release: the plan never calls that "nothing to do", and never takes
+// the server to a candidate unasked — it is the person's, with the command
+// that does it (exit 4). Named, the candidate is upgraded to as any version.
+func TestAServerBehindAnInstalledCandidateIsThePersons(t *testing.T) {
+	t.Parallel()
+	const rc = "0.5.1-rc.1"
+	w := newFakeWorld(t, 2)
+	scriptBinary(t, w.install, rc)
+	deps := w.deps()
+	mirror := filepath.Join(t.TempDir(), "mirror")
+	mirrorRelease(t, mirror, fOld, fOld, true)
+	mirrorRelease(t, mirror, rc, rc, false)
+	deps.Releases = fakeReleases(t, mirror)
+	for _, mode := range [][]string{{"--plan"}, nil} {
+		rep, code := runIn(t, context.Background(), deps, mode...)
+		person := strings.Join(rep.Person, "\n")
+		if code != exitDecide || rep.To != rc || rep.Run != nil || !strings.Contains(person, "upgrade --to "+rc+" --data-dir "+w.data) {
+			t.Errorf("%q: %d to %s: %s\n%s", mode, code, rep.To, rep.Summary, person)
+		}
+	}
+	if w.answers() != fOld {
+		t.Fatal("the server was taken to the candidate unasked")
+	}
+	if rep, code := runIn(t, context.Background(), deps, "--to", rc, "--data-dir", w.data); code != exitOK {
+		t.Fatalf("named: %d %s", code, rep.Summary)
+	}
+	w.waitVersion(rc)
+	if rep, code := runIn(t, context.Background(), deps, "--plan"); code != exitOK || !strings.Contains(rep.Summary, "Nothing to do") {
+		t.Errorf("after: %d %s", code, rep.Summary)
 	}
 }
 
@@ -888,7 +1056,7 @@ func TestAProcessIsItsPIDAndItsStart(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
 	r := &runner{deps: w.deps()}
-	procs, _, _ := w.host.Candidates()
+	procs, _, _ := w.host.Candidates(context.Background())
 	p := procs[0]
 	spec := ServerSpec{Exe: p.Exe, Argv: p.Argv}
 	for _, tc := range []struct {

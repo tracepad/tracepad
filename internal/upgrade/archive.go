@@ -52,6 +52,9 @@ type Archived struct {
 	// was written by another program (a container's) and only its presence
 	// is checked.
 	DBSize int64 `json:"db_size"`
+	// Bytes is what its files take restored: the room a way back's restore
+	// needs, known before the way back reads the archive (the final review).
+	Bytes int64 `json:"bytes,omitempty"`
 }
 
 // writeArchive writes dataDir's contents to path as a gzipped tar, entries
@@ -67,7 +70,7 @@ func writeArchive(dataDir, path string) (Archived, error) {
 	buf := bufio.NewWriterSize(io.MultiWriter(out, hash), 1<<20)
 	gz := gzip.NewWriter(buf)
 	tw := tar.NewWriter(gz)
-	dbSize := int64(-1)
+	dbSize, total := int64(-1), int64(0)
 	err = filepath.WalkDir(dataDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -112,6 +115,7 @@ func writeArchive(dataDir, path string) (Archived, error) {
 		if n != info.Size() {
 			return fmt.Errorf("%s changed while it was archived", p)
 		}
+		total += n
 		if rel == dataDBName {
 			dbSize = n
 		}
@@ -135,7 +139,7 @@ func writeArchive(dataDir, path string) (Archived, error) {
 	if dbSize < 0 {
 		return Archived{}, fmt.Errorf("%s has no %s", dataDir, dataDBName)
 	}
-	return Archived{SHA256: hex.EncodeToString(hash.Sum(nil)), DBSize: dbSize}, nil
+	return Archived{SHA256: hex.EncodeToString(hash.Sum(nil)), DBSize: dbSize, Bytes: total}, nil
 }
 
 // verifyArchive reads an archive back whole: its bytes hash to what was
