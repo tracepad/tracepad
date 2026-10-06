@@ -424,12 +424,15 @@ func TestUpgradeARunningServerKeepsItsArgumentsEnvironmentAndTraces(t *testing.T
 		t.Errorf("set aside %q, want %s in it", back.SetAside, after)
 	}
 
-	// Twice is refused, and changes nothing.
+	// Twice ends where once did, and changes nothing (#31).
+	pid, _ := lockedBy(w.data)
 	again, code := w.run(w.deps(), "--back", rep.Run.ID)
-	if code != exitRefused {
+	if code != exitOK || len(again.Done) > 0 {
 		t.Fatalf("second way back: exit %d, %+v", code, again)
 	}
-	w.waitVersion(vOld)
+	if now, _ := lockedBy(w.data); now != pid || w.count() != 3 {
+		t.Errorf("the second way back changed what runs: pid %d, was %d; %d traces", now, pid, w.count())
+	}
 }
 
 func TestABrokenReleaseIsNotHealthyAndTheWayBackRuns(t *testing.T) {

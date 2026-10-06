@@ -3,42 +3,68 @@
 package upgrade
 
 import (
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// runnerCgroup is where every process of a GitHub-hosted runner sits: inside
-// the runner agent's unit, which started the shell and runs nothing of ours.
+// sessionScope is a terminal's: what a server started by hand, or by
+// setup.md's `nohup … &`, sits in. On a CI runner every process sits in the
+// agent's unit instead, which by #29 makes it the person's; so the servers
+// these tests start are read as in a session, and the tests below read the
+// cgroup as it is.
+const sessionScope = "0::/user.slice/user-1000.slice/session-1.scope\n"
+
+func init() { cgroupOf = func(string) string { return sessionScope } }
+
+// runnerCgroup is where every process of a GitHub-hosted runner sits.
 const runnerCgroup = "0::/system.slice/hosted-compute-agent.service\n"
 
-func asOnARunner(t *testing.T, mainPID func() int, execStart string) {
-	t.Helper()
-	savedCgroup, savedShow := cgroupOf, unitShow
-	t.Cleanup(func() { cgroupOf, unitShow = savedCgroup, savedShow })
-	cgroupOf = func(string) string { return runnerCgroup }
-	unitShow = func(bool, string) (int, string, error) { return mainPID(), execStart, nil }
-}
-
-func TestAServerStartedInsideAnotherServicesUnitIsTheCommands(t *testing.T) {
-	w := newWorld(t)
-	w.start()
-	asOnARunner(t, func() int { return 1 }, "{ path=/opt/runner/agent ; argv[]=/opt/runner/agent ; ignore_errors=no }")
-	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
-	if code != exitOK {
-		t.Fatalf("exit %d, %s", code, rep.Summary)
-	}
-	w.waitVersion(vNew)
-}
-
-func TestAServerItsUnitRunsIsThePersons(t *testing.T) {
+// In a service's unit — the CI runner's agent's, whatever started the shell —
+// a server is the person's, and the command leaves it (#29).
+func TestAServerInAServicesUnitIsThePersons(t *testing.T) {
 	w := newWorld(t)
 	pid := w.start()
-	asOnARunner(t, func() int { return pid }, "")
+	saved := cgroupOf
+	t.Cleanup(func() { cgroupOf = saved })
+	cgroupOf = func(string) string { return runnerCgroup }
 	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
-	if code != exitRefused || !strings.Contains(rep.Summary, "runs as the systemd unit hosted-compute-agent.service") {
+	if code != exitRefused || !strings.Contains(rep.Summary, "the systemd unit hosted-compute-agent.service") {
 		t.Fatalf("exit %d, %s", code, rep.Summary)
 	}
 	if !alive(pid) || w.installedVersion() != vOld {
 		t.Error("something was touched")
 	}
+}
+
+// The machine's own cgroup, read as the command reads it, gives the rule's
+// answer: on a runner, a service's unit, and the server is the person's; in
+// a container without systemd, the root, and it is the command's.
+func TestTheRealCgroupDecidesByTheRule(t *testing.T) {
+	saved := cgroupOf
+	t.Cleanup(func() { cgroupOf = saved })
+	cgroupOf = func(dir string) string {
+		b, _ := os.ReadFile(dir + "/cgroup")
+		return string(b)
+	}
+	w := newWorld(t)
+	pid := w.start()
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cgroup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := systemdUnit(string(b))
+	p, err := newSystem().Inspect(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Manager != want {
+		t.Errorf("the process reads %q, the rule says %q", p.Manager, want)
+	}
+	s, _ := classifyServer(p, w.install)
+	if s.Ours == (want != "") {
+		t.Errorf("cgroup %q: ours=%v (%s)", b, s.Ours, s.Reason)
+	}
+	t.Logf("this machine: %q → %q", strings.TrimSpace(string(b)), want)
 }

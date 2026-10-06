@@ -238,8 +238,10 @@ jobs:
   # the fault matrix again on them. The gate runs the command on fakes; this
   # is the minutes a fake saves, spent only when a pull request touches what
   # it tests, and on every merge to main. On ubuntu-latest every process sits
-  # in the runner agent's systemd unit — exactly the unit the command must
-  # tell from one that runs a server (Decisions 22, 26).
+  # in the runner agent's systemd unit, which makes a server the person's
+  # (Decision 29): the tests read their servers as a terminal's, and one test
+  # reads the runner's real cgroup by the rule. A change to the toolchain, the
+  # dependencies, the Makefile's target or this job runs it too (Decision 33).
   upgrade-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -260,7 +262,7 @@ jobs:
           else
             for f in $(git diff --name-only "$BASE" HEAD); do
               case "$f" in
-                internal/upgrade/*|internal/store/*|internal/server/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|scripts/install-test.sh|Dockerfile|.goreleaser.yaml) run=true ;;
+                internal/upgrade/*|internal/store/*|internal/server/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|scripts/install-test.sh|Dockerfile|.goreleaser.yaml|go.mod|go.sum|Makefile|.github/workflows/ci.yml) run=true ;;
               esac
             done
           fi

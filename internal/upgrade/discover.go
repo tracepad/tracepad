@@ -197,10 +197,10 @@ func classifyServer(p Process, install string) (Server, bool) {
 		s.Reason = fmt.Sprintf("it runs %s, not the installed %s", p.Exe, install)
 	case !recordsPID(dataDir, p.PID):
 		s.Reason = fmt.Sprintf("the lock of its data directory %s does not record it", dataDir)
+	case strings.HasPrefix(p.Manager, "its "):
+		s.Reason = p.Manager
 	case p.Manager != "":
-		s.Reason = "it runs as " + p.Manager + ", which restarts it"
-	case p.Unasked != "":
-		s.Reason = p.Unasked
+		s.Reason = "it runs in " + p.Manager + ", which may restart what the command stops"
 	case s.URL == "":
 		s.Reason = fmt.Sprintf("it listens on %s, beyond this machine", listen)
 	case isMountPoint(dataDir):

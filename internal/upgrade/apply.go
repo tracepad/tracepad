@@ -38,40 +38,60 @@ type job struct {
 	// inspect and image are the old container's (a container run).
 	inspect inspectContainer
 	image   inspectImage
-	// held lets go of the data locks the command holds: from the stop until
-	// a server starts on the data, through a way back (spec 054 #26, #28).
-	held []func()
+	// held are the database locks the command holds, by data directory:
+	// from the stop until a server starts on the data, and through a way
+	// back (spec 054 #26, #28, #32).
+	held map[string]func()
 }
 
-// hold takes the lock of the database at dbLock, as a server takes it, and
+// hold takes the lock of dataDir's database, as a server takes it, and
 // keeps it until release: a server a shell loop or a supervisor brings back
 // while the command archives or swaps the data cannot take the database and
-// write into it. ok is false when another process holds it.
+// write into it. ok is false when another process holds it. Holding it
+// already is ok.
 func (j *job) hold(dataDir string) (ok bool, err error) {
+	if j.holds(dataDir) {
+		return true, nil
+	}
 	release, ok, err := store.TryLock(filepath.Join(dataDir, dataDBName))
 	if err != nil || !ok {
 		return ok, err
 	}
-	j.held = append(j.held, release)
+	if j.held == nil {
+		j.held = map[string]func(){}
+	}
+	j.held[dataDir] = release
 	return true, nil
 }
 
-// release lets go of the data directory's lock, right before a server starts
-// on it, or when the command gives the data back.
-func (j *job) release() {
-	for _, release := range j.held {
-		release()
-	}
-	j.held = nil
+func (j *job) holds(dataDir string) bool {
+	_, ok := j.held[dataDir]
+	return ok
 }
 
-// at marks a step of a swap or a way back for the fault matrix: the error a
-// test injects there is the step's failure.
-func (j *job) at(point string) error {
+// letGo lets go of one directory's lock.
+func (j *job) letGo(dataDir string) {
+	if release, ok := j.held[dataDir]; ok {
+		release()
+		delete(j.held, dataDir)
+	}
+}
+
+// release lets go of every lock the command holds, when it ends.
+func (j *job) release() {
+	for dir := range j.held {
+		j.letGo(dir)
+	}
+}
+
+// at marks where the act a step records happens, for the fault matrix: the
+// error a test injects there is the act's failure. Its points are the
+// table's steps (#31).
+func (j *job) at(step string) error {
 	if j.r.deps.Fault == nil {
 		return nil
 	}
-	return j.r.deps.Fault(point)
+	return j.r.deps.Fault(step)
 }
 
 // unstep takes back a step recorded ahead of an act that then did not happen.
@@ -86,7 +106,11 @@ func (j *job) unstep(name string) {
 	_ = j.st.save(j.dir)
 }
 
+// step records a step, along the run's table.
 func (j *job) step(name string) error {
+	if last := j.st.last(); !allows(j.st.Kind, last, name) {
+		badStep(j.st.Kind, last, name)
+	}
 	j.st.Steps = append(j.st.Steps, Step{Name: name, At: j.r.deps.Now().UTC()})
 	return j.st.save(j.dir)
 }
@@ -219,6 +243,16 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 			return nil, fmt.Sprintf("no copy of the installed %s to go back to: %v", bin.Version, err)
 		}
 		st.Binary.Old = old
+		// Before anything stops (the sixth review): a server running the
+		// installed binary at a later version refuses the run here, not
+		// after its server is down. The replacement checks again.
+		var own []int
+		if p.server != nil {
+			own = append(own, p.server.Proc.PID)
+		}
+		if err := r.nothingNewerRuns(ctx, bin.Path, p.to, own...); err != nil {
+			return nil, err.Error()
+		}
 	}
 
 	var need int64 = mib100
@@ -272,6 +306,10 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 func (r *runner) lockRuns(rep *Report) (release func(), ok bool) {
 	if err := os.MkdirAll(r.deps.Backups, 0o700); err != nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: could not make "+r.deps.Backups+": "+err.Error()
+		return nil, false
+	}
+	if err := private(r.deps.Backups); err != nil {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
 		return nil, false
 	}
 	release, ok, err := store.TryLock(filepath.Join(r.deps.Backups, "runs"))
@@ -349,7 +387,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	}
 	_, err = io.Copy(out, in)
 	if err == nil {
-		err = out.Sync()
+		err = syncFile(out)
 	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
@@ -547,7 +585,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		j.stuck("could not record the run's state: " + err.Error())
 		return
 	}
-	err := j.at("swap.stop")
+	err := j.at(stepStopSent)
 	if err == nil {
 		err = r.signal(ps.PID)
 	}
@@ -559,7 +597,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		rep.Run = nil
 		return
 	}
-	if !r.waitGone(ctx, ps.PID) {
+	if err := j.at(stepStopped); err != nil || !r.waitGone(ctx, ps.PID) {
 		rep.ExitCode = exitStuck
 		rep.Summary = fmt.Sprintf("Server pid %d was asked to stop and has not stopped in %s; it may still. Nothing else changed.", ps.PID, r.deps.StopWait)
 		rep.Next = append(rep.Next, "when it has stopped, start it again as it was: "+j.upgradeCmd("--back "+st.Run))
@@ -567,9 +605,9 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	}
 	_ = j.step(stepStopped)
 	j.done("stopped server pid %d", ps.PID)
-	// From the stop to the start the command holds the database, so a
-	// server brought back by something else cannot write into what it
-	// archives (the fourth review).
+	// From the stop the command holds the database, so a server brought
+	// back by something else cannot write into what it archives (the fourth
+	// review); it lets go only to start a server on it (#32).
 	defer j.release()
 	if ok, err := j.hold(ps.DataDir); !ok {
 		why := "the data directory's lock could not be taken"
@@ -584,7 +622,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	}
 
 	archive := filepath.Join(j.dir, "data.tar.gz")
-	if err := j.at("swap.archive"); err != nil {
+	if err := j.at(stepArchived); err != nil {
 		j.goBack(ctx, "the archive of "+ps.DataDir+" failed: "+err.Error())
 		return
 	}
@@ -602,23 +640,17 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	j.done("archived %s into %s and read it back whole", ps.DataDir, archive)
 
 	if p.replaceBinary {
-		err := j.at("swap.binary")
-		if err == nil {
-			err = j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+p.to), p.to)
-		}
-		if err != nil {
+		if err := j.putNew(ctx); err != nil {
 			j.goBack(ctx, "tracepad "+p.to+" could not be put in place: "+err.Error())
 			return
 		}
-		_ = j.step(stepBinaryReplaced)
-		j.done("put tracepad %s at %s", p.to, st.Binary.Path)
 	}
 
-	if err := j.at("swap.start"); err != nil {
+	if err := j.at(stepStarted); err != nil {
 		j.goBack(ctx, "tracepad "+p.to+" did not start: "+err.Error())
 		return
 	}
-	started, err := j.start()
+	started, err := j.launch(ctx, true)
 	if err != nil {
 		j.goBack(ctx, "tracepad "+p.to+" did not start: "+err.Error())
 		return
@@ -627,12 +659,13 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	_ = j.step(stepStarted)
 	j.done("started tracepad %s as pid %d, with the old server's arguments and environment", p.to, ps.NewPID)
 
-	if err := j.at("swap.check"); err != nil {
+	if err := j.at(stepChecked); err != nil {
 		j.goBack(ctx, "not healthy: "+err.Error())
 		return
 	}
 	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	ps.NewVersionSeen = c.Health
 	// What answered must have opened this data directory: the lock of it
 	// records the new server. A server that resolved its data elsewhere — a
 	// relative path in its environment, say — answers healthy on an empty
@@ -643,22 +676,81 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	j.verdict(ctx, c)
 }
 
-// start starts the installed binary with the old server's arguments,
-// environment and working directory, its output appended to the old log.
-// A server.pid that named a server of this run is moved to the new one.
-func (j *job) start() (Started, error) {
+// putNew puts the run's new binary at the install path, recording first that
+// it may be there: a way back that meets a server on the data reads from the
+// steps alone which binary that server may have started from (#31).
+func (j *job) putNew(ctx context.Context) error {
+	st := j.st
+	if err := j.step(stepBinaryReplacing); err != nil {
+		return err
+	}
+	err := j.at(stepBinaryReplacing)
+	if err == nil {
+		err = j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.To)
+	}
+	if err != nil {
+		return err
+	}
+	_ = j.step(stepBinaryReplaced)
+	j.done("put tracepad %s at %s", st.To, st.Binary.Path)
+	return nil
+}
+
+// launch is the one way the command starts a server on the data (#32). The
+// command holds the data's lock — it takes it here when it does not — so
+// nothing else is on the data; it lets go of it only for the start itself,
+// because a server takes its database's lock and refuses one held, and an
+// flock cannot be handed to a child that opens the file itself. A start
+// that fails takes the lock back for the way back; a child that exits takes
+// it back too; and the lock must then be the child's, or what took it in
+// that moment is named. newVersion is the run's new version, which may
+// write into the data once it has the lock: that is recorded before the
+// lock is let go.
+func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 	ps := j.st.Process
+	if ok, err := j.hold(ps.DataDir); !ok {
+		if err != nil {
+			return nil, fmt.Errorf("the lock of %s could not be taken: %w", ps.DataDir, err)
+		}
+		holder, _ := lockedBy(ps.DataDir)
+		return nil, fmt.Errorf("pid %d holds %s", holder, ps.DataDir)
+	}
 	if info, err := os.Stat(ps.Log); err == nil {
 		ps.LogOffset = info.Size()
 	} else {
 		ps.LogOffset = 0
 	}
-	j.release()
+	if newVersion {
+		ps.WroteAfterSwap = true
+		ps.NewStartedAt = j.r.deps.Now().UTC()
+	}
+	if err := j.st.save(j.dir); err != nil {
+		return nil, err
+	}
+	j.letGo(ps.DataDir)
 	started, err := j.r.deps.Sys.Start(StartSpec{Path: j.spec.Exe, Argv: j.spec.Argv, Env: j.spec.Env, Dir: j.spec.Dir, Log: ps.Log})
 	if err != nil {
+		_, _ = j.hold(ps.DataDir)
 		return nil, err
 	}
 	j.newProc = started
+	if newVersion {
+		ps.NewPID = started.PID()
+	} else {
+		ps.BackPID = started.PID()
+	}
+	_ = j.st.save(j.dir)
+	// The child holds the data now, or it does not and the command holds it
+	// again: one that exited, or opened another directory, leaves the data
+	// to the way back and its check says why. Only something else that took
+	// the lock in that moment stops here.
+	j.r.waitRecorded(ctx, started.PID(), ps.DataDir)
+	if !(j.r.deps.Sys.Alive(started.PID()) && lockHeld(ps.DataDir) && recordsPID(ps.DataDir, started.PID())) {
+		if ok, _ := j.hold(ps.DataDir); !ok {
+			holder, _ := lockedBy(ps.DataDir)
+			return nil, fmt.Errorf("pid %d took %s in the moment it was free for the start", holder, ps.DataDir)
+		}
+	}
 	pidFile := filepath.Join(ps.DataDir, "server.pid")
 	if b, err := os.ReadFile(pidFile); err == nil {
 		named := strings.TrimSpace(string(b))
@@ -787,14 +879,12 @@ func (j *job) stuck(why string) {
 // command's runs it.
 func (j *job) swapBinaryOnly(ctx context.Context) {
 	r, st, rep := j.r, j.st, j.rep
-	if err := j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.To); err != nil {
+	if err := j.putNew(ctx); err != nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+err.Error()
 		r.discard(j.dir)
 		rep.Run = nil
 		return
 	}
-	_ = j.step(stepBinaryReplaced)
-	j.done("put tracepad %s at %s", st.To, st.Binary.Path)
 	r.reinstallSkill(ctx, rep, st.Binary.Path, st.To)
 	_ = j.step(stepSkill)
 	rep.ExitCode = exitOK
@@ -809,12 +899,9 @@ func (j *job) replaceHostBinary(ctx context.Context) {
 	if st.Binary == nil || st.Binary.Old == "" {
 		return
 	}
-	if err := j.replaceBinary(ctx, filepath.Join(j.dir, "tracepad-"+st.To), st.To); err != nil {
+	if err := j.putNew(ctx); err != nil {
 		j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not replaced: "+err.Error())
-		return
 	}
-	_ = j.step(stepBinaryReplaced)
-	j.done("put tracepad %s at %s", st.To, st.Binary.Path)
 }
 
 // reinstallSkill installs the skill again, with the binary at bin when it is
@@ -884,6 +971,19 @@ func shq(word string) string {
 		return word
 	}
 	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
+}
+
+// loadSpec reads the run's server.json, which must start the installed
+// binary: a run's files name nothing else to run (#30).
+func (j *job) loadSpec() (ServerSpec, error) {
+	spec, err := readSpec(j.dir)
+	if err != nil {
+		return spec, err
+	}
+	if j.st.Binary == nil || !sameFile(spec.Exe, j.st.Binary.Path) {
+		return spec, errors.New("server.json starts another binary than the installed one")
+	}
+	return spec, nil
 }
 
 // readSpec reads server.json.

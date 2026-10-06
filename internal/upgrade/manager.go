@@ -1,141 +1,71 @@
 package upgrade
 
 import (
-	"bufio"
-	"context"
-	"fmt"
 	"path"
-	"strconv"
 	"strings"
-	"time"
 )
 
-// A service manager runs a server when the service itself says so, not when
-// the server merely sits inside one (spec 054 #22): on a CI runner every
-// process is in the agent's unit, under tmux a shell is in a user unit, and a
-// server a person started from such a shell is theirs to stop and start like
-// any other. So the unit a process's cgroup names, or the launchd job its
-// environment names, is asked: it manages the process when its main PID is
-// the process's, or when what it starts is this binary with these arguments.
-// A unit that cannot be asked proves nothing.
+// A server a service manager runs is the person's, and the command does not
+// touch it (spec 054 #29, which replaces #22 and #26 (D)): a manager restarts
+// what the command stops, and the two then race for the data. The rule is
+// one of membership, not of proof: a process whose own unit is a systemd
+// service — system or user, under cgroup v1, v2 or both — or that carries a
+// launchd job's label, is in a manager's hands, whether that unit started it
+// directly, through a wrapper, or is a CI runner's agent that happened to
+// start the shell. A process whose own unit is a session or a scope — a
+// terminal, tmux, ssh, the `nohup … &` setup.md starts a server with — is
+// not. What cannot be read cannot be ruled out, and is the person's too.
+// Nothing here asks the manager anything: the answer is in the process's
+// own record.
 
-// unitShow reads a systemd unit's MainPID and ExecStart (`systemctl show`):
-// the user manager's for a unit under `user@N.service`.
-var unitShow = func(user bool, unit string) (mainPID int, execStart string, err error) {
-	args := []string{"show", "--property=MainPID", "--property=ExecStart", "--", unit}
-	if user {
-		args = append([]string{"--user"}, args...)
+// systemdUnit names the unit a process's cgroup puts it in, when that is a
+// service: "the systemd unit X" or "the user systemd unit X"; or why one
+// cannot be ruled out. Empty for a session's or a scope's process. The line
+// read is the one that names the process's own unit: `name=systemd` under
+// cgroup v1 or a hybrid hierarchy, else the unified `0::` line; a
+// controller's line in v1 may stop at `user@N.service` and is not it.
+func systemdUnit(cgroup string) string {
+	if strings.TrimSpace(cgroup) == "" {
+		return "its cgroup could not be read, so a service manager cannot be ruled out"
 	}
-	out, err := runQuiet("systemctl", args...)
-	if err != nil {
-		return 0, "", err
-	}
-	for _, line := range strings.Split(out, "\n") {
-		k, v, _ := strings.Cut(line, "=")
-		switch k {
-		case "MainPID":
-			mainPID, _ = strconv.Atoi(strings.TrimSpace(v))
-		case "ExecStart":
-			execStart = v
-		}
-	}
-	return mainPID, execStart, nil
-}
-
-// jobPID reads a launchd job's PID and its program's arguments (`launchctl
-// print`), in this user's GUI domain or its user domain; PID 0 when it runs
-// nothing.
-var jobPID = func(uid int, label string) (pid int, arguments string, err error) {
-	var last error
-	for _, domain := range []string{"gui/", "user/"} {
-		out, err := runQuiet("launchctl", "print", domain+strconv.Itoa(uid)+"/"+label)
-		if err != nil {
-			last = err
-			continue
-		}
-		var args []string
-		inArgs := false
-		s := bufio.NewScanner(strings.NewReader(out))
-		for s.Scan() {
-			line := strings.TrimSpace(s.Text())
-			switch {
-			case inArgs && line == "}":
-				inArgs = false
-			case inArgs:
-				args = append(args, line)
-			case line == "arguments = {":
-				inArgs = true
-			case strings.HasPrefix(line, "program = "):
-				args = append(args, strings.TrimPrefix(line, "program = "))
-			case strings.HasPrefix(line, "pid = "):
-				pid, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid = ")))
-			}
-		}
-		return pid, strings.Join(args, " "), nil
-	}
-	return 0, "", last
-}
-
-func runQuiet(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := child(ctx, name, args...).Output()
-	return string(out), err
-}
-
-// systemdManager decides, from p's /proc/<pid>/cgroup, which unit runs p:
-// managed names it; unasked says why the unit p sits in could not be asked,
-// which makes p the person's all the same.
-func systemdManager(p Process, cgroup string) (managed, unasked string) {
+	var unified, named string
+	found := false
 	for _, line := range strings.Split(strings.TrimSpace(cgroup), "\n") {
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
-		unit := path.Base(parts[2])
-		if !strings.HasSuffix(unit, ".service") {
-			continue
+		switch {
+		case parts[1] == "name=systemd":
+			named, found = parts[2], true
+		case parts[0] == "0" && parts[1] == "":
+			unified, found = parts[2], true
 		}
-		user := strings.Contains(parts[2], "/user@") && !strings.HasPrefix(unit, "user@")
-		mainPID, execStart, err := unitShow(user, unit)
-		if err != nil {
-			return "", fmt.Sprintf("it sits in the systemd unit %s, which could not be asked whether it runs it (%v): restart it yourself, or with sudo systemctl restart %s if the unit is what runs it", unit, firstLine(err.Error()), unit)
-		}
-		// A unit is proven not to run the server only when its main process
-		// is neither the server nor its parent (a wrapper script without
-		// exec) and its command does not mention tracepad: a CI runner's
-		// agent, cron, a terminal's service. Anything less, and the unit is
-		// taken to run it (the fourth review: better to refuse wrongly than
-		// to fight a manager that restarts what the command stops).
-		if mainPID == p.PID || (mainPID > 0 && mainPID == p.PPID) || mentionsTracepad(execStart) {
-			return "the systemd unit " + unit, ""
-		}
-		return "", ""
 	}
-	return "", ""
+	if !found {
+		return "its cgroup names no systemd hierarchy, so a service manager cannot be ruled out"
+	}
+	own := unified
+	if named != "" {
+		own = named
+	}
+	unit := path.Base(own)
+	if !strings.HasSuffix(unit, ".service") {
+		return ""
+	}
+	if strings.Contains(own, "/user@") && !strings.HasPrefix(unit, "user@") {
+		return "the user systemd unit " + unit
+	}
+	return "the systemd unit " + unit
 }
 
-// mentionsTracepad says whether a service's command names tracepad anywhere:
-// the binary, a script named for it, an argument.
-func mentionsTracepad(command string) bool {
-	return strings.Contains(strings.ToLower(command), "tracepad")
-}
-
-// launchdManager decides which launchd job runs p: the job its
-// XPC_SERVICE_NAME names runs it unless that job is proven not to — its PID
-// neither p's nor p's parent's, and its program not mentioning tracepad. A
-// job that cannot be asked makes p the person's.
-func launchdManager(p Process, uid int) (managed, unasked string) {
+// launchdJob names the launchd job a process runs in: launchd sets
+// XPC_SERVICE_NAME to a job's label; a terminal's processes carry `0`, an
+// application's `application.…`.
+func launchdJob(p Process) string {
 	label := p.Getenv("XPC_SERVICE_NAME")
 	if label == "" || label == "0" || strings.HasPrefix(label, "application.") {
-		return "", ""
+		return ""
 	}
-	pid, arguments, err := jobPID(uid, label)
-	if err != nil {
-		return "", fmt.Sprintf("it sits in the launchd job %s, which could not be asked whether it runs it (%v): restart it yourself, or with launchctl kickstart -k gui/%d/%s if the job is what runs it", label, firstLine(err.Error()), uid, label)
-	}
-	if pid > 0 && (pid == p.PID || pid == p.PPID) || mentionsTracepad(arguments) {
-		return "the launchd job " + label, ""
-	}
-	return "", ""
+	return "the launchd job " + label
 }

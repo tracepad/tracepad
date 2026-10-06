@@ -14,28 +14,6 @@ import (
 	"time"
 )
 
-// Steps a run records, in the order they happen. The way back reads them to
-// know what to undo (Decision 11).
-const (
-	stepPrepared       = "prepared"        // nothing changed yet
-	stepStopSent       = "stop_sent"       // SIGTERM sent, or docker stop asked
-	stepStopped        = "stopped"         // the old server is down
-	stepArchived       = "archived"        // data.tar.gz read back whole
-	stepRenamedOld     = "renamed_old"     // container: <name>-before-<run>
-	stepBinaryReplaced = "binary_replaced" // the installed binary is the new one
-	stepStarted        = "started"         // the new server or container runs
-	stepChecked        = "checked"         // the verdict is in `verdict`
-	stepSkill          = "skill"           // the skill's copies reinstalled
-	stepBackBegun      = "back_begun"      // the way back changed what runs
-	stepBackRestored   = "back_restored"   // the archive restored beside the data, and checked
-	stepBackAside      = "back_set_aside"  // what the new version left is set aside
-	stepBackMoved      = "back_moved"      // the restore is in the data's place
-	stepBackVolume     = "back_volume"     // container: the archive restored into <vol>-<run>
-	stepBackBinary     = "back_binary"     // the old binary is back
-	stepBackStarted    = "back_started"    // the old version runs again
-	stepBackDone       = "back_done"       // the way back finished
-)
-
 // Kinds of run.
 const (
 	kindProcess   = "process"
@@ -94,7 +72,19 @@ type ProcessState struct {
 	// PIDFile is whether <data>/server.pid named the old PID and was moved
 	// to the new one.
 	PIDFile bool `json:"pid_file"`
-	NewPID  int  `json:"new_pid,omitempty"`
+	// What the way back decides by (#31): facts written when they happened,
+	// never read back from how a server answers later. NewPID is the server
+	// this run started, NewStartedAt when, and NewVersionSeen what it said
+	// it was at its check. WroteAfterSwap is whether anything other than
+	// the old version may have had the data since the stop: set before the
+	// command lets go of the data to start the new version, or when a way
+	// back finds a server on the data that started while the install path
+	// may have held another version. Once set it stays, and a way back
+	// restores the archive.
+	NewPID         int       `json:"new_pid,omitempty"`
+	NewStartedAt   time.Time `json:"new_started_at,omitzero"`
+	NewVersionSeen string    `json:"new_version_seen,omitempty"`
+	WroteAfterSwap bool      `json:"wrote_after_swap"`
 	// BackPID is the old version a way back started, or found running.
 	BackPID int `json:"back_pid,omitempty"`
 	// Old is the copy of the running version in the run directory.
@@ -162,6 +152,11 @@ func (s *State) save(dir string) error {
 	return writeFileAtomic(filepath.Join(dir, stateFile), append(b, '\n'))
 }
 
+// syncFile flushes a file the command relies on to disk before it goes on:
+// a state, a copy of a binary, an archive. A test seam: the gate's fault
+// matrix, whose cells cannot lose power, does without it.
+var syncFile = (*os.File).Sync
+
 func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
@@ -169,7 +164,7 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	_, err = tmp.Write(data)
 	if err == nil {
-		err = tmp.Sync()
+		err = syncFile(tmp)
 	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
@@ -189,6 +184,27 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return writeFileAtomic(path, append(b, '\n'))
+}
+
+// private says whether a directory is the person's alone: a real directory,
+// not a link, owned by this user, with no access for anyone else. The
+// backups directory and every run in it must be (#30): a run's files are
+// started and run.
+func private(dir string) error {
+	info, err := os.Lstat(dir)
+	switch {
+	case err != nil:
+		return err
+	case info.Mode()&os.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link, and a run's files are taken only from a directory of the person's own", dir)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory", dir)
+	case info.Mode().Perm()&0o077 != 0:
+		return fmt.Errorf("%s is open to other users (mode %o); make it the person's alone: chmod 700 %s", dir, info.Mode().Perm(), shq(dir))
+	case !ownedByMe(info):
+		return fmt.Errorf("%s is not this user's", dir)
+	}
+	return nil
 }
 
 // resolveRun takes `--check` or `--back`'s argument: a run's id, under the
@@ -211,7 +227,12 @@ func resolveRun(backups, arg string) (string, error) {
 	if !runID.MatchString(filepath.Base(abs)) {
 		return "", fmt.Errorf("%s is not a run's directory", arg)
 	}
-	return abs, nil
+	// Only a run directly under the backups directory: given by its path,
+	// it must be the one its id names there.
+	if canonicalPath(filepath.Dir(abs)+"/x") != canonicalPath(filepath.Join(backups, "x")) {
+		return "", fmt.Errorf("%s is not under %s, where runs are", arg, backups)
+	}
+	return filepath.Join(backups, filepath.Base(abs)), nil
 }
 
 // loadState reads a run's state and refuses one that is not this run's or
@@ -228,7 +249,7 @@ func loadState(dir string) (*State, error) {
 	if err := dec.Decode(&s); err != nil {
 		return nil, fmt.Errorf("%s/%s is not a run's state: %w", dir, stateFile, err)
 	}
-	if err := s.validate(filepath.Base(dir)); err != nil {
+	if err := s.validate(dir); err != nil {
 		return nil, fmt.Errorf("%s/%s is not this run's: %w", dir, stateFile, err)
 	}
 	return &s, nil
@@ -242,7 +263,8 @@ var (
 	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-func (s *State) validate(dirName string) error {
+func (s *State) validate(dir string) error {
+	dirName := filepath.Base(dir)
 	switch {
 	case s.Run != dirName:
 		return fmt.Errorf("its run is %q, and its directory %q", s.Run, dirName)
@@ -253,15 +275,21 @@ func (s *State) validate(dirName string) error {
 	case s.Archive != nil && s.Archive.SHA256 != "" && !sha256Hex.MatchString(s.Archive.SHA256):
 		return errors.New("its archive's checksum is not one")
 	}
+	if err := s.followsTable(); err != nil {
+		return err
+	}
+	// The copies a way back runs and puts in place are the run's own files,
+	// in its directory, never a path from elsewhere.
+	inRun := func(p string) bool { return filepath.Dir(p) == dir && strings.HasPrefix(filepath.Base(p), "tracepad-") }
 	if b := s.Binary; b != nil {
-		if !filepath.IsAbs(b.Path) || (b.From != "" && !IsRelease(b.From)) || (b.Old != "" && !filepath.IsAbs(b.Old)) {
+		if !filepath.IsAbs(b.Path) || (b.From != "" && !IsRelease(b.From)) || (b.Old != "" && !inRun(b.Old)) {
 			return errors.New("its binary is not one a run records")
 		}
 	}
 	switch s.Kind {
 	case kindProcess:
 		p := s.Process
-		if p == nil || p.PID <= 0 || !filepath.IsAbs(p.DataDir) || !filepath.IsAbs(p.Log) || !filepath.IsAbs(p.Old) {
+		if p == nil || p.PID <= 0 || !filepath.IsAbs(p.DataDir) || !filepath.IsAbs(p.Log) || !inRun(p.Old) {
 			return errors.New("its server is not one a run records")
 		}
 		// The address asked, with the key, is the one the listen address

@@ -22,13 +22,11 @@ type Process struct {
 	Stdout string
 	// PPID is its parent's.
 	PPID int
-	// Manager names what started and restarts it, when that is a service
-	// manager: "the systemd unit tracepad.service", "the launchd job X".
+	// Manager names the service manager it runs under — "the systemd unit
+	// tracepad.service", "the user systemd unit X", "the launchd job X" — or
+	// says why one cannot be ruled out ("its cgroup …"). Such a server is
+	// the person's (#29).
 	Manager string
-	// Unasked is set when a service manager it sits in could not be asked
-	// whether it runs it: why. Such a server is the person's (the second
-	// review): the command never assumes it is free to stop one.
-	Unasked string
 }
 
 // Getenv reads the process's environment.

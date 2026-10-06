@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 )
 
 // prepareContainer pulls the new image, saves the old container's and
@@ -75,15 +75,19 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		j.stuck("could not record the run's state: " + err.Error())
 		return
 	}
-	err := j.at("swap.stop")
+	err := j.at(stepStopSent)
 	if err == nil {
-		_, err = docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name)
+		err = r.askToStop(ctx, cs.Name)
 	}
 	if err != nil {
 		if r.containerRunning(ctx, cs.ID, false) {
-			// It runs as it did: nothing changed.
+			// It runs as it did: nothing changed, its restart policy too.
 			j.unstep(stepStopSent)
 			rep.ExitCode, rep.Summary = exitRefused, "Refused, and nothing changed: "+cs.Name+" could not be stopped: "+firstLine(err.Error())
+			if _, perr := docker.Run(ctx, "update", "--restart", cs.Restart, cs.Name); perr != nil {
+				rep.ExitCode, rep.Summary = exitStuck, cs.Name+" could not be stopped ("+firstLine(err.Error())+"), and its restart policy, set to no for the stop, could not be put back to "+cs.Restart+": "+firstLine(perr.Error())
+				rep.Next = append(rep.Next, "docker update --restart "+shq(cs.Restart)+" "+shq(cs.Name))
+			}
 			r.discard(j.dir)
 			rep.Run = nil
 			return
@@ -91,10 +95,17 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		j.goBack(ctx, cs.Name+" did not stop cleanly: "+firstLine(err.Error()))
 		return
 	}
+	if err := j.at(stepStopped); err != nil || !r.waitStopped(ctx, cs.ID) {
+		// As a server's stop: never a SIGKILL (the sixth review).
+		rep.ExitCode = exitStuck
+		rep.Summary = fmt.Sprintf("%s was asked to stop and has not stopped in %s; it may still, and its restart policy is no until the way back puts %s back. Nothing else changed.", cs.Name, r.deps.StopWait, cs.Restart)
+		rep.Next = append(rep.Next, "when it has stopped, start it again as it was: "+j.upgradeCmd("--back "+st.Run))
+		return
+	}
 	_ = j.step(stepStopped)
 	j.done("stopped %s", cs.Name)
 
-	if err := j.at("swap.archive"); err != nil {
+	if err := j.at(stepArchived); err != nil {
 		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+err.Error())
 		return
 	}
@@ -119,7 +130,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepArchived)
 	j.done("archived the volume %s into %s and read it back whole", cs.Volume, archive)
 
-	err = j.at("swap.rename")
+	err = j.at(stepRenamedOld)
 	if err == nil {
 		_, err = docker.Run(ctx, "rename", cs.Name, j.before())
 	}
@@ -137,7 +148,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 
 	args := runArgs(j.inspect, j.image, cs.Name, cs.NewRef, filepath.Join(j.dir, "env"), "")
 	var out []byte
-	err = j.at("swap.run")
+	err = j.at(stepStarted)
 	if err == nil {
 		out, err = docker.Run(ctx, args...)
 	}
@@ -149,13 +160,38 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepStarted)
 	j.done("ran %s as %s", cs.NewRef, cs.Name)
 
-	if err := j.at("swap.check"); err != nil {
+	if err := j.at(stepChecked); err != nil {
 		j.goBack(ctx, "not healthy: "+err.Error())
 		return
 	}
 	c := r.check(ctx, cs.URL, p.to, st.CountBefore, func() bool { return r.containerRunning(ctx, cs.NewID, true) })
 	c.LogLine = r.containerFirstLog(ctx, cs.NewID)
 	j.verdict(ctx, c)
+}
+
+// askToStop stops a container the way a server is stopped: SIGTERM, never
+// the SIGKILL `docker stop` sends after its timeout (the sixth review). Its
+// restart policy is set to no first, or docker would start again what the
+// signal stopped; the way back puts it back.
+func (r *runner) askToStop(ctx context.Context, name string) error {
+	if _, err := r.deps.Docker.Run(ctx, "update", "--restart", "no", name); err != nil {
+		return err
+	}
+	_, err := r.deps.Docker.Run(ctx, "kill", "--signal", "TERM", name)
+	return err
+}
+
+// waitStopped waits, as a server's stop does, for a container asked to stop.
+func (r *runner) waitStopped(ctx context.Context, id string) bool {
+	deadline := r.deps.Now().Add(r.deps.StopWait)
+	for {
+		if list, err := r.inspectContainers(ctx, id); err == nil && len(list) == 1 && !list[0].State.Running {
+			return true
+		}
+		if !r.deps.Now().Before(deadline) || r.deps.Sleep(ctx, 250*time.Millisecond) != nil {
+			return false
+		}
+	}
 }
 
 // containerRunning says whether the container with this id runs. Docker

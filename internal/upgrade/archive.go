@@ -127,7 +127,7 @@ func writeArchive(dataDir, path string) (Archived, error) {
 		err = buf.Flush()
 	}
 	if err == nil {
-		err = out.Sync()
+		err = syncFile(out)
 	}
 	if err != nil {
 		return Archived{}, err
@@ -208,20 +208,6 @@ func readBack(path string, want Archived) (ReadBack, error) {
 		return ReadBack{}, fmt.Errorf("%s is not the archive that was written: its checksum changed", path)
 	}
 	return ReadBack{SHA256: sum, Bytes: total}, nil
-}
-
-// fileSHA256 is a file's SHA-256, in hex.
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // cleanEntry is a tar entry's name without its `./`.

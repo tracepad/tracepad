@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,10 +32,9 @@ type wentBack struct {
 // `--back` takes.
 func (j *job) wayBack(ctx context.Context) wentBack {
 	st := j.st
-	if st.has(stepBackDone) {
-		return wentBack{ok: false, why: "this run's way back already ran"}
-	}
-	// A lock the way back took is let go however it ends.
+	// A way back done already runs again to the same end (#31): the old
+	// version, checked, on the same data — started again if it was stopped
+	// since, and nothing else changed. A lock the way back took is let go however it ends.
 	defer j.release()
 	var out wentBack
 	switch st.Kind {
@@ -47,7 +47,7 @@ func (j *job) wayBack(ctx context.Context) wentBack {
 	}
 	// Done only when the old version is seen healthy: a way back that could
 	// not confirm it is taken up again by the next --back, which checks.
-	if out.ok && !out.unconfirmed {
+	if out.ok && !out.unconfirmed && st.last() != stepBackDone {
 		_ = j.step(stepBackDone)
 	}
 	return out
@@ -90,13 +90,18 @@ func (j *job) restoreBinary(ctx context.Context, copyPath, want string) error {
 
 func (j *job) backBinary(ctx context.Context) wentBack {
 	b := j.st.Binary
-	if !j.st.has(stepBinaryReplaced) {
+	if !j.st.has(stepBinaryReplacing) || j.st.has(stepBackBinary) {
 		return wentBack{ok: true}
 	}
 	j.begin()
-	if err := j.restoreBinary(ctx, b.Old, b.From); err != nil {
+	err := j.at(stepBackBinary)
+	if err == nil {
+		err = j.restoreBinary(ctx, b.Old, b.From)
+	}
+	if err != nil {
 		return j.fail(fmt.Sprintf("%s could not be put back at %s: %v", b.From, b.Path, err))
 	}
+	_ = j.step(stepBackBinary)
 	return wentBack{ok: true}
 }
 
@@ -104,7 +109,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	r, st := j.r, j.st
 	ps := st.Process
 	if j.spec.Exe == "" {
-		spec, err := readSpec(j.dir)
+		spec, err := j.loadSpec()
 		if err != nil {
 			return j.fail("the run's server.json does not read: " + err.Error())
 		}
@@ -116,6 +121,9 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	if !st.has(stepStopSent) {
 		return wentBack{ok: true}
 	}
+	if err := j.pathAsRecorded(ctx); err != nil {
+		return j.fail(err.Error() + "; nothing was touched")
+	}
 	after, restore := ps.DataDir+".after-"+st.Run, ps.DataDir+".restore-"+st.Run
 
 	// A way back that stopped half way is taken up where it stopped, from
@@ -125,114 +133,73 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		if _, err := os.Lstat(ps.DataDir); err == nil {
 			return j.fail(fmt.Sprintf("%s is set aside as %s, and something is at %s again; nothing was touched", ps.DataDir, after, ps.DataDir))
 		}
-		if err := j.at("back.move"); err != nil {
-			return j.fail(fmt.Sprintf("the restore in %s could not take the place of %s (%v); run --back again", restore, ps.DataDir, err))
+		if out, ok := j.moveRestore(restore, after); !ok {
+			return out
 		}
-		if err := renameDir(restore, ps.DataDir); err != nil {
-			return j.fail(fmt.Sprintf("the restore in %s could not take the place of %s (%v); run --back again once it can", restore, ps.DataDir, err))
-		}
-		_ = j.step(stepBackMoved)
-		j.done("put the restore in the place of %s", ps.DataDir)
 	}
 
-	if !st.has(stepBackMoved) {
-		// The old server may still be on its way out: its stop timed out.
-		// It is waited for, and started again once it has gone.
-		if alive, _ := r.isServer(ps.PID, ps.DataDir, j.spec); alive {
-			if !r.waitGone(ctx, ps.PID) {
-				return j.fail(fmt.Sprintf("server pid %d is still shutting down from its stop; run --back again once it has exited. Nothing was touched", ps.PID))
-			}
+	// The decision, unless it is made and acted on: a way back cut short
+	// between the path's clearing and the restore's move takes it up again,
+	// with nothing able to start from the path meanwhile.
+	if !st.has(stepBackMoved) && (!st.has(stepBackCleared) || ps.WroteAfterSwap) {
+		holder, out, ok := j.decide(ctx)
+		if !ok {
+			return out
 		}
-		// Whatever holds the data directory now — whoever started it, this
-		// run, a later run's way back, the person — may be stopped only when
-		// it is this directory's server as the run recorded it, and its
-		// version decides what it did: the old version ran on data nothing
-		// else touched, anything else may have migrated it, and the archive
-		// is restored. Anything that is not the directory's server stops the
-		// way back before it touches a thing. Held by this command since the
-		// stop (j.held), the data has no other holder.
-		holder := 0
-		restoreData := st.has(stepStarted)
-		if len(j.held) == 0 && lockHeld(ps.DataDir) {
-			holder, _ = lockedBy(ps.DataDir)
-			ok, err := r.isServer(holder, ps.DataDir, j.spec)
-			if !ok {
-				why := fmt.Sprintf("pid %d", holder)
-				if err != nil {
-					why = err.Error()
-				}
-				return j.fail(fmt.Sprintf("pid %d holds %s, and it is not this directory's server as the run recorded it: %s. Stop it first; nothing was touched", holder, ps.DataDir, why))
-			}
-			if !restoreData {
-				hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-				v, _ := health(hctx, r.deps.HTTP, ps.URL)
-				cancel()
-				if v != st.From {
-					if st.Archive == nil {
-						return j.fail(fmt.Sprintf("server pid %d holds %s at %q, not %s, and the run took no archive to restore; stop it and run --back again", holder, ps.DataDir, v, st.From))
-					}
-					restoreData = true
-					j.done("server pid %d runs %q on %s, not %s: it may have migrated the data, which is restored from the archive", holder, v, ps.DataDir, st.From)
-				}
-			}
-		}
-		if restoreData {
+		if ps.WroteAfterSwap {
 			if out, ok := j.swapBack(ctx, holder, after, restore); !ok {
 				return out
 			}
-		} else if holder > 0 {
-			// Nothing ran on the data but the old version, and it runs.
-			ps.BackPID = holder
-			_ = st.save(j.dir)
-			return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
+		} else {
+			// Nothing but the old version had the data: it stays as it is.
+			j.begin()
+			if out, ok := j.clearPath(ctx); !ok {
+				return out
+			}
 		}
 	}
 
 	if !st.has(stepBackBinary) {
 		j.begin()
-		err := j.at("back.binary")
+		err := j.at(stepBackBinary)
 		if err == nil {
 			err = j.restoreBinary(ctx, ps.Old, st.From)
 		}
 		if err != nil {
-			return j.fail(fmt.Sprintf("%s could not be put back at %s (%v); nothing was started; run --back again", st.From, st.Binary.Path, err))
+			return j.fail(fmt.Sprintf("%s could not be put back at %s (%v); nothing was started, and nothing runs from %s until it is: run --back again", st.From, st.Binary.Path, err, st.Binary.Path))
 		}
 		_ = j.step(stepBackBinary)
 	}
 
-	// Started already, by an earlier attempt: that server is checked rather
-	// than a second one started — once it has taken the database, which a
-	// server just started may not have yet (the fault matrix).
+	// From here the install path has held the old version or nothing since
+	// the steps say so, and the command held the data until then: a server
+	// on the data now is the old version (#31). It is kept when it is this
+	// directory's server as the run recorded it — an earlier attempt's, or
+	// one the person or a shell loop started — once it has taken the
+	// database; anything else stops the way back with nothing started.
 	if st.has(stepBackStarted) && r.deps.Sys.Alive(ps.BackPID) {
 		r.waitRecorded(ctx, ps.BackPID, ps.DataDir)
 	}
-	// Whoever holds the data now — this command since the restore (j.held),
-	// an earlier attempt's server, or another — decides: this directory's
-	// server as the run recorded it is checked and kept; anything else
-	// stops the way back with nothing started.
-	if len(j.held) == 0 && lockHeld(ps.DataDir) {
+	if !j.holds(ps.DataDir) && lockHeld(ps.DataDir) {
 		holder, _ := lockedBy(ps.DataDir)
-		hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		v, _ := health(hctx, r.deps.HTTP, ps.URL)
-		cancel()
-		if ok, err := r.isServer(holder, ps.DataDir, j.spec); ok && v != st.From && v != "" {
-			return j.fail(fmt.Sprintf("server pid %d holds %s at %s, not %s; nothing was started. Stop it, and run --back again", holder, ps.DataDir, v, st.From))
-		} else if ok {
-			if ps.BackPID != holder {
-				ps.BackPID = holder
-				_ = j.step(stepBackStarted)
+		if ok, err := r.isServer(holder, ps.DataDir, j.spec); !ok {
+			why := fmt.Sprintf("pid %d took %s meanwhile", holder, ps.DataDir)
+			if err != nil {
+				why += " (" + err.Error() + ")"
 			}
-			return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
-		} else if err != nil {
-			return j.fail(fmt.Sprintf("pid %d took %s meanwhile (%v); nothing was started", holder, ps.DataDir, err))
+			return j.fail(why + "; nothing was started")
 		}
-		return j.fail(fmt.Sprintf("pid %d took %s meanwhile; nothing was started", holder, ps.DataDir))
+		if ps.BackPID != holder {
+			ps.BackPID = holder
+			_ = j.step(stepBackStarted)
+		}
+		return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
 	}
 	j.begin()
-	if err := j.at("back.start"); err != nil {
+	if err := j.at(stepBackStarted); err != nil {
 		return j.fail(fmt.Sprintf("%s did not start (%v); run --back again", st.From, err))
 	}
-	started, err := j.start()
+	started, err := j.launch(ctx, false)
 	if err != nil {
 		return j.fail(fmt.Sprintf("%s did not start (%v); run --back again", st.From, err))
 	}
@@ -242,6 +209,154 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	return j.checkBack(ctx, running(started), ps.BackPID, true)
 }
 
+// pathMayBeNew says, from the steps alone, whether the install path may have
+// held another version than the old one since the stop: what started from it
+// in that time may have been that version (#31).
+func (j *job) pathMayBeNew() bool {
+	st := j.st
+	return !st.has(stepBackCleared) && (st.has(stepBinaryReplacing) || st.Binary.From != st.From)
+}
+
+// pathAsRecorded checks that the install path holds what the steps say it
+// may: a later run or the person may have put another version there since,
+// and a way back from this run would then undo theirs. Its version is the
+// binary's own answer, not a server's.
+func (j *job) pathAsRecorded(ctx context.Context) error {
+	st, b := j.st, j.st.Binary
+	if b.From == "" {
+		return nil
+	}
+	if _, err := os.Lstat(b.Path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	want := []string{b.From}
+	if st.has(stepBinaryReplacing) {
+		want = append(want, st.To)
+	}
+	if st.has(stepBackCleared) {
+		want = []string{st.From}
+	}
+	v, err := j.r.deps.Version(ctx, b.Path)
+	if err != nil || !slices.Contains(want, v) {
+		return fmt.Errorf("%s is now %q, which this run did not put there (it may hold %s): a later upgrade, or the person's; go back from the run that put it there first", b.Path, v, strings.Join(want, " or "))
+	}
+	return nil
+}
+
+// decide is the way back's one decision — restore the archive or not — made
+// from what the state records, never from how a server answers or how fast
+// (#31): the archive is restored when anything but the old version may have
+// had the data since the stop. A server on the data is this directory's
+// server as the run recorded it, or the way back stops with nothing
+// touched; when it started while the steps say the install path may have
+// held another version, that is recorded too. Without one, the data is held
+// from here. It answers the server that holds the data, if any.
+func (j *job) decide(ctx context.Context) (int, wentBack, bool) {
+	r, ps := j.r, j.st.Process
+	// The old server may still be on its way out: its stop timed out. It is
+	// waited for, and started again once it has gone.
+	if alive, _ := r.isServer(ps.PID, ps.DataDir, j.spec); alive && !r.waitGone(ctx, ps.PID) {
+		return 0, j.fail(fmt.Sprintf("server pid %d is still shutting down from its stop; run --back again once it has exited. Nothing was touched", ps.PID)), false
+	}
+	for range 3 {
+		if j.holds(ps.DataDir) {
+			return 0, wentBack{}, true
+		}
+		if !lockHeld(ps.DataDir) {
+			if ok, _ := j.hold(ps.DataDir); ok {
+				return 0, wentBack{}, true
+			}
+			continue
+		}
+		holder, _ := lockedBy(ps.DataDir)
+		if ok, err := r.isServer(holder, ps.DataDir, j.spec); !ok {
+			why := fmt.Sprintf("pid %d", holder)
+			if err != nil {
+				why = err.Error()
+			}
+			return 0, j.fail(fmt.Sprintf("pid %d holds %s, and it is not this directory's server as the run recorded it: %s. Stop it first; nothing was touched", holder, ps.DataDir, why)), false
+		}
+		if !ps.WroteAfterSwap && j.pathMayBeNew() {
+			ps.WroteAfterSwap = true
+			if err := j.st.save(j.dir); err != nil {
+				return 0, j.fail("could not record the run's state: " + err.Error()), false
+			}
+			j.done("server pid %d holds %s, and started while %s may have held tracepad %s: what it wrote is set aside, and the archive restored", holder, ps.DataDir, j.st.Binary.Path, j.st.To)
+		}
+		return holder, wentBack{}, true
+	}
+	return 0, j.fail("the lock of " + ps.DataDir + " kept changing hands; nothing was touched. Run --back again"), false
+}
+
+// clearPath takes another version than the old one off the install path,
+// while the command holds the data: from here, what starts from the path is
+// the old version or nothing, until the old version is put back (#31). The
+// binary taken off is kept in the run's directory; nothing is deleted.
+func (j *job) clearPath(ctx context.Context) (wentBack, bool) {
+	st := j.st
+	path := st.Binary.Path
+	if st.has(stepBackCleared) {
+		return wentBack{}, true
+	}
+	if err := j.at(stepBackCleared); err != nil {
+		return j.fail(fmt.Sprintf("%s was not cleared (%v); nothing was started; run --back again", path, err)), false
+	}
+	if _, err := os.Lstat(path); err == nil {
+		if v, err := j.r.deps.Version(ctx, path); err != nil || v != st.From {
+			if !j.holds(st.Process.DataDir) {
+				return j.fail(fmt.Sprintf("a server holds %s and %s is %q; nothing was touched", st.Process.DataDir, path, v)), false
+			}
+			kept := ""
+			for i := 1; kept == ""; i++ {
+				kept = filepath.Join(j.dir, "installed-"+strconv.Itoa(i))
+				if _, err := os.Lstat(kept); err == nil {
+					kept = ""
+				}
+			}
+			if err := linkOrCopy(path, kept); err != nil {
+				return j.fail(fmt.Sprintf("%s could not be kept in %s (%v); nothing was started; run --back again", path, j.dir, err)), false
+			}
+			if err := os.Remove(path); err != nil {
+				return j.fail(fmt.Sprintf("%s could not be taken off (%v); nothing was started; run --back again", path, err)), false
+			}
+			j.done("took %s off %s until %s is back; it is kept as %s", firstNonEmpty(v, "the binary"), path, st.From, kept)
+		}
+	}
+	_ = j.step(stepBackCleared)
+	return wentBack{}, true
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// moveRestore puts the restore in the data's place, the lock held on it
+// following it there.
+func (j *job) moveRestore(restore, after string) (wentBack, bool) {
+	ps := j.st.Process
+	if ok, err := j.hold(restore); !ok {
+		return j.fail(fmt.Sprintf("the restore's lock could not be taken (%v); the restore waits in %s; run --back again", err, restore)), false
+	}
+	err := j.at(stepBackMoved)
+	if err == nil {
+		err = renameDir(restore, ps.DataDir)
+	}
+	if err != nil {
+		return j.fail(fmt.Sprintf("the restore could not take the place of %s (%v); %s is set aside, and the restore waits in %s; run --back again to finish", ps.DataDir, err, after, restore)), false
+	}
+	// The data's lock was the directory set aside; the restore's is the
+	// data's now.
+	j.letGo(ps.DataDir)
+	j.held[ps.DataDir] = j.held[restore]
+	delete(j.held, restore)
+	_ = j.step(stepBackMoved)
+	j.done("put the restore in the place of %s", ps.DataDir)
+	return wentBack{}, true
+}
+
 // swapBack restores the archive beside the data and checks it, stops the
 // server that holds the data, and swaps the two directories, recording each
 // move so that a way back cut short is taken up where it stopped.
@@ -249,7 +364,7 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	r, st := j.r, j.st
 	ps := st.Process
 	if st.Archive == nil {
-		return j.fail("the run records no archive; nothing was touched"), false
+		return j.fail(fmt.Sprintf("tracepad %s may have had %s, and the run took no archive of it to restore: going back would start %s on data %s may have migrated. Keep %s, or restore a backup of your own; nothing was touched", st.To, ps.DataDir, st.From, st.To, st.To)), false
 	}
 	archive := filepath.Join(j.dir, "data.tar.gz")
 	rb, err := readBack(archive, *st.Archive)
@@ -264,6 +379,7 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	if _, err := os.Lstat(after); err == nil {
 		return j.fail(after + " exists already, and this run did not put it there; nothing was touched"), false
 	}
+	j.begin()
 	// A restore the way back finished and checked before is taken up as it
 	// is; one it began and did not finish (no back_restored) holds nothing
 	// but part of the archive, which stays, and is begun again (the fault
@@ -278,7 +394,7 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 		if err != nil {
 			return j.fail(err.Error()), false
 		}
-		err = j.at("back.restore")
+		err = j.at(stepBackRestored)
 		if err == nil {
 			err = extractArchive(archive, restore, info.Mode().Perm())
 		}
@@ -301,10 +417,6 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 
 	// Only now is the server stopped: a bad archive is found while it still
 	// runs.
-	j.begin()
-	if err := j.at("back.stop"); err != nil {
-		return j.fail(fmt.Sprintf("server pid %d was not stopped (%v); the restore waits in %s; run --back again", holder, err, restore)), false
-	}
 	if holder > 0 {
 		if ok, err := r.isServer(holder, ps.DataDir, j.spec); !ok {
 			why := "it is gone"
@@ -320,8 +432,6 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 			j.done("stopped server pid %d", holder)
 		}
 	}
-	// The data held from here too, until the old version starts: nothing
-	// runs on it between the stop and the swap.
 	// The server this run started, when it holds something else than this
 	// directory (it opened another one): it is the run's own, by its binary
 	// and arguments, and it holds the address the old version needs.
@@ -331,10 +441,15 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 		}
 		j.done("stopped the run's server pid %d", ps.NewPID)
 	}
+	// The data held from here too, until the old version starts: nothing
+	// runs on it between the stop and the swap.
 	if ok, _ := j.hold(ps.DataDir); !ok {
 		return j.fail("something took " + ps.DataDir + " meanwhile; nothing was set aside, and the restore waits in " + restore), false
 	}
-	err = j.at("back.aside")
+	if out, ok := j.clearPath(ctx); !ok {
+		return out, false
+	}
+	err = j.at(stepBackAside)
 	if err == nil {
 		err = renameDir(ps.DataDir, after)
 	}
@@ -343,16 +458,8 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	}
 	st.SetAside = append(st.SetAside, after)
 	_ = j.step(stepBackAside)
-	err = j.at("back.move")
-	if err == nil {
-		err = renameDir(restore, ps.DataDir)
-	}
-	if err != nil {
-		return j.fail(fmt.Sprintf("the restore could not take the place of %s (%v); %s is set aside, and the restore waits in %s; run --back again to finish", ps.DataDir, err, after, restore)), false
-	}
-	_ = j.step(stepBackMoved)
-	j.done("set %s aside as %s, and put the restore in its place", ps.DataDir, after)
-	return wentBack{}, true
+	j.done("set %s aside as %s", ps.DataDir, after)
+	return j.moveRestore(restore, after)
 }
 
 // waitRecorded waits, as a stop does, for a server just started to take its
@@ -431,7 +538,7 @@ func running(s Started) func() bool {
 // checkBack checks the old version a way back started.
 func (j *job) checkBack(ctx context.Context, alive func() bool, pid int, fresh bool) wentBack {
 	ps := j.st.Process
-	if err := j.at("back.check"); err != nil {
+	if err := j.at(stepBackDone); err != nil {
 		return wentBack{ok: true, unconfirmed: true, why: "its check failed: " + err.Error()}
 	}
 	c := j.r.check(ctx, ps.URL, j.st.From, j.st.CountBefore, alive)
@@ -470,20 +577,33 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	}
 	switch {
 	case !st.has(stepRenamedOld):
+		// Stopped, or asked to stop, and nothing else: it starts again with
+		// the restart policy the stop set to no.
+		if st.has(stepBackStarted) && r.containerRunning(ctx, cs.ID, false) {
+			return j.checkContainer(ctx, cs.ID, false)
+		}
 		j.begin()
-		err := j.at("back.run")
+		err := j.at(stepBackStarted)
+		if err == nil {
+			err = restorePolicy(cs.Name)
+		}
 		if err == nil {
 			_, err = docker.Run(ctx, "start", cs.Name)
 		}
 		if err != nil {
-			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()))
+			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()) + "; run --back again")
 		}
-		j.done("started %s again", cs.Name)
+		cs.BackID = cs.ID
+		_ = j.step(stepBackStarted)
+		j.done("started %s again, with its restart policy", cs.Name)
 		return j.checkContainer(ctx, cs.ID, false)
 	case !st.has(stepStarted) && !r.exists(ctx, "container", j.before()) && !st.has(stepBackStarted) && !j.nameIs(ctx, cs.ID):
 		// The old container was removed since (by the person): the old
 		// image runs again, on the volume the new version never ran on.
 		j.begin()
+		if err := j.at(stepBackStarted); err != nil {
+			return j.fail(st.From + " did not start (" + err.Error() + "); run --back again")
+		}
 		if out, ok := j.clearName(ctx, ""); !ok {
 			return out
 		}
@@ -497,10 +617,21 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		j.done("%s was gone; ran %s as %s again", j.before(), ref, cs.Name)
 		return j.checkContainer(ctx, cs.BackID, true)
 	case !st.has(stepStarted) && st.has(stepBackStarted):
+		if !r.containerRunning(ctx, cs.BackID, false) {
+			// Stopped since: started again, as the first way back did.
+			if !j.nameIs(ctx, cs.BackID) {
+				return j.fail("the container named " + cs.Name + " is not the one this run's way back started; nothing was touched")
+			}
+			if _, err := docker.Run(ctx, "start", cs.BackID); err != nil {
+				return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()) + "; run --back again")
+			}
+			_ = j.step(stepBackStarted)
+			j.done("started %s again", cs.Name)
+		}
 		return j.checkContainer(ctx, cs.BackID, false)
 	case !st.has(stepStarted):
 		j.begin()
-		if err := j.at("back.run"); err != nil {
+		if err := j.at(stepBackStarted); err != nil {
 			return j.fail(j.before() + " was not renamed back (" + err.Error() + "); run --back again")
 		}
 		if r.exists(ctx, "container", j.before()) {
@@ -524,6 +655,8 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		if _, err := docker.Run(ctx, "start", cs.Name); err != nil {
 			return j.fail(cs.Name + " did not start again: " + firstLine(err.Error()) + "; run --back again")
 		}
+		cs.BackID = cs.ID
+		_ = j.step(stepBackStarted)
 		j.done("renamed %s back to %s, with its restart policy, and started it", j.before(), cs.Name)
 		return j.checkContainer(ctx, cs.ID, false)
 	}
@@ -553,7 +686,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		if err := checkArchiveDB(ctx, archive, j.dir); err != nil {
 			return j.fail("the archive's database fails its check (" + err.Error() + "); nothing was touched")
 		}
-		if err := j.at("back.volume"); err != nil {
+		if err := j.at(stepBackVolume); err != nil {
 			return j.fail("the volume " + vol + " was not made (" + err.Error() + "); nothing was touched")
 		}
 		if _, err := docker.Run(ctx, "volume", "create", vol); err != nil {
@@ -577,12 +710,15 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 
 	if !st.has(stepBackAside) {
 		j.begin()
-		if err := j.at("back.aside"); err != nil {
+		if err := j.at(stepBackAside); err != nil {
 			return j.fail("the new container was not set aside (" + err.Error() + "); run --back again")
 		}
 		if list, err := r.inspectContainers(ctx, cs.Name); err == nil && len(list) == 1 && list[0].ID == cs.NewID {
-			if _, err := docker.Run(ctx, "stop", "--time", strconv.Itoa(int(r.deps.StopWait.Seconds())), cs.Name); err != nil {
+			if err := r.askToStop(ctx, cs.Name); err != nil {
 				return j.fail(cs.Name + " did not stop: " + firstLine(err.Error()) + "; run --back again")
+			}
+			if !r.waitStopped(ctx, cs.NewID) {
+				return j.fail(fmt.Sprintf("%s was asked to stop and has not in %s; run --back again once it has", cs.Name, r.deps.StopWait))
 			}
 			if _, err := docker.Run(ctx, "rename", cs.Name, j.after()); err != nil {
 				return j.fail(cs.Name + " could not be set aside: " + firstLine(err.Error()) + "; run --back again")
@@ -605,7 +741,7 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 	fresh := false
 	if !st.has(stepBackStarted) || !r.containerRunning(ctx, cs.BackID, false) {
 		j.begin()
-		if err := j.at("back.run"); err != nil {
+		if err := j.at(stepBackStarted); err != nil {
 			return j.fail(st.From + " did not start on " + vol + " (" + err.Error() + "); run --back again")
 		}
 		if out, ok := j.clearName(ctx, cs.BackID); !ok {
@@ -627,8 +763,8 @@ func (j *job) backContainer(ctx context.Context) wentBack {
 		}
 		_ = j.step(stepBackStarted)
 	}
-	if st.has(stepBinaryReplaced) && st.Binary.Old != "" && !st.has(stepBackBinary) {
-		err := j.at("back.binary")
+	if st.has(stepBinaryReplacing) && st.Binary.Old != "" && !st.has(stepBackBinary) {
+		err := j.at(stepBackBinary)
 		if err == nil {
 			err = j.restoreBinary(ctx, st.Binary.Old, st.Binary.From)
 		}
@@ -704,7 +840,7 @@ func checkArchiveDB(ctx context.Context, archive, runDir string) error {
 
 func (j *job) checkContainer(ctx context.Context, id string, fresh bool) wentBack {
 	cs := j.st.Container
-	if err := j.at("back.check"); err != nil {
+	if err := j.at(stepBackDone); err != nil {
 		return wentBack{ok: true, unconfirmed: true, why: "its check failed: " + err.Error()}
 	}
 	c := j.r.check(ctx, cs.URL, j.st.From, j.st.CountBefore, func() bool { return j.r.containerRunning(ctx, id, fresh) })
@@ -729,6 +865,12 @@ func (r *runner) openRun(arg string, rep *Report) (*job, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A run's state names files the way back runs and starts: it is taken
+	// only from a directory of the person's own, nobody else can write (the
+	// sixth review).
+	if err := private(dir); err != nil {
+		return nil, err
+	}
 	st, err := loadState(dir)
 	if err != nil {
 		return nil, err
@@ -741,21 +883,18 @@ func (r *runner) openRun(arg string, rep *Report) (*job, error) {
 // backMode is `--back RUN`.
 func (r *runner) backMode(ctx context.Context) *Report {
 	rep := &Report{Mode: "back"}
-	j, err := r.openRun(r.flags.back, rep)
-	if err != nil {
-		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
-		return rep
-	}
-	if j.st.has(stepBackDone) {
-		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run's way back already ran; nothing changed."
-		j.privacy()
-		return rep
-	}
+	// The lock first, then the state: a state read before it could be one
+	// another invocation is about to change (the sixth review).
 	release, ok := r.lockRuns(rep)
 	if !ok {
 		return rep
 	}
 	defer release()
+	j, err := r.openRun(r.flags.back, rep)
+	if err != nil {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
+		return rep
+	}
 	// Once it has begun, an interrupt must not leave the server down half way.
 	ctx, cancel := wayBackContext(ctx)
 	defer cancel()
@@ -784,16 +923,16 @@ func (r *runner) backMode(ctx context.Context) *Report {
 // starting. It never takes the way back itself.
 func (r *runner) checkMode(ctx context.Context) *Report {
 	rep := &Report{Mode: "check"}
-	j, err := r.openRun(r.flags.check, rep)
-	if err != nil {
-		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
-		return rep
-	}
 	release, ok := r.lockRuns(rep)
 	if !ok {
 		return rep
 	}
 	defer release()
+	j, err := r.openRun(r.flags.check, rep)
+	if err != nil {
+		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
+		return rep
+	}
 	st := j.st
 	if !st.has(stepStarted) || st.has(stepBackBegun) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: this run has no new version running to check."
@@ -803,7 +942,7 @@ func (r *runner) checkMode(ctx context.Context) *Report {
 	switch st.Kind {
 	case kindProcess:
 		ps := st.Process
-		spec, err := readSpec(j.dir)
+		spec, err := j.loadSpec()
 		if err != nil {
 			rep.ExitCode, rep.Summary = exitRefused, "Refused: the run's server.json does not read: "+err.Error()
 			return rep

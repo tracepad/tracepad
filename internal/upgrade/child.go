@@ -7,7 +7,7 @@ import (
 )
 
 // child is every process the command starts but a server: docker, busybox
-// through it, a tracepad asked its version, lsof, systemctl, launchctl, gh.
+// through it, a tracepad asked its version, lsof, gh.
 // Each goes into a process group of its own (spec 054 #26): a Ctrl-C at the
 // terminal is sent to the foreground group, and must reach the command alone,
 // which decides — a docker run half way through a restore, or a `tracepad

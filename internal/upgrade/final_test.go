@@ -74,7 +74,9 @@ func TestADataDirectoryFromAnySource(t *testing.T) {
 func TestANewServerThatOpenedAnotherDirectoryIsNotHealthy(t *testing.T) {
 	w := newFakeWorld(t, 2)
 	w.host.elsewhere[fNew] = t.TempDir()
-	rep, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data)
+	deps := w.deps()
+	deps.StopWait = 300 * time.Millisecond // how long the start waits for the lock to be the new server's
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
 	if code != exitWentBack || !strings.Contains(rep.Summary, "did not open") {
 		t.Fatalf("%d %s", code, rep.Summary)
 	}

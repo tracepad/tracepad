@@ -3,6 +3,7 @@ package upgrade
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -49,5 +50,26 @@ func TestTheDocsNameOnlyTheCommandsFlags(t *testing.T) {
 	}
 	if seen < 10 {
 		t.Fatalf("found %d invocations; the check would pass anything", seen)
+	}
+}
+
+// TestTheDocsNameEveryFieldOfTheReport holds cli.md's list of `--json`'s
+// fields to the report's (the sixth review found `back_check` missing).
+func TestTheDocsNameEveryFieldOfTheReport(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "cli.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, list, ok := strings.Cut(string(b), "prints the report as one object:")
+	if !ok {
+		t.Fatal("cli.md no longer lists the report's fields")
+	}
+	list, _, _ = strings.Cut(list, "\n\n")
+	typ := reflect.TypeFor[Report]()
+	for i := range typ.NumField() {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" && !strings.Contains(list, "`"+name+"`") {
+			t.Errorf("cli.md does not name the report's field %q", name)
+		}
 	}
 }

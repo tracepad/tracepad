@@ -42,6 +42,10 @@ type fakeDocker struct {
 	silentRef   string
 	failRestore bool
 	rootless    bool
+	// stubborn is a container that does not stop on SIGTERM; slow, how long
+	// every container takes to answer while set.
+	stubborn bool
+	slow     time.Duration
 	// onCall runs before each call: a test's interrupt.
 	onCall func(args []string)
 	dbFile []byte
@@ -169,9 +173,24 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 		}
 		return nil, nil
 	case args[0] == "stop":
+		d.t.Errorf("docker stop kills after its timeout: %s", joined)
+		return nil, errors.New("not here")
+	case args[0] == "kill":
 		c := d.find(args[len(args)-1])
 		if c == nil {
 			return nil, errors.New("No such container")
+		}
+		if args[1] != "--signal" || args[2] != "TERM" {
+			d.t.Errorf("a kill that is not SIGTERM: %s", joined)
+		}
+		if d.stubborn {
+			return nil, nil
+		}
+		// As docker does: a container that exits under a restart policy is
+		// started again.
+		if p := c.HostConfig.RestartPolicy.Name; p != "" && p != "no" {
+			c.RestartCount++
+			return nil, nil
 		}
 		c.State.Running = false
 		return nil, nil
@@ -351,6 +370,13 @@ func (d *fakeDocker) boot(c *inspectContainer) {
 // RoundTrip answers for whatever container publishes the asked port: its
 // image's version on /health, its volume's traces on /api/v1/system.
 func (d *fakeDocker) RoundTrip(req *http.Request) (*http.Response, error) {
+	if d.slow > 0 {
+		select {
+		case <-time.After(d.slow):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
 	for _, c := range d.byName {
 		if !c.State.Running || c.State.Restarting || c.Config.Image == d.silentRef && onRestoredVolume(c) {
 			continue
@@ -576,7 +602,7 @@ func TestAContainerUpgradeKeepsMountsPolicyAndVariables(t *testing.T) {
 	if len(plan.Next) == 0 || !strings.HasPrefix(plan.Next[0], deps.Self+" upgrade") {
 		t.Errorf("the plan hands on a bare command: %q", plan.Next)
 	}
-	if len(d.calls) == 0 || slices.ContainsFunc(d.calls, func(c []string) bool { return c[0] == "stop" || c[0] == "run" }) {
+	if len(d.calls) == 0 || slices.ContainsFunc(d.calls, func(c []string) bool { return c[0] == "kill" || c[0] == "run" }) {
 		t.Fatalf("the plan acted: %q", d.calls)
 	}
 
@@ -631,8 +657,15 @@ func TestAContainerUpgradeKeepsMountsPolicyAndVariables(t *testing.T) {
 	if after == nil || after.HostConfig.RestartPolicy.Name != "no" {
 		t.Errorf("the new container set aside: %+v", after)
 	}
-	if again, code := runReport(t, deps, "--back", rep.Run.ID); code != exitRefused {
+	// Run again, it ends where the first did and changes nothing (#31).
+	calls := len(d.calls)
+	if again, code := runReport(t, deps, "--back", rep.Run.ID); code != exitOK {
 		t.Errorf("second way back: %d %s", code, again.Summary)
+	}
+	for _, c := range d.calls[calls:] {
+		if c[0] != "container" && c[0] != "image" && c[0] != "logs" {
+			t.Errorf("the second way back acted: docker %q", c)
+		}
 	}
 }
 
@@ -690,7 +723,7 @@ func TestAWayBackWhoseVolumeExistsTouchesNothing(t *testing.T) {
 	if code != exitStuck || !strings.Contains(back.Summary, "exists already") {
 		t.Fatalf("%d %s", code, back.Summary)
 	}
-	if slices.ContainsFunc(d.calls, func(c []string) bool { return c[0] == "stop" || c[0] == "rename" || c[0] == "run" }) {
+	if slices.ContainsFunc(d.calls, func(c []string) bool { return c[0] == "kill" || c[0] == "rename" || c[0] == "run" }) {
 		t.Errorf("it acted: %q", d.calls)
 	}
 }
@@ -724,7 +757,7 @@ func TestAWayBackLeavesALaterRunsContainerAlone(t *testing.T) {
 		t.Fatalf("%d %s", code, back.Summary)
 	}
 	if slices.ContainsFunc(d.calls, func(c []string) bool {
-		return c[0] == "stop" || c[0] == "rename" || (c[0] == "volume" && c[1] == "create")
+		return c[0] == "kill" || c[0] == "rename" || (c[0] == "volume" && c[1] == "create")
 	}) {
 		t.Errorf("it acted: %q", d.calls)
 	}
@@ -807,7 +840,7 @@ func TestAnInterruptAfterTheContainerStopsStillBringsItBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	d.onCall = func(args []string) {
-		if args[0] == "stop" {
+		if args[0] == "kill" {
 			cancel()
 		}
 	}
@@ -945,7 +978,7 @@ func TestADeadlineSpentByTheSwapIsNotTheWayBacks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	d.onCall = func(args []string) {
-		if args[0] == "stop" {
+		if args[0] == "kill" {
 			<-ctx.Done()
 		}
 	}
@@ -970,7 +1003,7 @@ func TestAnInterruptedHealthySwapFinishes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	d.onCall = func(args []string) {
-		if args[0] == "stop" {
+		if args[0] == "kill" {
 			cancel()
 		}
 	}
@@ -983,5 +1016,33 @@ func TestAnInterruptedHealthySwapFinishes(t *testing.T) {
 	}
 	if cur := d.byName["tracepad-app"]; cur == nil || cur.Config.Image != "ghcr.io/tracepad/tracepad:0.2.0" {
 		t.Errorf("the new container: %+v", cur)
+	}
+}
+
+// A container is stopped as a server is (the sixth review): SIGTERM, its
+// restart policy set to no so docker does not start it again, and no
+// SIGKILL after the wait — one that has not stopped leaves the run stuck,
+// and --back puts its policy back and starts it.
+func TestAContainerThatDoesNotStopIsNeverKilled(t *testing.T) {
+	d := newFakeDocker(t)
+	d.setupContainer(t, t.TempDir())
+	d.stubborn = true
+	deps := containerDeps(t, d)
+	deps.StopWait = 50 * time.Millisecond
+	rep, code := runReport(t, deps)
+	if code != exitStuck || !strings.Contains(rep.Summary, "has not stopped") {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	c := d.byName["tracepad-app"]
+	if !c.State.Running || c.HostConfig.RestartPolicy.Name != "no" {
+		t.Errorf("the container after the stop's wait: running %v, policy %s", c.State.Running, c.HostConfig.RestartPolicy.Name)
+	}
+	d.stubborn = false
+	c.State.Running = false // it stopped, late
+	if back, code := runReport(t, deps, "--back", rep.Run.ID); code != exitOK {
+		t.Fatalf("--back: %d %s", code, back.Summary)
+	}
+	if !c.State.Running || c.HostConfig.RestartPolicy.Name != "always" {
+		t.Errorf("after --back: running %v, policy %s", c.State.Running, c.HostConfig.RestartPolicy.Name)
 	}
 }

@@ -1089,9 +1089,12 @@ server only at the server's own address. The design is spec 054.
   machine, another binary), and what the upgrade would do, step by step.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
-  on this machine only, and no service manager runs it — a systemd unit or a
-  launchd job it sits in counts as running it unless proven not to, and one
-  that cannot be asked counts too. It is backed up with
+  on this machine only, and it is in no service manager's hands: a server in
+  a systemd service (system or `--user`) or a launchd job is yours, whatever
+  started it, and so is one whose cgroup cannot be read — the plan gives the
+  `systemctl restart` or `launchctl kickstart` for it. A terminal's session,
+  tmux, or the `nohup … &` the setup starts a server with is not a service. It
+  is backed up with
   the server stopped (the data directory archived into
   `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
   against the release's `checksums.txt`, and its attestation when `gh` is
@@ -1103,7 +1106,9 @@ server only at the server's own address. The design is spec 054.
   finds), and Docker is neither rootless nor remapping user namespaces; it is
   recreated from `docker inspect` with the same mounts,
   ports, restart policy, labels and the variables you set, the old one renamed
-  `<name>-before-<run>`. No binary is ever put in place while a server runs
+  `<name>-before-<run>`. A server or a container is stopped with SIGTERM and
+  never killed; one that has not stopped in the wait leaves the run stuck
+  (exit `5`), and `--back` starts it again once it has. No binary is ever put in place while a server runs
   from it at a later version than the one put there.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
@@ -1118,7 +1123,12 @@ server only at the server's own address. The design is spec 054.
   restored beside the data and checked before anything stops, what the new
   version left is **set aside, not deleted** (`<data>.after-<run>`, or the
   container `<name>-after-<run>` and its volume), and the old version starts
-  with its arguments. A second `--back` of the same run is refused.
+  with its arguments. Whether the archive is restored is decided from what
+  the run recorded when it happened — whether the new version was started on
+  the data, or a server found there started while the installed binary may
+  have been the new one — never from how fast a server answers. `--back` again
+  ends where the first did: it checks the old version, starts it again if it
+  was stopped since, and changes nothing else.
 
 A run directory is a full copy of the database and of the server's
 environment, secrets included, kept until you delete it; erasing traces or a
@@ -1136,7 +1146,8 @@ same machine. Either refuses (`1`) when something runs later than the version
 asked for — after an install script put an older binary in place, say. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
-`plan`, `done`, `set_aside`, `person`, `next` and `notes`.
+`back_check` (the way back's check of the old version), `plan`, `done`,
+`set_aside`, `person`, `next` and `notes`.
 
 ## Version skew
 

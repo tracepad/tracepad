@@ -109,14 +109,14 @@ func recordedPid(file *os.File) string {
 // asks whether a server holds one, and reads who last did (spec 054 #28). One
 // protocol, here, so the two sides cannot drift.
 
-// lockTries and lockRetry are how long a lock found held is asked again
+// lockTries and LockRetry are how long a lock found held is asked again
 // before it counts as held: a child a process is starting holds a copy of
 // every descriptor between its fork and its exec, so a lock let go a moment
-// ago can look held for that moment.
-const (
-	lockTries = 5
-	lockRetry = 10 * time.Millisecond
-)
+// ago can look held for that moment. LockRetry is a variable for tests that
+// start no process, where a held lock is held.
+const lockTries = 5
+
+var LockRetry = 10 * time.Millisecond
 
 // TryLock takes the lock of the database at dbPath as a server takes it, and
 // returns at once: ok is false when another process holds it. Unlike a
@@ -140,7 +140,7 @@ func TryLock(dbPath string) (release func(), ok bool, err error) {
 			file.Close()
 			return func() {}, true, nil
 		case isLockHeld(err) && try < lockTries:
-			time.Sleep(lockRetry)
+			time.Sleep(LockRetry)
 		case isLockHeld(err):
 			file.Close()
 			return nil, false, nil

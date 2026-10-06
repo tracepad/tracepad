@@ -213,10 +213,10 @@ func TestWhatServerIsTheCommands(t *testing.T) {
 		{"another binary", func(p *Process) { p.Exe = "/opt/homebrew/bin/tracepad" }, "not the installed"},
 		{"no executable", func(p *Process) { p.Exe = "" }, "could not be read"},
 		{"a lock that records another", func(p *Process) { p.PID = 43 }, "does not record it"},
-		{"a service", func(p *Process) { p.Manager = "the systemd unit tracepad.service" }, "restarts it"},
-		{"a service that could not be asked", func(p *Process) {
-			p.Unasked = "it sits in the systemd unit tracepad.service, which could not be asked whether it runs it (no bus)"
-		}, "could not be asked"},
+		{"a service", func(p *Process) { p.Manager = "the systemd unit tracepad.service" }, "may restart what the command stops"},
+		{"a manager that cannot be ruled out", func(p *Process) {
+			p.Manager = "its cgroup could not be read, so a service manager cannot be ruled out"
+		}, "cannot be ruled out"},
 		{"beyond this machine", func(p *Process) { p.Argv[3] = "0.0.0.0:4318" }, "beyond this machine"},
 		{"all interfaces", func(p *Process) { p.Argv[3] = ":4318" }, "beyond this machine"},
 		{"relative, no cwd", func(p *Process) { p.Argv[5] = "rel"; p.Cwd = "" }, "relative"},
@@ -506,5 +506,38 @@ func TestOnlyWhatRunsOlderIsAChoice(t *testing.T) {
 	p.f.Servers[1].Version = "0.1.0"
 	if err := r.pickTarget(p); err != nil || len(p.choose) != 0 || p.server == nil || p.server.Proc.PID != 2 {
 		t.Errorf("one behind: choose %q, server %+v", p.choose, p.server)
+	}
+}
+
+// A run is taken only from a directory of the person's own, directly under
+// the backups directory (#30).
+func TestARunIsTakenOnlyFromThePersonsOwnDirectory(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	backups := filepath.Join(root, "tracepad-backups")
+	id := "20261006-120000-0.1.0-abc123"
+	_ = os.MkdirAll(filepath.Join(backups, id), 0o700)
+	_ = os.Chmod(backups, 0o700)
+	if got, err := resolveRun(backups, filepath.Join(backups, id)); err != nil || private(got) != nil {
+		t.Fatalf("the person's own: %q %v", got, err)
+	}
+	elsewhere := filepath.Join(root, "elsewhere", id)
+	_ = os.MkdirAll(elsewhere, 0o700)
+	if _, err := resolveRun(backups, elsewhere); err == nil {
+		t.Error("a run outside the backups directory: taken")
+	}
+	_ = os.Chmod(filepath.Join(backups, id), 0o755)
+	if err := private(filepath.Join(backups, id)); err == nil {
+		t.Error("a run open to other users: taken")
+	}
+	_ = os.Chmod(filepath.Join(backups, id), 0o700)
+	link := "20261006-120000-0.1.0-zzz999"
+	_ = os.Symlink(elsewhere, filepath.Join(backups, link))
+	if err := private(filepath.Join(backups, link)); err == nil {
+		t.Error("a run that is a link: taken")
+	}
+	// A state whose copies are outside its run.
+	st := &State{Run: id, Kind: kindBinary, From: "0.1.0", To: "0.2.0", Binary: &BinaryState{Path: "/x/tracepad", From: "0.1.0", Old: "/tmp/tracepad-0.1.0"}}
+	if err := st.validate(filepath.Join(backups, id)); err == nil {
+		t.Error("a copy outside its run: accepted")
 	}
 }

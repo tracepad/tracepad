@@ -50,7 +50,7 @@ func (kernSystem) Candidates() ([]Process, int, error) {
 			continue
 		}
 		// Its arguments first, which are cheap: `tracepad mcp`, `tail`,
-		// `version` are no server, and are not asked lsof or launchctl
+		// `version` are no server, and are not asked lsof
 		// about (the final review).
 		if raw, err := unix.SysctlRaw("kern.procargs2", pid); err == nil {
 			if _, argv, _, err := parseProcargs2(raw); err == nil {
@@ -99,7 +99,7 @@ func inspectDarwin(pid int) (Process, error) {
 	if k, err := unix.SysctlKinfoProc("kern.proc.pid", pid); err == nil {
 		p.PPID = int(k.Eproc.Ppid)
 	}
-	p.Manager, p.Unasked = launchdManager(p, os.Getuid())
+	p.Manager = launchdJob(p)
 	return p, nil
 }
 

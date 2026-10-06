@@ -40,6 +40,31 @@ type fakeHost struct {
 	// elsewhere are versions whose server opens another data directory
 	// than its arguments name.
 	elsewhere map[string]string
+	// slow is how long every server takes to answer, while set: longer than
+	// the command waits (the sixth review's "slow answer" cells).
+	slow time.Duration
+}
+
+// lag waits as a slow server does before it answers.
+func (h *fakeHost) lag(r *http.Request) bool {
+	h.mu.Lock()
+	d := h.slow
+	h.mu.Unlock()
+	if d == 0 {
+		return true
+	}
+	select {
+	case <-time.After(d):
+		return true
+	case <-r.Context().Done():
+		return false
+	}
+}
+
+func (h *fakeHost) setSlow(d time.Duration) {
+	h.mu.Lock()
+	h.slow = d
+	h.mu.Unlock()
 }
 
 type fakeServer struct {
@@ -155,10 +180,16 @@ func (h *fakeHost) Start(spec StartSpec) (Started, error) {
 		return exit()
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if !h.lag(r) {
+			return
+		}
 		fmt.Fprintf(w, `{"status":"ok","version":%q}`, version)
 	})
 	mux.HandleFunc("/api/v1/system", func(w http.ResponseWriter, r *http.Request) {
+		if !h.lag(r) {
+			return
+		}
 		h.mu.Lock()
 		failing := h.uncounted[version]
 		h.mu.Unlock()

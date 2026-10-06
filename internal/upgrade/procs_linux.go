@@ -50,7 +50,7 @@ func (procSystem) Candidates() ([]Process, int, error) {
 		if !isTracepadName(exe) && (len(argv) == 0 || !isTracepadName(argv[0])) {
 			continue
 		}
-		// Not a server (`tracepad mcp`, `tail`): not asked systemctl about.
+		// Not a server (`tracepad mcp`, `tail`): its cgroup is not read.
 		if _, ok := serverFlags(argv); argErr == nil && !ok {
 			continue
 		}
@@ -101,7 +101,7 @@ func inspectLinux(pid int) (Process, error) {
 		}
 	}
 	p.PPID = procPPID(dir)
-	p.Manager, p.Unasked = systemdManager(p, cgroupOf(dir))
+	p.Manager = systemdUnit(cgroupOf(dir))
 	return p, nil
 }
 

@@ -245,13 +245,14 @@ func containerAdvice(c Container, to string) string {
 }
 
 func serverAdvice(s Server) string {
+	m := s.Proc.Manager
 	switch {
-	case strings.HasPrefix(s.Proc.Manager, "the systemd unit "):
-		unit := strings.TrimPrefix(s.Proc.Manager, "the systemd unit ")
-		return fmt.Sprintf("Back up its data directory, install %s, then: sudo systemctl restart %s (%s)", "the new binary", unit, docsUpgrading)
-	case strings.HasPrefix(s.Proc.Manager, "the launchd job "):
-		job := strings.TrimPrefix(s.Proc.Manager, "the launchd job ")
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: launchctl kickstart -k gui/$(id -u)/%s (%s)", job, docsUpgrading)
+	case strings.HasPrefix(m, "the user systemd unit "):
+		return fmt.Sprintf("Back up its data directory, install the new binary, then: systemctl --user restart %s (%s)", strings.TrimPrefix(m, "the user systemd unit "), docsUpgrading)
+	case strings.HasPrefix(m, "the systemd unit "):
+		return fmt.Sprintf("Back up its data directory, install the new binary, then: sudo systemctl restart %s (%s)", strings.TrimPrefix(m, "the systemd unit "), docsUpgrading)
+	case strings.HasPrefix(m, "the launchd job "):
+		return fmt.Sprintf("Back up its data directory, install the new binary, then: launchctl kickstart -k gui/$(id -u)/%s (%s)", strings.TrimPrefix(m, "the launchd job "), docsUpgrading)
 	}
 	return "Back it up and restart it yourself (" + docsUpgrading + ")"
 }
