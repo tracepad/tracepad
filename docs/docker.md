@@ -627,21 +627,29 @@ a container. A Compose project takes the new tag in its Compose file and
 `docker compose up -d`, after the same backup.
 
 Back the volume up by tarring it from a throwaway container, then run the new
-release with the old one's options:
+release with the old one's options — as one command, each step only once the
+one before it worked, so a backup that is refused stops everything after it:
 
 ```sh
-docker stop tracepad
+docker stop tracepad &&
 docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz'
-docker pull ghcr.io/tracepad/tracepad:X.Y.Z        # the release you are moving to
-docker rename tracepad tracepad-old                 # kept, to go back to
+  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz' &&
+docker pull ghcr.io/tracepad/tracepad:X.Y.Z &&
+docker rename tracepad tracepad-old &&
 (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-old \
-  | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > tracepad.upgrade.env)   # the variables you gave it
+  | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > tracepad.upgrade.env) &&
 docker run -d --name tracepad --env-file tracepad.upgrade.env -p 127.0.0.1:4318:4318 \
-  -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve       # the options you created it with
-rm tracepad.upgrade.env                             # it holds the keys
-docker rm tracepad-old                              # once the new one has proved itself
+  -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve &&
+rm tracepad.upgrade.env
 ```
+
+`X.Y.Z` is the release you are moving to; the variables are the ones you gave
+the container, read from Docker into a file that holds its keys and is removed
+once the new one runs; the `-p`, `-v` and `serve` are the options you created it
+with. The old container is kept, renamed: once the new one has proved itself,
+`docker rm tracepad-old`. Stopped after the rename, put it back:
+`docker rm tracepad` if the new one was made, `rm -f tracepad.upgrade.env`, then
+`docker rename tracepad-old tracepad && docker start tracepad`.
 
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. `umask 077` makes the archive

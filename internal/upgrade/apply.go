@@ -562,15 +562,19 @@ func (r *runner) serversOn(ctx context.Context, path, version string, upgrade bo
 			continue
 		}
 		dataDir, listen, err := resolveServer(p)
-		if errors.Is(err, errNotServer) {
+		switch {
+		case errors.Is(err, errNotServer):
 			continue
+		case err != nil:
+			// Its own reason, never an empty address (the review of #225).
+			return fmt.Errorf("server pid %d may run %s, and where it keeps its data and listens cannot be told (%v), so putting %s there cannot be shown to be safe; stop it, or upgrade it first", p.PID, path, err, version)
 		}
 		if p.Exe == "" {
 			return fmt.Errorf("server pid %d on %s does not say which binary it runs, so whether it runs %s cannot be told; nothing is put there while it runs", p.PID, dataDir, path)
 		}
 		v := ""
 		url, asked := healthURL(listen)
-		if asked = asked && err == nil; asked {
+		if asked {
 			hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			v, _ = health(hctx, r.deps.HTTP, url) // ignored: no answer leaves v empty, which refuses below
 			cancel()

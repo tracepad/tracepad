@@ -124,13 +124,14 @@ func timedOut(err error) bool {
 // handshake and the first byte of an answer each have a deadline (the live
 // run of rc.3: a connection held by a firewall kept the plan for minutes),
 // and a whole download has ten minutes, for an archive on a slow line.
+//
+// It is Go's default transport — HTTP/2, the proxy from the environment, its
+// limits on idle connections — with these deadlines (the review of #225).
 func networkClient(dial, handshake, header time.Duration) *http.Client {
-	return &http.Client{Timeout: 10 * time.Minute, Transport: &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: dial, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   handshake,
-		ResponseHeaderTimeout: header,
-	}}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: dial, KeepAlive: 30 * time.Second}).DialContext
+	t.TLSHandshakeTimeout, t.ResponseHeaderTimeout = handshake, header
+	return &http.Client{Timeout: 10 * time.Minute, Transport: t}
 }
 
 // httpsOnly refuses a redirect to anything but https://, and stops after

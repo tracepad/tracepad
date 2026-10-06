@@ -66,3 +66,13 @@ func TestTheReleaseLookupKeepsItsDeadline(t *testing.T) {
 		}
 	}
 }
+
+// The download client is Go's default transport with the deadlines: HTTP/2
+// and the environment's proxy kept (the review of #225).
+func TestTheNetworkClientKeepsTheDefaults(t *testing.T) {
+	t.Parallel()
+	tr := networkClient(time.Second, 2*time.Second, 3*time.Second).Transport.(*http.Transport)
+	if !tr.ForceAttemptHTTP2 || tr.Proxy == nil || tr.MaxIdleConns == 0 || tr.TLSHandshakeTimeout != 2*time.Second || tr.ResponseHeaderTimeout != 3*time.Second {
+		t.Errorf("%+v", tr)
+	}
+}

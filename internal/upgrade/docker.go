@@ -87,7 +87,8 @@ type inspectContainer struct {
 			Name              string `json:"Name"`
 			MaximumRetryCount int    `json:"MaximumRetryCount"`
 		} `json:"RestartPolicy"`
-		NetworkMode string `json:"NetworkMode"`
+		NetworkMode     string `json:"NetworkMode"`
+		PublishAllPorts bool   `json:"PublishAllPorts"`
 	} `json:"HostConfig"`
 	// NetworkSettings.Ports are the bindings as Docker made them: a port
 	// asked for as any (`-p 127.0.0.1::4318`) has its number only here.
@@ -127,6 +128,8 @@ type Container struct {
 	// configuration could not be read.
 	Run      []string
 	EnvNames []string
+	// RunWhy says why Run could not be written, when it could not.
+	RunWhy string
 }
 
 // imageSlot stands for the image in Container.Run.
@@ -134,6 +137,7 @@ const imageSlot = "\x00image"
 
 // imageConfig is the part of `docker image inspect` the plan reads.
 type imageConfig struct {
+	ID     string `json:"Id"`
 	Config struct {
 		Env        []string `json:"Env"`
 		Entrypoint []string `json:"Entrypoint"`
@@ -146,7 +150,10 @@ type imageConfig struct {
 // person to find them): its published ports, its mounts, its restart
 // policy, its network, and the command and variables it was given beyond
 // the image's own.
-func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string) {
+func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string, err error) {
+	if ic.HostConfig.PublishAllPorts {
+		run = append(run, "-P")
+	}
 	keys := make([]string, 0, len(ic.HostConfig.PortBindings))
 	for k := range ic.HostConfig.PortBindings {
 		keys = append(keys, k)
@@ -175,9 +182,12 @@ func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string) {
 		case "volume":
 		case "bind":
 			src = m.Source
-		default:
+		case "tmpfs":
 			run = append(run, "--tmpfs", m.Destination)
 			continue
+		default:
+			// Never another mount in its place (the review of #225).
+			return nil, nil, fmt.Errorf("the command cannot write a mount of type %s (on %s) into a docker run", m.Type, m.Destination)
 		}
 		spec := src + ":" + m.Destination
 		if !m.RW {
@@ -196,11 +206,17 @@ func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string) {
 		run = append(run, "--network", n)
 	}
 	args := ic.Config.Cmd
-	if !slices.Equal(ic.Config.Entrypoint, img.Config.Entrypoint) && len(ic.Config.Entrypoint) > 0 {
+	switch {
+	case slices.Equal(ic.Config.Entrypoint, img.Config.Entrypoint):
+		if slices.Equal(args, img.Config.Cmd) {
+			args = nil
+		}
+	case len(ic.Config.Entrypoint) == 0:
+		// Cleared at its creation (--entrypoint ""), and cleared again.
+		run = append(run, "--entrypoint", "")
+	default:
 		run = append(run, "--entrypoint", ic.Config.Entrypoint[0])
 		args = append(slices.Clone(ic.Config.Entrypoint[1:]), args...)
-	} else if slices.Equal(args, img.Config.Cmd) {
-		args = nil
 	}
 	run = append(run, imageSlot)
 	run = append(run, args...)
@@ -210,7 +226,7 @@ func createdAs(ic inspectContainer, img imageConfig) (run, envNames []string) {
 		}
 	}
 	sort.Strings(envNames)
-	return run, envNames
+	return run, envNames, nil
 }
 
 // containerAddress is where a container's server answers on this machine:
@@ -287,6 +303,7 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 		return nil, "the containers could not be inspected, so they were not checked (" + firstLine(err.Error()) + ")"
 	}
 	var cs []Container
+	var ics []inspectContainer
 	for _, ic := range list {
 		repo, ok := imageRepo(ic.Config.Image)
 		if !ok {
@@ -304,12 +321,36 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 			}
 		}
 		c.URL, c.Default, c.Unchecked = containerAddress(ic)
-		// Its image's own configuration tells what it was given beyond it;
-		// one that cannot be read leaves the run to the person, said.
-		if img, err := r.inspectImage(ctx, ic.Image); err == nil {
-			c.Run, c.EnvNames = createdAs(ic, img)
-		}
 		cs = append(cs, c)
+		ics = append(ics, ic)
+	}
+	// Its image's own configuration tells what each was given beyond it:
+	// every image asked once, in one call, and none for Compose's, whose
+	// advice is its Compose file (the review of #225). One that cannot be
+	// read leaves the run to the person, said.
+	var imageIDs []string
+	for i, ic := range ics {
+		if cs[i].Compose == "" && !slices.Contains(imageIDs, ic.Image) {
+			imageIDs = append(imageIDs, ic.Image)
+		}
+	}
+	images, imgErr := r.inspectImages(ctx, imageIDs)
+	for i, ic := range ics {
+		if cs[i].Compose != "" {
+			continue
+		}
+		img, ok := images[ic.Image]
+		if !ok {
+			cs[i].RunWhy = "its image could not be read"
+			if imgErr != nil {
+				cs[i].RunWhy += " (" + firstLine(imgErr.Error()) + ")"
+			}
+			continue
+		}
+		var err error
+		if cs[i].Run, cs[i].EnvNames, err = createdAs(ic, img); err != nil {
+			cs[i].Run, cs[i].RunWhy = nil, err.Error()
+		}
 	}
 	// Every container's address is asked at once, under the plan's deadline.
 	var wg sync.WaitGroup
@@ -342,17 +383,24 @@ func (r *runner) inspectContainers(ctx context.Context, refs ...string) ([]inspe
 	return list, nil
 }
 
-// inspectImage reads an image's own configuration.
-func (r *runner) inspectImage(ctx context.Context, id string) (imageConfig, error) {
-	out, err := r.deps.Docker.Run(ctx, "image", "inspect", id)
+// inspectImages reads the images' own configurations, by ID, in one call.
+func (r *runner) inspectImages(ctx context.Context, ids []string) (map[string]imageConfig, error) {
+	images := map[string]imageConfig{}
+	if len(ids) == 0 {
+		return images, nil
+	}
+	out, err := r.deps.Docker.Run(ctx, append([]string{"image", "inspect"}, ids...)...)
 	if err != nil {
-		return imageConfig{}, err
+		return images, err
 	}
 	var list []imageConfig
-	if err := json.Unmarshal(out, &list); err != nil || len(list) != 1 {
-		return imageConfig{}, fmt.Errorf("docker image inspect %s: %v", id, err)
+	if err := json.Unmarshal(out, &list); err != nil {
+		return images, fmt.Errorf("docker image inspect: %w", err)
 	}
-	return list[0], nil
+	for _, img := range list {
+		images[img.ID] = img
+	}
+	return images, nil
 }
 
 // containerAdvice is what upgrades a container, as docker.md does it: stop
@@ -365,6 +413,22 @@ func containerAdvice(c Container, to string) string {
 		return fmt.Sprintf("Upgrade it with Compose (%s): back up its volume as docs/docker.md shows, set the image to %s in the project %s's Compose file, then: docker compose up -d",
 			docsDocker, image, shq(c.Compose))
 	}
+	name, old := shq(c.Name), shq(c.Name+"-old")
+	chain, after := containerSteps(c, to)
+	if c.Run == nil {
+		return fmt.Sprintf("Upgrade it yourself (%s), each step only once the one before it worked: %s. Then run %s as %s with the options %s was created with, which the command could not write (%s; docker inspect %s has them), and remove %s once it is healthy",
+			docsDocker, chain, image, name, name, c.RunWhy, old, old)
+	}
+	return fmt.Sprintf("Upgrade it yourself (%s), as one command — a step that fails stops the ones after it: %s. %s. Any other option it was given — a user, limits, labels — is in docker inspect %s",
+		docsDocker, chain, strings.Join(after, ". "), old)
+}
+
+// containerSteps are a container's upgrade as the person runs it: one
+// chain, each step only once the one before it worked (the review of #225:
+// a backup refused, or a file of variables left from before, stopped
+// nothing after it), and the sentences for after it.
+func containerSteps(c Container, to string) (chain string, after []string) {
+	image := c.Repo + ":" + to
 	version := c.Version
 	if version == "" {
 		version = "backup"
@@ -382,14 +446,13 @@ func containerAdvice(c Container, to string) string {
 		fmt.Sprintf("docker rename %s %s", name, old),
 	}
 	if c.Run == nil {
-		steps = append(steps, fmt.Sprintf("then run %s as %s with the options %s was created with (docker inspect %s), and remove %s once it is healthy", image, name, name, old, old))
-		return fmt.Sprintf("Upgrade it yourself (%s): %s", docsDocker, strings.Join(steps, "; "))
+		return strings.Join(steps, " && "), nil
 	}
 	// The variables it was given go into a file of their own, read from
 	// Docker and never printed (the live run of rc.3): they hold its keys.
-	run := []string{"docker run -d --name", name}
 	// A name of the upgrade's own, never overwritten (set -C): docs/docker.md
 	// keeps an admin token in tracepad.env, which this file must not take.
+	run := []string{"docker run -d --name", name}
 	env := shq(c.Name + ".upgrade.env")
 	if len(c.EnvNames) > 0 {
 		steps = append(steps, fmt.Sprintf("(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s | grep -E '^(%s)=' > %s)", old, strings.Join(c.EnvNames, "|"), env))
@@ -405,8 +468,13 @@ func containerAdvice(c Container, to string) string {
 	if len(c.EnvNames) > 0 {
 		steps = append(steps, "rm "+env)
 	}
-	steps = append(steps, fmt.Sprintf("docker rm %s once the new one is healthy", old))
-	return fmt.Sprintf("Upgrade it yourself (%s): %s. Any other option it was given — a user, limits, labels — is in docker inspect %s", docsDocker, strings.Join(steps, "; "), old)
+	after = append(after, fmt.Sprintf("Once the new one is healthy: docker rm %s", old))
+	back := fmt.Sprintf("docker rename %s %s && docker start %s", old, name, name)
+	if len(c.EnvNames) > 0 {
+		back = "rm -f " + env + "; " + back
+	}
+	after = append(after, fmt.Sprintf("Stopped after the rename: docker rm %s if it was made, then %s", name, back))
+	return strings.Join(steps, " && "), after
 }
 
 func firstLine(s string) string {

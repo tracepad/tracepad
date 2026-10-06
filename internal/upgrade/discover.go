@@ -333,7 +333,12 @@ func (r *runner) discover(ctx context.Context) Findings {
 	for i := range f.Servers {
 		probe, ok := healthURL(f.Servers[i].Listen)
 		if !ok {
-			f.Servers[i].Unchecked = fmt.Sprintf("it listens on %s only, an address the command does not ask", f.Servers[i].Listen)
+			// Only an address read is one not asked: a server whose
+			// configuration could not be read keeps that reason, and is
+			// named as one that may be behind (the review of #225).
+			if f.Servers[i].Listen != "" {
+				f.Servers[i].Unchecked = fmt.Sprintf("it listens on %s only, an address the command does not ask", f.Servers[i].Listen)
+			}
 			continue
 		}
 		hw.Add(1)

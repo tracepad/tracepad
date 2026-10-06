@@ -2,5 +2,5 @@
 
 package upgrade
 
-// userTempDir: only macOS keeps one apart from TMPDIR.
-func userTempDir() string { return "" }
+// systemUserTempDir: only macOS keeps one apart from TMPDIR.
+func systemUserTempDir() string { return "" }

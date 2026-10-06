@@ -121,6 +121,22 @@ func installDirFor(named, home, self string, tmps ...string) string {
 	return dir
 }
 
+// userTempDir is the system's own temporary directory of this user's: a
+// seam, so a test can count the asks.
+var userTempDir = systemUserTempDir
+
+// installTemps are the temporary directories installDirFor weighs: the
+// user's own is asked only when the answer can matter — no directory named,
+// a binary called tracepad, and not already found temporary — so a run that
+// does not need it starts no getconf (the review of #225).
+func installTemps(named, self string) []string {
+	tmps := []string{os.TempDir()}
+	if named == "" && filepath.Base(self) == "tracepad" && !temporary(canonicalPath(self), tmps) {
+		tmps = append(tmps, userTempDir())
+	}
+	return tmps
+}
+
 // mktempName is the name mktemp -d gives a directory by default, on macOS
 // and with GNU's.
 var mktempName = regexp.MustCompile(`^tmp\.[A-Za-z0-9]{6,}$`)
@@ -256,7 +272,7 @@ func realDeps(getenv func(string) string) (Deps, error) {
 	if err != nil {
 		return Deps{}, err
 	}
-	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, os.TempDir(), userTempDir())
+	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, installTemps(getenv("TRACEPAD_INSTALL_DIR"), self)...)
 	cwd, _ := os.Getwd() // ignored: none, and no project's copy of the skill is found there
 	base, mirror := getenv("TRACEPAD_DOWNLOAD_URL"), true
 	if base == "" {

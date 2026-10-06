@@ -582,8 +582,33 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 	dir := strings.TrimSpace(string(out))
 	t.Cleanup(func() { _ = os.Remove(dir) })
 	// What the command sees in such a shell: os.TempDir() is /tmp.
-	if got := installDirFor("", "/home/u", filepath.Join(dir, "tracepad"), "/tmp", userTempDir()); got != "/home/u/.local/bin" {
+	if got := installDirFor("", "/home/u", filepath.Join(dir, "tracepad"), "/tmp", systemUserTempDir()); got != "/home/u/.local/bin" {
 		t.Errorf("env -i mktemp -d made %s, and the bridge there installs into %s", dir, got)
+	}
+}
+
+// The user's temporary directory is asked only when it can matter (the
+// review of #225): a directory named, a binary not called tracepad, or one
+// already found temporary start no getconf.
+func TestTheUsersTempDirIsAskedOnlyWhenItMatters(t *testing.T) {
+	saved := userTempDir
+	t.Cleanup(func() { userTempDir = saved })
+	asked := 0
+	userTempDir = func() string { asked++; return "" }
+	for _, tc := range []struct {
+		named, self string
+		asks        int
+	}{
+		{"/srv/bin", "/opt/tools/tracepad", 0},
+		{"", "/home/u/tracepad-backups/r/upgrader", 0},
+		{"", filepath.Join(os.TempDir(), "tmp.Ab12Cd", "tracepad"), 0},
+		{"", "/opt/tools/tracepad", 1},
+	} {
+		asked = 0
+		installTemps(tc.named, tc.self)
+		if asked != tc.asks {
+			t.Errorf("%q %s: asked %d times", tc.named, tc.self, asked)
+		}
 	}
 }
 

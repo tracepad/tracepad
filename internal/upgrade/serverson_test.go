@@ -142,3 +142,27 @@ func TestAWayBackPutsTheSkillBack(t *testing.T) {
 		t.Errorf("%d %s; installed by %q; done %q", code, back.Summary, by, back.Done)
 	}
 }
+
+// A server whose configuration cannot be read — a relative data directory,
+// its working directory unread — keeps that reason (the review of #225):
+// the plan names it as one that may be behind, with the reason, not as one
+// listening on an address it does not ask, and the check of what runs from
+// the install path refuses with it, never with an empty address.
+func TestAServerThatCannotBeResolvedKeepsItsReason(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	p := Process{PID: 4242, Exe: w.install, Argv: []string{"tracepad", "serve", "--data-dir", "relative/data"}}
+	procs, _, _ := w.host.Candidates(context.Background())
+	deps := w.deps()
+	deps.Sys = listed{procs: append(procs, p)}
+	rep, code := runIn(t, context.Background(), deps, "--plan", "--to", fOld)
+	person := strings.Join(rep.Person, "\n")
+	if code != exitDecide || !strings.Contains(person, "server pid 4242 does not say its version") || !strings.Contains(person, "its working directory could not be read") || strings.Contains(strings.Join(rep.Notes, "\n"), "pid 4242") {
+		t.Errorf("%d %s\nperson: %s\nnotes: %q", code, rep.Summary, person, rep.Notes)
+	}
+	r := &runner{deps: deps}
+	err := r.serversOn(context.Background(), w.install, fOld, false)
+	if err == nil || !strings.Contains(err.Error(), "cannot be told (its data directory \"relative/data\" is relative") {
+		t.Errorf("the way back's check: %v", err)
+	}
+}
