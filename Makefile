@@ -35,6 +35,18 @@ test: ## Run all tests
 race: ## Run the store and server tests under the race detector (slow; CI runs it, the gate does not)
 	go test -race -count=1 -timeout 45m ./internal/store ./internal/server
 
+# Every platform a release builds, and FreeBSD, type-checked with its tests
+# (spec 054 #43): a file built for one system only — procs_other.go's for
+# Windows and the BSDs — went out of step with an interface once, and nothing
+# on Linux or macOS compiles it. CI runs it as a job of its own on every pull
+# request, so the break is the PR's, not the release tag's.
+CROSS_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64
+cross-build: ## Type-check the code and its tests for every release platform, and FreeBSD (CI runs it)
+	@for t in $(CROSS_TARGETS); do \
+		echo "cross-build $$t"; \
+		GOOS=$${t%/*} GOARCH=$${t#*/} go vet ./... || exit 1; \
+	done
+
 # The server killed in the middle of its writes (spec 043 #46). A real binary
 # on a temporary data directory is driven with ingest on both OTLP doors,
 # scores, deletions, an erasure and readers, with the sweeper and the
@@ -420,7 +432,7 @@ install-hooks: ## (Re)install both hooks
 	printf '#!/bin/sh\nexec make gate\n' > "$(HOOKS_DIR)/pre-push"
 	chmod +x "$(HOOKS_DIR)/pre-push"
 
-.PHONY: upgrade-integration help build build-server dev test vet smoke fixtures format format-check \
+.PHONY: cross-build upgrade-integration help build build-server dev test vet smoke fixtures format format-check \
 	ui ui-node ui-deps notices ui-types ui-types-check ui-check ui-lines image image-check \
 	e2e sdk-test sdk-py-unit sdk-lines py-lint sdk-go-test sdk-go-unit sdk-go-lines \
 	sdk-js-deps sdk-js-build sdk-js-test sdk-js-unit sdk-js-lines sdk-notices sdk-release-check race fuzz \

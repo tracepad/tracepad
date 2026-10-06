@@ -677,3 +677,38 @@ func TestASkillIsDoneOnlyWhenInstalled(t *testing.T) {
 		t.Errorf("notes: %q", rep.Notes)
 	}
 }
+
+// A download follows a redirect only to https:// (the thirteenth review):
+// one to plain HTTP is refused, whatever client the command was given, and
+// one to another https:// host is followed, as GitHub's releases need.
+func TestADownloadIsNeverRedirectedToPlainHTTP(t *testing.T) {
+	t.Parallel()
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("tampered"))
+	}))
+	defer plain.Close()
+	other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("the file"))
+	}))
+	defer other.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plain":
+			http.Redirect(w, r, plain.URL+"/x", http.StatusFound)
+		case "/other":
+			http.Redirect(w, r, other.URL+"/x", http.StatusFound)
+		}
+	}))
+	defer tls.Close()
+	// One client that trusts both test servers' certificates, and follows any
+	// redirect itself: the refusal must be the command's.
+	client := tls.Client()
+	client.Transport.(*http.Transport).TLSClientConfig.RootCAs.AddCert(other.Certificate())
+	r := &Releases{HTTP: client}
+	if b, err := r.read(context.Background(), tls.URL+"/plain"); err == nil || !strings.Contains(err.Error(), "only https:// is") {
+		t.Errorf("a redirect to plain HTTP: %q %v", b, err)
+	}
+	if b, err := r.read(context.Background(), tls.URL+"/other"); err != nil || string(b) != "the file" {
+		t.Errorf("a redirect to another https host: %q %v", b, err)
+	}
+}

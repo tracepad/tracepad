@@ -40,7 +40,7 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 	answered := false
 	for {
 		if !alive() {
-			c.Verdict, c.Why = verdictNotHealthy, "the new server exited"
+			c.Verdict, c.Why = verdictNotHealthy, "the server exited"
 			if v, err := health(ctx, r.deps.HTTP, base); err == nil {
 				c.Health = v
 				c.Why += fmt.Sprintf(", and something else answers at %s as %s", base, v)
@@ -71,7 +71,7 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 		return c
 	case !answered:
 		c.Verdict = verdictDecide
-		c.Why = fmt.Sprintf("the new server runs but has not answered at %s in %s; a migration of a large database runs before it listens", base, r.deps.HealthWait)
+		c.Why = fmt.Sprintf("the server runs but has not answered at %s in %s; a migration of a large database runs before it listens", base, r.deps.HealthWait)
 		return c
 	}
 	c.After, c.CountNote = r.traceCount(ctx, base)

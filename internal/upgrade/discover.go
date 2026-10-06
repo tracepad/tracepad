@@ -161,6 +161,32 @@ func loopbackURL(listen string) (string, bool) {
 	return loopbackBase(host, port)
 }
 
+// healthURL is where a server listening on listen is asked its version:
+// its loopback address, and for one listening on every address of the
+// machine (0.0.0.0, [::], or no host) the loopback address of the same
+// family, which reaches it too (the thirteenth review). /health carries no
+// key, so a server open beyond this machine is asked as one that is not;
+// the trace count, which does, is read only at loopbackURL.
+func healthURL(listen string) (string, bool) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", false
+	}
+	return loopbackBase(onLoopback(host), port)
+}
+
+// onLoopback is the loopback address of the same family as a wildcard host,
+// or host itself.
+func onLoopback(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::":
+		return "::1"
+	}
+	return host
+}
+
 // loopbackBase is the address to ask at host:port, by its IP. `localhost`
 // is asked at 127.0.0.1, the address a Go server listening on `localhost`
 // binds: a client that resolved the name could reach [::1] instead, where
@@ -300,13 +326,14 @@ func (r *runner) discover(ctx context.Context) Findings {
 	}
 	var hw sync.WaitGroup
 	for i := range f.Servers {
-		if f.Servers[i].URL == "" {
+		probe, ok := healthURL(f.Servers[i].Listen)
+		if !ok {
 			continue
 		}
 		hw.Add(1)
 		go func(s *Server) {
 			defer hw.Done()
-			s.Version, _ = health(ctx, r.deps.HTTP, s.URL) // ignored: no answer is no version, which is never upgraded
+			s.Version, _ = health(ctx, r.deps.HTTP, probe) // ignored: no answer is no version, which is never upgraded
 		}(&f.Servers[i])
 	}
 	hw.Wait()

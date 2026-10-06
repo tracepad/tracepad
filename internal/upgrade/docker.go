@@ -130,14 +130,7 @@ func containerAddress(ic inspectContainer) (url string, onDefault bool, why stri
 	}
 	for _, b := range bindings {
 		onDefault = onDefault || b.HostPort == "4318"
-		host := b.HostIP
-		switch host {
-		case "", "0.0.0.0":
-			host = "127.0.0.1"
-		case "::":
-			host = "::1"
-		}
-		if u, ok := loopbackBase(host, b.HostPort); ok && url == "" {
+		if u, ok := loopbackBase(onLoopback(b.HostIP), b.HostPort); ok && url == "" {
 			url = u
 		}
 	}

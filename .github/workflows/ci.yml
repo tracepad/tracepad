@@ -193,6 +193,22 @@ jobs:
   # and on demand. A race it finds is a race in the tree that was merged, and
   # the run of the next merge cancels this one, the newer tree containing the
   # older.
+  # Every platform a release builds, and FreeBSD, type-checked with the
+  # tests (spec 054 #43): a system's own files are compiled by nothing else,
+  # and a break there would surface only at the release tag.
+  cross-build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make cross-build
+
   race:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

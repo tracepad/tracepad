@@ -393,7 +393,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		need += size
 		// Its way back, before anything stops (the final review): a restore
 		// of what is there now, beside it, after an archive of it.
-		if err := j.wayBackPreconditions(ctx, size, size, p.server.Proc.PID); err != nil {
+		if err := j.wayBackPreconditions(ctx, size, size, !p.replaceBinary, p.server.Proc.PID); err != nil {
 			return nil, "its way back could not be taken: " + err.Error()
 		}
 	}
@@ -569,7 +569,7 @@ func (r *runner) serversOn(ctx context.Context, path, version string, upgrade bo
 			return fmt.Errorf("server pid %d on %s does not say which binary it runs, so whether it runs %s cannot be told; nothing is put there while it runs", p.PID, dataDir, path)
 		}
 		v := ""
-		if url, ok := loopbackURL(listen); ok && err == nil {
+		if url, ok := healthURL(listen); ok && err == nil {
 			hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			v, _ = health(hctx, r.deps.HTTP, url) // ignored: no answer leaves v empty, which refuses below
 			cancel()
@@ -708,19 +708,10 @@ func relativePaths(p Process) []string {
 // someone else's, and answers false; only one of this user's that cannot be
 // read is an error, which a caller refuses on.
 func (r *runner) isServer(pid int, start int64, dataDir string, spec ServerSpec) (bool, error) {
-	if pid <= 0 || !r.deps.Sys.Alive(pid) {
-		return false, nil
-	}
-	p, err := r.deps.Sys.Inspect(pid)
-	switch {
-	case errors.Is(err, errNotMine):
-		return false, nil
-	case err != nil:
-		return false, fmt.Errorf("pid %d cannot be read: %w", pid, err)
-	case start != 0 && p.Start != 0 && p.Start != start:
-		return false, nil // the PID reused by another process
-	}
-	return sameFile(p.Exe, spec.Exe) && slices.Equal(p.Argv, spec.Argv) && recordsPID(dataDir, pid), nil
+	// startedAs is the one reading of a process against a spec (the
+	// thirteenth review); the lock's record is what makes it dataDir's.
+	ok, err := r.startedAs(pid, start, spec)
+	return ok && recordsPID(dataDir, pid), err
 }
 
 // startOf is when a process started, for the run to record beside its PID;

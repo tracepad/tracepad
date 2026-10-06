@@ -150,12 +150,10 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 			}
 		}
 	}
-	if err := j.wayBackPreconditions(ctx, restoreBytes, 0, own...); err != nil {
+	if err := j.wayBackPreconditions(ctx, restoreBytes, 0, true, own...); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
 	}
-	if !st.has(stepStopSent) {
-		return wentBack{ok: true}
-	}
+	// wayBack returns before this when nothing was stopped.
 	if err := j.pathAsRecorded(ctx); err != nil {
 		return j.fail(err.Error() + "; nothing was touched")
 	}
@@ -283,10 +281,13 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 //
 // restoreBytes is what a restore takes, or -1 when none is ahead; archiveBytes
 // is what an archive not yet written takes on the run directory's file
-// system, counted too when that is the data's. own are the run's servers,
-// which the way back stops itself: the check of what runs from the install
-// path (serversOn) does not count them.
-func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64, own ...int) error {
+// system, counted too when that is the data's. servers is whether to check
+// what runs from the install path (serversOn) — the upgrade's own check of
+// it, made just before when it replaces the binary, refuses every server
+// this one would, and one look at the processes is enough (the thirteenth
+// review); own are the run's servers, which the way back stops itself and
+// that check does not count.
+func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveBytes int64, servers bool, own ...int) error {
 	st, ps := j.st, j.st.Process
 	if v, err := j.r.deps.Version(ctx, ps.Old); err != nil || v != st.From {
 		return fmt.Errorf("the copy %s does not answer %s", ps.Old, st.From)
@@ -295,7 +296,7 @@ func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveByt
 	// version (the eighth review) — the run's own servers (own) aside, which
 	// the way back stops itself. Put back at the end, it checks again, a
 	// second line against one started meanwhile.
-	if !st.has(stepBackBinary) {
+	if servers && !st.has(stepBackBinary) {
 		if err := j.r.serversOn(ctx, st.Binary.Path, st.From, false, own...); err != nil {
 			return err
 		}
@@ -344,16 +345,27 @@ func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveByt
 	if err := os.Remove(moved); err != nil {
 		return fmt.Errorf("%s does not let the way back remove what it makes there (%v)", parent, err)
 	}
+	return j.restoreRoom(restoreBytes, archiveBytes)
+}
+
+// restoreRoom is the one reckoning of the room a restore needs beside the
+// data (the thirteenth review): restoreBytes and 100 MiB, and archiveBytes
+// too — an archive not yet written — when the run's directory is on the
+// data's file system. Room that cannot be told is no room (the audit of
+// #223).
+func (j *job) restoreRoom(restoreBytes, archiveBytes int64) error {
+	dataDir := j.st.Process.DataDir
+	parent := filepath.Dir(dataDir)
 	free, err := freeBytes(parent)
 	if err != nil {
-		return fmt.Errorf("the room beside %s for a restore cannot be told (%v)", ps.DataDir, err)
+		return fmt.Errorf("the room beside %s for a restore cannot be told (%v)", dataDir, err)
 	}
 	need := restoreBytes + mib100
 	if sameDevice(parent, j.dir) {
 		need += archiveBytes
 	}
 	if free < need {
-		return fmt.Errorf("no room beside %s for the restore a way back may need: %d MiB free, %d MiB needed", ps.DataDir, free>>20, need>>20)
+		return fmt.Errorf("no room beside %s for the restore a way back may need: %d MiB free, %d MiB needed", dataDir, free>>20, need>>20)
 	}
 	return nil
 }
@@ -546,14 +558,10 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 		}
 		// The restore goes beside the data, on the data's file system, which
 		// may be another and fuller one than the archive's (the fourth
-		// review). Room the way back cannot tell is no room (the audit of
-		// #223), as in the upgrade's own check.
-		free, err := freeBytes(filepath.Dir(ps.DataDir))
-		switch {
-		case err != nil:
-			return j.fail(fmt.Sprintf("could not tell the room beside %s for the restore (%v); nothing was touched", ps.DataDir, err)), false
-		case free < rb.Bytes+mib100:
-			return j.fail(fmt.Sprintf("no room beside %s for the restore: %d MiB free, %d MiB needed; nothing was touched", ps.DataDir, free>>20, (rb.Bytes+mib100)>>20)), false
+		// review): the precondition's reckoning, with what the archive
+		// reads back as.
+		if err := j.restoreRoom(rb.Bytes, 0); err != nil {
+			return j.fail(fmt.Sprintf("%v; nothing was touched", err)), false
 		}
 	}
 	if _, err := os.Lstat(after); err == nil {

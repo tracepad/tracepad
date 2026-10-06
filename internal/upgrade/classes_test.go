@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -939,9 +941,9 @@ func TestACandidatePastTheLatestIsNothingToDo(t *testing.T) {
 
 // The way back's check of what runs from the install path comes before the
 // stop too (the twelfth review): with the binary already the target, a
-// server that is not the run's runs from it and does not say its version —
-// a way back would put the old binary under it — so the upgrade refuses
-// with the run's server still running.
+// server that is not the run's runs it at that version — a way back would
+// put the old binary under it — so the upgrade refuses with the run's
+// server still running.
 func TestTheWayBacksServerCheckComesBeforeTheStop(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
@@ -953,11 +955,51 @@ func TestTheWayBacksServerCheckComesBeforeTheStop(t *testing.T) {
 	}
 	pid, _ := lockedBy(w.data)
 	rep, code := runIn(t, context.Background(), w.deps(), "--to", fNew, "--data-dir", w.data)
-	if code != exitRefused || !strings.Contains(rep.Summary, "nothing changed: its way back could not be taken") || !strings.Contains(rep.Summary, "cannot be shown to be safe") {
+	if code != exitRefused || !strings.Contains(rep.Summary, "nothing changed: its way back could not be taken") || !strings.Contains(rep.Summary, "at "+fNew+" on ") || !strings.Contains(rep.Summary, "its next restart would be "+fOld) {
 		t.Errorf("%d %s", code, rep.Summary)
 	}
 	if !w.host.Alive(pid) || w.answers() != fOld {
 		t.Error("the server was stopped")
+	}
+}
+
+// A server listening on every address of the machine — 0.0.0.0, or [::] —
+// is asked its version on the loopback address of the same family, which
+// reaches it (the thirteenth review): the plan says what it runs, rather
+// than that it does not say.
+func TestAServerOnEveryAddressIsAskedOnLoopback(t *testing.T) {
+	t.Parallel()
+	for _, host := range []string{"0.0.0.0", "[::]"} {
+		w := newFakeWorld(t, 2)
+		addr := host + ":" + strings.Split(freeAddr(t), ":")[1]
+		if host == "[::]" {
+			l, err := net.Listen("tcp", "[::1]:0")
+			if err != nil {
+				t.Logf("no IPv6 loopback here: %v", err)
+				continue
+			}
+			addr = host + ":" + strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+			l.Close()
+		}
+		other := t.TempDir()
+		argv := []string{"tracepad", "serve", "--listen", addr, "--data-dir", other}
+		s, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, _ := runIn(t, context.Background(), w.deps(), "--plan", "--to", fNew)
+		found := false
+		for _, srv := range rep.Servers {
+			if srv.PID == s.PID() {
+				found = true
+				if srv.Version != fOld {
+					t.Errorf("%s: the server on every address reads %q, not %s", host, srv.Version, fOld)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: the server on every address is not in the report: %+v", host, rep.Servers)
+		}
 	}
 }
 

@@ -85,7 +85,14 @@ func (r *Releases) open(ctx context.Context, address string) (io.ReadCloser, err
 	if err != nil {
 		return nil, err
 	}
-	resp, err := r.HTTP.Do(req)
+	// A redirect is followed only to https:// (the thirteenth review): one
+	// to plain HTTP would hand the download, and the checksums.txt that
+	// vouches for it, to whoever is on the path. Another host is followed —
+	// GitHub serves its releases' files from one — as the install script's
+	// curl follows it, and the checksum is what the file is held to.
+	client := *r.HTTP
+	client.CheckRedirect = httpsOnly
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +105,18 @@ func (r *Releases) open(ctx context.Context, address string) (io.ReadCloser, err
 		return nil, fmt.Errorf("%s answered HTTP %d", address, resp.StatusCode)
 	}
 	return resp.Body, nil
+}
+
+// httpsOnly refuses a redirect to anything but https://, and stops after
+// ten, as the HTTP client's own rule does.
+func httpsOnly(req *http.Request, via []*http.Request) error {
+	switch {
+	case req.URL.Scheme != "https":
+		return fmt.Errorf("a redirect to %s is not followed: only https:// is", req.URL.Redacted())
+	case len(via) >= 10:
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // maxSmall bounds what is read into memory: checksums.txt and the API's list.
