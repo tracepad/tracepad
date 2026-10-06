@@ -1599,8 +1599,9 @@ package moves to the same version, and you report.</p>
   launchd), a server reachable from other machines, one that runs another
   binary (Homebrew's: <code>brew upgrade tracepad</code>), and every container, Compose's
   or not. The plan names each, with its reason and the commands for it — for a
-  container: stop it, back its volume up, pull the release, run it again with
-  the options it was created with.</li>
+  container: stop it, back its volume up, pull the release, and the
+  <code>docker run</code> it was created with, read from <code>docker inspect</code>, its variables
+  passed in a file and never printed.</li>
 <li>A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.</li>
 <li>Free space for the backup, when there is not enough.</li>

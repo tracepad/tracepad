@@ -619,27 +619,46 @@ the upgrade is only as safe as the copy you took before it.
 on the host — or your coding agent, given
 `Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md` —
 names every container of the image that runs an older version and gives the
-steps below with its name, its volume and the release filled in; the command
-changes nothing of a container. A Compose project takes the new tag in its
-Compose file and `docker compose up -d`, after the same backup.
+steps below with its name, its volume and the release filled in, and the
+`docker run` it was created with — its ports, mounts, restart policy and
+command, read from `docker inspect` — the variables it was given passed in a
+file read from Docker, named and never printed; the command changes nothing of
+a container. A Compose project takes the new tag in its Compose file and
+`docker compose up -d`, after the same backup.
 
-Back the volume up by tarring it from a throwaway container:
+Back the volume up by tarring it from a throwaway container, then run the new
+release with the old one's options — as one command, each step only once the
+one before it worked, so a backup that is refused stops everything after it:
 
 ```sh
-docker stop tracepad
+docker stop tracepad &&
 docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  sh -c 'umask 077 && tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .'
-docker pull ghcr.io/tracepad/tracepad:X.Y.Z        # the release you are moving to
-docker rename tracepad tracepad-old                 # kept, to go back to
-docker run -d --name tracepad … ghcr.io/tracepad/tracepad:X.Y.Z   # the options you created it with
-docker rm tracepad-old                              # once the new one has proved itself
+  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz' &&
+docker pull ghcr.io/tracepad/tracepad:X.Y.Z &&
+docker rename tracepad tracepad-old &&
+(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-old \
+  | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > tracepad.upgrade.env) &&
+docker run -d --name tracepad --env-file tracepad.upgrade.env -p 127.0.0.1:4318:4318 \
+  -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve &&
+rm tracepad.upgrade.env
 ```
+
+`X.Y.Z` is the release you are moving to; the variables are the ones you gave
+the container, read from Docker into a file that holds its keys and is removed
+once the new one runs; the `-p`, `-v` and `serve` are the options you created it
+with. The old container is kept, renamed: once the new one has proved itself,
+`docker rm tracepad-old`. Stopped before the rename, `docker start tracepad`.
+Stopped after it, put the old one back:
+`docker rm tracepad` if the new one was made, `rm -f tracepad.upgrade.env`, then
+`docker rename tracepad-old tracepad && docker start tracepad`.
 
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
 readable by its owner alone; it is the whole database, and without it the file
-lands in your directory as readable as that directory lets it be. Restoring is
-the same command with the arguments swapped, into a stopped container's volume.
+lands in your directory as readable as that directory lets it be. `set -C`
+keeps it from writing over an earlier backup of the same name. Restoring is the
+same command the other way round, `tar xzf - -C /data < /backup/<the file>`,
+into a stopped container's volume mounted without `readonly`.
 
 **One server per volume.** The server holds a lock on `tracepad.db.lock`, beside the
 database, for as long as it runs, and a second one started on the same

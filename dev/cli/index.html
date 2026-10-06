@@ -3162,7 +3162,9 @@ release: it refuses there before it looks at anything. The design is spec 054.</
 <li><strong>A container is yours to upgrade</strong>, in this release: the plan and the
   upgrade name each one that runs an older version and give the commands —
   stop it, back its volume up, pull the release, and run it again with the
-  options you created it with, the old one kept until the new one is healthy
+  options you created it with — the <code>docker run</code> read from <code>docker inspect</code>,
+  its variables passed in a file read from Docker and never printed — the old
+  one kept until the new one is healthy
   (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>), or Compose's
   <code>docker compose up -d</code>. The command changes nothing of a container. Its
   version is asked where its server listens — <code>--listen</code> or
@@ -3202,8 +3204,10 @@ release: it refuses there before it looks at anything. The design is spec 054.</
   checks the same before its first act. What the command cannot read — a process, a lock on a file system
   that cannot lock, the room on a disk, a version that is not said — is a
   reason to stop, never a yes: it refuses with nothing changed, and a server
-  or container whose version it cannot tell is named as one that may be
-  behind.</li>
+  or container that does not say its version when asked is named as one that
+  may be behind. One the command does not ask — a server listening on a
+  single address of the machine's that is not a loopback one, a container
+  whose address cannot be told — is said to be not checked.</li>
 <li><strong>The check</strong> asks the server's <code>/health</code> at its own address, and compares
   the trace count of <code>/api/v1/system</code> before and after, with the key in
   <code>TRACEPAD_API_KEY</code> (from the environment only; without one the counts are not
