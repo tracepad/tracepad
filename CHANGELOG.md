@@ -11,8 +11,10 @@ their own headings.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-06
+
 The first release, **0.1.0**, is the beta, and everything below ships in it.
-From the next release on, this section lists what changed since the previous
+From the next release on, each section lists what changed since the previous
 one.
 
 ### Added
@@ -46,9 +48,9 @@ one.
 - Bounds on what one request may cost (body, spans per request, read
   concurrency and timeout), and rate limiting by source.
 - Safe defaults for a bare binary: it listens on `localhost:4318` — both
-  loopback addresses — until told otherwise and warns while it serves plain HTTP to other machines, and the
-  key its first run prints holds `ingest` alone — a key that reads is minted
-  in the interface, never printed to a log.
+  loopback addresses — until told otherwise, and warns while it serves plain
+  HTTP to other machines. The key its first run prints holds `ingest` alone;
+  a key that reads is minted in the interface, never printed to a log.
 - Export of the raw archive to any OTLP receiver or to a directory, resumably.
 - Response headers that refuse framing and sniffing, and a
   `Content-Security-Policy` on the web interface's page that lets only the
@@ -92,17 +94,11 @@ one.
   on `ghcr.io/tracepad/tracepad`, mirrored to Docker Hub as
   `tracepad/tracepad` at the same digest for stable releases. See
   [docs/install.md](docs/install.md) and [docs/docker.md](docs/docker.md).
-- The server's log opens with its version and commit
-  (`tracepad 0.1.0-rc.1 (b14b11e)`), in a container as on a host, and
-  [docs/install.md](docs/install.md#what-a-version-is-called-where) lists what
-  one version is called in each registry and how to install a candidate.
 - An install script for Linux and macOS,
   `curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh`, which
   installs the binary and the agent skill into `~/.local/bin` without `sudo`.
   It verifies the checksum, and the attestation too when `gh` can. It
   installs a release candidate only when `TRACEPAD_VERSION` names one.
-- The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
-  Markdown beside its HTML, on the documentation site.
 - `tracepad upgrade`: the binary and a server or container you started, to a
   newer release, with a backup first and a way back that deletes nothing.
   `--plan` changes nothing and says what is yours; the upgrade restarts the
@@ -115,5 +111,12 @@ one.
   https://tracepad.github.io/tracepad/agent-upgrade.md`, and the install
   script names what still runs an older version
   ([docs/cli.md](docs/cli.md#upgrade)).
+- The server's log opens with its version and commit
+  (`tracepad 0.1.0 (b14b11e)`), in a container as on a host, and
+  [docs/install.md](docs/install.md#what-a-version-is-called-where) lists what
+  one version is called in each registry and how to install a candidate.
+- The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
+  Markdown beside its HTML, on the documentation site.
 
-[Unreleased]: https://github.com/tracepad/tracepad/commits/main
+[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tracepad/tracepad/releases/tag/v0.1.0

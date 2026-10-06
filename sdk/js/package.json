@@ -1,6 +1,6 @@
 {
   "name": "tracepad",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "Tracing, prompts, scores and evals for Node LLM apps, on OpenTelemetry — the client for Tracepad, the single-binary self-hosted LLM observability server",
   "license": "Apache-2.0",
   "repository": {
