@@ -35,6 +35,12 @@ type plan struct {
 	binaries []string
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
+	// idle are the person's servers and containers, by index in the
+	// findings, and their binary, that need nothing: at the target, past it,
+	// or not a release. othersBehind decides it, in the one place that sorts
+	// everything (the review of #228).
+	idleServers, idleContainers map[int]bool
+	idleBinary                  bool
 	// ahead: what the command looks after runs past the latest stable
 	// release, and no version was named.
 	ahead bool
@@ -326,6 +332,7 @@ func (r *runner) othersBehind(p *plan) {
 		order, ok := Compare(p.to, v)
 		return ok && order > 0
 	}
+	p.idleServers, p.idleContainers = map[int]bool{}, map[int]bool{}
 	for i := range p.f.Servers {
 		s := &p.f.Servers[i]
 		switch {
@@ -338,6 +345,7 @@ func (r *runner) othersBehind(p *plan) {
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
 		case !older(s.Version):
+			p.idleServers[i] = !s.Ours
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -361,6 +369,7 @@ func (r *runner) othersBehind(p *plan) {
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
 		case !older(c.Version):
+			p.idleContainers[i] = !c.Ours
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -371,20 +380,27 @@ func (r *runner) othersBehind(p *plan) {
 		}
 	}
 	// A binary runs nothing (#37 (e)): one behind, or one that does not say
-	// its version, is named, and not counted.
-	if b := p.f.Binary; !b.Ours && b.Exists && (b.Version == "" || older(b.Version)) {
-		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
-	}
-	// A development build is its builder's, and the command does not replace
-	// it; the install script puts the release in its place, and the plan
-	// gives its line (the live run of 0.1.0: the plan named the build and
-	// said nothing of how to replace it).
-	if b := p.f.Binary; b.Dev {
+	// its version, is named, and not counted. A development build is its
+	// builder's, and the command does not replace it; the install script
+	// puts the release in its place, and the plan gives its line (the live
+	// run of 0.1.0: the plan named the build and said nothing of how to
+	// replace it). Only one of the person's at the target or past it needs
+	// nothing.
+	switch b := p.f.Binary; {
+	case b.Ours || !b.Exists:
+	case b.Dev:
 		p.binaries = append(p.binaries, fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
 			b.Path, b.Version, p.to, r.installLine(filepath.Dir(b.Path), p.to)))
+	case b.Version == "" || older(b.Version):
+		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
+	default:
+		p.idleBinary = true
 	}
 	if b := p.f.Binary; b.First != "" {
 		v, err := b.FirstVersion, b.FirstErr
+		if err != nil || older(v) {
+			p.idleBinary = false
+		}
 		if err != nil {
 			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
 		} else if older(v) {
@@ -491,7 +507,15 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Containers[i].Target = p.container != nil && rep.Containers[i].Name == p.container.Name
 	}
 	rep.Person = append(append(append(rep.Person, p.held...), p.person...), p.binaries...)
-	r.markIdle(p, rep)
+	for i := range rep.Servers {
+		rep.Servers[i].Idle = p.idleServers[i]
+	}
+	for i := range rep.Containers {
+		rep.Containers[i].Idle = p.idleContainers[i]
+	}
+	if rep.Binary != nil {
+		rep.Binary.Idle = p.idleBinary
+	}
 	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
@@ -555,26 +579,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 	}
 	for _, l := range p.later {
 		rep.Next = append(rep.Next, "then "+l)
-	}
-}
-
-// markIdle marks what is the person's and needs nothing: it answers a
-// version the target is not ahead of, or one that is not a release (a
-// development build), so it is in none of the plan's lists. What does not
-// say its version, or was not checked, stays where the person looks.
-func (r *runner) markIdle(p *plan, rep *Report) {
-	current := func(v string) bool {
-		order, ok := Compare(p.to, v)
-		return v != "" && (!ok || order <= 0)
-	}
-	for i, s := range p.f.Servers {
-		rep.Servers[i].Idle = !s.Ours && s.Unchecked == "" && current(s.Version)
-	}
-	for i, c := range p.f.Containers {
-		rep.Containers[i].Idle = !c.Ours && c.Unchecked == "" && current(c.Version)
-	}
-	if b := p.f.Binary; rep.Binary != nil && !b.Ours && !b.Dev && b.Exists && current(b.Version) {
-		rep.Binary.Idle = b.First == "" || (b.FirstErr == nil && current(b.FirstVersion))
 	}
 }
 

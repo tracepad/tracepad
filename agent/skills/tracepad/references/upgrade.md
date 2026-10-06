@@ -10,7 +10,8 @@ refusal: it says what is the human's.
 
 First `tracepad version` against the skill's `metadata.version`. Older, or a
 development build (`dev`, a commit), and the binary is replaced before anything
-else — ask the human, then `curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> sh`.
+else — ask the human, then `curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> sh`;
+a skill that says `dev` names no release: ask which.
 
 With the key in the environment (never on a command line), so the trace counts
 before and after are compared: `setup.md` keeps it in `.env`; a project that
@@ -24,11 +25,11 @@ tracepad upgrade --plan
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
 binary predates the command; plan and upgrade with a release's, fetched into a
 directory of its own that stays the same, which a firewall that asks once per
-path asks once for, `v` the version named. It plans for the installed binary,
+path asks once for, emptied first so a failed download runs no older one; `v` the version named. It plans for the installed binary,
 and leaves one that is not a release's, giving the line that replaces it:
 
 ```sh
-v=; dir="${XDG_CACHE_HOME:-$HOME/.cache}/tracepad/release"; mkdir -p "$dir" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
+v=; dir="${XDG_CACHE_HOME:-$HOME/.cache}/tracepad/release"; mkdir -p "$dir" && rm -f "$dir/tracepad" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 TRACEPAD_NO_PLAN=1 sh >/dev/null && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what

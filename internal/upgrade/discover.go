@@ -390,6 +390,9 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		target, _ := os.Readlink(b.Path)           // ignored: the message's; a link is the person's either way
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"
+		// A build linked from its checkout is a development build too (the
+		// review of #228).
+		b.Dev = b.Version != "" && !IsRelease(b.Version)
 	case !st.Mode().IsRegular():
 		b.Exists = true
 		b.Reason = b.Path + " is not a regular file"

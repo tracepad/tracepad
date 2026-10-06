@@ -144,8 +144,10 @@ var userTempDir = systemUserTempDir
 // user's own is asked only when the answer can matter — no directory named,
 // a binary called tracepad, and not already found temporary — so a run that
 // does not need it starts no getconf (the review of #225).
-func installTemps(named, self string) []string {
-	tmps := []string{os.TempDir()}
+func installTemps(named, self, bridge string) []string {
+	// The bridge's own directory settles a bridge there without getconf
+	// (the review of #228).
+	tmps := []string{os.TempDir(), bridge}
 	if named == "" && filepath.Base(self) == "tracepad" && !temporary(canonicalPath(self), tmps) {
 		tmps = append(tmps, userTempDir())
 	}
@@ -291,7 +293,7 @@ func realDeps(getenv func(string) string) (Deps, error) {
 		return Deps{}, err
 	}
 	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self,
-		append(installTemps(getenv("TRACEPAD_INSTALL_DIR"), self), bridgeDir(home, getenv("XDG_CACHE_HOME")))...)
+		installTemps(getenv("TRACEPAD_INSTALL_DIR"), self, bridgeDir(home, getenv("XDG_CACHE_HOME")))...)
 	cwd, _ := os.Getwd() // ignored: none, and no project's copy of the skill is found there
 	base, mirror := getenv("TRACEPAD_DOWNLOAD_URL"), true
 	if base == "" {

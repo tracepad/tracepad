@@ -1127,8 +1127,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   the same `docker run`, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
   ([docker.md](docker.md#upgrading-and-backing-up-first)). A Compose
-  project's are run through its project and file, as Compose labelled the
-  container (`docker compose -p NAME -f FILE`), from any directory: the
+  project's are run through its project, env files and file, as Compose
+  labelled the container (`docker compose -p NAME --env-file ENV -f FILE`),
+  from any directory: the
   service stopped, the volume it really has archived — Compose names it
   `<project>_<volume>` — the image set in the file, with a digest pinned to
   it taken off, and `up -d`. One whose address cannot be told is said to be

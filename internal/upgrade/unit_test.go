@@ -694,9 +694,10 @@ func TestTheUsersTempDirIsAskedOnlyWhenItMatters(t *testing.T) {
 		{"", "/home/u/tracepad-backups/r/upgrader", 0},
 		{"", filepath.Join(os.TempDir(), "tmp.Ab12Cd", "tracepad"), 0},
 		{"", "/opt/tools/tracepad", 1},
+		{"", "/home/u/.cache/tracepad/release/tracepad", 0},
 	} {
 		asked = 0
-		installTemps(tc.named, tc.self)
+		installTemps(tc.named, tc.self, "/home/u/.cache/tracepad/release")
 		if asked != tc.asks {
 			t.Errorf("%q %s: asked %d times", tc.named, tc.self, asked)
 		}

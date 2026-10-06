@@ -81,6 +81,7 @@ does not warn about one left exported.
 | `TRACEPAD_VERSION` | the newest stable release | The release to install, `0.1.0-rc.1` or `v0.1.0-rc.1`. A release candidate is installed only when named here. |
 | `TRACEPAD_INSTALL_DIR` | `~/.local/bin` | Where the binary goes. Never needs `sudo` unless you point it somewhere that does. |
 | `TRACEPAD_NO_SKILL` | unset | `1` installs the binary alone, without the agent skill. |
+| `TRACEPAD_NO_PLAN` | unset | `1` skips the script's look at what still runs an older version, for a caller that runs `tracepad upgrade --plan` itself (the agent's bridge). |
 | `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
 
 See [install.md](install.md#with-the-install-script).

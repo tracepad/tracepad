@@ -634,7 +634,8 @@ restart policy, labels and command, read from `docker inspect` — the variables
 it was given passed in a file read from Docker, named and never printed. A
 Compose project gets the same backup with its own names — the service stopped
 through its project and file (`docker compose -p <project> -f <file> stop
-<service>`), the volume Compose made archived — then the new tag in its
+<service>`, with `--env-file` for each env file the project was started
+with), the volume Compose made archived — then the new tag in its
 Compose file (a `@sha256:` digest after the old tag taken off: Docker runs the
 digest whatever the tag says) and `docker compose -p <project> -f <file> up -d
 <service>`.

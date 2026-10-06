@@ -87,7 +87,14 @@ upgrade)
 	# The plan (spec 054): from the case's environment; a binary from before
 	# the command does not know the word.
 	[ -n "\${FAKE_PLAN:-}" ] || { echo "tracepad: unknown command" >&2; exit 2; }
-	[ -z "\${FAKE_PLAN_HANG:-}" ] || sleep 60
+	# A hanging plan answers SIGTERM as the real one does: exit 1, and the
+	# line of a plan cut short (the review of #228).
+	if [ -n "\${FAKE_PLAN_HANG:-}" ]; then
+		trap 'echo "Interrupted: the look at the machine was cut short"; kill \$! 2>/dev/null; exit 1' TERM
+		sleep 60 &
+		wait \$!
+	fi
+	[ -z "\${FAKE_PLAN_RAN:-}" ] || : >"\$FAKE_PLAN_RAN"
 	echo "\$*: \$FAKE_PLAN"
 	exit "\${FAKE_PLAN_EXIT:-0}" ;;
 skills)
@@ -258,6 +265,14 @@ run hanging-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG=1
 lacks "$out" "Still running" hanging-plan
 has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-plan
 ends_with_agent_line hanging-plan
+
+# --- A caller that runs the plan itself (the agent's bridge) is not given
+# the same look twice.
+ran="$tmp/plan-ran"
+run no-plan 0 FAKE_PLAN="Behind" FAKE_PLAN_EXIT=10 FAKE_PLAN_RAN="$ran" TRACEPAD_NO_PLAN=1
+[ ! -e "$ran" ] || fail "no-plan: the plan ran"
+lacks "$out" "Still running" no-plan
+lacks "$out" "Could not check" no-plan
 
 # --- A binary whose answer is not a version is not quoted.
 printf '#!/bin/sh\nprintf "1.0\\033]52;c;eA==\\007\\n"\n' >"$bin"

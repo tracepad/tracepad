@@ -44,9 +44,11 @@ slugs() {
 }
 
 # bad_links: the offending URLs among the lines on stdin, each with why. A
-# page under latest/, dev/ or vX.Y/ is a page of docs/ — `latest/docker/` is
+# page under latest/ or dev/ is a page of docs/ — `latest/docker/` is
 # docs/docker.md, `latest/` docs/index.md — and its anchor one of its headings
-# (`docs` is the directory, for the self-test's pages).
+# (`docs` is the directory, for the self-test's pages). A page under vX.Y/ is
+# that version's, which docs/ today does not answer for: its shape is all that
+# is checked (the review of #228).
 bad_links() {
 	local docs="${1:-docs}"
 	grep -oE "${base}/[A-Za-z0-9_.#/-]*" | sed "s#^tracepad\.github\.io/tracepad/##" | while IFS= read -r rest; do
@@ -57,7 +59,7 @@ bad_links() {
 			continue
 			;;
 		latest | dev | latest/* | dev/*) page="${rest#*/}" ;;
-		v[0-9]*.[0-9]*/*) page="${rest#*/}" ;;
+		v[0-9]*.[0-9]*/*) continue ;;
 		*)
 			echo "tracepad.github.io/tracepad/$rest: an HTML page at the site's root, a 404; put latest/ (or dev/, vX.Y/) after /tracepad/"
 			continue
@@ -92,6 +94,7 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/latest/install/#the-serve-command-and-its-flags' \
 		'https://tracepad.github.io/tracepad/dev/' \
 		'https://tracepad.github.io/tracepad/v0.1/docker/' \
+		'https://tracepad.github.io/tracepad/v0.1/gone/#a-heading-renamed-since' \
 		'https://tracepad.github.io/tracepad/latest/docker/#upgrading-and-backing-up-first' | bad_links "$fixture" || true)
 	[ -z "$ok" ] || { echo "site-links self-test: refused what the site serves: $ok" >&2; exit 1; }
 	bad=$(printf '%s\n' \

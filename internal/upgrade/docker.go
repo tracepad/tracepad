@@ -195,7 +195,11 @@ type Container struct {
 	Service      string
 	ComposeFiles []string
 	ComposeDir   string
-	Reason       string
+	// ComposeEnv are the files the project's --env-file named, in order:
+	// without them `up -d` interpolates the file otherwise, and may name
+	// another volume (the review of #228).
+	ComposeEnv []string
+	Reason     string
 	// Default is whether it publishes the default port, 4318, on the host.
 	Default bool
 	// Unchecked says why the plan could not tell where to ask it, when it
@@ -906,6 +910,9 @@ func asContainer(ic inspectContainer) (Container, bool) {
 	if files := labels["com.docker.compose.project.config_files"]; files != "" {
 		c.ComposeFiles = strings.Split(files, ",")
 	}
+	if files := labels["com.docker.compose.project.environment_file"]; files != "" {
+		c.ComposeEnv = strings.Split(files, ",")
+	}
 	for _, m := range ic.Mounts {
 		switch {
 		case m.Destination != "/data":
@@ -1063,12 +1070,15 @@ func composeAdvice(c Container, to string) string {
 }
 
 // composeCommand is `docker compose` for a container's project, from any
-// directory: its name, its files, and its directory when that is not the
-// first file's.
+// directory: its name, its env files, its files, and its directory when that
+// is not the first file's.
 func composeCommand(c Container) string {
 	cmd := "docker compose -p " + shq(c.Compose)
 	if c.ComposeDir != "" && (len(c.ComposeFiles) == 0 || c.ComposeDir != filepath.Dir(c.ComposeFiles[0])) {
 		cmd += " --project-directory " + shq(c.ComposeDir)
+	}
+	for _, f := range c.ComposeEnv {
+		cmd += " --env-file " + shq(f)
 	}
 	for _, f := range c.ComposeFiles {
 		cmd += " -f " + shq(f)

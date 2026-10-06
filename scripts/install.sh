@@ -10,7 +10,8 @@
 # installed and logged in. The binary goes to ~/.local/bin, or
 # TRACEPAD_INSTALL_DIR — never with sudo. Running it again upgrades, or does
 # nothing when the version is already there. TRACEPAD_NO_SKILL=1 leaves the
-# skill alone; TRACEPAD_DOWNLOAD_URL points at a mirror of the releases page.
+# skill alone; TRACEPAD_NO_PLAN=1 skips its look at what still runs an older
+# version; TRACEPAD_DOWNLOAD_URL points at a mirror of the releases page.
 #
 # POSIX sh: it runs under dash as well as bash, and everything is inside
 # functions so that a download cut short runs nothing.
@@ -200,13 +201,15 @@ skill_into() {
 # (spec 054 #15): each server and container, whose it is, and what to do. Its
 # report escapes what other programs supplied. Fifteen seconds at most: this is
 # advice, not a step that may hang: the watchdog's SIGTERM ends it with exit 1
-# and no verdict. plan_status is its exit status: 10 or 4 when something runs
-# older, 0 when nothing does, 2 from a binary from before the command; anything
-# else — a refusal, the watchdog — is "could not check", never "runs older".
+# and no verdict, and leaves $tmp/timeout behind — the plan catches SIGTERM, so
+# its exit status cannot say it was the watchdog (the review of #228).
+# plan_status is its exit status: 10 or 4 when something runs older, 0 when
+# nothing does, 2 from a binary from before the command; anything else — a
+# refusal, the watchdog — is "could not check", never "runs older".
 plan() {
 	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
-	(sleep 15 && kill "$planner") >/dev/null 2>&1 &
+	(sleep 15 && : >"$tmp/timeout" && kill "$planner") >/dev/null 2>&1 &
 	watchdog=$!
 	plan_status=0
 	wait "$planner" || plan_status=$?
@@ -325,9 +328,11 @@ main() {
 	# A server or container started from an older version keeps running it
 	# until it is restarted: the binary's plan names each, whose it is, and
 	# what to do. After a downgrade, what runs is newer, and the plan says to
-	# leave it. Not after a first install: nothing of this binary's runs yet.
+	# leave it. Not after a first install: nothing of this binary's runs yet;
+	# nor when the caller runs the plan itself (TRACEPAD_NO_PLAN=1: the
+	# agent's bridge), which would be the same look twice.
 	plan_status=none
-	if [ "$change" != installed ]; then
+	if [ "$change" != installed ] && [ "${TRACEPAD_NO_PLAN:-}" != 1 ]; then
 		plan
 		case "$plan_status/$change" in
 		10/* | 4/*)
@@ -344,7 +349,7 @@ main() {
 			# Why, in the plan's own first line, or the watchdog's: a new
 			# binary's first connection may wait on a firewall or a scan.
 			why="it did not finish in 15 seconds"
-			[ "$plan_status" -gt 128 ] || why="$(head -n 1 "$tmp/plan")"
+			[ -e "$tmp/timeout" ] || why="$(head -n 1 "$tmp/plan")"
 			say ""
 			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $bin upgrade --plan"
 			;;

@@ -771,10 +771,11 @@ func TestComposeAdvice(t *testing.T) {
 	pinned := "ghcr.io/tracepad/tracepad:0.1.0@sha256:" + strings.Repeat("d", 64)
 	d.image(pinned, "0.1.0")
 	labels := map[string]string{
-		"com.docker.compose.project":              "tracepad",
-		"com.docker.compose.service":              "tracepad",
-		"com.docker.compose.project.working_dir":  "/srv/my app",
-		"com.docker.compose.project.config_files": "/srv/my app/compose.yml,/srv/my app/compose.override.yml",
+		"com.docker.compose.project":                  "tracepad",
+		"com.docker.compose.service":                  "tracepad",
+		"com.docker.compose.project.working_dir":      "/srv/my app",
+		"com.docker.compose.project.config_files":     "/srv/my app/compose.yml,/srv/my app/compose.override.yml",
+		"com.docker.compose.project.environment_file": "/srv/my app/.env.prod",
 	}
 	args := []string{"--name", "tracepad-tracepad-1", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=tracepad_tracepad_data,dst=/data"}
 	for k, l := range labels {
@@ -783,7 +784,7 @@ func TestComposeAdvice(t *testing.T) {
 	d.run(t, append(args, pinned)...)
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	all := strings.Join(rep.Person, "\n")
-	compose := "docker compose -p tracepad -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
+	compose := "docker compose -p tracepad --env-file '/srv/my app/.env.prod' -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
 	for _, want := range []string{
 		compose + " stop tracepad && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly -v \"$PWD:/backup\" " + busybox + " sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-tracepad-1-0.1.0.tar.gz' && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
 		"set the image of the service tracepad in whichever of /srv/my app/compose.yml, /srv/my app/compose.override.yml sets it to ghcr.io/tracepad/tracepad:0.2.0",
@@ -813,6 +814,14 @@ func TestComposeAdvice(t *testing.T) {
 	if strings.Contains(got, "digest") {
 		t.Errorf("an image with no digest: %s", got)
 	}
+	// The env files the project was started with are passed again, in their
+	// order (the review of #228): a ${VAR} in the file may name the volume.
+	c.ComposeEnv = []string{"/srv/obs/base.env", "/srv/obs/my local.env"}
+	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs --env-file /srv/obs/base.env --env-file '/srv/obs/my local.env' -f /etc/obs/compose.yml stop tp") ||
+		!strings.Contains(got, "--env-file '/srv/obs/my local.env' -f /etc/obs/compose.yml up -d tp") {
+		t.Errorf("env files: %s", got)
+	}
+	c.ComposeEnv = nil
 	// Compose's labels missing: its project and directory, and what to look up.
 	c.ComposeFiles, c.Service = nil, ""
 	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop <its service>") {
@@ -1991,6 +2000,66 @@ func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 	}
 	if rep := plan("0.2.0"); !strings.Contains(rep.Summary, "there is no release v0.9.9") {
 		t.Errorf("another version was not looked up: %s", rep.Summary)
+	}
+}
+
+// Every kind of binary at the install path is sorted in one place (the
+// review of #228): a development build, a regular file or linked from its
+// checkout, gets the install script's line and is never "nothing to do"; one
+// of the person's at the target or past it is; one behind, or silent, is
+// named; the command's own is neither. A tracepad first on PATH that is
+// behind keeps the installed one off "nothing to do".
+func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
+	t.Parallel()
+	type want struct {
+		idle bool
+		line string // in the person's list, "" for none of the binary's
+	}
+	for name, c := range map[string]struct {
+		setup func(t *testing.T, bin string, deps *Deps)
+		want  want
+	}{
+		"none":                   {func(*testing.T, string, *Deps) {}, want{}},
+		"the command's, current": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "0.2.0") }, want{}},
+		"a development build": {func(t *testing.T, bin string, _ *Deps) { scriptBinary(t, bin, "97d6b79") },
+			want{line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
+		"a development build, linked": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "dev") },
+			want{line: `says it is "dev", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
+		"a release, linked, current": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.2.0") }, want{idle: true}},
+		"a release, linked, past it": {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.3.0") }, want{idle: true}},
+		"a release, linked, behind":  {func(t *testing.T, bin string, _ *Deps) { linked(t, bin, "0.1.0") }, want{line: "is 0.1.0; "}},
+		"one that does not run": {func(t *testing.T, bin string, _ *Deps) {
+			_ = os.WriteFile(bin, []byte("not a program"), 0o755)
+		}, want{line: "is no answer; "}},
+		"current, and one behind first on PATH": {func(t *testing.T, bin string, deps *Deps) {
+			linked(t, bin, "0.2.0")
+			first := filepath.Join(t.TempDir(), "tracepad")
+			scriptBinary(t, first, "0.1.0")
+			deps.LookPath = func(string) string { return first }
+		}, want{line: ", first on PATH, is 0.1.0: "}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			deps := containerDeps(t, newFakeDocker(t))
+			bin := filepath.Join(deps.InstallDir, "tracepad")
+			c.setup(t, bin, &deps)
+			rep, _ := runReport(t, deps, "--plan")
+			person := strings.Join(rep.Person, "\n")
+			if rep.Binary.Idle != c.want.idle || (c.want.line == "") != (person == "") || !strings.Contains(person, c.want.line) {
+				t.Errorf("idle %v, person %q; want %+v", rep.Binary.Idle, person, c.want)
+			}
+		})
+	}
+}
+
+// linked puts a stand-in that says version elsewhere and links it at bin,
+// as a build linked from its checkout is.
+func linked(t *testing.T, bin, version string) {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "tracepad")
+	scriptBinary(t, target, version)
+	if err := os.Symlink(target, bin); err != nil {
+		t.Fatal(err)
 	}
 }
 

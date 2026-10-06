@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -37,17 +38,28 @@ func shellBlocks(t *testing.T) []block {
 		if err != nil {
 			return err
 		}
+		// drift_test's fence, indented or not (a block in a list is
+		// indented); a block that is not shell is passed over whole.
 		var cur *block
+		open, indent := false, ""
 		for i, l := range strings.Split(string(b), "\n") {
 			switch {
-			case cur == nil && (l == "```sh" || l == "```bash" || l == "```shell"):
-				cur = &block{file: name, line: i + 2}
-			case cur != nil && l == "```":
-				blocks = append(blocks, *cur)
-				cur = nil
+			case fence.MatchString(l) && !open:
+				open, indent = true, l[:len(l)-len(strings.TrimLeft(l, " \t"))]
+				if lang := strings.TrimPrefix(strings.TrimSpace(l), "```"); lang == "sh" || lang == "bash" || lang == "shell" {
+					cur = &block{file: name, line: i + 2}
+				}
+			case fence.MatchString(l):
+				if cur != nil {
+					blocks = append(blocks, *cur)
+				}
+				open, cur = false, nil
 			case cur != nil:
-				cur.text += l + "\n"
+				cur.text += strings.TrimPrefix(l, indent) + "\n"
 			}
+		}
+		if open {
+			return fmt.Errorf("%s: a fence is never closed", name)
 		}
 		return nil
 	})
@@ -105,7 +117,10 @@ var zshKeeps = []string{"argv", "cdpath", "commands", "fignore", "fpath", "funct
 	"signals", "status", "watch", "zsh_eval_context", "aliases", "dirstack", "jobdirs", "jobstates", "jobtexts",
 	"modules", "nameddirs", "reswords", "userdirs"}
 
-var assignment = regexp.MustCompile(`(?:^|[\s;&|({])([a-z_][a-z0-9_]*)=`)
+var (
+	assignment = regexp.MustCompile(`(?:^|[\s;&|({])([a-z_][a-z0-9_]*)=`)
+	lowerName  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+)
 
 func TestTheSkillAssignsNoNameZshKeeps(t *testing.T) {
 	t.Parallel()
@@ -114,7 +129,7 @@ func TestTheSkillAssignsNoNameZshKeeps(t *testing.T) {
 	// floor, never the ceiling.
 	if out, err := exec.Command("zsh", "-f", "-c", `print -l ${(k)parameters}`).Output(); err == nil {
 		for _, name := range strings.Fields(string(out)) {
-			if name == strings.ToLower(name) && regexp.MustCompile(`^[a-z_][a-z0-9_]*$`).MatchString(name) && name != "_" {
+			if lowerName.MatchString(name) && name != "_" {
 				keeps = append(keeps, name)
 			}
 		}
@@ -162,6 +177,29 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 			if got, _ := os.ReadFile(args); string(got) != want {
 				t.Errorf("%s, v=%q: the plan was run with %q, want %q", sh, v, got, want)
 			}
+		}
+		// A download that fails runs no bridge an earlier run left (the
+		// review of #228): curl fails, sh reads nothing and exits 0.
+		home := t.TempDir()
+		stale := filepath.Join(home, ".cache", "tracepad", "release", "tracepad")
+		ran := filepath.Join(t.TempDir(), "ran")
+		if err := os.MkdirAll(filepath.Dir(stale), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(stale, []byte("#!/bin/sh\n: > \"$RAN\"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		failing := t.TempDir()
+		if err := os.WriteFile(filepath.Join(failing, "curl"), []byte("#!/bin/sh\nexit 7\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(sh, "-c", strings.Replace(line, "v=;", "v=0.2.0;", 1))
+		cmd.Env = []string{"PATH=" + failing + ":/usr/bin:/bin", "RAN=" + ran, "HOME=" + home}
+		if err := cmd.Run(); err == nil {
+			t.Errorf("%s: a failed download ended well", sh)
+		}
+		if _, err := os.Stat(ran); err == nil {
+			t.Errorf("%s: a failed download ran the bridge an earlier run left", sh)
 		}
 	}
 }
