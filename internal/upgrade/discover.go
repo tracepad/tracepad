@@ -124,16 +124,16 @@ func resolveServer(p Process) (dataDir, listen string, err error) {
 
 var errNotServer = errors.New("not a server")
 
-// lockedBy is the PID the data directory's lock file records: the server
-// writes its own after taking the lock (spec 001 #20), so a live process whose
-// PID is there holds the database.
+// lockedBy is the PID the data directory's lock records: the server writes
+// its own after taking the lock (spec 001 #20), so a live process whose PID
+// is there holds the database. The protocol is the store's.
 func lockedBy(dataDir string) (int, error) {
-	b, err := os.ReadFile(filepath.Join(dataDir, dataDBName+store.LockSuffix))
-	if err != nil {
-		return 0, err
-	}
-	line, _, _ := strings.Cut(string(b), "\n")
-	return strconv.Atoi(strings.TrimSpace(line))
+	return store.RecordedPID(filepath.Join(dataDir, dataDBName))
+}
+
+// lockHeld says whether a server holds the data directory's database now.
+func lockHeld(dataDir string) bool {
+	return store.Locked(filepath.Join(dataDir, dataDBName))
 }
 
 // loopbackURL is the address to ask a server listening on listen, when that
@@ -318,12 +318,19 @@ func (r *runner) discover(ctx context.Context) Findings {
 // installedBinary reads <install dir>/tracepad.
 func (r *runner) installedBinary(ctx context.Context) Binary {
 	b := Binary{Path: filepath.Join(r.deps.InstallDir, "tracepad")}
-	st, err := os.Stat(b.Path)
+	// Lstat: a link there is someone else's install (a package manager's),
+	// never replaced with a file (the final review).
+	st, err := os.Lstat(b.Path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		b.Reason = "no binary is installed at " + b.Path
 	case err != nil:
 		b.Reason = err.Error()
+	case st.Mode()&os.ModeSymlink != 0:
+		b.Exists = true
+		target, _ := os.Readlink(b.Path)
+		b.Version, _ = r.deps.Version(ctx, b.Path)
+		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"
 	case !st.Mode().IsRegular():
 		b.Exists = true
 		b.Reason = b.Path + " is not a regular file"

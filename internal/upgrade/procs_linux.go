@@ -50,6 +50,10 @@ func (procSystem) Candidates() ([]Process, int, error) {
 		if !isTracepadName(exe) && (len(argv) == 0 || !isTracepadName(argv[0])) {
 			continue
 		}
+		// Not a server (`tracepad mcp`, `tail`): not asked systemctl about.
+		if _, ok := serverFlags(argv); argErr == nil && !ok {
+			continue
+		}
 		p, err := inspectLinux(pid)
 		if err != nil {
 			if alive(pid) {
@@ -162,6 +166,20 @@ func procUID(dir string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// isZombie reads the state in /proc/<pid>/stat: the field after the
+// command's closing parenthesis.
+func isZombie(pid int) bool {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	i := strings.LastIndexByte(string(b), ')')
+	if i < 0 || i+2 >= len(b) {
+		return false
+	}
+	return b[i+2] == 'Z'
 }
 
 // cgroupOf is /proc/<pid>/cgroup; a test gives a runner's.

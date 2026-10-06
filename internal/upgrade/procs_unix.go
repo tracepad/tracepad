@@ -16,7 +16,9 @@ func alive(pid int) bool {
 		return false
 	}
 	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	// A zombie answers kill(pid, 0) and runs nothing: it is gone, whatever
+	// reaps it (the final review).
+	return (err == nil || errors.Is(err, syscall.EPERM)) && !isZombie(pid)
 }
 
 // started is a process this command started and reaps.
@@ -37,16 +39,22 @@ func startDetached(spec StartSpec) (Started, error) {
 		return nil, err
 	}
 	defer log.Close()
-	cmd := &exec.Cmd{
-		Path:        spec.Path,
-		Args:        spec.Argv,
-		Env:         spec.Env,
-		Dir:         spec.Dir,
-		Stdout:      log,
-		Stderr:      log,
-		SysProcAttr: &syscall.SysProcAttr{Setsid: true},
-	}
-	if err := cmd.Start(); err != nil {
+	// A server is the one process the command starts outside child(): a
+	// session of its own, so it outlives the command. A binary just put in
+	// place may be busy for a moment (ETXTBSY); each try is a fresh command.
+	var cmd *exec.Cmd
+	if err := retryBusy(func() error {
+		cmd = &exec.Cmd{
+			Path:        spec.Path,
+			Args:        spec.Argv,
+			Env:         spec.Env,
+			Dir:         spec.Dir,
+			Stdout:      log,
+			Stderr:      log,
+			SysProcAttr: &syscall.SysProcAttr{Setsid: true},
+		}
+		return cmd.Start()
+	}); err != nil {
 		return nil, err
 	}
 	s := &started{pid: cmd.Process.Pid, done: make(chan struct{})}

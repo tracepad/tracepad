@@ -93,6 +93,21 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 			p.from = p.container.Version
 		}
 	}
+	// A server or container running later than the target, from the
+	// installed binary or the command's own, is a downgrade too: after an
+	// install script put an older binary in place (TRACEPAD_VERSION), the
+	// plan refuses, and says to leave what runs as it is (#15; the final
+	// review: the plan used to say everything was current).
+	for _, s := range p.f.Servers {
+		if order, ok := Compare(s.Version, to); ok && order > 0 && (s.Ours || sameFile(s.Proc.Exe, bin.Path)) {
+			return nil, downgrade(to, fmt.Sprintf("server pid %d", s.Proc.PID), s.Version) + " Leave it running"
+		}
+	}
+	for _, c := range p.f.Containers {
+		if order, ok := Compare(c.Version, to); ok && order > 0 && c.Ours {
+			return nil, downgrade(to, "container "+c.Name, c.Version) + " Leave it running"
+		}
+	}
 	r.othersBehind(p)
 	rep.From = p.from
 	return p, ""
@@ -250,24 +265,25 @@ func (r *runner) planMode(ctx context.Context) *Report {
 		return rep
 	}
 	r.describe(p, rep)
-	switch {
-	case p.pending():
-		rep.ExitCode = exitPending
-		rep.Summary = fmt.Sprintf("An upgrade to %s is pending.", p.to)
-		if len(p.choose) > 0 {
-			rep.Summary = fmt.Sprintf("An upgrade to %s is pending; more than one server or container is the command's, so name one.", p.to)
-		}
-	case len(p.later) > 0:
-		rep.ExitCode = exitPending
-		rep.Summary = fmt.Sprintf("An upgrade to %s is pending.", p.to)
-	case len(p.person) > 0:
-		rep.ExitCode = exitDecide
-		rep.Summary = fmt.Sprintf("Nothing of the command's is behind %s; what is, is yours.", p.to)
-	default:
-		rep.ExitCode = exitOK
-		rep.Summary = fmt.Sprintf("Everything this command looks after runs %s already.", p.to)
-	}
+	rep.ExitCode, rep.Summary = verdictOf(p)
 	return rep
+}
+
+// verdictOf is what a plan finds, for --plan and for an upgrade that finds
+// nothing of its own to do: the same state, the same verdict (the final
+// review).
+func verdictOf(p *plan) (int, string) {
+	switch {
+	case len(p.choose) > 0:
+		return exitPending, fmt.Sprintf("An upgrade to %s is pending; more than one server or container is the command's, so name one.", p.to)
+	case p.pending():
+		return exitPending, fmt.Sprintf("An upgrade to %s is pending.", p.to)
+	case len(p.later) > 0:
+		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
+	case len(p.person) > 0:
+		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, is yours.", p.to)
+	}
+	return exitOK, fmt.Sprintf("Everything this command looks after runs %s already.", p.to)
 }
 
 // describe writes the plan's steps, what is the person's, and the next

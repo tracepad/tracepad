@@ -287,11 +287,15 @@ func extractBinary(archive, path string) error {
 func binaryVersion(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := child(ctx, path, "version")
-	cmd.Env = []string{}
 	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	err := retryBusy(func() error {
+		out.Reset()
+		cmd := child(ctx, path, "version")
+		cmd.Env = []string{}
+		cmd.Stdout = &out
+		return cmd.Run()
+	})
+	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil

@@ -37,6 +37,9 @@ type fakeHost struct {
 	// whose /api/v1/system fails while set.
 	broken    map[string]bool
 	uncounted map[string]bool
+	// elsewhere are versions whose server opens another data directory
+	// than its arguments name.
+	elsewhere map[string]string
 }
 
 type fakeServer struct {
@@ -48,7 +51,7 @@ type fakeServer struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}}
+	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}}
 	t.Cleanup(func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -137,8 +140,11 @@ func (h *fakeHost) Start(spec StartSpec) (Started, error) {
 	if err != nil || h.broken[version] {
 		return exit()
 	}
+	if other := h.elsewhere[version]; other != "" {
+		dataDir = other
+	}
 	lock := filepath.Join(dataDir, dataDBName+store.LockSuffix)
-	release, ok, err := lockFile(lock)
+	release, ok, err := store.TryLock(filepath.Join(dataDir, dataDBName))
 	if err != nil || !ok {
 		return exit()
 	}
@@ -245,6 +251,17 @@ func newFakeWorld(t *testing.T, traces int) *fakeWorld {
 	}
 	w.waitVersion(fOld)
 	return w
+}
+
+// freeAddr is a loopback address nothing listens on.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().String()
 }
 
 func (w *fakeWorld) url() string { return "http://" + w.listen }

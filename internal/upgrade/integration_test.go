@@ -166,6 +166,13 @@ func (w *world) start() int {
 // startIn starts the server with dir as its working directory.
 func (w *world) startIn(dir string) int {
 	w.t.Helper()
+	return w.startWith(dir, true)
+}
+
+// startWith starts the server; reap false leaves it a zombie once it exits,
+// as a harness that spawns and never waits does.
+func (w *world) startWith(dir string, reap bool) int {
+	w.t.Helper()
 	log, err := os.OpenFile(filepath.Join(w.data, "server.log"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		w.t.Fatal(err)
@@ -181,7 +188,11 @@ func (w *world) startIn(dir string) int {
 	if err := cmd.Start(); err != nil {
 		w.t.Fatal(err)
 	}
-	go func() { _ = cmd.Wait() }()
+	if reap {
+		go func() { _ = cmd.Wait() }()
+	} else {
+		w.t.Cleanup(func() { _ = cmd.Wait() })
+	}
 	if err := os.WriteFile(filepath.Join(w.data, "server.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		w.t.Fatal(err)
 	}
@@ -660,7 +671,7 @@ func TestARefusedRunLeavesNoDirectory(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(filepath.Join(w.home, "tracepad-backups"))
 	for _, e := range entries {
-		if e.Name() != ".lock" {
+		if e.Name() != "runs.lock" {
 			t.Errorf("left behind: %s", e.Name())
 		}
 	}
@@ -788,4 +799,17 @@ func TestAWayBackDoesNotPutAnOlderBinaryUnderANewerServer(t *testing.T) {
 	if w.installedVersion() != vNew {
 		t.Errorf("the binary was put back: %s", w.installedVersion())
 	}
+}
+
+// The old server's parent never reaps it: stopped, it is a zombie, which
+// kill(pid, 0) still answers. The upgrade takes it for gone (the final
+// review: it used to wait out its sixty seconds and end stuck).
+func TestAnUnreapedServerIsGoneOnceItStops(t *testing.T) {
+	w := newWorld(t)
+	w.startWith(w.home, false)
+	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("exit %d, %s", code, rep.Summary)
+	}
+	w.waitVersion(vNew)
 }

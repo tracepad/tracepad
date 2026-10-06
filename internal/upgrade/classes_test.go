@@ -19,7 +19,7 @@ func TestAServerBroughtBackAfterTheStopCannotTakeTheData(t *testing.T) {
 	var intruder Started
 	deps.Fault = func(point string) error {
 		if point == "swap.archive" {
-			argv := []string{"tracepad", "serve", "--listen", "127.0.0.1:1", "--data-dir", w.data}
+			argv := []string{"tracepad", "serve", "--listen", freeAddr(w.t), "--data-dir", w.data}
 			intruder, _ = w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(w.data, "server.log")})
 		}
 		return nil

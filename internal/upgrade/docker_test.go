@@ -204,7 +204,7 @@ func (d *fakeDocker) Run(ctx context.Context, args ...string) ([]byte, error) {
 		}
 		return nil, nil
 	case args[0] == "logs":
-		c := d.find(args[1])
+		c := d.find(args[len(args)-1])
 		return []byte(`time=x level=INFO msg="tracepad ` + d.images[c.Config.Image].Config.Labels["org.opencontainers.image.version"] + `"` + "\n"), nil
 	case args[0] == "run" && args[1] == "--rm":
 		return d.busybox(args)

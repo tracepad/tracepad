@@ -298,4 +298,83 @@ func TestTheFaultMatrixOfAServer(t *testing.T) {
 			})
 		}
 	}
+	// Cells that are not a step's: states the steps can meet (the final
+	// review).
+	intruder := func(w *fakeWorld) Started {
+		// As a supervisor restarts it: the same arguments, on its own
+		// address, free while the server is stopped; the lock is what
+		// keeps it off the data.
+		argv := []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}
+		s, _ := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(w.data, "server.log")})
+		return s
+	}
+	t.Run("scenario/a downgraded binary under a newer server", func(t *testing.T) {
+		t.Parallel()
+		w := newFakeWorld(t, 2)
+		deps := w.deps()
+		if rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != exitOK {
+			t.Fatalf("upgrade: %d %s", code, rep.Summary)
+		}
+		scriptBinary(t, w.install+".old", fOld)
+		_ = os.Rename(w.install+".old", w.install)
+		plan, code := runIn(t, context.Background(), deps, "--plan", "--to", fOld)
+		if code != exitRefused || !strings.Contains(plan.Summary, "Leave it running") {
+			t.Errorf("the plan after a downgrade: %d %s", code, plan.Summary)
+		}
+		invariants(t, w, "", 2, fNew)
+	})
+	t.Run("scenario/a server on the new binary during the way back", func(t *testing.T) {
+		t.Parallel()
+		w := newFakeWorld(t, 2)
+		deps := w.deps()
+		var in Started
+		deps.Fault = func(point string) error {
+			switch point {
+			case "swap.start":
+				return errInjected
+			case "back.binary":
+				in = intruder(w)
+			}
+			return nil
+		}
+		rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+		if code != exitWentBack {
+			t.Fatalf("%d %s", code, rep.Summary)
+		}
+		select {
+		case <-in.Exited():
+		default:
+			t.Error("a server on the new binary took the data during the way back")
+		}
+		invariants(t, w, rep.Run.Dir, 2, fOld)
+	})
+	t.Run("scenario/a server on the new binary between runs", func(t *testing.T) {
+		t.Parallel()
+		w := newFakeWorld(t, 2)
+		deps := w.deps()
+		deps.Fault = func(point string) error {
+			if point == "swap.start" || point == "back.binary" {
+				return errInjected
+			}
+			return nil
+		}
+		rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+		if code != exitStuck {
+			t.Fatalf("%d %s", code, rep.Summary)
+		}
+		deps.Fault = nil
+		in := intruder(w)
+		select {
+		case <-in.Exited():
+			t.Fatal("the stand-in for a supervisor could not take the data")
+		default:
+		}
+		w.addTrace() // what it wrote: a migration, say
+		backUntilDone(t, deps, rep.Run.ID)
+		invariants(t, w, rep.Run.Dir, 2, fOld)
+		if n, err := countTraces(filepath.Join(w.data+".after-"+rep.Run.ID, dataDBName)); err != nil || n != 3 {
+			t.Errorf("what it wrote, set aside: %d (%v)", n, err)
+		}
+	})
+
 }

@@ -1130,7 +1130,10 @@ Exit `0` done, healthy, or nothing to do; `1` refused, with nothing changed;
 runs again; `4` yours to decide (the report says what and how); `5` stuck — a
 step failed and could not be undone, or the way back started the old version
 but could not see it answer — and the report says what runs and what is where. `--plan` exits `10` when the upgrade would change something, `4` when
-only what is yours is behind, and `0` when everything is up to date. `--json`
+only what is yours is behind, and `0` when everything is up to date; an
+upgrade that finds nothing of its own to do exits as `--plan` would on the
+same machine. Either refuses (`1`) when something runs later than the version
+asked for — after an install script put an older binary in place, say. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
 `plan`, `done`, `set_aside`, `person`, `next` and `notes`.

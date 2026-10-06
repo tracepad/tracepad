@@ -38,32 +38,31 @@ type job struct {
 	// inspect and image are the old container's (a container run).
 	inspect inspectContainer
 	image   inspectImage
-	// held releases the data directory's lock while the command holds it:
-	// from the stop until a server starts on the data (spec 054 #26).
-	held func()
+	// held lets go of the data locks the command holds: from the stop until
+	// a server starts on the data, through a way back (spec 054 #26, #28).
+	held []func()
 }
 
 // hold takes the lock of the database at dbLock, as a server takes it, and
 // keeps it until release: a server a shell loop or a supervisor brings back
 // while the command archives or swaps the data cannot take the database and
 // write into it. ok is false when another process holds it.
-func (j *job) hold(dbLock string) (ok bool, err error) {
-	release, ok, err := lockFile(dbLock)
+func (j *job) hold(dataDir string) (ok bool, err error) {
+	release, ok, err := store.TryLock(filepath.Join(dataDir, dataDBName))
 	if err != nil || !ok {
 		return ok, err
 	}
-	j.release()
-	j.held = release
+	j.held = append(j.held, release)
 	return true, nil
 }
 
 // release lets go of the data directory's lock, right before a server starts
 // on it, or when the command gives the data back.
 func (j *job) release() {
-	if j.held != nil {
-		j.held()
-		j.held = nil
+	for _, release := range j.held {
+		release()
 	}
+	j.held = nil
 }
 
 // at marks a step of a swap or a way back for the fault matrix: the error a
@@ -116,8 +115,8 @@ func (r *runner) upgrade(ctx context.Context) *Report {
 	}
 	bin := p.f.Binary
 	if !p.replaceBinary && p.server == nil && p.container == nil {
-		rep.ExitCode = exitOK
-		rep.Summary = fmt.Sprintf("Nothing to upgrade: everything this command looks after runs %s already.", p.to)
+		code, summary := verdictOf(p)
+		rep.ExitCode, rep.Summary = code, "Nothing upgraded by this run. "+summary
 		if bin.Ours {
 			r.reinstallSkill(ctx, rep, bin.Path, p.to)
 		}
@@ -275,7 +274,7 @@ func (r *runner) lockRuns(rep *Report) (release func(), ok bool) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: could not make "+r.deps.Backups+": "+err.Error()
 		return nil, false
 	}
-	release, ok, err := lockFile(filepath.Join(r.deps.Backups, ".lock"))
+	release, ok, err := store.TryLock(filepath.Join(r.deps.Backups, "runs"))
 	switch {
 	case err != nil:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: could not lock "+r.deps.Backups+": "+err.Error()
@@ -349,6 +348,9 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Sync()
+	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
@@ -458,7 +460,7 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 		// removed since): it would not start there again. It starts in its
 		// data directory — unless an argument is relative to the directory
 		// that is gone.
-		if relativeArgs(s.Proc.Argv) {
+		if relativeDataDir(s.Proc) {
 			return fmt.Sprintf("server pid %d's working directory %s is gone, and its arguments name paths relative to it: restart it yourself", s.Proc.PID, s.Proc.Cwd)
 		}
 		if s.Proc.Cwd != "" {
@@ -472,10 +474,12 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 	return ""
 }
 
-// relativeArgs says whether a server's --data-dir is a relative path: one that
-// means something only in the directory it was started in.
-func relativeArgs(argv []string) bool {
-	args, ok := serverFlags(argv)
+// relativeDataDir says whether a server's data directory, from whichever
+// source it came — --data-dir, TRACEPAD_DATA_DIR, XDG_DATA_HOME, HOME — is a
+// relative path: one that means something only in the directory it was
+// started in (the final review).
+func relativeDataDir(p Process) bool {
+	args, ok := serverFlags(p.Argv)
 	if !ok {
 		return false
 	}
@@ -483,8 +487,15 @@ func relativeArgs(argv []string) bool {
 	if err != nil {
 		return true
 	}
-	d, given := flags.Given("data-dir")
-	return given && d != "" && !filepath.IsAbs(d)
+	if d, given := flags.Given("data-dir"); given && d != "" {
+		return !filepath.IsAbs(d)
+	}
+	for _, key := range []string{"TRACEPAD_DATA_DIR", "XDG_DATA_HOME", "HOME"} {
+		if v := p.Getenv(key); v != "" {
+			return !filepath.IsAbs(v)
+		}
+	}
+	return true
 }
 
 // isServer checks, right before a signal, that pid is still the server of
@@ -560,7 +571,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	// server brought back by something else cannot write into what it
 	// archives (the fourth review).
 	defer j.release()
-	if ok, err := j.hold(filepath.Join(ps.DataDir, dataDBName+store.LockSuffix)); !ok {
+	if ok, err := j.hold(ps.DataDir); !ok {
 		why := "the data directory's lock could not be taken"
 		if err == nil {
 			holder, _ := lockedBy(ps.DataDir)
@@ -622,6 +633,13 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	}
 	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	// What answered must have opened this data directory: the lock of it
+	// records the new server. A server that resolved its data elsewhere — a
+	// relative path in its environment, say — answers healthy on an empty
+	// database (the final review).
+	if c.Verdict != verdictNotHealthy && c.Health != "" && !recordsPID(ps.DataDir, ps.NewPID) {
+		c.Verdict, c.Why = verdictNotHealthy, fmt.Sprintf("the new server answers, but did not open %s", ps.DataDir)
+	}
 	j.verdict(ctx, c)
 }
 
@@ -699,7 +717,9 @@ func (j *job) finishHealthy(ctx context.Context) {
 // stop or a check that says not healthy.
 func (j *job) goBack(ctx context.Context, why string) {
 	j.done("%s; the way back runs", why)
-	j.release()
+	// The data stays held: the way back lets go only right before it starts
+	// the old version, so nothing — a supervisor, a shell loop — runs the
+	// new binary on data it has not restored (the final review).
 	ctx, cancel := wayBackContext(ctx)
 	defer cancel()
 	outcome := j.wayBack(ctx)

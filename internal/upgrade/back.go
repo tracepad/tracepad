@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tracepad/tracepad/internal/store"
 )
 
 // renameDir is os.Rename; a test's seam, to cut a way back short between
@@ -146,10 +145,15 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 		}
 		// Whatever holds the data directory now — whoever started it, this
 		// run, a later run's way back, the person — may be stopped only when
-		// it is this directory's server as the run recorded it. Anything else
-		// stops the way back before it touches a thing.
+		// it is this directory's server as the run recorded it, and its
+		// version decides what it did: the old version ran on data nothing
+		// else touched, anything else may have migrated it, and the archive
+		// is restored. Anything that is not the directory's server stops the
+		// way back before it touches a thing. Held by this command since the
+		// stop (j.held), the data has no other holder.
 		holder := 0
-		if lockHeld(ps.DataDir) {
+		restoreData := st.has(stepStarted)
+		if len(j.held) == 0 && lockHeld(ps.DataDir) {
 			holder, _ = lockedBy(ps.DataDir)
 			ok, err := r.isServer(holder, ps.DataDir, j.spec)
 			if !ok {
@@ -159,13 +163,25 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 				}
 				return j.fail(fmt.Sprintf("pid %d holds %s, and it is not this directory's server as the run recorded it: %s. Stop it first; nothing was touched", holder, ps.DataDir, why))
 			}
+			if !restoreData {
+				hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				v, _ := health(hctx, r.deps.HTTP, ps.URL)
+				cancel()
+				if v != st.From {
+					if st.Archive == nil {
+						return j.fail(fmt.Sprintf("server pid %d holds %s at %q, not %s, and the run took no archive to restore; stop it and run --back again", holder, ps.DataDir, v, st.From))
+					}
+					restoreData = true
+					j.done("server pid %d runs %q on %s, not %s: it may have migrated the data, which is restored from the archive", holder, v, ps.DataDir, st.From)
+				}
+			}
 		}
-		if st.has(stepStarted) {
+		if restoreData {
 			if out, ok := j.swapBack(ctx, holder, after, restore); !ok {
 				return out
 			}
 		} else if holder > 0 {
-			// Nothing ran on the data, and its server runs: check it.
+			// Nothing ran on the data but the old version, and it runs.
 			ps.BackPID = holder
 			_ = st.save(j.dir)
 			return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
@@ -194,9 +210,14 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	// an earlier attempt's server, or another — decides: this directory's
 	// server as the run recorded it is checked and kept; anything else
 	// stops the way back with nothing started.
-	if j.held == nil && lockHeld(ps.DataDir) {
+	if len(j.held) == 0 && lockHeld(ps.DataDir) {
 		holder, _ := lockedBy(ps.DataDir)
-		if ok, err := r.isServer(holder, ps.DataDir, j.spec); ok {
+		hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		v, _ := health(hctx, r.deps.HTTP, ps.URL)
+		cancel()
+		if ok, err := r.isServer(holder, ps.DataDir, j.spec); ok && v != st.From && v != "" {
+			return j.fail(fmt.Sprintf("server pid %d holds %s at %s, not %s; nothing was started. Stop it, and run --back again", holder, ps.DataDir, v, st.From))
+		} else if ok {
 			if ps.BackPID != holder {
 				ps.BackPID = holder
 				_ = j.step(stepBackStarted)
@@ -274,7 +295,7 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	}
 	// The restore's database is held from here until the old version starts
 	// on it: the lock follows the file through the renames below.
-	if ok, err := j.hold(filepath.Join(restore, dataDBName+store.LockSuffix)); !ok {
+	if ok, err := j.hold(restore); !ok {
 		return j.fail(fmt.Sprintf("the restore's lock could not be taken (%v); the server and %s are as they were, and the restore waits in %s", err, ps.DataDir, restore)), false
 	}
 
@@ -299,7 +320,18 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 			j.done("stopped server pid %d", holder)
 		}
 	}
-	if lockHeld(ps.DataDir) {
+	// The data held from here too, until the old version starts: nothing
+	// runs on it between the stop and the swap.
+	// The server this run started, when it holds something else than this
+	// directory (it opened another one): it is the run's own, by its binary
+	// and arguments, and it holds the address the old version needs.
+	if ps.NewPID > 0 && ps.NewPID != holder && r.startedAs(ps.NewPID, j.spec) {
+		if !r.stop(ctx, ps.NewPID) {
+			return j.fail(fmt.Sprintf("the run's server pid %d was asked to stop and has not; the restore waits in %s; run --back again once it has exited", ps.NewPID, restore)), false
+		}
+		j.done("stopped the run's server pid %d", ps.NewPID)
+	}
+	if ok, _ := j.hold(ps.DataDir); !ok {
 		return j.fail("something took " + ps.DataDir + " meanwhile; nothing was set aside, and the restore waits in " + restore), false
 	}
 	err = j.at("back.aside")
@@ -343,6 +375,17 @@ func (r *runner) waitGone(ctx context.Context, pid int) bool {
 		}
 	}
 	return true
+}
+
+// startedAs says whether pid runs as spec started it: its binary and its
+// arguments. It is how a way back knows the server its own run started when
+// that server holds no lock of the run's directory.
+func (r *runner) startedAs(pid int, spec ServerSpec) bool {
+	if !r.deps.Sys.Alive(pid) {
+		return false
+	}
+	p, err := r.deps.Sys.Inspect(pid)
+	return err == nil && sameFile(p.Exe, spec.Exe) && slices.Equal(p.Argv, spec.Argv)
 }
 
 // watch is a check's liveness for a server this invocation did not start:

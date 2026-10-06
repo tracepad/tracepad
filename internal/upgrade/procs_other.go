@@ -20,3 +20,6 @@ func (noSystem) Inspect(int) (Process, error)        { return Process{}, errNoPr
 func (noSystem) Alive(pid int) bool                  { return false }
 func (noSystem) Signal(int, syscall.Signal) error    { return errNoProcesses }
 func (noSystem) Start(StartSpec) (Started, error)    { return nil, errNoProcesses }
+
+// isZombie: no process table to read here.
+func isZombie(int) bool { return false }

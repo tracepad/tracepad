@@ -102,8 +102,9 @@ type inspectContainer struct {
 	Name  string `json:"Name"`
 	Image string `json:"Image"`
 	State struct {
-		Running    bool `json:"Running"`
-		Restarting bool `json:"Restarting"`
+		Running    bool   `json:"Running"`
+		Restarting bool   `json:"Restarting"`
+		StartedAt  string `json:"StartedAt"`
 	} `json:"State"`
 	RestartCount int           `json:"RestartCount"`
 	Config       inspectConfig `json:"Config"`

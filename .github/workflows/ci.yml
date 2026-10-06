@@ -260,7 +260,7 @@ jobs:
           else
             for f in $(git diff --name-only "$BASE" HEAD); do
               case "$f" in
-                internal/upgrade/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|Dockerfile|.goreleaser.yaml) run=true ;;
+                internal/upgrade/*|internal/store/*|internal/server/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|scripts/install-test.sh|Dockerfile|.goreleaser.yaml) run=true ;;
               esac
             done
           fi

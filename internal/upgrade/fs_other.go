@@ -6,8 +6,6 @@ import "errors"
 
 func isMountPoint(string) bool { return false }
 
-func lockHeld(string) bool { return false }
-
 func freeBytes(string) (int64, error) { return 0, errors.New("not supported on this system") }
 
 func lockFile(string) (func(), bool, error) {

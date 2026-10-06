@@ -834,8 +834,9 @@ reason in a comment; adding a dialect should be a table edit.
 - **Trunk-based PR flow**: short-lived branch → PR → squash-merge. PR titles
   follow Conventional Commits (they become the commit history).
 - **`make upgrade-integration` before pushing a change to `internal/upgrade/`,
-  `cmd/tracepad/`, `internal/config/`, `agent/skills/`, `scripts/install.sh`,
-  the `Dockerfile` or `.goreleaser.yaml`**: the upgrade against real servers
+  `internal/store/`, `internal/server/`, `cmd/tracepad/`, `internal/config/`,
+  `agent/skills/`, `scripts/install.sh` or its test, the `Dockerfile` or
+  `.goreleaser.yaml`**: the upgrade against real servers
   (spec 054 #27), about two minutes, out of the gate; CI runs it on those
   paths too.
 - **Run what you touched, not everything, until the push.** While iterating:

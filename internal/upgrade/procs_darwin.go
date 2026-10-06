@@ -49,6 +49,16 @@ func (kernSystem) Candidates() ([]Process, int, error) {
 			// the arguments are read only for a process it could be.
 			continue
 		}
+		// Its arguments first, which are cheap: `tracepad mcp`, `tail`,
+		// `version` are no server, and are not asked lsof or launchctl
+		// about (the final review).
+		if raw, err := unix.SysctlRaw("kern.procargs2", pid); err == nil {
+			if _, argv, _, err := parseProcargs2(raw); err == nil {
+				if _, ok := serverFlags(argv); !ok {
+					continue
+				}
+			}
+		}
 		p, err := inspectDarwin(pid)
 		if err != nil {
 			if alive(pid) {
@@ -91,6 +101,12 @@ func inspectDarwin(pid int) (Process, error) {
 	}
 	p.Manager, p.Unasked = launchdManager(p, os.Getuid())
 	return p, nil
+}
+
+// isZombie reads the process table's state: SZOMB is 5.
+func isZombie(pid int) bool {
+	k, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	return err == nil && k.Proc.P_stat == 5
 }
 
 // parseProcargs2 reads what `kern.procargs2` returns: argc as a 32-bit

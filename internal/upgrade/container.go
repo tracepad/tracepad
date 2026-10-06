@@ -176,7 +176,13 @@ func (r *runner) containerRunning(ctx context.Context, id string, fresh bool) bo
 }
 
 func (r *runner) containerFirstLog(ctx context.Context, id string) string {
-	out, err := r.deps.Docker.Run(ctx, "logs", id)
+	// This start's log, not the container's from its creation: a container
+	// the way back starts again has months of it (the final review).
+	args := []string{"logs"}
+	if list, err := r.inspectContainers(ctx, id); err == nil && len(list) == 1 && list[0].State.StartedAt != "" {
+		args = append(args, "--since", list[0].State.StartedAt)
+	}
+	out, err := r.deps.Docker.Run(ctx, append(args, id)...)
 	if err != nil {
 		return ""
 	}

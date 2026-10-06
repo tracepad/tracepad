@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // LockSuffix is what the lock file's name adds to the database's: the file a
@@ -101,4 +102,80 @@ func recordedPid(file *os.File) string {
 	}
 	return " (the process that last recorded itself there had pid " + pid +
 		", which may be stale or another container's)"
+}
+
+// The pieces below are the same protocol for a process that is not the
+// server: `tracepad upgrade` holds a database while it archives and swaps it,
+// asks whether a server holds one, and reads who last did (spec 054 #28). One
+// protocol, here, so the two sides cannot drift.
+
+// lockTries and lockRetry are how long a lock found held is asked again
+// before it counts as held: a child a process is starting holds a copy of
+// every descriptor between its fork and its exec, so a lock let go a moment
+// ago can look held for that moment.
+const (
+	lockTries = 5
+	lockRetry = 10 * time.Millisecond
+)
+
+// TryLock takes the lock of the database at dbPath as a server takes it, and
+// returns at once: ok is false when another process holds it. Unlike a
+// server's, it records no pid. On a file system that cannot lock there is
+// nothing to hold, and it says ok with a release that does nothing, as a
+// server starts there unguarded.
+func TryLock(dbPath string) (release func(), ok bool, err error) {
+	file, err := os.OpenFile(dbPath+LockSuffix, os.O_RDWR|os.O_CREATE, dataFileMode)
+	if err != nil {
+		return nil, false, err
+	}
+	for try := 0; ; try++ {
+		err := takeLock(file)
+		switch {
+		case err == nil:
+			return func() {
+				_ = unlockFile(file)
+				_ = file.Close()
+			}, true, nil
+		case isLockUnsupported(err):
+			file.Close()
+			return func() {}, true, nil
+		case isLockHeld(err) && try < lockTries:
+			time.Sleep(lockRetry)
+		case isLockHeld(err):
+			file.Close()
+			return nil, false, nil
+		default:
+			file.Close()
+			return nil, false, err
+		}
+	}
+}
+
+// Locked says whether a process holds the lock of the database at dbPath now.
+// A lock taken here to ask is let go at once; a missing lock file is no
+// holder.
+func Locked(dbPath string) bool {
+	if _, err := os.Stat(dbPath + LockSuffix); err != nil {
+		return false
+	}
+	release, ok, err := TryLock(dbPath)
+	if err != nil {
+		return false
+	}
+	if ok {
+		release()
+	}
+	return !ok
+}
+
+// RecordedPID is the pid the last server to hold the database at dbPath
+// wrote into its lock: it took the lock first, so a live process with this pid
+// holds it.
+func RecordedPID(dbPath string) (int, error) {
+	b, err := os.ReadFile(dbPath + LockSuffix)
+	if err != nil {
+		return 0, err
+	}
+	line, _, _ := strings.Cut(string(b), "\n")
+	return strconv.Atoi(strings.TrimSpace(line))
 }
