@@ -18,6 +18,8 @@ it beside the tools that cover the same ground.
 - [Quickstart](quickstart.md): the first trace on screen.
 - [Agent setup](agent-setup.md): the page to hand a coding agent, which sets
   Tracepad up for a project and reads the first trace back.
+- [Agent upgrade](agent-upgrade.md): the page to hand it for an update, which
+  backs the data up, restarts the server and checks it, with a way back.
 - [Installing the binary](install.md): download, verify, run as a service,
   upgrade, back up.
 - [Docker](docker.md): the image, its volume, TLS in front, upgrades.

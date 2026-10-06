@@ -14,6 +14,7 @@ A coding agent setting Tracepad up for a project starts at [Agent setup](https:/
 
 - [Quickstart](https://tracepad.github.io/tracepad/dev/quickstart.md): From nothing to a trace on screen.
 - [Agent setup](https://tracepad.github.io/tracepad/dev/agent-setup.md): This page is an instruction to a coding agent (Claude Code, Codex, Cursor or any other) that a person has asked to set Tracepad up for the project in front of it.
+- [Agent upgrade](https://tracepad.github.io/tracepad/dev/agent-upgrade.md): This page is an instruction to a coding agent that a person has asked to update Tracepad on this machine: "Update Tracepad to the latest release", or to a version they name.
 - [Installing the binary](https://tracepad.github.io/tracepad/dev/install.md): The release archives are one file each and need nothing installed beside them.
 - [Docker](https://tracepad.github.io/tracepad/dev/docker.md): `ghcr.io/tracepad/tracepad` is the server, the web interface and the CLI in one image — the same binary the release archives carry, built from the `Dockerfile` in this repository.
 - [Configuration](https://tracepad.github.io/tracepad/dev/configuration.md): Every variable the server, the CLI and the packages read, in one place.

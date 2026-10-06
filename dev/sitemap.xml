@@ -2,114 +2,118 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/accounts/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/admin/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/agent-setup/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
+    </url>
+    <url>
+         <loc>https://tracepad.github.io/tracepad/dev/agent-upgrade/</loc>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/agents/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/annotation/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/api/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/cli/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/compare/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/configuration/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/datasets/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/docker/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/export/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/ingest/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/install/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/langfuse-sdk/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/mcp/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/media/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/prompts/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/quality/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/quickstart/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/retention/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/scores/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/sdk-go/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/sdk-js/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/sdk-python/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/ui/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
     <url>
          <loc>https://tracepad.github.io/tracepad/dev/users/</loc>
-         <lastmod>2026-10-05</lastmod>
+         <lastmod>2026-10-06</lastmod>
     </url>
 </urlset>

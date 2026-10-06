@@ -403,6 +403,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -2373,12 +2401,21 @@ still being written after five seconds is cut off either way.</p>
 existing <code>/data</code> and brings it forward. <strong>A downgrade is not supported</strong> — an
 older binary meeting a newer schema is not a case anything here handles — so
 the upgrade is only as safe as the copy you took before it.</p>
+<p><strong>A container is upgraded by hand</strong>, in this release. <code>tracepad upgrade --plan</code>
+on the host — or your coding agent, given
+<code>Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md</code> —
+names every container of the image that runs an older version and gives the
+steps below with its name, its volume and the release filled in; the command
+changes nothing of a container. A Compose project takes the new tag in its
+Compose file and <code>docker compose up -d</code>, after the same backup.</p>
 <p>Back the volume up by tarring it from a throwaway container:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>docker<span class="w"> </span>stop<span class="w"> </span>tracepad
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">:/backup"</span><span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">'umask 077 &amp;&amp; tar czf /backup/tracepad-$(date +%F).tar.gz -C /data .'</span>
 <a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w">        </span><span class="c1"># the release you are moving to</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>tracepad<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>rename<span class="w"> </span>tracepad<span class="w"> </span>tracepad-old<span class="w">                 </span><span class="c1"># kept, to go back to</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>…<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w">   </span><span class="c1"># the options you created it with</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>docker<span class="w"> </span>rm<span class="w"> </span>tracepad-old<span class="w">                              </span><span class="c1"># once the new one has proved itself</span>
 </code></pre></div>
 <p>Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. <code>umask 077</code> makes the archive

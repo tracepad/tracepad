@@ -401,6 +401,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1656,15 +1684,18 @@ is for any agent that reads the same layout — a <code>SKILL.md</code> with a
 <p>The <a href="../install/#with-the-install-script">install script</a> runs this command
 for you, in each skills directory an agent on the machine has made.</p>
 <p>The skill is plain files. <code>SKILL.md</code> is what the agent loads when a task
-matches its description. Five references are read only when the task needs
-one: debugging, instrumenting a service, evals, administration, and setting
+matches its description. Six references are read only when the task needs
+one: debugging, instrumenting a service, evals, administration, setting
 Tracepad up for a project from nothing, which
-<a href="../agent-setup/">agent-setup.md</a> hands an agent.
+<a href="../agent-setup/">agent-setup.md</a> hands an agent, and upgrading it, which
+<a href="../agent-upgrade/">agent-upgrade.md</a> does.
 <code>tracepad skills show</code> prints <code>SKILL.md</code> and <code>tracepad skills show
 debugging.md</code> a reference, for reading it without installing it.</p>
 <p>Neither command talks to a server or needs a key.</p>
 <h3 id="updating">Updating</h3>
-<p>Run the same command again after upgrading the binary:</p>
+<p><a href="../cli/#upgrade"><code>tracepad upgrade</code></a> does it for you, wherever a copy carries
+the skill's <code>.version</code> marker. By hand, run the same command again after
+upgrading the binary:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>updated 0.1.0 → 0.1.1 in /home/you/.claude/skills/tracepad
 </code></pre></div>
 <p>The directory is replaced whole, so a reference the new version dropped does

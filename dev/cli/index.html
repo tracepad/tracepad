@@ -401,6 +401,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../install/" class="md-nav__link">
         
   
@@ -1480,6 +1508,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2129,6 +2168,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2242,6 +2292,22 @@ escaping is the job of whatever reads it.</p>
 <tr>
 <td><code>2</code></td>
 <td>The command was typed wrong: unknown flag, missing argument, a <code>--limit</code> out of range.</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: not upgraded — the way back ran, and the old version runs again.</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: yours to decide (a check that needs you; with <code>--plan</code>, only what is yours is behind).</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td><a href="#upgrade"><code>upgrade</code></a> only: stuck — a step failed and could not be undone, or the old version did not answer after a way back; the report says what is where.</td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td><a href="#upgrade"><code>upgrade --plan</code></a> only: the upgrade would change something (<code>0</code>: everything is up to date).</td>
 </tr>
 </tbody>
 </table>
@@ -3069,6 +3135,170 @@ container's own layer, not a <code>tmpfs</code> — and otherwise refuses, print
 <code>docker exec … skills install</code> is refused (<a href="../agents/#from-the-docker-image">agents.md</a>).
 Exit <code>1</code> for any of these refusals, <code>2</code> for a usage error.
 The whole of it is <a href="../agents/">agents.md</a>.</p>
+<h3 id="upgrade"><code>upgrade</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--plan<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span><span class="o">[</span>--to<span class="w"> </span><span class="m">0</span>.2.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--data-dir<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--check<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--back<span class="w"> </span>RUN<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+</code></pre></div>
+<p>Upgrades the installed binary and one server you started, to the newest
+stable release or the one <code>--to</code> names — never an older one: migrations run
+forward only. With no <code>--to</code>, the target is the later of the latest stable
+release and the installed binary: a release candidate installed is never gone
+back from, and a server still running an older version from it is yours to
+take there — the plan gives the command, with the candidate named
+(<code>--to 0.2.0-rc.1 --data-dir DIR</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
+command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, as
+the agent's bridge does; <code>TRACEPAD_INSTALL_DIR</code> names another). One a package
+manager installed — Homebrew's Cellar, the Nix store, a snap, <code>/usr/bin</code> — is
+yours, and the plan names the manager's command. It is local, like <code>skills</code>: it reads this machine's processes and containers and asks a
+server only at the server's own address. It does not run on Windows in this
+release: it refuses there before it looks at anything. The design is spec 054.</p>
+<ul>
+<li><code>--plan</code> changes nothing. It lists the binary, every <code>tracepad serve</code> of
+  yours and every container of the image, says which the command may upgrade
+  and why each other is yours (a service, an address beyond this machine,
+  another binary, a container), and what the upgrade would do, step by step.</li>
+<li><strong>A container is yours to upgrade</strong>, in this release: the plan and the
+  upgrade name each one that runs an older version and give the commands —
+  stop it, back its volume up, pull the release, and run it again with the
+  options you created it with, the old one kept until the new one is healthy
+  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>), or Compose's
+  <code>docker compose up -d</code>. The command changes nothing of a container. Its
+  version is asked where its server listens — <code>--listen</code> or
+  <code>TRACEPAD_LISTEN</code>, as published on this machine; a container whose address
+  cannot be told is said to be not checked, not called behind.</li>
+<li>Without it, the command does it. A <strong>server</strong> is the command's when it runs
+  the installed binary, its data directory's lock records its pid, it listens
+  on this machine only, and it is in no service manager's hands: a server in
+  a systemd service (system or <code>--user</code>) or a launchd job is yours, whatever
+  started it, and so is one whose cgroup cannot be read or names no session —
+  a container's root without systemd, a slice — since no manager can be ruled
+  out; the plan gives the <code>systemctl restart</code> or <code>launchctl kickstart</code> for a
+  service's. A terminal's session, tmux, or the <code>nohup … &amp;</code> the setup starts a
+  server with is not a service. It
+  is backed up with
+  the server stopped (the data directory archived into
+  <code>~/tracepad-backups/&lt;run&gt;/</code> and read back whole), the new binary — checked
+  against the release's <code>checksums.txt</code>, and its attestation when <code>gh</code> is
+  logged in — is put in place, and the server starts again with <strong>the same
+  arguments, environment and working directory</strong> — in its data directory when
+  that working directory is gone, and not at all (a refusal before the stop)
+  when its data directory or a file it reads, such as
+  <code>TRACEPAD_ADMIN_TOKEN_FILE</code>, is named relative to the one gone. A server is stopped with
+  SIGTERM and never killed; one that has not stopped in the wait leaves the run stuck
+  (exit <code>5</code>), and <code>--back</code> starts it again once it has. <strong>No binary is put
+  under another server</strong>: while any server but the run's own runs from the
+  installed binary, at any version, the plan and the upgrade refuse — its next
+  restart would be the new version with no backup — and say to stop it first;
+  two servers of the command's on one binary are refused up front, with the
+  order to take them in.
+  A way back puts the old binary back only where nothing runs it at a later
+  version. <strong>What a way back needs is checked before the stop</strong>: the copy of
+  the old version, room beside the data directory for a restore (beside the
+  archive, when both are on one disk), and a parent directory the restore can
+  be made in and the data renamed aside through, and no other server on the
+  installed binary that a way back would put the old version under; <code>--back</code>
+  checks the same before its first act. What the command cannot read — a process, a lock on a file system
+  that cannot lock, the room on a disk, a version that is not said — is a
+  reason to stop, never a yes: it refuses with nothing changed, and a server
+  or container whose version it cannot tell is named as one that may be
+  behind.</li>
+<li><strong>The check</strong> asks the server's <code>/health</code> at its own address, and compares
+  the trace count of <code>/api/v1/system</code> before and after, with the key in
+  <code>TRACEPAD_API_KEY</code> (from the environment only; without one the counts are not
+  compared). A new version that exits, or answers as another version, goes back at once (exit <code>3</code>). One that runs
+  but stays silent through the two-minute wait — a long migration runs before
+  the server listens — or answers but counts fewer traces, or cannot count
+  them, is left running for you to decide (exit <code>4</code>).</li>
+<li><code>--check RUN</code> asks again, for a server that was still starting — the one the
+  run started, or the same one you started again since — and never goes back
+  by itself. <code>--back RUN</code> takes a run's way back: the archive is
+  restored beside the data and checked before anything stops, what the new
+  version left is <strong>set aside, not deleted</strong> (<code>&lt;data&gt;.after-&lt;run&gt;</code>), and the
+  old version starts
+  with its arguments. Whether the archive is restored is decided from what
+  the run recorded when it happened — whether the new version was started on
+  the data, or a server found there started while the installed binary may
+  have been the new one — never from how fast a server answers. <code>--back</code> again
+  ends where the first did: it checks the old version, starts it again if it
+  was stopped since, and changes nothing else.</li>
+</ul>
+<p>A run directory is a full copy of the database and of the server's
+environment, secrets included, kept until you delete it; erasing traces or a
+user does not reach it, nor what a way back set aside. The report says so, and
+gives the commands to remove each. The command never deletes any of it.</p>
+<p>The exit status, by mode — one table, which the skill reads too:</p>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th><code>--plan</code></th>
+<th>the upgrade</th>
+<th><code>--check RUN</code></th>
+<th><code>--back RUN</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>nothing runs older (an older <code>tracepad</code> elsewhere is named, and runs nothing)</td>
+<td>upgraded, healthy; or nothing to do anywhere</td>
+<td>healthy</td>
+<td>went back; the old version runs, healthy</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>refused, or interrupted: no verdict (the install script reads it as "could not check")</td>
+<td>refused, or interrupted before the stop, with nothing changed</td>
+<td>refused</td>
+<td>refused, with nothing touched</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>a usage error</td>
+<td>a usage error</td>
+<td>a usage error</td>
+<td>a usage error</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>—</td>
+<td>not upgraded: the way back ran, and the old version runs, healthy</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td>only servers or containers of yours run older</td>
+<td>with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind</td>
+<td>the new version is not healthy, or is yours to decide</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td>—</td>
+<td>stuck: a step failed and could not be undone, or the old version was started and not seen healthy</td>
+<td>stuck: the run could not record its check</td>
+<td>stuck: the way back did not finish, or the old version was not seen healthy</td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td>an upgrade is pending</td>
+<td>nothing to do for the one named, and another of the command's is behind: the report's <code>next</code> upgrades it</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>An upgrade that finds nothing of its own to do exits as <code>--plan</code> would on the
+same machine. Either refuses (<code>1</code>) when something runs later than the version
+asked for — after an install script put an older binary in place, say. The
+report says what runs and what is where, whatever the status. <code>--json</code>
+prints the report as one object: <code>mode</code>, <code>status</code>, <code>exit_code</code>, <code>summary</code>,
+<code>from</code>, <code>to</code>, <code>run</code>, <code>binary</code>, <code>servers</code>, <code>containers</code>, <code>probe</code>, <code>check</code>,
+<code>back_check</code> (the way back's check of the old version), <code>plan</code>, <code>done</code>,
+<code>set_aside</code>, <code>person</code>, <code>next</code> and <code>notes</code>.</p>
 <h2 id="version-skew">Version skew</h2>
 <p>Every API response carries the server's build. When it differs from the CLI's,
 the first command of a session prints a warning to stderr and carries on — a

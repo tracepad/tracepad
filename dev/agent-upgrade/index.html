@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/configuration/">
+        <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/agent-upgrade/">
       
       
-        <link rel="prev" href="../docker/">
+        <link rel="prev" href="../agent-setup/">
       
       
-        <link rel="next" href="../compare/">
+        <link rel="next" href="../install/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Configuration - Tracepad</title>
+        <title>Agent upgrade - Tracepad</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#configuration" class="md-skip">
+        <a href="#agent-upgrade" class="md-skip">
           Skip to content
         </a>
       
@@ -111,7 +111,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Configuration
+              Agent upgrade
             
           </span>
         </div>
@@ -400,10 +400,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../agent-upgrade/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -419,6 +446,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-to-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-needs-the-person" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What needs the person
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-backup-said-plainly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The backup, said plainly
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -484,37 +564,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -530,81 +583,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-cli-and-the-mcp-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The CLI and the MCP server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-python-node-and-go-packages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Python, Node and Go packages
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-install-script" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The install script
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sending-from-any-opentelemetry-sdk" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sending from any OpenTelemetry SDK
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1523,10 +1501,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-server" class="md-nav__link">
+  <a href="#what-to-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The server
+        What to do
       
     </span>
   </a>
@@ -1534,10 +1512,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-cli-and-the-mcp-server" class="md-nav__link">
+  <a href="#what-needs-the-person" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The CLI and the MCP server
+        What needs the person
       
     </span>
   </a>
@@ -1545,32 +1523,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-python-node-and-go-packages" class="md-nav__link">
+  <a href="#the-backup-said-plainly" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The Python, Node and Go packages
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-install-script" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The install script
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sending-from-any-opentelemetry-sdk" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sending from any OpenTelemetry SDK
+        The backup, said plainly
       
     </span>
   </a>
@@ -1594,7 +1550,7 @@
 
 
   
-    <a href="https://github.com/tracepad/tracepad/edit/main/docs/configuration.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/tracepad/tracepad/edit/main/docs/agent-upgrade.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1602,272 +1558,61 @@
   
 
 
-<h1 id="configuration">Configuration</h1>
-<p>Every variable the server, the CLI and the packages read, in one place. The
-server takes two flags as well — <code>--listen</code> and <code>--data-dir</code> — and a flag beats
-its variable. <code>tracepad help</code> prints the server's list; a variable the server
-does not know is logged as a warning at start, which catches a typo.</p>
-<p>Sizes are bytes, durations are Go's (<code>30m</code>, <code>1h</code>), and "on/off" variables take
-<code>on</code>/<code>off</code>, <code>true</code>/<code>false</code>, <code>yes</code>/<code>no</code> or <code>1</code>/<code>0</code>.</p>
-<h2 id="the-server">The server</h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>TRACEPAD_LISTEN</code></td>
-<td><code>localhost:4318</code></td>
-<td>Address to serve on. The default is this machine only: a <code>localhost</code> host is both loopback addresses, <code>127.0.0.1</code> and <code>::1</code>. <code>:4318</code> is every interface, over plain HTTP, and warns at start. The Docker image sets <code>:4318</code>. See <a href="../install/#first-run">install.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_DATA_DIR</code></td>
-<td><code>$XDG_DATA_HOME/tracepad</code>, else <code>~/.local/share/tracepad</code> (<code>/data</code> in the image)</td>
-<td>The one directory everything is kept in.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_URL</code></td>
-<td>unset</td>
-<td>The address people reach the server at, for the links it prints — the setup and invitation links. Set it behind a proxy. The CLI reads the same variable as its target. See <a href="../accounts/">accounts.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_PROJECTS</code></td>
-<td>unset</td>
-<td><code>name:public_key:secret_key,…</code> — projects and keys declared at start, so a deployment never has one printed. See <a href="../docker/">docker.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_ADMIN_TOKEN</code></td>
-<td>unset</td>
-<td>Bearer token for administration across projects, at least 32 characters (<code>openssl rand -hex 32</code>); a shorter one stops the server from starting. See <a href="../admin/">admin.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_ADMIN_TOKEN_FILE</code></td>
-<td>unset</td>
-<td>Read the admin token from this file instead; readable by the server's user and nobody else.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_SETUP</code></td>
-<td><code>on</code></td>
-<td><code>off</code> mints and prints no setup link — for a deployment that makes its first owner with the admin token.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_SESSION_DAYS</code></td>
-<td><code>30</code></td>
-<td>How long a browser sign-in lasts, sliding; at least <code>1</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_TRUSTED_PROXIES</code></td>
-<td>loopback</td>
-<td>Peers whose <code>X-Forwarded-For</code>, <code>-Proto</code> and <code>-Host</code> are believed: addresses and CIDR ranges, or <code>none</code>. See <a href="../docker/#serving-over-tls">docker.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_STORE_RAW</code></td>
-<td><code>on</code></td>
-<td>Keep every accepted export body, so the archive can be replayed (<a href="../export/">export.md</a>). Costs disk.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_MAX_BODY_BYTES</code></td>
-<td><code>20971520</code> (20 MiB)</td>
-<td>Request body cap, applied to the wire bytes and again to what they decompress to. See <a href="../ingest/">ingest.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_MAX_SPANS_PER_REQUEST</code></td>
-<td><code>20000</code></td>
-<td>Spans one export may carry; at least <code>1</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_BODY_BUDGET_BYTES</code></td>
-<td>four times the body cap</td>
-<td>Request bodies the server holds in memory at once; at least the body cap. Past it a write waits and then gets <code>429</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_RESPONSE_BUDGET_BYTES</code></td>
-<td><code>51200</code></td>
-<td>The default byte budget of a read response (<a href="../api/">api.md</a>); a request may ask for another. From 4 KiB to 5 MiB.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_READ_TIMEOUT</code></td>
-<td><code>20s</code></td>
-<td>Deadline of one read request, its wait for a slot included; from <code>1s</code> to <code>4m</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_READ_CONCURRENCY</code></td>
-<td>two per CPU, at least 4</td>
-<td>Reads served at once; at least <code>1</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_MAX_CONNECTIONS</code></td>
-<td><code>1024</code></td>
-<td>Client connections held at once; at least <code>16</code>. Past it a new connection waits to be accepted, and the connection idle longest, or else one that has sent nothing for two seconds, is closed to make room for it.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_MAX_CONNECTIONS_PER_SOURCE</code></td>
-<td>a quarter of <code>TRACEPAD_MAX_CONNECTIONS</code></td>
-<td>Connections one address (an IPv6 /64) may hold; from <code>1</code> to <code>TRACEPAD_MAX_CONNECTIONS</code>. Past it the source's own idle ones make room, and a new one is refused when all are busy. A proxy in <code>TRACEPAD_TRUSTED_PROXIES</code> is exempt.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_MCP</code></td>
-<td><code>on</code></td>
-<td>Serve MCP at <code>/mcp</code> (<a href="../mcp/">mcp.md</a>).</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_SWEEP_INTERVAL</code></td>
-<td><code>1h</code></td>
-<td>Cadence of the retention sweep; at least <code>1s</code>. See <a href="../retention/">retention.md</a>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_ROLLUP_INTERVAL</code></td>
-<td><code>5m</code></td>
-<td>Cadence of the statistics rollup; at least <code>1s</code>.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_IN_CONTAINER</code></td>
-<td>unset</td>
-<td>Set to <code>1</code> by the image so a wildcard bind is read as the design rather than a warning. Not for you to set.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="the-cli-and-the-mcp-server">The CLI and the MCP server</h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>TRACEPAD_URL</code></td>
-<td><code>http://localhost:4318</code></td>
-<td>The server to talk to.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_API_KEY</code></td>
-<td>unset</td>
-<td>The key, or the admin token where a command says so. Prefer it to <code>--key</code>, which shows in the process list. With it unset, a command that takes the admin token reads <code>TRACEPAD_ADMIN_TOKEN</code> or <code>TRACEPAD_ADMIN_TOKEN_FILE</code> instead, for a server on this machine only.</td>
-</tr>
-</tbody>
-</table>
-<p><code>tracepad health</code> with neither <code>--url</code> nor <code>TRACEPAD_URL</code> looks at
-<code>TRACEPAD_LISTEN</code>. <a href="../cli/">cli.md</a> has the rest.</p>
-<h2 id="the-python-node-and-go-packages">The Python, Node and Go packages</h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>TRACEPAD_URL</code></td>
-<td>unset</td>
-<td>Where the store is. <code>TRACEPAD_HOST</code>, the packages' first name for it, still works and warns once.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_API_KEY</code></td>
-<td>unset</td>
-<td>A secret key, sent as <code>Bearer</code>. An <code>ingest</code> key is enough to export.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_ENVIRONMENT</code></td>
-<td>unset</td>
-<td>The deployment this process is.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_RELEASE</code></td>
-<td>unset</td>
-<td>The version of this deployment.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_EXPORT_TIMEOUT</code></td>
-<td><code>5</code></td>
-<td>Seconds one export may take, retries included.</td>
-</tr>
-</tbody>
-</table>
-<p><strong><code>TRACEPAD_URL</code> is one variable with two readers.</strong> The server takes it as the
-public, browser-facing address (for the links it prints), the CLI and the
-packages as the address to talk to. In a <code>.env</code> shared between the server and an
-application, the application therefore sends its spans to the public address; if
-it should use an internal one (<code>http://tracepad:4318</code>), give <code>init</code> the host
-explicitly or keep a separate <code>.env</code> for it.</p>
-<p>Options passed to <code>init</code> win over these. The OpenTelemetry variables
-(<code>OTEL_SERVICE_NAME</code>, <code>OTEL_RESOURCE_ATTRIBUTES</code>, the exporter's and the batch
-processor's own) are the OpenTelemetry SDK's business, and it honours them as
-they are. <a href="../sdk-python/">sdk-python.md</a>, <a href="../sdk-js/">sdk-js.md</a> and
-<a href="../sdk-go/">sdk-go.md</a> have the details.</p>
-<h2 id="the-install-script">The install script</h2>
-<p>Read by <code>scripts/install.sh</code> — the <code>curl … | sh</code> line of the
-<a href="../quickstart/#with-your-coding-agent">quickstart</a> — and, for
-<code>TRACEPAD_INSTALL_DIR</code> and <code>TRACEPAD_DOWNLOAD_URL</code>, by
-<a href="../cli/#upgrade"><code>tracepad upgrade</code></a>, which installs the same way; the server
-does not warn about one left exported.</p>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>TRACEPAD_VERSION</code></td>
-<td>the newest stable release</td>
-<td>The release to install, <code>0.1.0-rc.1</code> or <code>v0.1.0-rc.1</code>. A release candidate is installed only when named here.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_INSTALL_DIR</code></td>
-<td><code>~/.local/bin</code></td>
-<td>Where the binary goes. Never needs <code>sudo</code> unless you point it somewhere that does.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_NO_SKILL</code></td>
-<td>unset</td>
-<td><code>1</code> installs the binary alone, without the agent skill.</td>
-</tr>
-<tr>
-<td><code>TRACEPAD_DOWNLOAD_URL</code></td>
-<td><code>https://github.com/tracepad/tracepad/releases</code></td>
-<td>A mirror with the same layout (<code>download/v&lt;version&gt;/…</code>, <code>latest/download/checksums.txt</code>), over <code>https://</code> or <code>file://</code>.</td>
-</tr>
-</tbody>
-</table>
-<p>See <a href="../install/#with-the-install-script">install.md</a>.</p>
-<h2 id="sending-from-any-opentelemetry-sdk">Sending from any OpenTelemetry SDK</h2>
-<p>These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:</p>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>OTEL_EXPORTER_OTLP_PROTOCOL</code></td>
-<td><code>http/protobuf</code> — required wherever the SDK defaults to gRPC — Tracepad has no gRPC receiver. <code>http/json</code> works too.</td>
-</tr>
-<tr>
-<td><code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</code></td>
-<td><code>http://&lt;server&gt;/v1/traces</code></td>
-</tr>
-<tr>
-<td><code>OTEL_EXPORTER_OTLP_HEADERS</code></td>
-<td><code>authorization=Bearer &lt;secret key&gt;</code></td>
-</tr>
-</tbody>
-</table>
-<p>The Langfuse SDKs take <code>LANGFUSE_BASE_URL</code> (older ones <code>LANGFUSE_HOST</code>),
-<code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> instead
-(<a href="../langfuse-sdk/#the-switch">langfuse-sdk.md</a>).</p>
+<h1 id="agent-upgrade">Agent upgrade</h1>
+<p>This page is an instruction to a coding agent that a person has asked to
+update Tracepad on this machine: "Update Tracepad to the latest release", or to
+a version they name. A person reading it learns what the agent will do and
+what it leaves to them. The work is done by one command of the binary,
+<a href="../cli/#upgrade"><code>tracepad upgrade</code></a>, which a person can run as well;
+<a href="../install/#upgrading">install.md</a> and
+<a href="../docker/#upgrading-and-backing-up-first">docker.md</a> cover what it leaves to
+them.</p>
+<p>The line a person gives you:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md
+</code></pre></div>
+<h2 id="what-to-do">What to do</h2>
+<p>The steps, with their commands and what each exit status means, are in the
+agent skill the binary carries. Print it and follow it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tracepad<span class="w"> </span>skills<span class="w"> </span>show<span class="w"> </span>upgrade.md
+</code></pre></div>
+<p>If your agent loaded the <code>tracepad</code> skill, this is the same file as its
+<code>references/upgrade.md</code>. <em>The skill has no file "upgrade.md"</em>: the binary is
+older than the command, and the file is on <code>main</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/tracepad/tracepad/main/agent/skills/tracepad/references/upgrade.md
+</code></pre></div>
+<p><em>command not found</em>: Tracepad is not installed here, and
+<a href="../agent-setup/">agent-setup.md</a> is the page to follow.</p>
+<p>In outline: <code>tracepad upgrade --plan</code> changes nothing and says what the upgrade
+will do and what is the person's; you show it to them. <code>tracepad upgrade</code> then
+backs the data up into <code>~/tracepad-backups/&lt;run&gt;/</code> before it stops anything,
+puts the new binary in place, starts the server again with the same
+arguments and environment, and checks it. A new version that exits or answers
+as another version is rolled back at once; one that
+runs but stays silent through the wait (a long migration runs before the
+server listens), or answers with a trace count that looks wrong, is left
+running, and the person decides (exit <code>4</code>). Nothing is ever deleted:
+what a way back replaces is set aside, renamed. Then the project's <code>tracepad</code>
+package moves to the same version, and you report.</p>
+<h2 id="what-needs-the-person">What needs the person</h2>
+<ul>
+<li>A server the command does not start or stop itself: a service (systemd,
+  launchd), a server reachable from other machines, one that runs another
+  binary (Homebrew's: <code>brew upgrade tracepad</code>), and every container, Compose's
+  or not. The plan names each, with its reason and the commands for it — for a
+  container: stop it, back its volume up, pull the release, run it again with
+  the options it was created with.</li>
+<li>A trace count that is lower after the upgrade, or cannot be read: keep the
+  new version, or go back to the old one, which drops what arrived since.</li>
+<li>Free space for the backup, when there is not enough.</li>
+<li>Deleting the backups, and whatever a way back set aside.</li>
+</ul>
+<h2 id="the-backup-said-plainly">The backup, said plainly</h2>
+<p>A run directory in <code>~/tracepad-backups/</code> is a full copy of the database —
+every prompt and completion — and of the server's environment, secrets
+included. It stays until someone deletes it, and erasing traces or a user's
+data never reaches it, nor what a way back set aside. The report names each
+and gives the commands to remove them; deleting is the person's, once the new
+version has run for a while.</p>
 
 
 

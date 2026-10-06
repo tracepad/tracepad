@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://tracepad.github.io/tracepad/dev/install/">
       
       
-        <link rel="prev" href="../agent-setup/">
+        <link rel="prev" href="../agent-upgrade/">
       
       
         <link rel="next" href="../docker/">
@@ -383,6 +383,34 @@
     
   
     Agent setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent upgrade
   
 
     
@@ -2035,6 +2063,30 @@ is printed at the address your people use.</p>
 data directory and brings it up to date. <strong>A downgrade is not supported</strong> — an
 older binary meeting a newer schema is not a case anything handles — so the
 upgrade is only as safe as the copy you took before it.</p>
+<p><strong>A server you started yourself</strong> — <code>tracepad serve</code> from the binary the
+install script put in <code>~/.local/bin</code>, listening on this machine only — is
+upgraded by one command, or by your coding agent with one line:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>tracepad<span class="w"> </span>upgrade<span class="w"> </span>--plan<span class="w">      </span><span class="c1"># changes nothing: what it will do, and what is yours</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>tracepad<span class="w"> </span>upgrade<span class="w">             </span><span class="c1"># does it</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md
+</code></pre></div>
+<p>It archives the data directory into <code>~/tracepad-backups/&lt;run&gt;/</code> with the server
+stopped, puts the new binary in place, starts it with the same arguments and
+environment, and checks it; a version that exits or answers as another version
+is rolled back at once, one that runs but stays silent is left for you to
+decide, and <code>tracepad upgrade --back &lt;run&gt;</code> takes the way back later. Nothing is
+deleted on the way: what a way back replaces is set aside as
+<code>&lt;data&gt;.after-&lt;run&gt;</code>. The whole of it is <a href="../cli/#upgrade">cli.md</a>.</p>
+<p><strong>A backup is personal data with no expiry.</strong> A run directory, like any copy
+you take, holds every prompt and completion and the server's environment,
+secrets included, until someone deletes it; erasing traces or a user's data
+(see <a href="../retention/">retention.md</a>) reaches neither it nor a data directory a
+way back set aside. Remove them once the new version has proved itself.</p>
+<p>A service, or a server open beyond this machine, is upgraded by hand — the
+command's plan says which, and these are the steps (a container's are in
+<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>, and the plan gives them
+with its names filled in):</p>
 <ol>
 <li>Read the release notes, and <a href="https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md">CHANGELOG.md</a> for anything
    marked <em>Changed</em>.</li>
@@ -2042,10 +2094,10 @@ upgrade is only as safe as the copy you took before it.</p>
 <li>
 <p>Download and <a href="#verify-what-you-downloaded">verify</a> the new archive, stop the
    service, replace the binary, start it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>tracepad<span class="w"> </span>version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>tracepad<span class="w"> </span>/usr/local/bin/tracepad
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>tracepad<span class="w"> </span>version
 </code></pre></div>
 </li>
 <li>
@@ -2069,14 +2121,14 @@ under any other name, and best kept outside the data directory.</p>
 both must include the <code>-wal</code> file's contents — which is why neither one is a
 plain <code>cp</code> of <code>tracepad.db</code> from under a running server.</p>
 <p><strong>Stopped.</strong> The simplest, and complete by construction:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>sudo<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>tracepad-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>-C<span class="w"> </span>/var/lib/tracepad<span class="w"> </span>.
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>tracepad
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>sudo<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>tracepad-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>-C<span class="w"> </span>/var/lib/tracepad<span class="w"> </span>.
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>tracepad
 </code></pre></div>
 <p><strong>Running.</strong> SQLite's own online backup takes a consistent copy while the server
 carries on, with the <code>sqlite3</code> command-line shell (any recent version):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>sudo<span class="w"> </span>sqlite3<span class="w"> </span>/var/lib/tracepad/tracepad.db<span class="w"> </span><span class="s2">".backup '/backups/tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.db'"</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/backups/tracepad-*.db
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>sudo<span class="w"> </span>sqlite3<span class="w"> </span>/var/lib/tracepad/tracepad.db<span class="w"> </span><span class="s2">".backup '/backups/tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.db'"</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>sudo<span class="w"> </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/backups/tracepad-*.db
 </code></pre></div>
 <p>Put either one outside the data directory, or name it anything but
 <code>tracepad.db.pre-&lt;NNNN&gt;_&lt;name&gt;.bak</code>, the shape the server's own take and
