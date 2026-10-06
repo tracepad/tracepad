@@ -77,8 +77,8 @@ type BinaryReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	First   string `json:"first_on_path,omitempty"`
-	// Idle: at the plan's version, past it, or not a release — nothing to
-	// do, whoever's it is; the text lists the person's apart.
+	// Idle: needsNothing — a release at the plan's version or past it,
+	// whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -92,8 +92,8 @@ type ServerReport struct {
 	Whose   string   `json:"whose"`
 	Reason  string   `json:"reason,omitempty"`
 	Target  bool     `json:"target,omitempty"`
-	// Idle: at the plan's version, past it, or not a release — nothing to
-	// do, whoever's it is; the text lists the person's apart.
+	// Idle: needsNothing — a release at the plan's version or past it,
+	// whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -106,8 +106,8 @@ type ContainerReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	Target  bool   `json:"target,omitempty"`
-	// Idle: at the plan's version, past it, or not a release — nothing to
-	// do, whoever's it is; the text lists the person's apart.
+	// Idle: needsNothing — a release at the plan's version or past it,
+	// whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
@@ -232,7 +232,7 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 	section("Yours, to do:", rep.Person)
 	if len(idle) > 0 {
 		line("")
-		line("Yours, nothing to do (at %s, past it, or not a release):", rep.To)
+		line("Yours, nothing to do (a release at %s or past it):", rep.To)
 		for _, it := range idle {
 			line("  %s", it)
 		}

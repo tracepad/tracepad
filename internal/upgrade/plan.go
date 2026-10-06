@@ -36,10 +36,9 @@ type plan struct {
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
 	// idle are the servers and containers, by index in the findings, and
-	// the binary, that need nothing: at the target, past it, or not a
-	// release, whoever's they are (the second review of #228). othersBehind
-	// decides it, in the one place that sorts everything (the review of
-	// #228).
+	// the binary, that need nothing, whoever's they are: needsNothing is
+	// the rule, and othersBehind, the one place that sorts everything,
+	// applies it (the reviews of #228).
 	idleServers, idleContainers map[int]bool
 	idleBinary                  bool
 	// ahead: what the command looks after runs past the latest stable
@@ -329,6 +328,15 @@ func canonicalDir(dir string) string {
 	return filepath.Clean(dir)
 }
 
+// needsNothing is what `nothing_to_do` means (spec 054 #55): a release at the
+// target or past it. A version that is not a release's — a development build,
+// one not said — may need anything, the binary's install line among them, so
+// it is never marked.
+func needsNothing(to, v string) bool {
+	order, ok := Compare(to, v)
+	return ok && order <= 0
+}
+
 // othersBehind lists what runs older than the target version and this run
 // does not upgrade: the command's own (for a later run) and the person's.
 func (r *runner) othersBehind(p *plan) {
@@ -349,7 +357,7 @@ func (r *runner) othersBehind(p *plan) {
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
 		case !older(s.Version):
-			p.idleServers[i] = true
+			p.idleServers[i] = needsNothing(p.to, s.Version)
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -373,7 +381,7 @@ func (r *runner) othersBehind(p *plan) {
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
 		case !older(c.Version):
-			p.idleContainers[i] = true
+			p.idleContainers[i] = needsNothing(p.to, c.Version)
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -388,15 +396,14 @@ func (r *runner) othersBehind(p *plan) {
 	// builder's, and the command does not replace it; the install script
 	// puts the release in its place, and the plan gives its line (the live
 	// run of 0.1.0: the plan named the build and said nothing of how to
-	// replace it). Only one of the person's at the target or past it needs
-	// nothing.
+	// replace it).
 	switch b := p.f.Binary; {
 	case !b.Exists:
 	case b.Ours:
 		// Whether it is behind, never whether this run replaces it: a
 		// binary a container's run leaves is still behind (the third
 		// review of #228).
-		p.idleBinary = !older(b.Version)
+		p.idleBinary = needsNothing(p.to, b.Version)
 	case b.Dev && b.Link != "":
 		p.binaries = append(p.binaries, fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
 			b.Path, b.Link, b.Version, p.to, b.Link, r.installLine(filepath.Dir(b.Path), p.to)))
@@ -406,7 +413,7 @@ func (r *runner) othersBehind(p *plan) {
 	case b.Version == "" || older(b.Version):
 		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
 	default:
-		p.idleBinary = true
+		p.idleBinary = needsNothing(p.to, b.Version)
 	}
 	if b := p.f.Binary; b.First != "" {
 		v, err := b.FirstVersion, b.FirstErr

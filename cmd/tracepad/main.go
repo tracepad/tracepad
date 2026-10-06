@@ -126,7 +126,7 @@ func main() {
 		}))
 	case cmd == "version":
 		info, _ := debug.ReadBuildInfo()
-		os.Exit(versionCommand(args, currentVersion(), commit, info, isTerminal(os.Stdout), os.Stdout, os.Stderr))
+		os.Exit(versionCommand(args, currentVersion(), commit, info, os.Stdout, os.Stderr))
 	case cmd == "help", cmd == "-h", cmd == "--help":
 		usage()
 	default:
@@ -156,8 +156,8 @@ func helpText() string {
 Usage:
   tracepad [serve] [flags]   run the server (default command)
   tracepad mcp [flags]       serve MCP over stdio, against a running server
-  tracepad version [--json]  print the version (and, on a terminal or in
-                             JSON, the commit it was built from)
+  tracepad version [--json]  print the version (in JSON, with the commit it
+                             was built from)
   tracepad skills install [--project | --dir DIR] [--force]
                              install the agent skill this binary carries
   tracepad skills show [FILE]

@@ -1096,9 +1096,9 @@ release: it refuses there before it looks at anything. The design is spec 054.
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
   another binary, a Compose project), and what the upgrade would do, step by
-  step. What is yours and needs nothing — at the version, past it, or not a
-  release — is listed apart, under *Yours, nothing to do* (`nothing_to_do` in
-  `--json`, which marks the command's too). A development build at the
+  step. What is yours and needs nothing — a release at the version or past it — is
+  listed apart, under *Yours, nothing to do* (`nothing_to_do` in `--json`,
+  which marks the command's too); a development build is never that. A development build at the
   install path is left as it is, with the install script's line that
   replaces it — a link there included, which the line replaces with the
   release, as it says. Every value in a command the plan prints that the
@@ -1231,8 +1231,8 @@ prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `back_check` (the way back's check of the old version), `plan`, `done`,
 `set_aside`, `person`, `next` and `notes`. In `binary`, `servers` and
 `containers`, `whose` is `command` or `person`, with the `reason` of the
-person's, and `nothing_to_do` marks one that needs nothing — at the target,
-past it, or not a release — whoever's it is.
+person's, and `nothing_to_do` marks one that needs nothing — a release at
+the target or past it — whoever's it is.
 
 ## Version skew
 

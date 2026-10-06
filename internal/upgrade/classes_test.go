@@ -1130,3 +1130,43 @@ func TestAProcessIsItsPIDAndItsStart(t *testing.T) {
 		t.Error("one of this user's that cannot be read: no error")
 	}
 }
+
+// Without a key every verdict says the counts were not compared, and why
+// (the fourth review of #228): a check that ends before it reads a count —
+// a server that exits, exit 3; one that does not answer, exit 4 — said
+// nothing, and the run's notes leave it to the check.
+func TestWithoutAKeyEveryVerdictSaysTheCountsWereNotCompared(t *testing.T) {
+	t.Parallel()
+	const want = "the trace counts were not compared: no TRACEPAD_API_KEY in the environment"
+	for name, c := range map[string]struct {
+		to   string
+		slow bool
+		code int
+	}{
+		"a server that exits":           {fBroken, false, exitWentBack},
+		"a server that does not answer": {fNew, true, exitDecide},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			w := newFakeWorld(t, 2)
+			deps := w.deps()
+			deps.Getenv = func(string) string { return "" }
+			deps.HealthWait = 300 * time.Millisecond
+			// Not answering is a request past the client's deadline,
+			// kept short: the wait is the test's whole length.
+			deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 500 * time.Millisecond}
+			deps.Fault = func(point string) error {
+				if c.slow && point == stepStarted {
+					w.host.setSlow(2 * time.Second)
+				}
+				return nil
+			}
+			rep, code := runIn(t, context.Background(), deps, "--to", c.to, "--data-dir", w.data)
+			w.host.setSlow(0)
+			if code != c.code || rep.Check == nil || rep.Check.CountNote != want ||
+				strings.Contains(strings.Join(rep.Notes, "\n"), "TRACEPAD_API_KEY") {
+				t.Fatalf("exit %d, %s, check %+v, notes %q", code, rep.Summary, rep.Check, rep.Notes)
+			}
+		})
+	}
+}

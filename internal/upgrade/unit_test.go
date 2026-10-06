@@ -477,10 +477,11 @@ func TestTheCheckVerdicts(t *testing.T) {
 	}))
 	defer srv.Close()
 	now := time.Unix(0, 0)
+	key := "tp-sk-x"
 	r := &runner{deps: Deps{HTTP: srv.Client(), HealthWait: 3 * time.Second,
 		Getenv: func(k string) string {
 			if k == "TRACEPAD_API_KEY" {
-				return "tp-sk-x"
+				return key
 			}
 			return ""
 		},
@@ -511,8 +512,22 @@ func TestTheCheckVerdicts(t *testing.T) {
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), func() bool { return false }); c.Verdict != verdictNotHealthy || !strings.Contains(c.Why, "exited") {
 		t.Errorf("exited: %+v", c)
 	}
+	// Counts not compared are said whatever the verdict, with why (the
+	// fourth review of #228): a verdict that comes before any count read
+	// said nothing.
+	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictNotHealthy || c.CountNote != "the trace counts were not compared: the count before the upgrade was not read" {
+		t.Errorf("another version, not read before: %+v", c)
+	}
+	key = ""
+	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
+		t.Errorf("another version, no key: %+v", c)
+	}
 	srv.Close()
-	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "has not answered") {
+	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictDecide || c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
+		t.Errorf("alive and silent, no key: %+v", c)
+	}
+	key = "tp-sk-x"
+	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "has not answered") || c.CountNote != "" {
 		t.Errorf("alive and silent: %+v", c)
 	}
 }
@@ -794,7 +809,7 @@ func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 	sleeps := 0
-	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour,
+	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour, Getenv: func(string) string { return "" },
 		Sleep: func(context.Context, time.Duration) error { sleeps++; return nil }}}
 	c := r.check(context.Background(), srv.URL, "0.5.1", nil, func() bool { return true })
 	if c.Verdict != verdictNotHealthy || c.Health != "9.9.9" || sleeps > 0 {

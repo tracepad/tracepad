@@ -36,6 +36,17 @@ type Checked struct {
 // version want, and compares its trace count with before (Decision 9).
 func (r *runner) check(ctx context.Context, base, want string, before *int64, alive func() bool) Checked {
 	c := Checked{Before: before}
+	if before == nil {
+		// Said whatever the verdict, in as many words: a check that
+		// returns before it reads a count says it too (the fourth review
+		// of #228), and the live run of 0.1.0 found "no TRACEPAD_API_KEY
+		// in the environment" alone unclear.
+		why := "the count before the upgrade was not read"
+		if !r.hasKey() {
+			why = noKey
+		}
+		c.CountNote = "the trace counts were not compared: " + why
+	}
 	deadline := r.deps.Now().Add(r.deps.HealthWait)
 	answered := false
 	for {
@@ -74,21 +85,14 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 		c.Why = fmt.Sprintf("the server runs but has not answered at %s in %s; a migration of a large database runs before it listens", base, r.deps.HealthWait)
 		return c
 	}
-	c.After, c.CountNote = r.traceCount(ctx, base)
+	after, note := r.traceCount(ctx, base)
+	c.After = after
 	switch {
 	case before == nil:
 		c.Verdict, c.Why = verdictHealthy, "it answers as "+want
-		// Said in as many words, whatever the reason (the live run of
-		// 0.1.0: a key the project kept elsewhere left the line reading
-		// only "no TRACEPAD_API_KEY in the environment").
-		why := c.CountNote
-		if why == "" {
-			why = "the count before the upgrade was not read"
-		}
-		c.CountNote = "the trace counts were not compared: " + why
 	case c.After == nil:
-		c.Verdict = verdictDecide
-		c.Why = "it answers as " + want + ", but its trace count, read before the upgrade, cannot be read now (" + c.CountNote + ")"
+		c.Verdict, c.CountNote = verdictDecide, note
+		c.Why = "it answers as " + want + ", but its trace count, read before the upgrade, cannot be read now (" + note + ")"
 	case *c.After < *before:
 		c.Verdict = verdictDecide
 		c.Why = fmt.Sprintf("it answers as %s, but it counts %d traces where there were %d", want, *c.After, *before)
@@ -101,14 +105,18 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 // noKey is why there is no count when no key was given.
 const noKey = "no TRACEPAD_API_KEY in the environment"
 
+// hasKey says whether a trace count can be asked for: whoever needs to know
+// asks this, not traceCount's prose.
+func (r *runner) hasKey() bool { return r.deps.Getenv("TRACEPAD_API_KEY") != "" }
+
 // traceCount reads `database.rows.traces` of /api/v1/system with the key in
 // TRACEPAD_API_KEY, which is read from the environment and never put on a
 // command line. note says why there is no count.
 func (r *runner) traceCount(ctx context.Context, base string) (*int64, string) {
-	key := r.deps.Getenv("TRACEPAD_API_KEY")
-	if key == "" {
+	if !r.hasKey() {
 		return nil, noKey
 	}
+	key := r.deps.Getenv("TRACEPAD_API_KEY")
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/system", nil)

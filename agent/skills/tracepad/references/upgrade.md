@@ -9,10 +9,10 @@ refusal: it says what is the human's.
 ## 1. The plan
 
 First `tracepad version` against the skill's `metadata.version`. Older, or a
-development build (`dev`, a commit), and the binary is replaced before anything
-else, where it is — ask the human, then
-`curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> TRACEPAD_INSTALL_DIR="$(dirname "$(command -v tracepad)")" sh`;
-a skill that says `dev` names no release: ask which.
+development build (`dev`, a commit), and the binary goes first: plan with
+`--to` the skill's version, which says how — the upgrade replaces a release's,
+a package manager's names that manager's command, a development build gets the
+install script's line. A skill that says `dev` names no release: ask which.
 
 With the key in the environment (never on a command line), so the trace counts
 before and after are compared: `setup.md` keeps it in `.env`; a project that

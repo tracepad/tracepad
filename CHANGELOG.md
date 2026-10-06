@@ -39,9 +39,9 @@ their own headings.
 
 ### Changed
 
-- `tracepad version` on a terminal prints the commit too, as the log's first
-  line does (`tracepad 0.1.0 (ef3e349)`); into a pipe it still prints the
-  version alone, and `--json` gives both.
+- `tracepad version --json` gives the commit the build was made from beside
+  the version, as the log's first line does; `tracepad version` still prints
+  the version alone.
 - `docs/configuration.md` says what reaches the network: the server nothing.
 
 ## [0.1.0] - 2026-10-06

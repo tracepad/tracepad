@@ -90,13 +90,13 @@ func buildRevision(ver, stamped string, info *debug.BuildInfo) (rev string, dirt
 	return rev, dirty
 }
 
-// versionCommand is `tracepad version` (spec 001 #27). Into a pipe or a file
-// it prints the bare version and nothing else: scripts compare it, the
-// install script and `tracepad upgrade` among them — 0.1.0's included, which
-// runs the next release's binary and holds what it prints to the version it
-// downloaded. On a terminal it prints the line the log starts with, the
-// commit too; `--json` gives both to a program.
-func versionCommand(args []string, ver, stamped string, info *debug.BuildInfo, tty bool, stdout, stderr io.Writer) int {
+// versionCommand is `tracepad version` (spec 001 #27). It prints the bare
+// version and nothing else, wherever its output goes: scripts and agents
+// compare it, the install script and `tracepad upgrade` among them — 0.1.0's
+// included, which runs the next release's binary and holds what it prints to
+// the version it downloaded — and an agent's tool may run it on a terminal.
+// `--json` gives the commit too.
+func versionCommand(args []string, ver, stamped string, info *debug.BuildInfo, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	asJSON := fs.Bool("json", false, "")
@@ -112,8 +112,6 @@ func versionCommand(args []string, ver, stamped string, info *debug.BuildInfo, t
 			Commit  string `json:"commit,omitempty"`
 			Dirty   bool   `json:"dirty,omitempty"`
 		}{ver, rev, dirty}) // ignored: the last thing the command writes
-	case tty:
-		fmt.Fprintln(stdout, buildLabel(ver, stamped, info))
 	default:
 		fmt.Fprintln(stdout, ver)
 	}

@@ -31,10 +31,31 @@ cd "$ROOT"
 FIXTURE="scripts/doc-anchors-fixture"
 
 # The headings of one file as GitHub would slug them, in order: the order is
-# what numbers a repeat. The rule is the shared one's (scripts/lib).
-# shellcheck source=scripts/lib/heading-slugs.sh
-. "$ROOT/scripts/lib/heading-slugs.sh"
-slugs() { heading_slugs "$1" github; }
+# what numbers a repeat.
+slugs() {
+	awk '
+		function slugify(text,   out) {
+			out = tolower(text)
+			# Everything that is not a letter, a digit, an underscore, a
+			# hyphen or a space goes. That is what drops the backticks of
+			# a code span, and what leaves the two spaces around an em
+			# dash as two hyphens — which is what GitHub produces too.
+			gsub(/[^-_ a-z0-9]/, "", out)
+			gsub(/ /, "-", out)
+			return out
+		}
+		/^[ \t]*(```|~~~)/ { fence = !fence; next }
+		fence { next }
+		/^#{1,6}[ \t]/ {
+			text = $0
+			sub(/^#+[ \t]+/, "", text)
+			sub(/[ \t]+#+[ \t]*$/, "", text)
+			slug = slugify(text)
+			seen[slug]++
+			print (seen[slug] > 1 ? slug "-" (seen[slug] - 1) : slug)
+		}
+	' "$1"
+}
 
 # Every `](…#…)` of one file as "line<TAB>target". External links are somebody
 # else's headings (Out of scope), and a bare `](file.md)` names no anchor.

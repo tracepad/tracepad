@@ -57,10 +57,9 @@ for the release `0.1.0` that follows it:
 | Go module | tag of the nested module | `sdk/go/v0.1.0-rc.1` | `sdk/go/v0.1.0` |
 | `tracepad version`, the first line of the server's log | semver, without the `v` | `0.1.0-rc.1` | `0.1.0` |
 
-On a terminal `tracepad version` adds the commit the build was made from, as the
-log's first line has it (`tracepad 0.1.0 (ef3e349)`); into a pipe or a file it
-prints the version alone, which is what scripts compare, and `tracepad version
---json` gives both (`{"version":"0.1.0","commit":"ef3e349"}`).
+`tracepad version` prints the version alone, which is what scripts compare;
+`tracepad version --json` adds the commit the build was made from, as the log's
+first line has it (`{"version":"0.1.0","commit":"ef3e349"}`).
 
 Python's spelling is the only one that differs from the tag's, and it is derived
 from it (`-rc.N` is `rcN`, `-beta.N` is `bN`, `-alpha.N` is `aN`). A candidate

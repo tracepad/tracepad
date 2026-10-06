@@ -390,6 +390,11 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	case st.Mode()&os.ModeSymlink != 0:
 		b.Exists = true
 		target, _ := os.Readlink(b.Path) // ignored: the message's; a link is the person's either way
+		if target != "" && !filepath.IsAbs(target) {
+			// Named from the link's directory, which the reader is not in
+			// (the fourth review of #228).
+			target = filepath.Join(filepath.Dir(b.Path), target)
+		}
 		b.Link = target
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"

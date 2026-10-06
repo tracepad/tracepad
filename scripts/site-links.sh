@@ -3,10 +3,11 @@
 # the redirect to `latest/`, the Markdown of every page, `install.sh` and the
 # `llms*.txt` files — and no HTML page. `https://tracepad.github.io/tracepad/install/`
 # is a 404; `…/latest/install/` is the page. A link in code, a script or a doc
-# that names an HTML page must carry `latest/`, `dev/` or a `vX.Y/`, name a
-# page docs/ has, and an anchor that is one of that page's headings as the site
-# gives it an id: the binary and the skill print these links, and a person
-# follows them in the middle of an upgrade (spec 050 #19).
+# that names an HTML page must carry `latest/`, `dev/` or a `vX.Y/`, and a page
+# docs/ has: the binary and the skill print these links, and a person follows
+# them in the middle of an upgrade (spec 050 #19). The anchor of such a link is
+# checked against the ids Python-Markdown itself gives the page's headings, by
+# scripts/docs-site/site_anchors_test.py: the slug rule is not copied here.
 #
 #   scripts/site-links.sh              check every tracked file (part of the gate)
 #   scripts/site-links.sh --self-test  hold the rule to examples
@@ -14,23 +15,15 @@ set -euo pipefail
 
 base='tracepad\.github\.io/tracepad'
 
-# slugs: the ids the site gives the headings of one page — Python-Markdown's
-# toc rule, which mkdocs.yml leaves at its default, not GitHub's that
-# doc-anchors.sh holds docs/ to (`A — B` is `a-b` here, `a--b` on GitHub; a
-# repeat is `_1`). The parser is shared with doc-anchors.sh (scripts/lib).
-# shellcheck source=scripts/lib/heading-slugs.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/heading-slugs.sh"
-slugs() { heading_slugs "$1" site; }
-
 # bad_links: the offending URLs among the lines on stdin, each with why. A
 # page under latest/ or dev/ is a page of docs/ — `latest/docker/` is
-# docs/docker.md, `latest/` docs/index.md — and its anchor one of its headings
-# (`docs` is the directory, for the self-test's pages). A page under vX.Y/ is
-# that version's, which docs/ today does not answer for: its shape is all that
-# is checked (the review of #228).
+# docs/docker.md, `latest/` docs/index.md (`docs` is the directory, for the
+# self-test's pages). A page under vX.Y/ is that version's, which docs/ today
+# does not answer for: its shape is all that is checked (the review of #228).
+# The period that ends a sentence is not the link's.
 bad_links() {
 	local docs="${1:-docs}"
-	grep -oE "${base}/[A-Za-z0-9_.#/-]*" | sed "s#^tracepad\.github\.io/tracepad/##" | while IFS= read -r rest; do
+	grep -oE "${base}/[A-Za-z0-9_.#/-]*" | sed -e "s#^tracepad\.github\.io/tracepad/##" -e 's/[.]*$//' | while IFS= read -r rest; do
 		case "$rest" in
 		"" | install.sh | llms.txt | llms-full.txt) continue ;;
 		*.md | *.md#*)
@@ -45,17 +38,10 @@ bad_links() {
 			;;
 		esac
 		[ "$page" != "$rest" ] || page=""
-		anchor=""
-		case "$page" in *"#"*) anchor="${page#*#}" page="${page%%#*}" ;; esac
+		page="${page%%#*}"
 		page="${page%/}"
 		md="$docs/${page:-index}.md"
-		if [ ! -f "$md" ]; then
-			echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"
-		# Captured, not piped into grep -q: under pipefail, awk's SIGPIPE
-		# after an early match reads as no match (spec 026 #14).
-		elif [ -n "$anchor" ] && ! grep -qxF -- "$anchor" <<<"$(slugs "$md")"; then
-			echo "tracepad.github.io/tracepad/$rest: $md has no heading whose id is #$anchor"
-		fi
+		[ -f "$md" ] || echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"
 	done
 }
 
@@ -71,8 +57,8 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/llms-full.txt' \
 		'https://tracepad.github.io/tracepad/latest/' \
 		'https://tracepad.github.io/tracepad/latest/install/#upgrading' \
-		'https://tracepad.github.io/tracepad/latest/install/#upgrading_1' \
-		'https://tracepad.github.io/tracepad/latest/install/#the-serve-command-and-its-flags' \
+		'see https://tracepad.github.io/tracepad/latest/install/.' \
+		'https://tracepad.github.io/tracepad/latest/docker/#upgrading-and-backing-up-first.' \
 		'https://tracepad.github.io/tracepad/dev/' \
 		'https://tracepad.github.io/tracepad/v0.1/docker/' \
 		'https://tracepad.github.io/tracepad/v0.1/gone/#a-heading-renamed-since' \
@@ -85,11 +71,9 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/quickstart' \
 		'https://tracepad.github.io/tracepad/docs/page.md' \
 		'https://tracepad.github.io/tracepad/latest/quickstart/' \
-		'https://tracepad.github.io/tracepad/latest/install/#upgrading_2' \
-		'https://tracepad.github.io/tracepad/latest/install/#a-comment-not-a-heading' \
-		'https://tracepad.github.io/tracepad/latest/install/#the-serve-command--and-its-flags' \
-		'https://tracepad.github.io/tracepad/latest/docker/#upgrading' | bad_links "$fixture" | wc -l | tr -d ' ')
-	[ "$bad" = 10 ] || { echo "site-links self-test: found $bad of 10 links the site does not serve" >&2; exit 1; }
+		'https://tracepad.github.io/tracepad/latest/quickstart/#a-heading' \
+		'https://tracepad.github.io/tracepad/dev/gone/.' | bad_links "$fixture" | wc -l | tr -d ' ')
+	[ "$bad" = 8 ] || { echo "site-links self-test: found $bad of 8 links the site does not serve" >&2; exit 1; }
 	echo "site-links: the rule answers as expected"
 	exit 0
 fi
@@ -104,5 +88,5 @@ while IFS= read -r file; do
 		status=1
 	fi
 done < <(git ls-files | grep -vE '\.(png|jpg|svg|ico|woff2?|gz|zip|pb|db)$')
-[ "$status" -ne 0 ] || echo "site-links: every link names a page the site serves, and a heading on it"
+[ "$status" -ne 0 ] || echo "site-links: every link names a page the site serves"
 exit "$status"

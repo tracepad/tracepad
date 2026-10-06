@@ -846,19 +846,23 @@ func TestThePersonsIdleApart(t *testing.T) {
 	d := newFakeDocker(t)
 	d.add("other-current", "0.2.0", "0.0.0.0", "4330", "current", nil)
 	d.add("other-behind", "0.1.0", "0.0.0.0", "4331", "behind", nil)
+	// One rule, needsNothing: a development build is never marked, as the
+	// binary's is not (the fourth review of #228).
+	d.image("ghcr.io/tracepad/tracepad:dev", "dev")
+	d.add("other-dev", "dev", "0.0.0.0", "4332", "dev", nil)
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	idle := map[string]bool{}
 	for _, c := range rep.Containers {
 		idle[c.Name] = c.Idle
 	}
-	if code != exitDecide || !idle["other-current"] || idle["other-behind"] {
+	if code != exitDecide || !idle["other-current"] || idle["other-behind"] || idle["other-dev"] {
 		t.Fatalf("%d %v", code, idle)
 	}
 	var out bytes.Buffer
 	run(context.Background(), Options{Args: []string{"--plan"}, Stdout: &out, Stderr: io.Discard}, containerDeps(t, d))
 	text := out.String()
 	head, rest, _ := strings.Cut(text, "\nYours, to do:")
-	_, apart, _ := strings.Cut(rest, "\nYours, nothing to do (at 0.2.0, past it, or not a release):\n")
+	_, apart, _ := strings.Cut(rest, "\nYours, nothing to do (a release at 0.2.0 or past it):\n")
 	if !strings.Contains(head, "container other-behind") || strings.Contains(head, "other-current") ||
 		!strings.HasPrefix(apart, "  container other-current, ghcr.io/tracepad/tracepad:0.2.0, 0.2.0 — yours") {
 		t.Errorf("%s", text)
@@ -2163,5 +2167,26 @@ func TestADevelopmentBuildIsGivenItsReplacement(t *testing.T) {
 		if v, _ := scriptVersion(context.Background(), bin); v != "97d6b79" {
 			t.Errorf("%q: the build was replaced: %s", mode, v)
 		}
+	}
+}
+
+// A link given relatively names its target from the link's directory, not
+// the reader's (the fourth review of #228).
+func TestARelativeLinkIsNamedWhole(t *testing.T) {
+	t.Parallel()
+	deps := containerDeps(t, newFakeDocker(t))
+	bin := filepath.Join(deps.InstallDir, "tracepad")
+	checkout := filepath.Join(filepath.Dir(deps.InstallDir), "checkout")
+	if err := os.MkdirAll(checkout, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	scriptBinary(t, filepath.Join(checkout, "tracepad"), "dev")
+	if err := os.Symlink("../checkout/tracepad", bin); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := runReport(t, deps, "--plan")
+	want := fmt.Sprintf("%s is a link to %s, which says", bin, filepath.Join(checkout, "tracepad"))
+	if person := strings.Join(rep.Person, "\n"); !strings.Contains(person, want) {
+		t.Errorf("%s", person)
 	}
 }

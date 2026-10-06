@@ -1055,10 +1055,7 @@ func containerAdvice(c Container, to string) string {
 // nothing.
 func composeAdvice(c Container, to string) string {
 	image := c.Repo + ":" + to
-	service := "its service"
-	if c.Service != "" {
-		service = c.Service
-	}
+	service := composeService(c)
 	where := "the project " + c.Compose + "'s Compose file"
 	switch len(c.ComposeFiles) {
 	case 0:
@@ -1082,15 +1079,21 @@ func composeAdvice(c Container, to string) string {
 // in them that Docker or Compose gave is quoted (the second review of #228).
 func composeSteps(c Container, to string) (chain, up, start string) {
 	compose := composeCommand(c)
-	// With no service label, the placeholder is quoted: pasted, it is a
-	// service Compose does not have, never a redirection (the third review
-	// of #228).
-	service := shq("<its service>")
-	if c.Service != "" {
-		service = shq(c.Service)
-	}
+	// Quoted, the placeholder too: pasted, it is a service Compose does not
+	// have, never a redirection (the third review of #228).
+	service := shq(composeService(c))
 	chain = strings.Join([]string{compose + " stop " + service, backupStep(c), "docker pull " + shq(c.Repo+":"+to)}, " && ")
 	return chain, compose + " up -d " + service, compose + " start " + service
+}
+
+// composeService is the container's Compose service, or the placeholder
+// the person fills in when it has no label saying it: one place, so the
+// prose and the commands name it alike (the fourth review of #228).
+func composeService(c Container) string {
+	if c.Service == "" {
+		return "<its service>"
+	}
+	return c.Service
 }
 
 // backupStep archives a stopped container's /data from busybox into the
