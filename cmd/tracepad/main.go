@@ -98,7 +98,10 @@ func main() {
 	case cmd == "upgrade":
 		// Local too: it acts on this machine's binary, processes and
 		// containers, and asks servers only at their own addresses (spec 054).
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		// A terminal closed under it is an interrupt like Ctrl-C (#35): once
+		// a server is stopped the run goes on to the end, or back, and every
+		// later SIGHUP is caught here too, so none ends it half way.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		os.Exit(upgrade.Run(ctx, upgrade.Options{
 			Args:    args,

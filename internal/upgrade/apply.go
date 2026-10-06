@@ -106,13 +106,78 @@ func (j *job) unstep(name string) {
 	_ = j.st.save(j.dir)
 }
 
-// step records a step, along the run's table.
+// step records a step, along the run's table, and clears the intent it
+// records the act of. A step off the table is never written (#34): the run
+// stops there, stuck, and says what it was about to record.
 func (j *job) step(name string) error {
 	if last := j.st.last(); !allows(j.st.Kind, last, name) {
 		badStep(j.st.Kind, last, name)
+		panic(offTable{kind: j.st.Kind, last: last, next: name})
+	}
+	// The matrix's kill: the act done, its record not yet written.
+	if j.r.deps.Fault != nil {
+		_ = j.r.deps.Fault(name + recordPoint)
+	}
+	if p := j.st.Pending; p != nil && p.Step == name {
+		j.st.Pending = nil
 	}
 	j.st.Steps = append(j.st.Steps, Step{Name: name, At: j.r.deps.Now().UTC()})
 	return j.st.save(j.dir)
+}
+
+// recordPoint marks, for the fault matrix, the moment between an act and
+// the write of the step that records it.
+const recordPoint = "/record"
+
+// intend writes what is about to happen before it happens (#34): a run cut
+// short between an act and its step is settled from it on its next load.
+func (j *job) intend(step, format string, args ...any) error {
+	j.st.Pending = &Intent{Step: step, What: fmt.Sprintf(format, args...)}
+	return j.st.save(j.dir)
+}
+
+// act is one act of a step (#34): what it will do written first, then its
+// point in the fault matrix, then the act; an act that failed takes its
+// intent back, and what it may have left is the next path's to meet.
+func (j *job) act(step, what string, do func() error) error {
+	if err := j.intend(step, "%s", what); err != nil {
+		return err
+	}
+	err := j.at(step)
+	if err == nil {
+		err = do()
+	}
+	if err != nil {
+		j.drop()
+	}
+	return err
+}
+
+// drop takes back an intent whose act did not happen.
+func (j *job) drop() {
+	if j.st.Pending != nil {
+		j.st.Pending = nil
+		_ = j.st.save(j.dir)
+	}
+}
+
+// offTable is a step the command was about to record off its run's table:
+// a fault in the command, which ends the run stuck rather than write it.
+type offTable struct{ kind, last, next string }
+
+func (e offTable) Error() string {
+	return fmt.Sprintf("the command was about to record %q after %q, which a %s run's steps do not allow; nothing was recorded, and the run stops here. Report this; --back and --check still read the run as it was", e.next, e.last, e.kind)
+}
+
+// stopOffTable turns an off-table step into the run's end: exit 5, said.
+func stopOffTable(rep *Report) {
+	if v := recover(); v != nil {
+		e, ok := v.(offTable)
+		if !ok {
+			panic(v)
+		}
+		rep.ExitCode, rep.Summary = exitStuck, "Stuck: "+e.Error()
+	}
 }
 
 func (j *job) done(format string, args ...any) {
@@ -120,8 +185,9 @@ func (j *job) done(format string, args ...any) {
 }
 
 // upgrade is the default mode.
-func (r *runner) upgrade(ctx context.Context) *Report {
-	rep := &Report{Mode: "upgrade"}
+func (r *runner) upgrade(ctx context.Context) (rep *Report) {
+	rep = &Report{Mode: "upgrade"}
+	defer stopOffTable(rep)
 	p, refusal := r.makePlan(ctx, rep)
 	if p == nil {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+refusal
@@ -196,8 +262,9 @@ func laterOnly(next []string) []string {
 }
 
 // prepare is everything before anything stops (Decision 7). Every failure is
-// a refusal with nothing changed; the run directory it made stays, with what
-// it holds, as a record.
+// a refusal with nothing changed, and upgrade removes the run directory it
+// made (discard): before the stop it holds only what this run fetched and
+// wrote, the server's environment among it.
 func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, string) {
 	now := r.deps.Now()
 	st := &State{Kind: kindBinary, Created: now.UTC(), From: p.from, To: p.to}
@@ -622,15 +689,15 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	}
 
 	archive := filepath.Join(j.dir, "data.tar.gz")
-	if err := j.at(stepArchived); err != nil {
-		j.goBack(ctx, "the archive of "+ps.DataDir+" failed: "+err.Error())
-		return
-	}
-	a, err := writeArchive(ps.DataDir, archive)
-	if err == nil {
-		afterArchive(archive)
-		err = verifyArchive(archive, a)
-	}
+	var a Archived
+	err = j.act(stepArchived, "archive "+ps.DataDir+" into "+archive, func() (err error) {
+		a, err = writeArchive(ps.DataDir, archive)
+		if err == nil {
+			afterArchive(archive)
+			err = verifyArchive(archive, a)
+		}
+		return err
+	})
 	if err != nil {
 		j.goBack(ctx, "the archive of "+ps.DataDir+" failed: "+err.Error())
 		return
@@ -646,11 +713,11 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		}
 	}
 
-	if err := j.at(stepStarted); err != nil {
-		j.goBack(ctx, "tracepad "+p.to+" did not start: "+err.Error())
-		return
-	}
-	started, err := j.launch(ctx, true)
+	var started Started
+	err = j.act(stepStarted, "start tracepad "+p.to+" on "+ps.DataDir, func() (err error) {
+		started, err = j.launch(ctx, true)
+		return err
+	})
 	if err != nil {
 		j.goBack(ctx, "tracepad "+p.to+" did not start: "+err.Error())
 		return
@@ -665,7 +732,6 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	}
 	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
-	ps.NewVersionSeen = c.Health
 	// What answered must have opened this data directory: the lock of it
 	// records the new server. A server that resolved its data elsewhere — a
 	// relative path in its environment, say — answers healthy on an empty
@@ -681,8 +747,10 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 // steps alone which binary that server may have started from (#31).
 func (j *job) putNew(ctx context.Context) error {
 	st := j.st
-	if err := j.step(stepBinaryReplacing); err != nil {
-		return err
+	if st.last() != stepBinaryReplacing {
+		if err := j.step(stepBinaryReplacing); err != nil {
+			return err
+		}
 	}
 	err := j.at(stepBinaryReplacing)
 	if err == nil {
@@ -722,7 +790,6 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 	}
 	if newVersion {
 		ps.WroteAfterSwap = true
-		ps.NewStartedAt = j.r.deps.Now().UTC()
 	}
 	if err := j.st.save(j.dir); err != nil {
 		return nil, err
@@ -756,9 +823,7 @@ func (j *job) launch(ctx context.Context, newVersion bool) (Started, error) {
 		named := strings.TrimSpace(string(b))
 		for _, pid := range []int{ps.PID, ps.NewPID, ps.BackPID} {
 			if pid > 0 && named == strconv.Itoa(pid) {
-				if writeFileAtomic(pidFile, []byte(strconv.Itoa(started.PID())+"\n")) == nil {
-					ps.PIDFile = true
-				}
+				_ = writeFileAtomic(pidFile, []byte(strconv.Itoa(started.PID())+"\n"))
 				break
 			}
 		}

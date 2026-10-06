@@ -46,6 +46,9 @@ type fakeDocker struct {
 	// every container takes to answer while set.
 	stubborn bool
 	slow     time.Duration
+	// ranOn is every "<volume> <image>" a container ran: what may have
+	// written a volume.
+	ranOn map[string]bool
 	// onCall runs before each call: a test's interrupt.
 	onCall func(args []string)
 	dbFile []byte
@@ -54,7 +57,7 @@ type fakeDocker struct {
 func newFakeDocker(t *testing.T) *fakeDocker {
 	t.Helper()
 	return &fakeDocker{t: t, byName: map[string]*inspectContainer{}, images: map[string]inspectImage{},
-		volumes: map[string]int64{}, archives: map[string]int64{}, dbFile: sqliteFile(t)}
+		volumes: map[string]int64{}, archives: map[string]int64{}, ranOn: map[string]bool{}, dbFile: sqliteFile(t)}
 }
 
 // sqliteFile is a real, empty SQLite database, for the way back's check.
@@ -357,6 +360,11 @@ func (d *fakeDocker) create(args []string) ([]byte, error) {
 func (d *fakeDocker) boot(c *inspectContainer) {
 	if c.Config.Image != d.brokenRef {
 		c.State.Running, c.State.Restarting = true, false
+		for _, m := range c.Mounts {
+			if m.Destination == "/data" {
+				d.ranOn[m.Name+" "+c.Config.Image] = true
+			}
+		}
 		return
 	}
 	if p := c.HostConfig.RestartPolicy.Name; p != "" && p != "no" {
@@ -789,7 +797,7 @@ func TestAFailedRestoreNamesWhatItLeft(t *testing.T) {
 	d.failRestore = true
 	vol := "tracepad-app-" + rep.Run.ID
 	back, code := runReport(t, deps, "--back", rep.Run.ID)
-	if code != exitStuck || !strings.Contains(back.Summary, "docker volume rm "+vol) {
+	if code != exitStuck || !strings.Contains(back.Summary, vol) || !strings.Contains(back.Summary, "run --back again") {
 		t.Fatalf("%d %s", code, back.Summary)
 	}
 	all := strings.Join(append(back.Person, back.SetAside...), "\n")
@@ -803,9 +811,12 @@ func TestAFailedRestoreNamesWhatItLeft(t *testing.T) {
 	if chk, code := runReport(t, deps, "--check", rep.Run.ID); code != exitOK {
 		t.Errorf("--check after a refused way back: %d %s", code, chk.Summary)
 	}
+	// The half-filled volume is the run's own (#34): the next way back fills
+	// it again, and nothing is left for the person to remove first.
+	d.failRestore = false
 	again, code := runReport(t, deps, "--back", rep.Run.ID)
-	if code != exitStuck || !strings.Contains(again.Summary, "docker volume rm "+vol) {
-		t.Errorf("second way back: %d %s", code, again.Summary)
+	if code != exitOK || d.volumes[vol] != 7 {
+		t.Errorf("second way back: %d %s; %s holds %d", code, again.Summary, vol, d.volumes[vol])
 	}
 }
 

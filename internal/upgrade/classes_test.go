@@ -279,3 +279,100 @@ func TestANewerServerOnTheBinaryRefusesBeforeTheStop(t *testing.T) {
 		}
 	}
 }
+
+// A step off the table is never written (#34): the run ends stuck, saying
+// what it was about to record, and the state on disk is as it was.
+func TestAStepOffTheTableIsNeverWritten(t *testing.T) {
+	saved := badStep
+	badStep = func(string, string, string) {}
+	t.Cleanup(func() { badStep = saved })
+	dir := t.TempDir()
+	j := &job{r: &runner{deps: Deps{Now: time.Now}}, rep: &Report{}, dir: dir,
+		st: &State{Kind: kindProcess, Steps: []Step{{Name: stepPrepared}}}}
+	_ = j.st.save(dir)
+	rep := &Report{}
+	func() {
+		defer stopOffTable(rep)
+		_ = j.step(stepStarted)
+		t.Error("the step off the table was let through")
+	}()
+	if rep.ExitCode != exitStuck || !strings.Contains(rep.Summary, `"started" after "prepared"`) {
+		t.Errorf("%d %s", rep.ExitCode, rep.Summary)
+	}
+	st, err := loadStateUnchecked(dir)
+	if err != nil || len(st.Steps) != 1 {
+		t.Errorf("written: %+v %v", st, err)
+	}
+}
+
+// --check knows the run's server by the data's lock (the seventh review): the
+// person who restarts it after a decide, the same version on the same data,
+// gets healthy, not "exited".
+func TestACheckFindsTheServerThePersonRestarted(t *testing.T) {
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	w.host.uncounted[fNew] = true
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitDecide {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	st, _ := loadState(rep.Run.Dir)
+	_ = w.host.Signal(st.Process.NewPID, 15)
+	spec, _ := readSpec(rep.Run.Dir)
+	if _, err := w.host.Start(StartSpec{Path: spec.Exe, Argv: spec.Argv, Env: spec.Env, Dir: spec.Dir, Log: st.Process.Log}); err != nil {
+		t.Fatal(err)
+	}
+	w.host.mu.Lock()
+	w.host.uncounted[fNew] = false
+	w.host.mu.Unlock()
+	chk, code := runIn(t, context.Background(), deps, "--check", rep.Run.ID)
+	if code != exitOK {
+		t.Fatalf("--check: %d %s", code, chk.Summary)
+	}
+}
+
+// A way back takes back only what its run put at the install path (#31 (b),
+// the seventh review): after a later run put a newer version there, the
+// binary-only run's --back and a container run's are refused with nothing
+// touched.
+func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
+	t.Run("binary only", func(t *testing.T) {
+		w := newFakeWorld(t, 2)
+		procs, _, _ := w.host.Candidates()
+		for _, p := range procs {
+			_ = w.host.Signal(p.PID, 15)
+		}
+		deps := w.deps()
+		a, code := runIn(t, context.Background(), deps, "--to", fNew)
+		if code != exitOK {
+			t.Fatalf("run A: %d %s", code, a.Summary)
+		}
+		if b, code := runIn(t, context.Background(), deps, "--to", fBroken); code != exitOK {
+			t.Fatalf("run B: %d %s", code, b.Summary)
+		}
+		back, code := runIn(t, context.Background(), deps, "--back", a.Run.ID)
+		if code == exitOK || !strings.Contains(back.Summary, "nothing was touched") {
+			t.Errorf("--back A: %d %s", code, back.Summary)
+		}
+		if v, _ := scriptVersion(context.Background(), w.install); v != fBroken {
+			t.Errorf("the binary is %s", v)
+		}
+	})
+	t.Run("container", func(t *testing.T) {
+		d, deps := matrixContainer(t)
+		rep, code := runIn(t, context.Background(), deps)
+		if code != exitOK {
+			t.Fatalf("%d %s", code, rep.Summary)
+		}
+		path := filepath.Join(deps.InstallDir, "tracepad")
+		scriptBinary(t, path, "0.2.1")
+		image := d.byName["tracepad-app"].Config.Image
+		back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+		if code == exitOK || !strings.Contains(back.Summary, "nothing was touched") {
+			t.Errorf("--back: %d %s", code, back.Summary)
+		}
+		if v, _ := scriptVersion(context.Background(), path); v != "0.2.1" || d.byName["tracepad-app"].Config.Image != image {
+			t.Errorf("touched: binary %s, image %s", v, d.byName["tracepad-app"].Config.Image)
+		}
+	})
+}

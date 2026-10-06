@@ -105,20 +105,19 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepStopped)
 	j.done("stopped %s", cs.Name)
 
-	if err := j.at(stepArchived); err != nil {
-		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+err.Error())
-		return
-	}
 	script := fmt.Sprintf("umask 077 && tar czf /backup/data.tar.gz -C /data . && chown %d:%d /backup/data.tar.gz", os.Getuid(), os.Getgid())
-	_, err = docker.Run(ctx, "run", "--rm",
-		"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/data", "readonly"),
-		"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup"),
-		busybox, "sh", "-c", script)
 	archive := filepath.Join(j.dir, "data.tar.gz")
 	var rb ReadBack
-	if err == nil {
-		rb, err = readBack(archive, Archived{DBSize: -1})
-	}
+	err = j.act(stepArchived, "archive the volume "+cs.Volume+" into "+archive, func() error {
+		_, err := docker.Run(ctx, "run", "--rm",
+			"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/data", "readonly"),
+			"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup"),
+			busybox, "sh", "-c", script)
+		if err == nil {
+			rb, err = readBack(archive, Archived{DBSize: -1})
+		}
+		return err
+	})
 	if err != nil {
 		j.goBack(ctx, "the archive of the volume "+cs.Volume+" failed: "+firstLine(err.Error()))
 		return
@@ -130,28 +129,25 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	_ = j.step(stepArchived)
 	j.done("archived the volume %s into %s and read it back whole", cs.Volume, archive)
 
-	err = j.at(stepRenamedOld)
-	if err == nil {
-		_, err = docker.Run(ctx, "rename", cs.Name, j.before())
-	}
+	err = j.act(stepRenamedOld, "rename the container "+cs.Name+" to "+j.before(), func() error {
+		_, err := docker.Run(ctx, "rename", cs.Name, j.before())
+		return err
+	})
 	if err != nil {
 		j.goBack(ctx, "the rename of "+cs.Name+" failed: "+firstLine(err.Error()))
 		return
 	}
-	_ = j.step(stepRenamedOld)
+	// Its restart policy is no already, since the stop, and a rename keeps it.
 	st.SetAside = append(st.SetAside, "container "+j.before())
-	if _, err := docker.Run(ctx, "update", "--restart", "no", j.before()); err != nil {
-		j.goBack(ctx, "the restart policy of "+j.before()+" could not be set to no: "+firstLine(err.Error()))
-		return
-	}
+	_ = j.step(stepRenamedOld)
 	j.done("renamed %s to %s, restart policy no", cs.Name, j.before())
 
 	args := runArgs(j.inspect, j.image, cs.Name, cs.NewRef, filepath.Join(j.dir, "env"), "")
 	var out []byte
-	err = j.at(stepStarted)
-	if err == nil {
+	err = j.act(stepStarted, "run "+cs.NewRef+" as "+cs.Name, func() (err error) {
 		out, err = docker.Run(ctx, args...)
-	}
+		return err
+	})
 	if err != nil {
 		j.goBack(ctx, "the new container did not start: "+firstLine(err.Error()))
 		return

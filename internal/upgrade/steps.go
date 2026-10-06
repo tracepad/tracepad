@@ -68,7 +68,9 @@ var machines = func() map[string]machine {
 		// Again after it is done: a --back repeated finds the old version
 		// stopped since, and starts it (#31).
 		stepBackStarted: {stepBackBinary, stepBackStarted, stepBackDone},
-		stepBackDone:    {stepPrepared, stepBackStarted},
+		// Nothing to undo — a run cut short before its stop, or before its
+		// first step — is a way back done (#34).
+		stepBackDone: {"", stepPrepared, stepBackStarted},
 	}
 	process[stepBackBegun] = swapSteps(process)
 
@@ -92,7 +94,7 @@ var machines = func() map[string]machine {
 		// Again after it is done: the host's binary, when it could not be
 		// put back before, is put back by a --back repeated.
 		stepBackBinary: {stepBackStarted, stepBackDone},
-		stepBackDone:   {stepPrepared, stepBackStarted, stepBackBinary},
+		stepBackDone:   {"", stepPrepared, stepBackStarted, stepBackBinary},
 	}
 	container[stepBackVolume] = swapSteps(container)
 	container[stepBackBegun] = append(swapSteps(container), stepBackVolume)
@@ -104,7 +106,7 @@ var machines = func() map[string]machine {
 		stepSkill:           {stepBinaryReplaced},
 		stepBackBegun:       {stepBinaryReplacing, stepBinaryReplaced, stepSkill},
 		stepBackBinary:      {stepBackBegun},
-		stepBackDone:        {stepPrepared, stepBackBinary},
+		stepBackDone:        {"", stepPrepared, stepBackBinary},
 	}
 	return map[string]machine{kindProcess: process, kindContainer: container, kindBinary: binary}
 }()

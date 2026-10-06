@@ -41,8 +41,12 @@ type State struct {
 	CountBefore *int64    `json:"count_before,omitempty"`
 	Archive     *Archived `json:"archive,omitempty"`
 
-	Steps   []Step `json:"steps"`
-	Verdict string `json:"verdict,omitempty"`
+	Steps []Step `json:"steps"`
+	// Pending is an act begun and not yet recorded (#34): written before
+	// the act, cleared by the step that records it. A run loaded with one
+	// settles it against what is on disk first.
+	Pending *Intent `json:"pending,omitempty"`
+	Verdict string  `json:"verdict,omitempty"`
 	// SetAside is every path and name the run or its way back left for the
 	// person to remove.
 	SetAside []string `json:"set_aside,omitempty"`
@@ -69,22 +73,16 @@ type ProcessState struct {
 	// LogOffset is the log's size when the new server started: its first
 	// line is the one after it.
 	LogOffset int64 `json:"log_offset"`
-	// PIDFile is whether <data>/server.pid named the old PID and was moved
-	// to the new one.
-	PIDFile bool `json:"pid_file"`
 	// What the way back decides by (#31): facts written when they happened,
 	// never read back from how a server answers later. NewPID is the server
-	// this run started, NewStartedAt when, and NewVersionSeen what it said
-	// it was at its check. WroteAfterSwap is whether anything other than
-	// the old version may have had the data since the stop: set before the
+	// this run started. WroteAfterSwap is whether anything other than the
+	// old version may have had the data since the stop: set before the
 	// command lets go of the data to start the new version, or when a way
 	// back finds a server on the data that started while the install path
 	// may have held another version. Once set it stays, and a way back
 	// restores the archive.
-	NewPID         int       `json:"new_pid,omitempty"`
-	NewStartedAt   time.Time `json:"new_started_at,omitzero"`
-	NewVersionSeen string    `json:"new_version_seen,omitempty"`
-	WroteAfterSwap bool      `json:"wrote_after_swap"`
+	NewPID         int  `json:"new_pid,omitempty"`
+	WroteAfterSwap bool `json:"wrote_after_swap"`
 	// BackPID is the old version a way back started, or found running.
 	BackPID int `json:"back_pid,omitempty"`
 	// Old is the copy of the running version in the run directory.
@@ -110,6 +108,13 @@ type ContainerState struct {
 type Step struct {
 	Name string    `json:"name"`
 	At   time.Time `json:"at"`
+}
+
+// Intent is an act about to happen: the step that will record it, and what
+// exactly it does, for the person reading the state.
+type Intent struct {
+	Step string `json:"step"`
+	What string `json:"what"`
 }
 
 // ServerSpec is server.json: how the old server was started, so it can be
@@ -278,6 +283,15 @@ func (s *State) validate(dir string) error {
 	if err := s.followsTable(); err != nil {
 		return err
 	}
+	if p := s.Pending; p != nil {
+		if _, ok := machines[s.Kind][p.Step]; !ok {
+			return fmt.Errorf("its pending act %q is not a step of its table", p.Step)
+		}
+	}
+	// A run cut short in its preparation, before its first step, may not
+	// have all its parts yet: it changed nothing, and its way back does
+	// nothing. Each part it has is held to what a run writes all the same.
+	early := !s.has(stepPrepared) && s.Pending == nil
 	// The copies a way back runs and puts in place are the run's own files,
 	// in its directory, never a path from elsewhere.
 	inRun := func(p string) bool { return filepath.Dir(p) == dir && strings.HasPrefix(filepath.Base(p), "tracepad-") }
@@ -289,6 +303,9 @@ func (s *State) validate(dir string) error {
 	switch s.Kind {
 	case kindProcess:
 		p := s.Process
+		if p == nil && early {
+			break
+		}
 		if p == nil || p.PID <= 0 || !filepath.IsAbs(p.DataDir) || !filepath.IsAbs(p.Log) || !inRun(p.Old) {
 			return errors.New("its server is not one a run records")
 		}
@@ -299,6 +316,9 @@ func (s *State) validate(dir string) error {
 		}
 	case kindContainer:
 		c := s.Container
+		if c == nil && early {
+			break
+		}
 		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
 			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
 			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
@@ -308,7 +328,7 @@ func (s *State) validate(dir string) error {
 			return fmt.Errorf("its container's address %q is not this machine's", c.URL)
 		}
 	case kindBinary:
-		if s.Binary == nil {
+		if s.Binary == nil && !early {
 			return errors.New("it has no binary")
 		}
 	default:

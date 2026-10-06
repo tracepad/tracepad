@@ -1118,8 +1118,9 @@ server only at the server's own address. The design is spec 054.
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit `4`).
-- `--check RUN` asks again, for a server that was still starting, and never
-  goes back by itself. `--back RUN` takes a run's way back: the archive is
+- `--check RUN` asks again, for a server that was still starting — the one the
+  run started, or the same one you started again since — and never goes back
+  by itself. `--back RUN` takes a run's way back: the archive is
   restored beside the data and checked before anything stops, what the new
   version left is **set aside, not deleted** (`<data>.after-<run>`, or the
   container `<name>-after-<run>` and its volume), and the old version starts
@@ -1135,15 +1136,22 @@ environment, secrets included, kept until you delete it; erasing traces or a
 user does not reach it, nor what a way back set aside. The report says so, and
 gives the commands to remove each. The command never deletes any of it.
 
-Exit `0` done, healthy, or nothing to do; `1` refused, with nothing changed;
-`2` a usage error; `3` not upgraded — the way back ran and the old version
-runs again; `4` yours to decide (the report says what and how); `5` stuck — a
-step failed and could not be undone, or the way back started the old version
-but could not see it answer — and the report says what runs and what is where. `--plan` exits `10` when the upgrade would change something, `4` when
-only what is yours is behind, and `0` when everything is up to date; an
-upgrade that finds nothing of its own to do exits as `--plan` would on the
+The exit status, by mode — one table, which the skill reads too:
+
+| Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
+|------|----------|-------------|---------------|--------------|
+| `0` | everything is up to date | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `1` | refused | refused, with nothing changed | refused | refused, with nothing touched |
+| `2` | a usage error | a usage error | a usage error | a usage error |
+| `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
+| `4` | only what is yours is behind | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
+| `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
+
+An upgrade that finds nothing of its own to do exits as `--plan` would on the
 same machine. Either refuses (`1`) when something runs later than the version
-asked for — after an install script put an older binary in place, say. `--json`
+asked for — after an install script put an older binary in place, say. The
+report says what runs and what is where, whatever the status. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
 `back_check` (the way back's check of the old version), `plan`, `done`,

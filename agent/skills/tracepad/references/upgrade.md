@@ -35,13 +35,19 @@ its `--data-dir` or `--container` to the upgrade.
 
 The same command and flags without `--plan`. Its exit status:
 
-- `0`: upgraded, healthy. Run `setup.md`'s step 4 span and step 6 read-back.
+- `0`: upgraded, healthy (or nothing at all was behind). After an upgrade, run
+  `setup.md`'s step 4 span and step 6 read-back.
 - `3`: not upgraded; the old version runs again. Say what failed (the first
   line of the report) and stop.
-- `4`: the new version runs, but its check needs the human (a lower or
-  unreadable trace count, or a server still starting). Show the evidence, and
-  ask: keep it (`tracepad upgrade --check <run>` later), or `tracepad upgrade
-  --back <run>`, which drops what arrived since. Never decide for them.
+- `4` with a run in the report: the new version runs, but its check needs the
+  human (a lower or unreadable trace count, or a server still starting). Show
+  the evidence, and ask: keep it (`tracepad upgrade --check <run>` later), or
+  `tracepad upgrade --back <run>`, which drops what arrived since. Never
+  decide for them. `4` with no run: nothing of the command's was behind, only
+  what is the human's; show them that list.
+- `10`: nothing to do for the one named, and another server or container of
+  the command's is behind. Run the upgrade the report's `next` gives, and act
+  on its status.
 - `5`: stuck. Stop, and give the human the report as it is.
 - `1`: nothing changed; say why.
 

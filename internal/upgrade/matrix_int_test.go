@@ -3,8 +3,10 @@
 package upgrade
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -66,6 +68,61 @@ func TestTheFaultMatrixOfARealServer(t *testing.T) {
 			beside, _ := filepath.Glob(w.data + ".*")
 			return fmt.Sprintf("answers %s, pid %d, %d traces\nbeside the data %q\nset aside %q\nsteps %d", v, pid, w.count(), beside, st.SetAside, len(st.Steps))
 		}
+	}
+
+	// The kill cells (#34), as the gate's: every step, killed between what
+	// it records and the record, then --check and --back as a person runs
+	// them.
+	kill := func(t *testing.T, w *world, deps Deps, point string, args ...string) {
+		t.Helper()
+		c := &cell{point: point, kind: "kill"}
+		deps.Fault = c.fault
+		var out bytes.Buffer
+		if _, dead := runKillable(context.Background(), Options{Args: append(args, "--json"), Version: vOld, Stdout: &out, Stderr: io.Discard}, deps); !dead || !c.hit.Load() {
+			t.Fatalf("no run records %s: %s", point, out.String())
+		}
+	}
+	recordSwap, recordBack := recordsOf(t, kindProcess)
+	for _, point := range recordSwap {
+		t.Run("upgrade/kill/"+point, func(t *testing.T) {
+			t.Parallel()
+			cells <- struct{}{}
+			defer func() { <-cells }()
+			w := newWorld(t)
+			w.start()
+			w.sendTrace(1)
+			w.sendTrace(2)
+			w.waitCount(2)
+			deps := w.deps()
+			kill(t, w, deps, point, "--to", vNew, "--data-dir", w.data)
+			id, dir := runOf(t, deps)
+			afterKill(t, deps, id, false)
+			invariants(t, w, deps, dir, vOld)
+			backAgain(t, deps, id, snapshot(w, deps, dir))
+		})
+	}
+	for _, point := range recordBack {
+		t.Run("back/kill/"+point, func(t *testing.T) {
+			t.Parallel()
+			cells <- struct{}{}
+			defer func() { <-cells }()
+			w := newWorld(t)
+			w.start()
+			w.sendTrace(1)
+			w.sendTrace(2)
+			w.waitCount(2)
+			deps := w.deps()
+			rep, code := w.run(deps, "--to", vNew, "--data-dir", w.data)
+			if code != exitOK {
+				t.Fatalf("upgrade: %d %s", code, rep.Summary)
+			}
+			w.sendTrace(3)
+			w.waitCount(3)
+			kill(t, w, deps, point, "--back", rep.Run.ID)
+			afterKill(t, deps, rep.Run.ID, true)
+			invariants(t, w, deps, rep.Run.Dir, vOld)
+			backAgain(t, deps, rep.Run.ID, snapshot(w, deps, rep.Run.Dir))
+		})
 	}
 
 	for _, kind := range []string{"fail", "interrupt"} {

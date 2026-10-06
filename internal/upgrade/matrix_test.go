@@ -52,6 +52,16 @@ var stepOrder = []string{
 
 // pointsOf are a kind's cells: the swap's points, then the way back's.
 func pointsOf(t *testing.T, kind string) (swap, back []string) {
+	return stepsOf(t, kind, false)
+}
+
+// recordsOf are a kind's kill cells: every step there is, each killed between
+// what it records and its record.
+func recordsOf(t *testing.T, kind string) (swap, back []string) {
+	return stepsOf(t, kind, true)
+}
+
+func stepsOf(t *testing.T, kind string, all bool) (swap, back []string) {
 	t.Helper()
 	m := machines[kind]
 	for step := range m {
@@ -60,7 +70,7 @@ func pointsOf(t *testing.T, kind string) (swap, back []string) {
 		}
 	}
 	for _, step := range stepOrder {
-		if _, ok := m[step]; !ok || noAct[step] {
+		if _, ok := m[step]; !ok || (noAct[step] && !all) {
 			continue
 		}
 		if strings.HasPrefix(step, "back_") {
@@ -133,6 +143,13 @@ type cell struct {
 }
 
 func (c *cell) fault(point string) error {
+	if c.kind == "kill" {
+		if point == c.point+recordPoint {
+			c.hit.Store(true)
+			panic(killed{})
+		}
+		return nil
+	}
 	if point != c.point {
 		return nil
 	}
@@ -152,13 +169,81 @@ func (c *cell) fault(point string) error {
 func runIn(t *testing.T, ctx context.Context, deps Deps, args ...string) (Report, int) {
 	t.Helper()
 	var out bytes.Buffer
-	code := run(ctx, Options{Args: append(args, "--json"), Stdout: &out, Stderr: io.Discard}, deps)
+	code, killed := runKillable(ctx, Options{Args: append(args, "--json"), Stdout: &out, Stderr: io.Discard}, deps)
+	if killed {
+		return Report{}, codeKilled
+	}
 	var rep Report
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("%v: %s", err, out.String())
 	}
 	return rep, code
 }
+
+// killed is the matrix's kill: the command stops where it is, between an
+// act and the write of its step, as a SIGKILL or a lost machine stops it.
+// What it held it lets go of, as a process that dies does.
+type killed struct{}
+
+// codeKilled is a killed run's status, for the tests.
+const codeKilled = -9
+
+// runKillable runs the command and says whether the matrix killed it.
+func runKillable(ctx context.Context, opt Options, deps Deps) (code int, dead bool) {
+	defer func() {
+		if v := recover(); v != nil {
+			if _, ok := v.(killed); !ok {
+				panic(v)
+			}
+			code, dead = codeKilled, true
+		}
+	}()
+	return run(ctx, opt, deps), false
+}
+
+// runOf is the one run a killed command left, found where runs are.
+func runOf(t *testing.T, deps Deps) (id, dir string) {
+	t.Helper()
+	states, _ := filepath.Glob(filepath.Join(deps.Backups, "*", stateFile))
+	if len(states) != 1 {
+		t.Fatalf("runs left: %q", states)
+	}
+	dir = filepath.Dir(states[0])
+	return filepath.Base(dir), dir
+}
+
+// afterKill is what a person does after a run was killed, in either order:
+// --check, which finishes it or refuses with nothing touched, and --back
+// until done. Whichever comes first meets the run as the kill left it.
+func afterKill(t *testing.T, deps Deps, id string, backFirst bool) {
+	t.Helper()
+	st, err := loadState(filepath.Join(deps.Backups, id))
+	if err != nil {
+		t.Fatalf("the run a kill left does not load: %v", err)
+	}
+	// Killed once the new version was started on the data (its intent or
+	// its step written), and before any way back: --check finds it healthy.
+	started := (st.has(stepStarted) || (st.Pending != nil && st.Pending.Step == stepStarted)) && !st.has(stepBackBegun)
+	check := func() {
+		rep, code := runIn(t, context.Background(), deps, "--check", id)
+		switch {
+		case started && !backFirst && code != exitOK:
+			t.Errorf("--check of a new version started before the kill: %d %s", code, rep.Summary)
+		case code != exitOK && code != exitRefused:
+			t.Errorf("--check after the kill: %d %s", code, rep.Summary)
+		}
+	}
+	if !backFirst {
+		check()
+	}
+	backUntilDone(t, deps, id)
+	if backFirst {
+		check()
+	}
+}
+
+// orders are the two a person may meet a killed run in.
+var orders = map[string]bool{"check-first": false, "back-first": true}
 
 // backUntilDone runs --back as a person does, until it is done: at most
 // three times.
@@ -265,7 +350,10 @@ func TestTheFaultMatrixOfAContainer(t *testing.T) {
 	}
 	snapshot := func(d *fakeDocker, dir string) func() string {
 		return func() string {
-			st, _ := loadState(dir)
+			st, err := loadState(dir)
+			if err != nil {
+				return err.Error()
+			}
 			var names []string
 			for name, c := range d.byName {
 				names = append(names, fmt.Sprintf("%s=%s:%s:%v:%s", name, c.ID[60:], c.Config.Image, c.State.Running, c.HostConfig.RestartPolicy.Name))
@@ -340,6 +428,160 @@ func TestTheFaultMatrixOfAContainer(t *testing.T) {
 				backUntilDone(t, deps, rep.Run.ID)
 				invariants(t, d, rep.Run.Dir, oldImage)
 				backAgain(t, deps, rep.Run.ID, snapshot(d, rep.Run.Dir))
+			})
+		}
+	}
+}
+
+// The kill cells (#34): every step, the command killed after what it records
+// and before the record. The run is then met as a person meets it: --check,
+// which finishes it or refuses with nothing touched, then --back until done
+// and three times more. No state a kill leaves is stuck for good.
+func TestTheKillMatrixOfAContainer(t *testing.T) {
+	inProcess(t)
+	swapSteps, backSteps := recordsOf(t, kindContainer)
+	const oldImage = "ghcr.io/tracepad/tracepad:0.1.0"
+	check := func(t *testing.T, d *fakeDocker, deps Deps, id, dir string, backFirst bool) {
+		t.Helper()
+		afterKill(t, deps, id, backFirst)
+		c := d.byName["tracepad-app"]
+		if c == nil || !c.State.Running || c.Config.Image != oldImage {
+			t.Fatalf("after the way back: %+v", c)
+		}
+		// The new version ran on the volume: the old one runs on the
+		// archive restored, never on what the new one may have migrated.
+		if d.ranOn["tracepad-app ghcr.io/tracepad/tracepad:0.2.0"] {
+			for _, m := range c.Mounts {
+				if m.Destination == "/data" && m.Name != "tracepad-app-"+id {
+					t.Errorf("the old version runs on %s, which the new one ran on", m.Name)
+				}
+			}
+		}
+		for _, m := range c.Mounts {
+			if m.Destination == "/data" && d.volumes[m.Name] != 7 {
+				t.Errorf("its volume %s holds %d traces, not 7", m.Name, d.volumes[m.Name])
+			}
+		}
+		backAgain(t, deps, id, func() string {
+			st, err := loadState(dir)
+			if err != nil {
+				return err.Error()
+			}
+			var names []string
+			for name, c := range d.byName {
+				names = append(names, fmt.Sprintf("%s=%s:%v:%s", name, c.Config.Image, c.State.Running, c.HostConfig.RestartPolicy.Name))
+			}
+			slices.Sort(names)
+			return fmt.Sprintf("%q %v %q %d", names, d.volumes, st.SetAside, len(st.Steps))
+		})
+	}
+	for order, backFirst := range orders {
+		for _, point := range swapSteps {
+			t.Run(order+"/upgrade/"+point, func(t *testing.T) {
+				t.Parallel()
+				d, deps := matrixContainer(t)
+				c := &cell{point: point, kind: "kill"}
+				deps.Fault = c.fault
+				if _, code := runIn(t, context.Background(), deps); code != codeKilled || !c.hit.Load() {
+					t.Fatalf("no upgrade records %s: %d", point, code)
+				}
+				deps.Fault = nil
+				id, dir := runOf(t, deps)
+				check(t, d, deps, id, dir, backFirst)
+			})
+		}
+	}
+	for order, backFirst := range orders {
+		for _, point := range backSteps {
+			t.Run(order+"/back/"+point, func(t *testing.T) {
+				t.Parallel()
+				d, deps := matrixContainer(t)
+				rep, code := runIn(t, context.Background(), deps)
+				if code != exitOK {
+					t.Fatalf("upgrade: %d %s", code, rep.Summary)
+				}
+				c := &cell{point: point, kind: "kill"}
+				deps.Fault = c.fault
+				if _, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
+					t.Fatalf("no way back records %s: %d", point, code)
+				}
+				deps.Fault = nil
+				check(t, d, deps, rep.Run.ID, rep.Run.Dir, backFirst)
+			})
+		}
+	}
+}
+
+func TestTheKillMatrixOfAServer(t *testing.T) {
+	inProcess(t)
+	swapSteps, backSteps := recordsOf(t, kindProcess)
+	check := func(t *testing.T, w *fakeWorld, deps Deps, id, dir string, traces int64, backFirst bool) {
+		t.Helper()
+		afterKill(t, deps, id, backFirst)
+		if v := w.answers(); v != fOld {
+			t.Fatalf("after the way back %s answers %q", w.url(), v)
+		}
+		// The new version had the data: what it left is set aside, and the
+		// old one runs on the archive restored.
+		w.host.mu.Lock()
+		wrote := w.host.held[fNew+" "+w.data]
+		w.host.mu.Unlock()
+		if _, err := os.Stat(w.data + ".after-" + id); wrote && err != nil {
+			t.Errorf("the new version had the data, and nothing was set aside: %v", err)
+		}
+		if n, err := countTraces(filepath.Join(w.data, dataDBName)); err != nil || n != traces {
+			t.Errorf("traces: %d (%v), not %d", n, err, traces)
+		}
+		backAgain(t, deps, id, func() string {
+			st, err := loadState(dir)
+			if err != nil {
+				return err.Error()
+			}
+			pid, _ := lockedBy(w.data)
+			n, _ := countTraces(filepath.Join(w.data, dataDBName))
+			beside, _ := filepath.Glob(w.data + ".*")
+			v, _ := scriptVersion(context.Background(), w.install)
+			return fmt.Sprintf("%s %d %d %s %q %q %d", w.answers(), pid, n, v, beside, st.SetAside, len(st.Steps))
+		})
+	}
+	for order, backFirst := range orders {
+		for _, point := range swapSteps {
+			t.Run(order+"/upgrade/"+point, func(t *testing.T) {
+				t.Parallel()
+				w := newFakeWorld(t, 2)
+				deps := w.deps()
+				c := &cell{point: point, kind: "kill"}
+				deps.Fault = c.fault
+				if _, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != codeKilled || !c.hit.Load() {
+					t.Fatalf("no upgrade records %s: %d", point, code)
+				}
+				deps.Fault = nil
+				id, dir := runOf(t, deps)
+				check(t, w, deps, id, dir, 2, backFirst)
+			})
+		}
+	}
+	for order, backFirst := range orders {
+		for _, point := range backSteps {
+			t.Run(order+"/back/"+point, func(t *testing.T) {
+				t.Parallel()
+				w := newFakeWorld(t, 2)
+				deps := w.deps()
+				rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+				if code != exitOK {
+					t.Fatalf("upgrade: %d %s", code, rep.Summary)
+				}
+				w.addTrace()
+				c := &cell{point: point, kind: "kill"}
+				deps.Fault = c.fault
+				if _, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
+					t.Fatalf("no way back records %s: %d", point, code)
+				}
+				deps.Fault = nil
+				check(t, w, deps, rep.Run.ID, rep.Run.Dir, 2, backFirst)
+				if n, err := countTraces(filepath.Join(w.data+".after-"+rep.Run.ID, dataDBName)); err != nil || n != 3 {
+					t.Errorf("set aside: %d traces (%v), not 3", n, err)
+				}
 			})
 		}
 	}

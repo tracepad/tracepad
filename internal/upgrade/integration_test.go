@@ -816,3 +816,48 @@ func TestAnUnreapedServerIsGoneOnceItStops(t *testing.T) {
 	}
 	w.waitVersion(vNew)
 }
+
+// A terminal closed under the run after the stop — SIGHUP, as an ssh session
+// that drops sends — interrupts it as Ctrl-C does, and no more (#35): the
+// swap goes on to the end, and a second SIGHUP is caught as the first.
+func TestATerminalClosedAfterTheStopDoesNotEndTheRun(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	w.sendTrace(1)
+	w.waitCount(1)
+	path := t.TempDir()
+	if _, err := os.Stat("/usr/sbin/lsof"); err == nil {
+		_ = os.Symlink("/usr/sbin/lsof", filepath.Join(path, "lsof"))
+	}
+	var out bytes.Buffer
+	cmd := exec.Command(filepath.Join(builtBinaries(t), vNew), "upgrade", "--to", vNew, "--data-dir", w.data, "--json")
+	cmd.Env = []string{"HOME=" + w.home, "PATH=" + path, "TRACEPAD_DOWNLOAD_URL=file://" + w.mirror, "TRACEPAD_API_KEY=" + testSK}
+	cmd.Stdout = &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	hung := false
+	for i := 0; i < 3000 && !hung; i++ {
+		states, _ := filepath.Glob(filepath.Join(w.home, "tracepad-backups", "*", stateFile))
+		for _, s := range states {
+			if b, _ := os.ReadFile(s); strings.Contains(string(b), `"`+stepStopped+`"`) {
+				_ = cmd.Process.Signal(syscall.SIGHUP)
+				_ = cmd.Process.Signal(syscall.SIGHUP)
+				hung = true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	err := cmd.Wait()
+	if !hung {
+		t.Fatalf("the run never reached its stop: %v %s", err, out.String())
+	}
+	var rep Report
+	if jerr := json.Unmarshal(out.Bytes(), &rep); err != nil || jerr != nil || rep.ExitCode != exitOK {
+		t.Fatalf("after SIGHUP: %v, %v: %s", err, jerr, out.String())
+	}
+	w.waitVersion(vNew)
+	if got := w.count(); got != 1 {
+		t.Errorf("traces: %d", got)
+	}
+}

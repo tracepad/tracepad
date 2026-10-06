@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,57 @@ func TestTheDocsNameEveryFieldOfTheReport(t *testing.T) {
 		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
 		if name != "" && name != "-" && !strings.Contains(list, "`"+name+"`") {
 			t.Errorf("cli.md does not name the report's field %q", name)
+		}
+	}
+}
+
+// TestTheSkillReadsTheExitTable holds the skill's reading of each exit status
+// to cli.md's one table, and the table to the command's codes (the seventh
+// review found the skill reading 4 and 10 as the command never returns
+// them): every status the plan returns is in the skill's plan, every one the
+// upgrade returns has its own line in the skill's upgrade section.
+func TestTheSkillReadsTheExitTable(t *testing.T) {
+	read := func(parts ...string) string {
+		b, err := os.ReadFile(filepath.Join(append([]string{"..", ".."}, parts...)...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	cli, skill := read("docs", "cli.md"), read("agent", "skills", "tracepad", "references", "upgrade.md")
+	_, table, ok := strings.Cut(cli, "| Exit | `--plan` | the upgrade |")
+	if !ok {
+		t.Fatal("cli.md has no exit table")
+	}
+	row := regexp.MustCompile("(?m)^\\| `(\\d+)` \\| ([^|]*) \\| ([^|]*) \\|")
+	plan, upgrade, codes := []string{}, []string{}, []string{}
+	for _, m := range row.FindAllStringSubmatch(table, -1) {
+		codes = append(codes, m[1])
+		if strings.TrimSpace(m[2]) != "—" {
+			plan = append(plan, m[1])
+		}
+		if strings.TrimSpace(m[3]) != "—" {
+			upgrade = append(upgrade, m[1])
+		}
+	}
+	var want []string
+	for _, c := range []int{exitOK, exitRefused, exitUsage, exitWentBack, exitDecide, exitStuck, exitPending} {
+		want = append(want, strconv.Itoa(c))
+	}
+	if strings.Join(codes, " ") != strings.Join(want, " ") {
+		t.Fatalf("the table's codes %q, the command's %q", codes, want)
+	}
+	_, sec1, _ := strings.Cut(skill, "## 1.")
+	sec1, sec2, _ := strings.Cut(sec1, "## 2.")
+	sec2, _, _ = strings.Cut(sec2, "## 3.")
+	for _, c := range plan {
+		if c != "2" && !strings.Contains(sec1, "`"+c+"`") {
+			t.Errorf("the skill's plan does not read exit %s", c)
+		}
+	}
+	for _, c := range upgrade {
+		if c != "2" && !strings.Contains(sec2, "- `"+c+"`") {
+			t.Errorf("the skill's upgrade has no line for exit %s", c)
 		}
 	}
 }

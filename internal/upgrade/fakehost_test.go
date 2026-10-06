@@ -40,6 +40,9 @@ type fakeHost struct {
 	// elsewhere are versions whose server opens another data directory
 	// than its arguments name.
 	elsewhere map[string]string
+	// held is every "<version> <data directory>" a server took: what may
+	// have written the data.
+	held map[string]bool
 	// slow is how long every server takes to answer, while set: longer than
 	// the command waits (the sixth review's "slow answer" cells).
 	slow time.Duration
@@ -76,7 +79,7 @@ type fakeServer struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}}
+	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}}
 	t.Cleanup(func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -174,6 +177,9 @@ func (h *fakeHost) Start(spec StartSpec) (Started, error) {
 		return exit()
 	}
 	s.release = release
+	h.mu.Lock()
+	h.held[version+" "+dataDir] = true
+	h.mu.Unlock()
 	_ = os.WriteFile(lock, []byte(strconv.Itoa(pid)+"\n"), 0o600)
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
