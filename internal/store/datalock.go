@@ -129,11 +129,16 @@ const lockTries = 5
 
 var LockRetry = 10 * time.Millisecond
 
+// ErrLocksUnsupported is a file system without locks: whether a server holds
+// a database on it cannot be told, and nothing can be held there.
+var ErrLocksUnsupported = errors.New("this file system cannot lock files, so whether a server holds the database cannot be told")
+
 // TryLock takes the lock of the database at dbPath as a server takes it, and
 // returns at once: ok is false when another process holds it. Unlike a
-// server's, it records no pid. On a file system that cannot lock there is
-// nothing to hold, and it says ok with a release that does nothing, as a
-// server starts there unguarded.
+// server's, it records no pid. On a file system that cannot lock it answers
+// ErrLocksUnsupported (spec 054 #39): a server starts there unguarded (#20),
+// but for a process that would act on the answer — hold the data, ask
+// whether a server does — "cannot tell" is never "free".
 func TryLock(dbPath string) (release func(), ok bool, err error) {
 	file, err := os.OpenFile(dbPath+LockSuffix, os.O_RDWR|os.O_CREATE, dataFileMode)
 	if err != nil {
@@ -149,7 +154,7 @@ func TryLock(dbPath string) (release func(), ok bool, err error) {
 			}, true, nil
 		case isLockUnsupported(err):
 			file.Close()
-			return func() {}, true, nil
+			return nil, false, fmt.Errorf("%s: %w", dbPath+LockSuffix, ErrLocksUnsupported)
 		case isLockHeld(err) && try < lockTries:
 			time.Sleep(LockRetry)
 		case isLockHeld(err):

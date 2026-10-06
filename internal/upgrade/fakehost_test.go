@@ -46,6 +46,10 @@ type fakeHost struct {
 	// slow is how long every server takes to answer, while set: longer than
 	// the command waits (the sixth review's "slow answer" cells).
 	slow time.Duration
+	// unread is how many processes the listing could not read; unreadable,
+	// the pids Inspect cannot read (the audit of #223).
+	unread     int
+	unreadable map[int]bool
 }
 
 // lag waits as a slow server does before it answers.
@@ -79,7 +83,7 @@ type fakeServer struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}}
+	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}, unreadable: map[int]bool{}}
 	t.Cleanup(func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -114,12 +118,15 @@ func (h *fakeHost) Candidates() ([]Process, int, error) {
 		}
 	}
 	slices.SortFunc(out, func(a, b Process) int { return a.PID - b.PID })
-	return out, 0, nil
+	return out, h.unread, nil
 }
 
 func (h *fakeHost) Inspect(pid int) (Process, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.unreadable[pid] {
+		return Process{}, fmt.Errorf("pid %d: permission denied", pid)
+	}
 	if s, ok := h.procs[pid]; ok && !s.stopped {
 		return s.p, nil
 	}
@@ -259,23 +266,11 @@ func newFakeWorld(t *testing.T, traces int) *fakeWorld {
 		}
 	}
 	scriptBinary(t, w.install, fOld)
-	for _, v := range []string{fOld, fNew, fBroken} {
-		mirrorRelease(t, w.mirror, v, v, false)
-	}
+	w.mirror = sharedMirror(t)
 	w.host.broken[fBroken] = true
-	db, err := sql.Open("sqlite", filepath.Join(w.data, dataDBName))
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(w.data, dataDBName), templateDB(t, traces), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE traces (id INTEGER)"); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < traces; i++ {
-		if _, err := db.Exec("INSERT INTO traces VALUES (?)", i); err != nil {
-			t.Fatal(err)
-		}
-	}
-	db.Close()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -288,6 +283,81 @@ func newFakeWorld(t *testing.T, traces int) *fakeWorld {
 	}
 	w.waitVersion(fOld)
 	return w
+}
+
+// templates are the worlds' databases, by their number of traces: made once,
+// and copied into each world, which is cheaper than an insert committed per
+// trace.
+var templates struct {
+	sync.Mutex
+	dbs map[int][]byte
+}
+
+func templateDB(t *testing.T, traces int) []byte {
+	t.Helper()
+	templates.Lock()
+	defer templates.Unlock()
+	if b, ok := templates.dbs[traces]; ok {
+		return b
+	}
+	path := filepath.Join(t.TempDir(), "template.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE traces (id INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < traces; i++ {
+		if _, err := db.Exec("INSERT INTO traces VALUES (?)", i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if templates.dbs == nil {
+		templates.dbs = map[int][]byte{}
+	}
+	templates.dbs[traces] = b
+	return b
+}
+
+// shared is the fake worlds' mirror of releases, made once: it is only
+// read, and making three archives for every world was most of a world's
+// making.
+var shared struct {
+	once   sync.Once
+	mirror string
+	err    error
+}
+
+func sharedMirror(t *testing.T) string {
+	t.Helper()
+	shared.once.Do(func() {
+		shared.mirror, shared.err = os.MkdirTemp("", "tracepad-upgrade-mirror-")
+		if shared.err != nil {
+			return
+		}
+		for _, v := range []string{fOld, fNew, fBroken} {
+			mirrorRelease(t, shared.mirror, v, v, false)
+		}
+	})
+	if shared.err != nil {
+		t.Fatal(shared.err)
+	}
+	return shared.mirror
+}
+
+// TestMain removes the shared mirror once the package's tests are done.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if shared.mirror != "" {
+		_ = os.RemoveAll(shared.mirror) // ignored: a test's temporary directory
+	}
+	os.Exit(code)
 }
 
 // freeAddr is a loopback address nothing listens on.
@@ -348,11 +418,15 @@ func (w *fakeWorld) deps() Deps {
 			}
 			return ""
 		},
-		LookPath:     func(string) string { return "" },
-		Version:      scriptVersion,
-		Skills:       func(context.Context, string, string, ...string) (string, error) { return "", nil },
-		Now:          time.Now,
-		Sleep:        sleepCtx,
+		LookPath: func(string) string { return "" },
+		Version:  scriptVersion,
+		Skills:   func(context.Context, string, string, ...string) (string, error) { return "", nil },
+		Now:      time.Now,
+		// The fake machine answers at once: a wait's polls are short, and
+		// its deadline is the wait's own.
+		Sleep: func(ctx context.Context, d time.Duration) error {
+			return sleepCtx(ctx, min(d, 10*time.Millisecond))
+		},
 		StopWait:     2 * time.Second,
 		HealthWait:   2 * time.Second,
 		ProbeWait:    50 * time.Millisecond,

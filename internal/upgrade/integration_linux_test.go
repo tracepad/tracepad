@@ -39,8 +39,10 @@ func TestAServerInAServicesUnitIsThePersons(t *testing.T) {
 }
 
 // The machine's own cgroup, read as the command reads it, gives the rule's
-// answer: on a runner, a service's unit, and the server is the person's; in
-// a container without systemd, the root, and it is the command's.
+// answer: on a runner, a service's unit, and in a container without systemd
+// the root, which rules no manager out (the audit of #223): either way the
+// server is the person's; only a session's or a terminal's scope makes it the
+// command's.
 func TestTheRealCgroupDecidesByTheRule(t *testing.T) {
 	saved := cgroupOf
 	t.Cleanup(func() { cgroupOf = saved })

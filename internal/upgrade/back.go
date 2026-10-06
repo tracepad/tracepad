@@ -144,7 +144,12 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	// this run's data aside, which the way back stops itself. Put back at
 	// the end, it checks again, a second line against one started meanwhile.
 	if !st.has(stepBackBinary) {
-		own := j.ownPIDs()
+		// The run's own new server is not counted only when it is the one the
+		// way back stops: one alive and unread is counted (the audit of #223).
+		own := []int{ps.PID, ps.BackPID}
+		if ok, _ := r.startedAs(ps.NewPID, j.spec); ok { // ignored: one that cannot be read is counted, which refuses
+			own = append(own, ps.NewPID)
+		}
 		if held, _ := lockHeld(ps.DataDir); held { // ignored: an unread lock leaves the holder counted, which refuses
 			if holder, err := lockedBy(ps.DataDir); err == nil {
 				if ok, _ := r.isServer(holder, ps.DataDir, j.spec); ok { // ignored: one that cannot be read is not the run's, and is counted
@@ -164,6 +169,8 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	if st.has(stepBackAside) && !st.has(stepBackMoved) {
 		if _, err := os.Lstat(ps.DataDir); err == nil {
 			return j.fail(fmt.Sprintf("%s is set aside as %s, and something is at %s again; nothing was touched", ps.DataDir, after, ps.DataDir))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return j.fail(fmt.Sprintf("%s cannot be looked at (%v); nothing was touched", ps.DataDir, err))
 		}
 		if out, ok := j.moveRestore(restore, after); !ok {
 			return out
@@ -188,7 +195,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 				j.step(stepBackStarted)
 				j.done("server pid %d was asked to stop and still runs, as it was before the run: it is kept", ps.PID)
 			}
-			return j.checkBack(ctx, r.watch(ps.PID, ps.DataDir, j.spec), ps.PID, false)
+			return j.checkBack(ctx, nil, ps.PID)
 		}
 	}
 
@@ -250,7 +257,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 			ps.BackPID = holder
 			j.step(stepBackStarted)
 		}
-		return j.checkBack(ctx, r.watch(holder, ps.DataDir, j.spec), holder, false)
+		return j.checkBack(ctx, nil, holder)
 	}
 	j.begin()
 	var started Started
@@ -264,7 +271,7 @@ func (j *job) backProcess(ctx context.Context) wentBack {
 	ps.BackPID = started.PID()
 	j.step(stepBackStarted)
 	j.done("started %s again as pid %d, with its arguments and environment", st.From, ps.BackPID)
-	return j.checkBack(ctx, running(started), ps.BackPID, true)
+	return j.checkBack(ctx, started, ps.BackPID)
 }
 
 // pathMayBeNew says, from the steps alone, whether the install path may have
@@ -367,8 +374,12 @@ func (j *job) clearPath(ctx context.Context) (wentBack, bool) {
 		return wentBack{}, true
 	}
 	err := j.act(stepBackCleared, "take any other version than "+st.From+" off "+path+", keeping it in "+j.dir, func() error {
-		if _, err := os.Lstat(path); err != nil {
+		// Only what is not there is absent (the audit of #223): a path that
+		// cannot be looked at is not cleared.
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			return nil
+		} else if err != nil {
+			return fmt.Errorf("%s cannot be looked at (%v); nothing was started; run --back again", path, err)
 		}
 		v, err := j.r.deps.Version(ctx, path)
 		if err == nil && v == st.From {
@@ -446,11 +457,19 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	}
 	// The restore goes beside the data, on the data's file system, which
 	// may be another and fuller one than the archive's (the fourth review).
-	if free, err := freeBytes(filepath.Dir(ps.DataDir)); err == nil && free < rb.Bytes+mib100 {
+	// Room the way back cannot tell is no room (the audit of #223), as in
+	// the upgrade's own check.
+	free, err := freeBytes(filepath.Dir(ps.DataDir))
+	switch {
+	case err != nil:
+		return j.fail(fmt.Sprintf("could not tell the room beside %s for the restore (%v); nothing was touched", ps.DataDir, err)), false
+	case free < rb.Bytes+mib100:
 		return j.fail(fmt.Sprintf("no room beside %s for the restore: %d MiB free, %d MiB needed; nothing was touched", ps.DataDir, free>>20, (rb.Bytes+mib100)>>20)), false
 	}
 	if _, err := os.Lstat(after); err == nil {
 		return j.fail(after + " exists already, and this run did not put it there; nothing was touched"), false
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return j.fail(fmt.Sprintf("%s cannot be looked at (%v); nothing was touched", after, err)), false
 	}
 	j.begin()
 	// A restore the way back finished and checked before is taken up as it
@@ -487,6 +506,13 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 		return j.fail(fmt.Sprintf("the restore's lock could not be taken (%v); the server and %s are as they were, and the restore waits in %s", err, ps.DataDir, restore)), false
 	}
 
+	// The run's own new server, if it runs on another directory, is
+	// stopped too below; one that runs and cannot be read stops the way back
+	// before anything is (the audit of #223).
+	newRuns, err := r.startedAs(ps.NewPID, j.spec)
+	if err != nil {
+		return j.fail("the run's server " + err.Error() + "; nothing was stopped, and the restore waits in " + restore), false
+	}
 	// Only now is the server stopped: a bad archive is found while it still
 	// runs.
 	if holder > 0 {
@@ -507,7 +533,7 @@ func (j *job) swapBack(ctx context.Context, holder int, after, restore string) (
 	// The server this run started, when it holds something else than this
 	// directory (it opened another one): it is the run's own, by its binary
 	// and arguments, and it holds the address the old version needs.
-	if ps.NewPID > 0 && ps.NewPID != holder && r.startedAs(ps.NewPID, j.spec) {
+	if ps.NewPID > 0 && ps.NewPID != holder && newRuns {
 		if !r.stop(ctx, ps.NewPID) {
 			return j.fail(fmt.Sprintf("the run's server pid %d was asked to stop and has not; the restore waits in %s; run --back again once it has exited", ps.NewPID, restore)), false
 		}
@@ -564,23 +590,41 @@ func (r *runner) waitGone(ctx context.Context, pid int) bool {
 // startedAs says whether pid runs as spec started it: its binary and its
 // arguments. It is how a way back knows the server its own run started when
 // that server holds no lock of the run's directory.
-func (r *runner) startedAs(pid int, spec ServerSpec) bool {
-	if !r.deps.Sys.Alive(pid) {
-		return false
+func (r *runner) startedAs(pid int, spec ServerSpec) (bool, error) {
+	if pid <= 0 || !r.deps.Sys.Alive(pid) {
+		return false, nil
 	}
 	p, err := r.deps.Sys.Inspect(pid)
-	return err == nil && sameFile(p.Exe, spec.Exe) && slices.Equal(p.Argv, spec.Argv)
+	if err != nil {
+		return false, fmt.Errorf("pid %d runs and cannot be read: %w", pid, err)
+	}
+	return sameFile(p.Exe, spec.Exe) && slices.Equal(p.Argv, spec.Argv), nil
 }
 
 // watch is a check's liveness for a server this invocation did not start:
 // its full identity — executable, arguments, the lock's record, which on
 // macOS asks lsof — is read once, and each poll after that is kill(pid, 0)
 // and the lock's record alone (the third review).
-func (r *runner) watch(pid int, dataDir string, spec ServerSpec) func() bool {
-	if ok, _ := r.isServer(pid, dataDir, spec); !ok { // ignored: one that cannot be read is not watched as alive, and the check says so
-		return func() bool { return false }
+// A server that cannot be read is no answer: watch says why (the audit of
+// #223), and checkWatched makes it the verdict decide, never "exited".
+func (r *runner) watch(pid int, dataDir string, spec ServerSpec) (func() bool, error) {
+	ok, err := r.isServer(pid, dataDir, spec)
+	if err != nil {
+		return nil, err
 	}
-	return func() bool { return r.deps.Sys.Alive(pid) && recordsPID(dataDir, pid) }
+	if !ok {
+		return func() bool { return false }, nil
+	}
+	return func() bool { return r.deps.Sys.Alive(pid) && recordsPID(dataDir, pid) }, nil
+}
+
+// checkWatched is a check of a server this invocation did not start.
+func (r *runner) checkWatched(ctx context.Context, base, want string, before *int64, pid int, dataDir string, spec ServerSpec) Checked {
+	alive, err := r.watch(pid, dataDir, spec)
+	if err != nil {
+		return Checked{Before: before, Verdict: verdictDecide, Why: err.Error()}
+	}
+	return r.confirm(r.check(ctx, base, want, before, alive), pid, dataDir, spec)
 }
 
 // confirm reads a server's full identity once more after a check found it
@@ -612,20 +656,19 @@ func running(s Started) func() bool {
 	}
 }
 
-// checkBack checks the old version a way back started.
-func (j *job) checkBack(ctx context.Context, alive func() bool, pid int, fresh bool) wentBack {
+// checkBack checks the old version a way back started (fresh, watched
+// through its own exit) or found running (read through checkWatched).
+func (j *job) checkBack(ctx context.Context, started Started, pid int) wentBack {
 	ps := j.st.Process
 	if err := j.at(stepBackDone); err != nil {
 		return wentBack{ok: true, unconfirmed: true, why: "its check failed: " + err.Error()}
 	}
-	c := j.r.check(ctx, ps.URL, j.st.From, j.st.CountBefore, alive)
-	if !fresh {
-		// One this command started is watched through its own exit; one it
-		// found running is read once more.
-		c = j.r.confirm(c, pid, ps.DataDir, j.spec)
-	}
-	if fresh {
+	var c Checked
+	if started != nil {
+		c = j.r.check(ctx, ps.URL, j.st.From, j.st.CountBefore, running(started))
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
+	} else {
+		c = j.r.checkWatched(ctx, ps.URL, j.st.From, j.st.CountBefore, pid, ps.DataDir, j.spec)
 	}
 	j.rep.BackCheck = &c
 	return checked(j.st.From+" started again but is not healthy", c)
@@ -730,15 +773,30 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 		// The server is whichever holds the data as the run recorded it — the
 		// one it started, or the same one the person started again since
 		// (the seventh review) — and its version is the check's to say.
+		// A lock, or a holder, that cannot be read refuses the check, with
+		// nothing recorded (the audit of #223).
 		pid := ps.NewPID
-		held, _ := lockHeld(ps.DataDir) // ignored: an unread lock leaves the check on the server the run started
-		if holder, err := lockedBy(ps.DataDir); err == nil && holder != pid && held {
-			if ok, _ := r.isServer(holder, ps.DataDir, spec); ok { // ignored: one that cannot be read is not the run's server; the check goes on with the one it started
+		held, err := lockHeld(ps.DataDir)
+		if err != nil {
+			rep.ExitCode, rep.Summary = exitRefused, fmt.Sprintf("Refused: the lock of %s cannot be read (%v); nothing was recorded.", ps.DataDir, err)
+			return rep
+		}
+		if held {
+			holder, err := lockedBy(ps.DataDir)
+			if err != nil {
+				rep.ExitCode, rep.Summary = exitRefused, fmt.Sprintf("Refused: %s is locked, and its lock does not say by whom (%v); nothing was recorded.", ps.DataDir, err)
+				return rep
+			}
+			ok, err := r.isServer(holder, ps.DataDir, spec)
+			if err != nil && r.deps.Sys.Alive(holder) {
+				rep.ExitCode, rep.Summary = exitRefused, fmt.Sprintf("Refused: the server on %s cannot be read (%v); nothing was recorded.", ps.DataDir, err)
+				return rep
+			}
+			if ok {
 				pid = holder
 			}
 		}
-		c = r.check(ctx, ps.URL, st.To, st.CountBefore, r.watch(pid, ps.DataDir, spec))
-		c = r.confirm(c, pid, ps.DataDir, spec)
+		c = r.checkWatched(ctx, ps.URL, st.To, st.CountBefore, pid, ps.DataDir, spec)
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	default:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: a run of the binary alone has no server to check."

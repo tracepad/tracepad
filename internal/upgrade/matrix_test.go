@@ -313,9 +313,12 @@ type killWorld struct {
 func newKillWorld(t *testing.T, kind string) *killWorld {
 	w := newFakeWorld(t, 2)
 	k := &killWorld{w: w, deps: w.deps()}
-	// A stop's wait, for the server a kill left running: a cell's, not a
-	// person's.
-	k.deps.StopWait = 300 * time.Millisecond
+	// A stop's wait, for the server a kill left running or one that stops
+	// late, is a cell's, not a person's; and its polls are short.
+	k.deps.StopWait = 50 * time.Millisecond
+	k.deps.Sleep = func(ctx context.Context, d time.Duration) error {
+		return sleepCtx(ctx, min(d, 5*time.Millisecond))
+	}
 	binary := func() string {
 		v, _ := scriptVersion(context.Background(), w.install)
 		return v
@@ -368,59 +371,21 @@ func newKillWorld(t *testing.T, kind string) *killWorld {
 	return k
 }
 
-// The kill cells (#34, #37), from both tables: every step of a server's run
-// and of the binary's alone, the command killed between the step's act and
-// its write, and right after its write. A person then meets the run in
-// either order, --check or --back first: never a step off the table, never a
-// refusal for good — --back ends at 0, and three more change nothing.
-func TestTheKillMatrix(t *testing.T) {
+// The fault matrix and the walk matrix run as one, side by side: the
+// seams of inProcess are theirs for as long as both run.
+func TestTheMatrices(t *testing.T) {
 	inProcess(t)
-	for _, kind := range []string{kindProcess, kindBinary} {
-		swapSteps, backSteps := recordsOf(t, kind)
-		for moment := range killMoments {
-			for order, backFirst := range orders {
-				for _, point := range swapSteps {
-					t.Run(kind+"/"+moment+"/"+order+"/upgrade/"+point, func(t *testing.T) {
-						t.Parallel()
-						k := newKillWorld(t, kind)
-						c := &cell{point: point, kind: moment}
-						k.deps.Fault = c.fault
-						if _, code := runIn(t, context.Background(), k.deps, k.args...); code != codeKilled || !c.hit.Load() {
-							t.Fatalf("no upgrade records %s: %d", point, code)
-						}
-						k.deps.Fault = nil
-						id, dir := runOf(t, k.deps)
-						afterKill(t, k.deps, id, backFirst)
-						k.done(t, id)
-						backAgain(t, k.deps, id, func() string { return k.snapshot(dir) })
-					})
-				}
-				for _, point := range backSteps {
-					t.Run(kind+"/"+moment+"/"+order+"/back/"+point, func(t *testing.T) {
-						t.Parallel()
-						k := newKillWorld(t, kind)
-						rep, code := runIn(t, context.Background(), k.deps, k.args...)
-						if code != exitOK {
-							t.Fatalf("upgrade: %d %s", code, rep.Summary)
-						}
-						c := &cell{point: point, kind: moment}
-						k.deps.Fault = c.fault
-						if _, code := runIn(t, context.Background(), k.deps, "--back", rep.Run.ID); code != codeKilled || !c.hit.Load() {
-							t.Fatalf("no way back records %s: %d", point, code)
-						}
-						k.deps.Fault = nil
-						afterKill(t, k.deps, rep.Run.ID, backFirst)
-						k.done(t, rep.Run.ID)
-						backAgain(t, k.deps, rep.Run.ID, func() string { return k.snapshot(rep.Run.Dir) })
-					})
-				}
-			}
-		}
-	}
+	t.Run("fault", func(t *testing.T) {
+		t.Parallel()
+		theFaultMatrix(t)
+	})
+	t.Run("walk", func(t *testing.T) {
+		t.Parallel()
+		theWalkMatrix(t)
+	})
 }
 
-func TestTheFaultMatrixOfAServer(t *testing.T) {
-	inProcess(t)
+func theFaultMatrix(t *testing.T) {
 	swapPoints, backPoints := pointsOf(t, kindProcess)
 	exists := func(item string) bool {
 		_, err := os.Stat(item)

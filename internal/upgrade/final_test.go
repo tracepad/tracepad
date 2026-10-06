@@ -14,6 +14,7 @@ import (
 
 // A zombie answers kill(pid, 0) and runs nothing: it is gone.
 func TestAZombieIsGone(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command("sh", "-c", "exit 0")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -32,6 +33,7 @@ func TestAZombieIsGone(t *testing.T) {
 // A link at the install path is someone else's install, never the command's
 // to replace.
 func TestALinkedBinaryIsNotTheCommands(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	real := filepath.Join(dir, "cellar", "tracepad")
 	_ = os.MkdirAll(filepath.Dir(real), 0o755)
@@ -50,6 +52,7 @@ func TestALinkedBinaryIsNotTheCommands(t *testing.T) {
 
 // Whichever source a data directory came from, a relative one is relative.
 func TestADataDirectoryFromAnySource(t *testing.T) {
+	t.Parallel()
 	serve := []string{"tracepad", "serve"}
 	for _, tc := range []struct {
 		argv []string
@@ -72,6 +75,7 @@ func TestADataDirectoryFromAnySource(t *testing.T) {
 
 // What answers must have opened this data directory.
 func TestANewServerThatOpenedAnotherDirectoryIsNotHealthy(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	w.host.elsewhere[fNew] = t.TempDir()
 	deps := w.deps()
@@ -86,6 +90,7 @@ func TestANewServerThatOpenedAnotherDirectoryIsNotHealthy(t *testing.T) {
 // The upgrade and the plan reach one verdict on one state: a named server
 // already current, another of the command's behind, is pending for both.
 func TestThePlanAndTheUpgradeAgree(t *testing.T) {
+	t.Parallel()
 	p := &plan{to: "0.2.0", later: []string{"server pid 2 (0.1.0): tracepad upgrade --data-dir /b"}}
 	code, summary := verdictOf(p)
 	if code != exitPending || !strings.Contains(summary, "server pid 2") {

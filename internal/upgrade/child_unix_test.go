@@ -11,6 +11,7 @@ import (
 // A child is in a process group of its own, so a terminal's SIGINT to the
 // command's group does not reach it.
 func TestAChildIsInAGroupOfItsOwn(t *testing.T) {
+	t.Parallel()
 	cmd := child(context.Background(), "sleep", "5")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

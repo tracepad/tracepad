@@ -59,10 +59,13 @@ var machines = func() map[string]machine {
 		stepChecked:         {stepStarted},
 		stepSkill:           {stepChecked},
 		stepBackRestored:    {stepBackBegun},
-		stepBackCleared:     {stepBackBegun, stepBackRestored},
-		stepBackAside:       {stepBackCleared},
-		stepBackMoved:       {stepBackAside},
-		stepBackBinary:      {stepBackCleared, stepBackMoved},
+		// After a kept server (#37 (c)) that has exited since: the way back
+		// that kept it cleared nothing, and the next one clears the path
+		// before it starts the old version again (#39).
+		stepBackCleared: {stepBackBegun, stepBackRestored, stepBackStarted, stepBackDone},
+		stepBackAside:   {stepBackCleared},
+		stepBackMoved:   {stepBackAside},
+		stepBackBinary:  {stepBackCleared, stepBackMoved},
 		// Again after it is done: a --back repeated finds the old version
 		// stopped since, and starts it (#31).
 		stepBackStarted: {stepBackBegun, stepBackBinary, stepBackStarted, stepBackDone},

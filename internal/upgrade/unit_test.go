@@ -24,6 +24,7 @@ import (
 )
 
 func TestReleaseOrder(t *testing.T) {
+	t.Parallel()
 	ordered := []string{"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-beta.1", "0.1.0-rc.1", "0.1.0-rc.2", "0.1.0-rc.10", "0.1.0", "0.1.1", "0.2.0", "1.0.0"}
 	for i := range ordered {
 		for k := range ordered {
@@ -116,6 +117,7 @@ func mirrorRelease(t *testing.T, mirror, v, says string, stable bool) {
 }
 
 func TestReleasesLikeTheInstallScript(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mirror := t.TempDir()
 	r := testReleases(t, mirror)
@@ -169,6 +171,7 @@ func TestReleasesLikeTheInstallScript(t *testing.T) {
 }
 
 func TestTheNewestCandidateIsNamedFromGitHubsAPI(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/releases":
@@ -197,6 +200,7 @@ func lockedDataDir(t *testing.T, pid int) string {
 }
 
 func TestWhatServerIsTheCommands(t *testing.T) {
+	t.Parallel()
 	bin, _ := filepath.EvalSymlinks(t.TempDir())
 	install := filepath.Join(bin, "tracepad")
 	data := lockedDataDir(t, 42)
@@ -250,6 +254,7 @@ func TestWhatServerIsTheCommands(t *testing.T) {
 }
 
 func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	id := "20261005-120000-0.1.0-abc123"
 	dir := filepath.Join(root, id)
@@ -301,6 +306,7 @@ func TestTheStateIsDataAndOnlyThisRuns(t *testing.T) {
 }
 
 func TestTheArchiveCountsOnlyWhenItReadsBackWhole(t *testing.T) {
+	t.Parallel()
 	data := t.TempDir()
 	db := bytes.Repeat([]byte("sqlite"), 50000)
 	_ = os.WriteFile(filepath.Join(data, "tracepad.db"), db, 0o600)
@@ -381,6 +387,7 @@ func TestTheArchiveCountsOnlyWhenItReadsBackWhole(t *testing.T) {
 }
 
 func TestTheCheckVerdicts(t *testing.T) {
+	t.Parallel()
 	version, traces, system := "0.2.0", int64(5), http.StatusOK
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -438,6 +445,7 @@ func TestTheCheckVerdicts(t *testing.T) {
 }
 
 func TestTheFlags(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"--plan", "--back", "x"},
 		{"--check", "x", "--back", "y"},
@@ -461,6 +469,7 @@ func TestTheFlags(t *testing.T) {
 }
 
 func TestCommandsArePastedAsTheyAreMeant(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"/home/u/tracepad-backups/x":                     "/home/u/tracepad-backups/x",
 		"/Users/me/Library/Application Support/tracepad": "'/Users/me/Library/Application Support/tracepad'",
@@ -480,6 +489,7 @@ func TestCommandsArePastedAsTheyAreMeant(t *testing.T) {
 }
 
 func TestOnlyWhatRunsOlderIsAChoice(t *testing.T) {
+	t.Parallel()
 	r := &runner{}
 	p := &plan{to: "0.2.0", f: Findings{Servers: []Server{
 		{Proc: Process{PID: 1}, DataDir: "/a", Ours: true, Version: "0.2.0"},
@@ -497,6 +507,7 @@ func TestOnlyWhatRunsOlderIsAChoice(t *testing.T) {
 // A run is taken only from a directory of the person's own, directly under
 // the backups directory (#30).
 func TestARunIsTakenOnlyFromThePersonsOwnDirectory(t *testing.T) {
+	t.Parallel()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	backups := filepath.Join(root, "tracepad-backups")
 	id := "20261006-120000-0.1.0-abc123"
@@ -532,6 +543,7 @@ func TestARunIsTakenOnlyFromThePersonsOwnDirectory(t *testing.T) {
 // agent's bridge runs one from a temporary directory, and upgrades the
 // installed one; a run's own copy is named upgrader, and does too.
 func TestTheInstallDirectoryIsWhereTheBinaryRuns(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	scriptBinary(t, filepath.Join(tmp, "tracepad"), "0.1.0")
 	for _, tc := range []struct{ named, self, want string }{
@@ -550,6 +562,7 @@ func TestTheInstallDirectoryIsWhereTheBinaryRuns(t *testing.T) {
 // A package manager's binary is the person's (the ninth review), a link or
 // not: Homebrew's Cellar, the Nix store, a snap, the system's directories.
 func TestAPackageManagersBinaryIsThePersons(t *testing.T) {
+	t.Parallel()
 	for path, managed := range map[string]bool{
 		"/opt/homebrew/Cellar/tracepad/0.1.0/bin/tracepad":     true,
 		"/usr/local/Cellar/tracepad/0.1.0/bin/tracepad":        true,

@@ -1101,9 +1101,11 @@ release: it refuses there before it looks at anything. The design is spec 054.
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
   a systemd service (system or `--user`) or a launchd job is yours, whatever
-  started it, and so is one whose cgroup cannot be read — the plan gives the
-  `systemctl restart` or `launchctl kickstart` for it. A terminal's session,
-  tmux, or the `nohup … &` the setup starts a server with is not a service. It
+  started it, and so is one whose cgroup cannot be read or names no session —
+  a container's root without systemd, a slice — since no manager can be ruled
+  out; the plan gives the `systemctl restart` or `launchctl kickstart` for a
+  service's. A terminal's session, tmux, or the `nohup … &` the setup starts a
+  server with is not a service. It
   is backed up with
   the server stopped (the data directory archived into
   `~/tracepad-backups/<run>/` and read back whole), the new binary — checked
@@ -1116,7 +1118,11 @@ release: it refuses there before it looks at anything. The design is spec 054.
   installed binary, at any version, the plan and the upgrade refuse — its next
   restart would be the new version with no backup — and say to stop it first.
   A way back puts the old binary back only where nothing runs it at a later
-  version.
+  version. What the command cannot read — a process, a lock on a file system
+  that cannot lock, the room on a disk, a version that is not said — is a
+  reason to stop, never a yes: it refuses with nothing changed, and a server
+  or container whose version it cannot tell is named as one that may be
+  behind.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not

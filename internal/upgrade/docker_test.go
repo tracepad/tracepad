@@ -149,6 +149,7 @@ func runReport(t *testing.T, deps Deps, args ...string) (Report, int) {
 // that upgrade it, and the upgrade refuses it the same way — exit 4, nothing
 // made, no docker call but the plan's two.
 func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
+	t.Parallel()
 	d := newFakeDocker(t)
 	d.add("tracepad-app", "0.1.0", "127.0.0.1", "4318", "tracepad-app", nil)
 	deps := containerDeps(t, d)
@@ -174,9 +175,11 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 }
 
 // Compose's container is upgraded through its Compose file; one already at
-// the version, or one that does not say its version here, is not called
-// behind; a daemon that does not answer is said, never taken for none.
+// the version is not called behind, and one that does not say its version
+// here may be, and gets the commands (the audit of #223); a daemon that does
+// not answer is said, never taken for none.
 func TestWhatThePlanSaysOfContainers(t *testing.T) {
+	t.Parallel()
 	d := newFakeDocker(t)
 	d.add("obs-tracepad-1", "0.1.0", "127.0.0.1", "4318", "obs_data", map[string]string{"com.docker.compose.project": "obs"})
 	d.add("tracepad-current", "0.2.0", "127.0.0.1", "4319", "current", nil)
@@ -184,7 +187,7 @@ func TestWhatThePlanSaysOfContainers(t *testing.T) {
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	all := strings.Join(rep.Person, "\n")
 	if code != exitDecide || !strings.Contains(all, "docker compose up -d") || !strings.Contains(all, "the project obs") ||
-		strings.Contains(all, "tracepad-current") || strings.Contains(all, "tracepad-open") {
+		strings.Contains(all, "tracepad-current") || !strings.Contains(all, "container tracepad-open does not say its version") {
 		t.Errorf("%d %s\n%s", code, rep.Summary, all)
 	}
 

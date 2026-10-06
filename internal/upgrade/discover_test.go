@@ -25,6 +25,7 @@ func (listed) Start(StartSpec) (Started, error)      { return nil, os.ErrInvalid
 // under one deadline: three of them must not add up past it (the fourth
 // review: the install script stops waiting at fifteen seconds).
 func TestTheLookAtTheMachineKeepsItsDeadline(t *testing.T) {
+	t.Parallel()
 	var procs []Process
 	for i := 0; i < 3; i++ {
 		l, err := net.Listen("tcp", "127.0.0.1:0")

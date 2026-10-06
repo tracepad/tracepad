@@ -54,8 +54,10 @@ type Findings struct {
 	// Notes say what could not be looked at, so that "none found" is never
 	// a larger claim than the search.
 	Notes []string
-	// complete is whether every candidate process could be read.
-	complete bool
+	// complete is whether everything was looked at: every candidate process
+	// and Docker. processes is whether every candidate process could be
+	// read — what a binary's replacement needs (#39).
+	complete, processes bool
 }
 
 // Probe is what answers at the default address.
@@ -145,7 +147,7 @@ func lockedBy(dataDir string) (int, error) {
 
 // lockHeld says whether a server holds the data directory's database now.
 func lockHeld(dataDir string) (bool, error) {
-	return store.Locked(filepath.Join(dataDir, dataDBName))
+	return locked(filepath.Join(dataDir, dataDBName))
 }
 
 // loopbackURL is the address to ask a server listening on listen, when that
@@ -269,7 +271,7 @@ func (r *runner) discover(ctx context.Context) Findings {
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	f := Findings{complete: true}
+	f := Findings{complete: true, processes: true}
 	var (
 		wg         sync.WaitGroup
 		containers []Container
@@ -283,10 +285,10 @@ func (r *runner) discover(ctx context.Context) Findings {
 	procs, unread, err := r.deps.Sys.Candidates()
 	switch {
 	case err != nil:
-		f.complete = false
+		f.complete, f.processes = false, false
 		f.Notes = append(f.Notes, "the processes could not be listed ("+err.Error()+"), so no server was found that way")
 	case unread > 0:
-		f.complete = false
+		f.complete, f.processes = false, false
 		f.Notes = append(f.Notes, fmt.Sprintf("%d process(es) named tracepad could not be read", unread))
 	}
 	wg.Wait()
@@ -322,6 +324,9 @@ func (r *runner) discover(ctx context.Context) Findings {
 	f.Containers = containers
 	if note != "" {
 		f.Notes = append(f.Notes, note)
+		// Docker there and not answering: what answers on 4318 may be a
+		// container's, and is not called no one's (the audit of #223).
+		f.complete = f.complete && r.deps.Docker == nil
 	}
 	f.Probe = r.attribute(probe, f)
 	return f

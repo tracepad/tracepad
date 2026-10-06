@@ -5,6 +5,7 @@ package upgrade
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 // swaps it: the command holds its lock from the stop to the start (spec 054
 // #26, B).
 func TestAServerBroughtBackAfterTheStopCannotTakeTheData(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	var intruder Started
@@ -52,6 +54,7 @@ func TestAServerBroughtBackAfterTheStopCannotTakeTheData(t *testing.T) {
 // replacement puts there: a way back of a binary-only run, after a server
 // started on the newer binary, is refused (spec 054 #26, C).
 func TestNoReplacementPutsAnOlderBinaryUnderANewerServer(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	// The binary alone: stop the world's server first, so no server is the
@@ -81,6 +84,7 @@ func TestNoReplacementPutsAnOlderBinaryUnderANewerServer(t *testing.T) {
 // A --check that finds healthy what the upgrade left to decide does what a
 // healthy upgrade does after it (spec 054 #26, E).
 func TestACheckThatFindsItHealthyFinishesTheRun(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	w.host.uncounted[fNew] = true
@@ -121,6 +125,7 @@ func (h *startHost) Start(spec StartSpec) (Started, error) {
 // not leave it to the server it started — so the way back that follows finds
 // the data as the command left it, and nothing else on it.
 func TestTheDataIsHeldAcrossEveryStart(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		with func(w *fakeWorld, h *startHost)
@@ -185,6 +190,7 @@ func TestTheDataIsHeldAcrossEveryStart(t *testing.T) {
 // for the start alone, and the command's again after a start that fails;
 // after one that works it is the server's.
 func TestLaunchHoldsTheDataOnEitherSideOfTheStart(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	procs, _, _ := w.host.Candidates()
 	for _, p := range procs {
@@ -239,6 +245,7 @@ func loadStateUnchecked(dir string) (*State, error) {
 // The lock on runs is taken before a run's state is read (#30): a state
 // another invocation holds is not read at all.
 func TestARunIsReadOnlyUnderTheLock(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	dir := filepath.Join(deps.Backups, "20261006-120000-0.5.0-abc123")
@@ -266,6 +273,7 @@ func TestARunIsReadOnlyUnderTheLock(t *testing.T) {
 // restart would be the new version with no backup and no check. A binary-
 // only run is refused the same way.
 func TestNoBinaryIsPutUnderAnotherServer(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		listen func(t *testing.T) string
@@ -340,6 +348,7 @@ func TestAStepOffTheTableIsNeverWritten(t *testing.T) {
 // person who restarts it after a decide, the same version on the same data,
 // gets healthy, not "exited".
 func TestACheckFindsTheServerThePersonRestarted(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	w.host.uncounted[fNew] = true
@@ -366,6 +375,7 @@ func TestACheckFindsTheServerThePersonRestarted(t *testing.T) {
 // the seventh review): after a later run put a newer version there, the
 // binary-only run's --back is refused with nothing touched.
 func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
+	t.Parallel()
 	t.Run("binary only", func(t *testing.T) {
 		w := newFakeWorld(t, 2)
 		procs, _, _ := w.host.Candidates()
@@ -394,6 +404,7 @@ func TestAWayBackLeavesALaterRunsBinary(t *testing.T) {
 // refusal on any of them leaves the server running, its data and the
 // installed binary as they were, and nothing begun.
 func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		after func(w *fakeWorld, dir string)
@@ -465,6 +476,7 @@ func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
 // names it with what upgrades it, and does not call anything behind — exit
 // 0, not the 4 the install script reads as "still running an older version".
 func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	if rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data); code != exitOK {
@@ -484,6 +496,7 @@ func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
 // going on would act on what is not recorded. Once the disk takes writes,
 // --back reads what is on disk and goes back.
 func TestAStateThatCannotBeWrittenStopsTheRun(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == 0 {
 		t.Skip("root writes any directory")
 	}
@@ -515,6 +528,7 @@ func TestAStateThatCannotBeWrittenStopsTheRun(t *testing.T) {
 // set-aside whose directories cannot be read, or an install path that cannot
 // be — which would read as "taken off" — refuses, and is not taken back.
 func TestSettlingRefusesWhatItCannotSee(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == 0 {
 		t.Skip("root reads any directory")
 	}
@@ -553,6 +567,7 @@ func TestSettlingRefusesWhatItCannotSee(t *testing.T) {
 // (the eighth review): it is the person's (classifyServer), and the plan's
 // order of versions refuses one too, as a second line.
 func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
+	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	w.host.setSlow(time.Second)
@@ -567,6 +582,7 @@ func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
 // The plan calls a binary in Homebrew's Cellar the person's, a link or not,
 // with what upgrades it (the ninth review).
 func TestABinaryInTheCellarIsThePersons(t *testing.T) {
+	t.Parallel()
 	cellar := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.1.0", "bin")
 	_ = os.MkdirAll(cellar, 0o755)
 	scriptBinary(t, filepath.Join(cellar, "tracepad"), "0.1.0")
@@ -575,5 +591,208 @@ func TestABinaryInTheCellarIsThePersons(t *testing.T) {
 	rep, code := runReport(t, deps, "--plan")
 	if rep.Binary == nil || rep.Binary.Whose != "person" || !strings.Contains(rep.Binary.Reason, "brew upgrade tracepad") || code == exitPending {
 		t.Errorf("%d %+v", code, rep.Binary)
+	}
+}
+
+// On a file system that cannot lock, "cannot tell" is never "free" (spec 054
+// #39). Where the runs are, every mode refuses before it reads a run; where
+// the data is, a way back refuses with nothing touched, the new version
+// still running on its data.
+func TestAFileSystemThatCannotLockIsNeverFree(t *testing.T) {
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitOK {
+		t.Fatalf("%d %s", code, rep.Summary)
+	}
+	savedTry, savedLocked := tryLock, locked
+	t.Cleanup(func() { tryLock, locked = savedTry, savedLocked })
+	cannot := func(under string) {
+		tryLock = func(db string) (func(), bool, error) {
+			if strings.HasPrefix(db, under) {
+				return nil, false, store.ErrLocksUnsupported
+			}
+			return savedTry(db)
+		}
+		locked = func(db string) (bool, error) {
+			if strings.HasPrefix(db, under) {
+				return false, store.ErrLocksUnsupported
+			}
+			return savedLocked(db)
+		}
+	}
+	cannot(deps.Backups)
+	for _, args := range [][]string{{"--back", rep.Run.ID}, {"--check", rep.Run.ID}} {
+		if r, code := runIn(t, context.Background(), deps, args...); code != exitRefused || !strings.Contains(r.Summary, "cannot lock") {
+			t.Errorf("%q, runs on a file system without locks: %d %s", args, code, r.Summary)
+		}
+	}
+	cannot(w.data)
+	pid, _ := lockedBy(w.data)
+	back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+	if code == exitOK || !strings.Contains(back.Summary, "cannot lock") || !strings.Contains(back.Summary, "nothing was touched") {
+		t.Errorf("--back, data on a file system without locks: %d %s", code, back.Summary)
+	}
+	if !w.host.Alive(pid) || w.answers() != fNew {
+		t.Error("the new version was stopped")
+	}
+}
+
+// The high fail-open sites of the audit of #223, each injected: what could
+// not be read, listed or measured refuses, and nothing is stopped or moved
+// (spec 054 #39).
+func TestWhatCannotBeReadRefuses(t *testing.T) {
+	setProc := func(w *fakeWorld, f func(p *Process)) {
+		w.host.mu.Lock()
+		defer w.host.mu.Unlock()
+		for _, s := range w.host.procs {
+			if !s.stopped {
+				f(&s.p)
+			}
+		}
+	}
+	// Before the stop: the upgrade and its plan refuse, the server runs.
+	for _, tc := range []struct {
+		name  string
+		setup func(w *fakeWorld)
+		says  string
+		// prepared: only the preparation reads it, and the plan does not.
+		prepared bool
+	}{
+		{"processes that could not be read (1)", func(w *fakeWorld) { w.host.unread = 1 }, "could not be read", false},
+		{"a server whose executable could not be read (5)", func(w *fakeWorld) {
+			other := w.t.TempDir()
+			argv := []string{"tracepad", "serve", "--listen", freeAddr(w.t), "--data-dir", other}
+			s, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")})
+			if err != nil {
+				w.t.Fatal(err)
+			}
+			w.host.mu.Lock()
+			w.host.procs[s.PID()].p.Exe = ""
+			w.host.mu.Unlock()
+		}, "is not this run's", false},
+		{"a working directory that could not be read (6)", func(w *fakeWorld) { setProc(w, func(p *Process) { p.Cwd = "" }) }, "working directory could not be read", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newFakeWorld(t, 2)
+			tc.setup(w)
+			pid, _ := lockedBy(w.data)
+			for _, mode := range [][]string{{"--plan"}, nil} {
+				rep, code := runIn(t, context.Background(), w.deps(), append(mode, "--to", fNew, "--data-dir", w.data)...)
+				if mode != nil && tc.prepared && code == exitPending {
+					continue
+				}
+				if code != exitRefused || !strings.Contains(rep.Summary, tc.says) {
+					t.Errorf("%q: %d %s", mode, code, rep.Summary)
+				}
+			}
+			if !w.host.Alive(pid) || w.answers() != fOld {
+				t.Error("the server was stopped")
+			}
+		})
+	}
+	// During a way back: it refuses with nothing touched, the new version
+	// running on its data.
+	for _, tc := range []struct {
+		name   string
+		setup  func(w *fakeWorld, newPID int)
+		says   string
+		global bool // sets a package seam: not beside the others
+	}{
+		{"processes that could not be read (1)", func(w *fakeWorld, _ int) { w.host.unread = 1 }, "could not be read", false},
+		{"the room beside the data that could not be told (7)", func(w *fakeWorld, _ int) {
+			saved := freeBytes
+			freeBytes = func(string) (int64, error) { return 0, errors.New("statfs: not implemented") }
+			w.t.Cleanup(func() { freeBytes = saved })
+		}, "could not tell the room", true},
+		{"the run's own server that could not be read (9)", func(w *fakeWorld, newPID int) { w.host.unreadable[newPID] = true }, "nothing was touched", false},
+	} {
+		t.Run("back/"+tc.name, func(t *testing.T) {
+			if !tc.global {
+				t.Parallel()
+			}
+			w := newFakeWorld(t, 2)
+			deps := w.deps()
+			rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+			if code != exitOK {
+				t.Fatalf("%d %s", code, rep.Summary)
+			}
+			st, _ := loadState(rep.Run.Dir)
+			tc.setup(w, st.Process.NewPID)
+			back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
+			if code == exitOK || !strings.Contains(back.Summary, tc.says) {
+				t.Errorf("%d %s", code, back.Summary)
+			}
+			if !w.host.Alive(st.Process.NewPID) || w.answers() != fNew {
+				t.Error("the new version was stopped")
+			}
+			if after, _ := filepath.Glob(w.data + ".after-*"); len(after) > 0 {
+				t.Errorf("set aside: %q", after)
+			}
+		})
+	}
+}
+
+// Only what is not there is absent at the install path (8): one that cannot
+// be looked at is not cleared, and the step is not written.
+func TestAPathThatCannotBeLookedAtIsNotCleared(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root looks at any directory")
+	}
+	bin := filepath.Join(t.TempDir(), "bin")
+	_ = os.Mkdir(bin, 0o700)
+	scriptBinary(t, filepath.Join(bin, "tracepad"), fNew)
+	data := t.TempDir()
+	j := &job{r: &runner{deps: Deps{Now: time.Now, Version: scriptVersion}}, rep: &Report{}, dir: t.TempDir(),
+		st: &State{Kind: kindProcess, From: fOld, Process: &ProcessState{DataDir: data}, Binary: &BinaryState{Path: filepath.Join(bin, "tracepad")},
+			Steps: []Step{{Name: stepPrepared}, {Name: stepStopSent}, {Name: stepStopped}, {Name: stepArchived}, {Name: stepBackBegun}}}}
+	if ok, err := j.hold(data); !ok {
+		t.Fatal(err)
+	}
+	defer j.release()
+	_ = os.Chmod(bin, 0)
+	defer os.Chmod(bin, 0o700)
+	if _, ok := j.clearPath(context.Background()); ok || j.st.has(stepBackCleared) {
+		t.Errorf("cleared a path it could not look at: %+v", j.st.Steps)
+	}
+}
+
+// The check at the replacement counts a server whose executable could not be
+// read, as the plan does (5): it may run from the binary.
+func TestAServerOfUnknownBinaryIsCounted(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	w.host.mu.Lock()
+	for _, s := range w.host.procs {
+		s.p.Exe = ""
+	}
+	w.host.mu.Unlock()
+	r := &runner{deps: w.deps()}
+	for _, upgrade := range []bool{true, false} {
+		if err := r.serversOn(context.Background(), w.install, fNew, upgrade); err == nil || !strings.Contains(err.Error(), "does not say which binary") {
+			t.Errorf("upgrade %v: %v", upgrade, err)
+		}
+	}
+}
+
+// A skill that was not installed again is a note, and its step is not
+// written: the next --check tries again (17).
+func TestASkillNotInstalledIsNotRecorded(t *testing.T) {
+	t.Parallel()
+	w := newFakeWorld(t, 2)
+	deps := w.deps()
+	marker := filepath.Join(w.home, ".claude", "skills", "tracepad", ".version")
+	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
+	_ = os.WriteFile(marker, []byte(fOld), 0o600)
+	deps.Skills = func(context.Context, string, string, ...string) (string, error) {
+		return "no room", errors.New("exit 1")
+	}
+	rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
+	if code != exitOK || !strings.Contains(strings.Join(rep.Notes, " "), "was not installed again") {
+		t.Fatalf("%d %s %q", code, rep.Summary, rep.Notes)
+	}
+	if st, _ := loadState(rep.Run.Dir); st.has(stepSkill) {
+		t.Error("a skill not installed is recorded as installed")
 	}
 }

@@ -308,8 +308,14 @@ func ghAttest(ctx context.Context, archive string) (string, error) {
 	if err != nil {
 		return "attestation not checked: gh is not installed", nil
 	}
-	if child(ctx, gh, "auth", "status").Run() != nil {
-		return "attestation not checked: gh is not logged in", nil
+	// Logged out is what the install script's rule skips for (#3); a gh that
+	// could not be asked is said as that (the audit of #223).
+	if err := child(ctx, gh, "auth", "status").Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return "attestation not checked: gh is not logged in", nil
+		}
+		return fmt.Sprintf("attestation not checked: gh could not be asked whether it is logged in (%v)", err), nil
 	}
 	out, err := child(ctx, gh, "attestation", "verify", archive, "--repo", repo).CombinedOutput()
 	if err != nil {

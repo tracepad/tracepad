@@ -22,7 +22,7 @@ func (procSystem) Candidates() ([]Process, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	self, _ := os.Readlink("/proc/self/ns/pid") // ignored: unread, every process is in another namespace, and the person's
+	self, _ := os.Readlink("/proc/self/ns/pid") // ignored: unread, no process is passed over as another namespace's: each stays a candidate
 	uid := os.Getuid()
 	var procs []Process
 	unread := 0
@@ -32,7 +32,24 @@ func (procSystem) Candidates() ([]Process, int, error) {
 			continue
 		}
 		dir := "/proc/" + e.Name()
-		if owner, ok := procUID(dir); !ok || owner != uid {
+		owner, ok := procUID(dir)
+		if !ok {
+			// Its status unread (hidepid, or a race): the directory's owner
+			// is the process's. One that cannot be told may be this user's,
+			// and counts as unread (the audit of #223).
+			if info, err := os.Stat(dir); err == nil {
+				if st, sok := info.Sys().(*syscall.Stat_t); sok {
+					owner, ok = int(st.Uid), true
+				}
+			}
+			if !ok {
+				if alive(pid) {
+					unread++
+				}
+				continue
+			}
+		}
+		if owner != uid {
 			continue
 		}
 		// Another PID namespace is a container's process: the container's.

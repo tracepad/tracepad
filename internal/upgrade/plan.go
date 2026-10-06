@@ -107,8 +107,11 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	// The plan refuses what the upgrade would (#38): a binary put under
 	// another server of it, whatever version that one runs.
 	if p.replaceBinary && len(p.choose) == 0 {
+		if !p.f.processes {
+			return nil, fmt.Sprintf("processes of this user could not be read, and any of them may run from %s; nothing can be put there until they can (the report's notes say how many)", bin.Path)
+		}
 		for _, s := range p.f.Servers {
-			if (p.server == nil || s.Proc.PID != p.server.Proc.PID) && sameFile(s.Proc.Exe, bin.Path) {
+			if (p.server == nil || s.Proc.PID != p.server.Proc.PID) && (s.Proc.Exe == "" || sameFile(s.Proc.Exe, bin.Path)) {
 				return nil, underAnother(s.Proc.PID, bin.Path, s.Version, s.DataDir, to)
 			}
 		}
@@ -191,26 +194,38 @@ func (r *runner) othersBehind(p *plan) {
 	for i := range p.f.Servers {
 		s := &p.f.Servers[i]
 		switch {
-		case s == p.server || !older(s.Version):
+		case s == p.server:
+		case s.Version == "":
+			// Unknown is never current (the audit of #223): it may be behind.
+			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
+		case !older(s.Version):
 		case s.Ours:
 			p.later = append(p.later, fmt.Sprintf("server pid %d (%s): %s --data-dir %s", s.Proc.PID, s.Version, r.self(), shq(s.DataDir)))
 		default:
 			p.person = append(p.person, fmt.Sprintf("server pid %d runs %s; %s. %s", s.Proc.PID, s.Version, s.Reason, serverAdvice(*s)))
 		}
 	}
-	// A container is the person's (#36): one behind gets the commands that
-	// upgrade it. One that does not say its version on this machine is in
-	// the report's list of containers, and is not called behind.
+	// A container is the person's (#36): one behind, or one that does not
+	// say its version on this machine and may be, gets the commands that
+	// upgrade it.
 	for _, c := range p.f.Containers {
-		if older(c.Version) {
+		switch {
+		case c.Version == "":
+			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
+		case older(c.Version):
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(c, p.to)))
 		}
 	}
-	if b := p.f.Binary; !b.Ours && b.Exists && older(b.Version) {
-		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, b.Version, b.Reason))
+	// A binary runs nothing (#37 (e)): one behind, or one that does not say
+	// its version, is named, and not counted.
+	if b := p.f.Binary; !b.Ours && b.Exists && (b.Version == "" || older(b.Version)) {
+		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
 	}
 	if b := p.f.Binary; b.First != "" {
-		if v, err := r.deps.Version(context.Background(), b.First); err == nil && older(v) {
+		v, err := r.deps.Version(context.Background(), b.First)
+		if err != nil {
+			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
+		} else if older(v) {
 			advice := "its package manager upgrades it"
 			if pm := packageManager(canonicalPath(b.First)); pm != "" {
 				advice = pm
@@ -260,7 +275,7 @@ func verdictOf(p *plan) (int, string) {
 	case len(p.later) > 0:
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
 	case len(p.person) > 0:
-		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, is yours.", p.to)
+		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, or may be, is yours.", p.to)
 	}
 	return exitOK, fmt.Sprintf("Everything this command looks after runs %s already.", p.to)
 }

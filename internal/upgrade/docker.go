@@ -131,7 +131,8 @@ const containerReason = "the command does not stop, recreate or go back from a c
 // be asked; an error is never taken for "no containers".
 func (r *runner) containers(ctx context.Context) ([]Container, string) {
 	if r.deps.Docker == nil {
-		return nil, ""
+		// Said, not taken for "no containers" (the audit of #223).
+		return nil, "docker is not on PATH, so containers were not looked for"
 	}
 	out, err := r.deps.Docker.Run(ctx, "ps", "-q", "--no-trunc")
 	if err != nil {
@@ -207,6 +208,10 @@ func containerAdvice(c Container, to string) string {
 		return fmt.Sprintf("Upgrade it with Compose (%s): back up its volume as docs/docker.md shows, set the image to %s in the project %s's Compose file, then: docker compose up -d",
 			docsDocker, image, shq(c.Compose))
 	}
+	version := c.Version
+	if version == "" {
+		version = "backup"
+	}
 	vol := c.Volume
 	if vol == "" {
 		vol = "<its /data volume>"
@@ -214,7 +219,7 @@ func containerAdvice(c Container, to string) string {
 	return fmt.Sprintf("Upgrade it yourself (%s): docker stop %s; "+
 		"docker run --rm --mount type=volume,src=%s,dst=/data,readonly -v \"$PWD:/backup\" %s sh -c 'umask 077 && tar czf /backup/%s-%s.tar.gz -C /data .'; "+
 		"docker pull %s; docker rename %s %s-old; then run %s as %s with the options %s was created with, and remove %s-old once it is healthy",
-		docsDocker, shq(c.Name), shq(vol), busybox, c.Name, c.Version, image, shq(c.Name), c.Name, image, shq(c.Name), shq(c.Name), shq(c.Name))
+		docsDocker, shq(c.Name), shq(vol), busybox, c.Name, version, image, shq(c.Name), c.Name, image, shq(c.Name), shq(c.Name), shq(c.Name))
 }
 
 func firstLine(s string) string {

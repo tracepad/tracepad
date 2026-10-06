@@ -21,7 +21,7 @@ func isMountPoint(dir string) bool {
 }
 
 // freeBytes is the room for this user on the file system that holds dir.
-func freeBytes(dir string) (int64, error) {
+func statFree(dir string) (int64, error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(dir, &st); err != nil {
 		return 0, err

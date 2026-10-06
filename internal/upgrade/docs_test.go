@@ -18,6 +18,7 @@ var upgradeLine = regexp.MustCompile("tracepad\"? upgrade([^`\\n]*)")
 // docs, the README and the skill to the flags the command has (spec 054 #16):
 // an agent runs them as written.
 func TestTheDocsNameOnlyTheCommandsFlags(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join("..", "..")
 	var files []string
 	for _, pattern := range []string{"docs/*.md", "README.md", "agent/skills/tracepad/*.md", "agent/skills/tracepad/references/*.md"} {
@@ -57,6 +58,7 @@ func TestTheDocsNameOnlyTheCommandsFlags(t *testing.T) {
 // TestTheDocsNameEveryFieldOfTheReport holds cli.md's list of `--json`'s
 // fields to the report's (the sixth review found `back_check` missing).
 func TestTheDocsNameEveryFieldOfTheReport(t *testing.T) {
+	t.Parallel()
 	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "cli.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +83,7 @@ func TestTheDocsNameEveryFieldOfTheReport(t *testing.T) {
 // them): every status the plan returns is in the skill's plan, every one the
 // upgrade returns has its own line in the skill's upgrade section.
 func TestTheSkillReadsTheExitTable(t *testing.T) {
+	t.Parallel()
 	read := func(parts ...string) string {
 		b, err := os.ReadFile(filepath.Join(append([]string{"..", ".."}, parts...)...))
 		if err != nil {

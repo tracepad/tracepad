@@ -8,6 +8,7 @@ import (
 // A process whose own unit is a service is a manager's, whichever service,
 // and the command leaves it (spec 054 #29); a session's or a scope's is not.
 func TestAServiceManagersProcessIsThePersons(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, cgroup, managed string
 	}{
@@ -23,14 +24,16 @@ func TestAServiceManagersProcessIsThePersons(t *testing.T) {
 		{"a terminal's session", "0::/user.slice/user-1000.slice/session-3.scope\n", ""},
 		{"tmux under a user manager", "0::/user.slice/user-1000.slice/user@1000.service/app.slice/tmux-spawn-1.scope\n", ""},
 		{"a desktop terminal", "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-terminal-7.scope\n", ""},
-		{"a container's root, no systemd", "0::/\n", ""},
+
 		{"a v1 session", "4:memory:/user.slice\n1:name=systemd:/user.slice/user-1000.slice/session-2.scope\n", ""},
 	} {
 		if got := systemdUnit(tc.cgroup); got != tc.managed {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.managed)
 		}
 	}
-	for _, cgroup := range []string{"", "4:memory:/user.slice\n"} {
+	// What says nothing rules nothing out: no cgroup, no systemd line, the
+	// root (a container's namespace, another init), a slice.
+	for _, cgroup := range []string{"", "4:memory:/user.slice\n", "0::/\n", "0::/user.slice/user-1000.slice\n"} {
 		if got := systemdUnit(cgroup); !strings.HasPrefix(got, "its cgroup") {
 			t.Errorf("%q: %q, want it not ruled out", cgroup, got)
 		}

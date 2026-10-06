@@ -40,6 +40,17 @@ type job struct {
 	held map[string]func()
 }
 
+// freeBytes is the room on a directory's file system: a seam, so a test can
+// give the command one that cannot say.
+var freeBytes = statFree
+
+// tryLock and locked are the store's lock protocol (spec 054 #28): seams, so
+// a test can give the command a file system that cannot lock (#39).
+var (
+	tryLock = store.TryLock
+	locked  = store.Locked
+)
+
 // hold takes the lock of dataDir's database, as a server takes it, and
 // keeps it until release: a server a shell loop or a supervisor brings back
 // while the command archives or swaps the data cannot take the database and
@@ -49,7 +60,7 @@ func (j *job) hold(dataDir string) (ok bool, err error) {
 	if j.holds(dataDir) {
 		return true, nil
 	}
-	release, ok, err := store.TryLock(filepath.Join(dataDir, dataDBName))
+	release, ok, err := tryLock(filepath.Join(dataDir, dataDBName))
 	if err != nil || !ok {
 		return ok, err
 	}
@@ -385,7 +396,7 @@ func (r *runner) lockRuns(rep *Report) (release func(), ok bool) {
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: "+err.Error()
 		return nil, false
 	}
-	release, ok, err := store.TryLock(filepath.Join(r.deps.Backups, "runs"))
+	release, ok, err := tryLock(filepath.Join(r.deps.Backups, "runs"))
 	switch {
 	case err != nil:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: could not lock "+r.deps.Backups+": "+err.Error()
@@ -509,12 +520,17 @@ func (r *runner) serversOn(ctx context.Context, path, version string, upgrade bo
 		return fmt.Errorf("%d processes of this user could not be read, and any of them may run from %s; nothing can be put there until they can", unread, path)
 	}
 	for _, p := range procs {
-		if slices.Contains(own, p.PID) || !sameFile(p.Exe, path) {
+		// A server whose executable could not be read may run from path:
+		// it is counted (the audit of #223), as one that does not answer is.
+		if slices.Contains(own, p.PID) || (p.Exe != "" && !sameFile(p.Exe, path)) {
 			continue
 		}
 		dataDir, listen, err := resolveServer(p)
 		if errors.Is(err, errNotServer) {
 			continue
+		}
+		if p.Exe == "" {
+			return fmt.Errorf("server pid %d on %s does not say which binary it runs, so whether it runs %s cannot be told; nothing is put there while it runs", p.PID, dataDir, path)
 		}
 		v := ""
 		if url, ok := loopbackURL(listen); ok && err == nil {
@@ -588,10 +604,19 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 	log := s.Proc.Stdout
 	if log == "" {
 		log = filepath.Join(s.DataDir, "server.log")
+		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("where server pid %d writes its output is not a file the command can tell (a terminal, a pipe, or unread); the restarted server writes to %s", s.Proc.PID, log))
 	}
 	st.Process = &ProcessState{PID: s.Proc.PID, DataDir: s.DataDir, Listen: s.Listen, URL: s.URL, Log: log, Old: old}
 	j.spec = ServerSpec{Exe: st.Binary.Path, Argv: s.Proc.Argv, Env: s.Proc.Env, Dir: s.Proc.Cwd}
-	if info, err := os.Stat(j.spec.Dir); j.spec.Dir == "" || err != nil || !info.IsDir() {
+	info, err := os.Stat(j.spec.Dir)
+	switch {
+	case j.spec.Dir == "":
+		// Not read is not gone (the audit of #223): where it was started
+		// cannot be told, and it is started nowhere else silently.
+		return fmt.Sprintf("server pid %d's working directory could not be read, so it cannot be started again where it was: restart it yourself", s.Proc.PID)
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		return fmt.Sprintf("server pid %d's working directory %s cannot be looked at (%v): restart it yourself", s.Proc.PID, s.Proc.Cwd, err)
+	case err != nil || !info.IsDir():
 		// Its working directory is gone (a temporary directory, a worktree
 		// removed since): it would not start there again. It starts in its
 		// data directory — unless an argument is relative to the directory
@@ -599,9 +624,7 @@ func (j *job) prepareProcess(ctx context.Context, p *plan) string {
 		if relativeDataDir(s.Proc) {
 			return fmt.Sprintf("server pid %d's working directory %s is gone, and its arguments name paths relative to it: restart it yourself", s.Proc.PID, s.Proc.Cwd)
 		}
-		if s.Proc.Cwd != "" {
-			j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("server pid %d's working directory %s is gone; it starts again in its data directory, %s", s.Proc.PID, s.Proc.Cwd, s.DataDir))
-		}
+		j.rep.Notes = append(j.rep.Notes, fmt.Sprintf("server pid %d's working directory %s is gone; it starts again in its data directory, %s", s.Proc.PID, s.Proc.Cwd, s.DataDir))
 		j.spec.Dir = s.DataDir
 	}
 	if err := writeJSON(filepath.Join(j.dir, "server.json"), j.spec); err != nil {
@@ -749,8 +772,16 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 	// records the new server. A server that resolved its data elsewhere — a
 	// relative path in its environment, say — answers healthy on an empty
 	// database (the final review).
-	if c.Verdict != verdictNotHealthy && c.Health != "" && !recordsPID(ps.DataDir, ps.NewPID) {
-		c.Verdict, c.Why = verdictNotHealthy, fmt.Sprintf("the new server answers, but did not open %s", ps.DataDir)
+	if c.Verdict != verdictNotHealthy && c.Health != "" {
+		// A lock whose record cannot be read cannot say either way: the
+		// person decides, as on a count that cannot be read (the audit of
+		// #223).
+		switch recorded, err := lockedBy(ps.DataDir); {
+		case err != nil:
+			c.Verdict, c.Why = verdictDecide, fmt.Sprintf("the new server answers, but the lock of %s cannot be read (%v), so whether it opened it cannot be told", ps.DataDir, err)
+		case recorded != ps.NewPID:
+			c.Verdict, c.Why = verdictNotHealthy, fmt.Sprintf("the new server answers, but did not open %s", ps.DataDir)
+		}
 	}
 	j.verdict(ctx, c)
 }
@@ -875,8 +906,7 @@ func (j *job) finishHealthy(ctx context.Context) {
 	if st.has(stepSkill) {
 		return
 	}
-	if st.Binary != nil && st.Binary.Path != "" {
-		j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, st.To)
+	if st.Binary != nil && st.Binary.Path != "" && j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, st.To) {
 		j.step(stepSkill)
 	}
 }
@@ -919,9 +949,13 @@ func (j *job) upgradeCmd(args string) string {
 func (j *job) refresh(ctx context.Context) {
 	rep, r := j.rep, j.r
 	if rep.Binary != nil {
-		if v, err := r.deps.Version(ctx, rep.Binary.Path); err == nil {
-			rep.Binary.Version = v
+		// What it is now, or that it cannot be told: never the version from
+		// before the run (the audit of #223).
+		v, err := r.deps.Version(ctx, rep.Binary.Path)
+		if err != nil {
+			rep.Notes = append(rep.Notes, fmt.Sprintf("%s does not say its version after the run: %v", rep.Binary.Path, err))
 		}
+		rep.Binary.Version = v
 	}
 	for i := range rep.Servers {
 		s := &rep.Servers[i]
@@ -950,8 +984,9 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 		rep.Run = nil
 		return
 	}
-	r.reinstallSkill(ctx, rep, st.Binary.Path, st.To)
-	j.step(stepSkill)
+	if r.reinstallSkill(ctx, rep, st.Binary.Path, st.To) {
+		j.step(stepSkill)
+	}
 	rep.ExitCode = exitOK
 	rep.Summary = fmt.Sprintf("Upgraded the binary to %s; no server of the command's runs it.", st.To)
 	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: "+j.upgradeCmd("--back "+st.Run))
@@ -959,10 +994,21 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 
 // reinstallSkill installs the skill again, with the binary at bin when it is
 // version to, wherever a copy carries its marker (Decision 12).
-func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string) {
-	if v, err := r.deps.Version(ctx, bin); err != nil || v != to {
-		return
+//
+// It answers whether that is done, so the run records it: a binary that does
+// not say its version, a marker that cannot be looked at, or an install that
+// failed is a note, and is not done (the audit of #223). A binary that is not
+// version to has nothing to install.
+func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string) bool {
+	v, err := r.deps.Version(ctx, bin)
+	switch {
+	case err != nil:
+		rep.Notes = append(rep.Notes, fmt.Sprintf("the skill was not installed again: %s does not say its version (%v)", bin, err))
+		return false
+	case v != to:
+		return true
 	}
+	done := true
 	targets := []struct {
 		marker string
 		args   []string
@@ -972,16 +1018,22 @@ func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string
 		{filepath.Join(r.deps.Cwd, ".claude", "skills", "tracepad", ".version"), []string{"--project"}},
 	}
 	for _, t := range targets {
-		if _, err := os.Stat(t.marker); err != nil {
+		if _, err := os.Stat(t.marker); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not looked at: %v", filepath.Dir(filepath.Dir(t.marker)), err))
+			done = false
 			continue
 		}
 		out, err := r.deps.Skills(ctx, bin, r.deps.Cwd, t.args...)
 		if err != nil {
 			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not installed again: %s", filepath.Dir(filepath.Dir(t.marker)), firstLine(out)))
+			done = false
 			continue
 		}
 		rep.Done = append(rep.Done, "skill: "+firstLine(out))
 	}
+	return done
 }
 
 // privacy says what a backup is (Decision 14), for every run that wrote one.

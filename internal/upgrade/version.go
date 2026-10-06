@@ -31,13 +31,19 @@ func parseVersion(v string) (version, bool) {
 	if m == nil {
 		return version{}, false
 	}
+	// A number too large to parse is no release's (the audit of #223), never 0.
 	var out version
+	var err error
 	for i := range 3 {
-		out.nums[i], _ = strconv.Atoi(m[i+1])
+		if out.nums[i], err = strconv.Atoi(m[i+1]); err != nil {
+			return version{}, false
+		}
 	}
 	if m[5] != "" {
 		out.pre = preRank[m[5]]
-		out.preN, _ = strconv.Atoi(m[6])
+		if out.preN, err = strconv.Atoi(m[6]); err != nil {
+			return version{}, false
+		}
 	}
 	return out, true
 }

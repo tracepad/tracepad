@@ -57,6 +57,7 @@ func (s *slowSystem) Start(spec StartSpec) (Started, error) {
 // shutting down: it waits for it to go, then starts the old version and
 // checks it, and is done only then (the second review).
 func TestAWayBackWaitsForAServerStillShuttingDown(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"status":"ok","version":"0.1.0"}`)
 	}))

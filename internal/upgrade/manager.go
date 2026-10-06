@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"fmt"
 	"path"
 	"strings"
 )
@@ -14,7 +15,9 @@ import (
 // directly, through a wrapper, or is a CI runner's agent that happened to
 // start the shell. A process whose own unit is a session or a scope — a
 // terminal, tmux, ssh, the `nohup … &` setup.md starts a server with — is
-// not. What cannot be read cannot be ruled out, and is the person's too.
+// not. What cannot be read cannot be ruled out, and is the person's too, and
+// so is a process at a cgroup's root or in a slice: only a scope says no
+// manager runs it.
 // Nothing here asks the manager anything: the answer is in the process's
 // own record.
 
@@ -50,8 +53,15 @@ func systemdUnit(cgroup string) string {
 		own = named
 	}
 	unit := path.Base(own)
-	if !strings.HasSuffix(unit, ".service") {
+	switch {
+	case strings.HasSuffix(unit, ".scope"):
+		// A session's or a terminal's: the one leaf that rules a manager
+		// out (the audit of #223).
 		return ""
+	case !strings.HasSuffix(unit, ".service"):
+		// The root — a cgroup namespace's, or an init that is not systemd's
+		// (OpenRC, runit, s6) — or a slice: nothing says no manager runs it.
+		return fmt.Sprintf("its cgroup (%s) is no session's or terminal's, so a service manager cannot be ruled out", own)
 	}
 	if strings.Contains(own, "/user@") && !strings.HasPrefix(unit, "user@") {
 		return "the user systemd unit " + unit

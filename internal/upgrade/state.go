@@ -255,8 +255,10 @@ func (s *State) validate(dir string) error {
 		return fmt.Errorf("its run %q is not a run's id", s.Run)
 	case !IsRelease(s.From) || !IsRelease(s.To):
 		return fmt.Errorf("its versions %q and %q are not releases'", s.From, s.To)
-	case s.Archive != nil && s.Archive.SHA256 != "" && !sha256Hex.MatchString(s.Archive.SHA256):
-		return errors.New("its archive's checksum is not one")
+	case s.Archive != nil && (!sha256Hex.MatchString(s.Archive.SHA256) || s.Archive.DBSize < 0):
+		// Both are what a way back checks the archive against; a state
+		// without them would restore one unchecked (the audit of #223).
+		return errors.New("its archive's checksum, or its database's size, is not one a run records")
 	}
 	if err := s.followsTable(); err != nil {
 		return err

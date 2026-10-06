@@ -19,6 +19,7 @@ import (
 // refused below, a cleanup of what is the command's own. Errors read and
 // acted on need nothing.
 func TestNoErrorIsDroppedSilently(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files, err := filepath.Glob("*.go")
 	if err != nil {

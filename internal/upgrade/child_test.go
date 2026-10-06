@@ -13,6 +13,7 @@ import (
 // own); a direct exec.Command anywhere else lets a terminal's Ctrl-C reach it
 // (spec 054 #26).
 func TestEveryChildGoesThroughOneDoor(t *testing.T) {
+	t.Parallel()
 	direct := regexp.MustCompile(`exec\.Command(Context)?\(|&exec\.Cmd\{|\bos\.StartProcess\(|syscall\.ForkExec\(`)
 	allowed := map[string]bool{"child.go": true, "procs_unix.go": true}
 	files, _ := filepath.Glob("*.go")
