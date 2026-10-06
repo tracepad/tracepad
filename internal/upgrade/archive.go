@@ -162,6 +162,16 @@ type ReadBack struct {
 // computes on the way (so the bytes are read once) and the room a restore
 // needs.
 func readBack(path string, want Archived) (ReadBack, error) {
+	return readBackInto(path, want, "")
+}
+
+// readBackInto is readBack that also writes the archive's database files
+// into dbDir, when given, in the same pass: a container's way back checks
+// that database on the host, and a multi-gigabyte archive is read once, not
+// twice (the review of #226). A link in the archive is refused here too, as
+// the preparation refuses a volume that holds one: a restore would not make
+// it again.
+func readBackInto(path string, want Archived, dbDir string) (ReadBack, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return ReadBack{}, err
@@ -183,7 +193,21 @@ func readBack(path string, want Archived) (ReadBack, error) {
 		if err != nil {
 			return ReadBack{}, fmt.Errorf("%s does not read back whole: %w", path, err)
 		}
-		n, err := io.Copy(io.Discard, tr)
+		if h.Typeflag == tar.TypeSymlink || h.Typeflag == tar.TypeLink {
+			return ReadBack{}, fmt.Errorf("%s holds %q, a link, which a backup never has", path, h.Name)
+		}
+		sink := io.Writer(io.Discard)
+		if name := databaseFile(cleanEntry(h.Name)); dbDir != "" && h.Typeflag == tar.TypeReg && name != "" {
+			// The name written is one of the command's own three, never the
+			// archive's (CodeQL go/zipslip).
+			out, err := os.OpenFile(filepath.Join(dbDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			if err != nil {
+				return ReadBack{}, err
+			}
+			defer out.Close()
+			sink = out
+		}
+		n, err := io.Copy(sink, tr)
 		total += n
 		if err != nil {
 			return ReadBack{}, fmt.Errorf("%s does not read back whole: %w", path, err)
@@ -343,4 +367,18 @@ func quickCheck(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("%s fails its check: %s", dbPath, strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// databaseFile is the name a check of an archive's database writes an entry
+// to — one of three constants — or "" for an entry it does not need.
+func databaseFile(entry string) string {
+	switch entry {
+	case dataDBName:
+		return dataDBName
+	case dataDBName + "-wal":
+		return dataDBName + "-wal"
+	case dataDBName + "-shm":
+		return dataDBName + "-shm"
+	}
+	return ""
 }

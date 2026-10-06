@@ -1,5 +1,5 @@
 // Package upgrade is `tracepad upgrade` (spec 054): it plans an upgrade of
-// the installed binary and of one server this user started,
+// the installed binary and of one server or container this user started,
 // backs up before it stops anything, swaps, checks, and goes back when the new
 // version does not answer, deleting nothing on the way.
 package upgrade
@@ -66,12 +66,13 @@ type Deps struct {
 }
 
 type flags struct {
-	plan    bool
-	to      string
-	check   string
-	back    string
-	dataDir string
-	json    bool
+	plan      bool
+	to        string
+	check     string
+	back      string
+	dataDir   string
+	container string
+	json      bool
 }
 
 type runner struct {
@@ -81,14 +82,15 @@ type runner struct {
 }
 
 const usage = `Usage:
-  tracepad upgrade --plan [--to X] [--data-dir DIR] [--json]
-  tracepad upgrade [--to X] [--data-dir DIR] [--json]
+  tracepad upgrade --plan [--to X] [--data-dir DIR | --container NAME] [--json]
+  tracepad upgrade [--to X] [--data-dir DIR | --container NAME] [--json]
   tracepad upgrade --check RUN [--json]
   tracepad upgrade --back RUN [--json]
 
-Upgrades the installed binary and one server this user started, with a
-backup first and a way back; a container gets the commands that upgrade it.
---plan changes nothing. The latest stable release unless --to names one;
+Upgrades the installed binary and one server or container this user
+started, with a backup first and a way back; what is yours (a service, a
+Compose project, a container it cannot recreate exactly) gets the commands
+that upgrade it. --plan changes nothing. The latest stable release unless --to names one;
 never an older one.
 
 Exit status: 0 done or nothing to do, 1 refused (nothing changed), 2 usage,
@@ -215,6 +217,7 @@ func newFlagSet(f *flags) *flag.FlagSet {
 	fs.StringVar(&f.check, "check", "", "")
 	fs.StringVar(&f.back, "back", "", "")
 	fs.StringVar(&f.dataDir, "data-dir", "", "")
+	fs.StringVar(&f.container, "container", "", "")
 	fs.BoolVar(&f.json, "json", false, "")
 	return fs
 }
@@ -250,8 +253,10 @@ func parseFlags(args []string) (flags, error) {
 	switch {
 	case modes > 1:
 		return f, errors.New("--plan, --check and --back are three modes; give one")
-	case (f.check != "" || f.back != "") && (f.to != "" || f.dataDir != ""):
+	case (f.check != "" || f.back != "") && (f.to != "" || f.dataDir != "" || f.container != ""):
 		return f, errors.New("--check and --back take a run, which already says what it upgraded")
+	case f.dataDir != "" && f.container != "":
+		return f, errors.New("--data-dir names a server and --container a container; one run upgrades one of them")
 	}
 	if f.to != "" {
 		f.to = normalizeVersion(f.to)

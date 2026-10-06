@@ -99,6 +99,7 @@ type ContainerReport struct {
 	Version string `json:"version,omitempty"`
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
+	Target  bool   `json:"target,omitempty"`
 }
 
 func whose(ours bool) string {
@@ -119,7 +120,7 @@ func (rep *Report) fill(f Findings) {
 	rep.Containers = []ContainerReport{}
 	for _, c := range f.Containers {
 		rep.Containers = append(rep.Containers, ContainerReport{Name: c.Name, Image: c.Ref, Volume: c.Volume,
-			URL: c.URL, Version: c.Version, Whose: whose(false), Reason: c.Reason})
+			URL: c.URL, Version: c.Version, Whose: whose(c.Ours), Reason: c.Reason})
 	}
 	if f.Probe.Version != "" {
 		p := f.Probe
@@ -165,7 +166,11 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 		line("            %s", strings.Join(s.Command, " "))
 	}
 	for _, c := range rep.Containers {
-		line("  container %s, %s, %s%s", c.Name, c.Image, orNone(c.Version), reasonSuffix(c.Whose, c.Reason))
+		mark := ""
+		if c.Target {
+			mark = " ← this run"
+		}
+		line("  container %s, %s, %s%s%s", c.Name, c.Image, orNone(c.Version), mark, reasonSuffix(c.Whose, c.Reason))
 	}
 	if p := rep.Probe; p != nil {
 		line("  %s answers as %s: %s", p.URL, p.Version, p.Whose)

@@ -46,8 +46,8 @@ var noAct = map[string]bool{
 
 // stepOrder is the order the cells run in, and every step there is.
 var stepOrder = []string{
-	stepPrepared, stepStopSent, stepStopped, stepArchived, stepBinaryReplacing, stepBinaryReplaced,
-	stepStarted, stepChecked, stepSkill, stepBackBegun, stepBackRestored, stepBackCleared,
+	stepPrepared, stepStopSent, stepStopped, stepArchived, stepRenamedOld, stepBinaryReplacing, stepBinaryReplaced,
+	stepStarted, stepChecked, stepSkill, stepBackVolume, stepBackBegun, stepBackRestored, stepBackCleared,
 	stepBackAside, stepBackMoved, stepBackStarted, stepBackBinary, stepBackDone,
 }
 
@@ -86,13 +86,16 @@ func stepsOf(t *testing.T, kind string, all bool) (swap, back []string) {
 // inProcess is a matrix whose servers are this process's, and whose cells
 // start no other: no fork holds a copy of a lock, so a lock found held is
 // held, where asking again for 50 ms each time is most of a cell's time. Nor
-// can a cell lose power: what reaches the disk is the integration tests' to
-// show, and a full flush per step, from cells side by side, is the rest.
+// can a cell lose power, or be killed inside a write: what reaches the disk,
+// and how, is the integration tests' to show, and a full flush per step, a
+// temporary file and a rename per write, from cells side by side, are the
+// rest.
 func inProcess(t *testing.T) {
-	retry, sync := store.LockRetry, syncFile
+	retry, sync, write := store.LockRetry, syncFile, writeFile
 	store.LockRetry = time.Millisecond
 	syncFile = func(*os.File) error { return nil }
-	t.Cleanup(func() { store.LockRetry, syncFile = retry, sync })
+	writeFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o600) }
+	t.Cleanup(func() { store.LockRetry, syncFile, writeFile = retry, sync, write })
 }
 
 // The table is the steps the command records: every step any run records is
@@ -300,9 +303,12 @@ func nothingDeleted(t *testing.T, dir string, exists func(item string) bool) {
 // its act and its write, and right after its write (#34, #37).
 var killMoments = map[string]string{"kill": recordPoint, "killafter": writtenPoint}
 
-// A kill world is one kind of run's: a server's, or the binary's alone.
+// A kill world is one kind of run's: a server's, a container's, or the
+// binary's alone.
 type killWorld struct {
-	w    *fakeWorld
+	w *fakeWorld
+	// d is a container run's docker, holding setup's container of fOld.
+	d    *fakeDocker
 	deps Deps
 	// args upgrade it; done checks it is back where it began; snapshot is
 	// what --back again must not change.
@@ -312,7 +318,12 @@ type killWorld struct {
 }
 
 func newKillWorld(t *testing.T, kind string) *killWorld {
-	w := newFakeWorld(t, 2)
+	var w *fakeWorld
+	if kind == kindContainer {
+		w = newBareWorld(t)
+	} else {
+		w = newFakeWorld(t, 2)
+	}
 	k := &killWorld{w: w, deps: w.deps()}
 	// A stop's wait, for the server a kill left running or one that stops
 	// late, is a cell's, not a person's; and its polls are short.
@@ -356,6 +367,19 @@ func newKillWorld(t *testing.T, kind string) *killWorld {
 			beside, _ := filepath.Glob(w.data + ".*")
 			return fmt.Sprintf("%s %d %d %s %q %s", w.answers(), pid, n, binary(), beside, steps(dir))
 		}
+	case kindContainer:
+		k.d = newContainerWorld(t, w.home)
+		// An old image that does not answer is waited for briefly.
+		k.deps.HealthWait = 100 * time.Millisecond
+		k.deps.Docker = k.d
+		k.deps.HTTP = &http.Client{Transport: k.d, Timeout: 2 * time.Second}
+		k.args = []string{"--to", fNew}
+		k.done = func(t *testing.T, id string) {
+			if v := k.d.answers(); v != fOld {
+				t.Fatalf("after the way back the container answers %q", v)
+			}
+		}
+		k.snapshot = func(dir string) string { return k.d.snapshot() + " " + binary() + " " + steps(dir) }
 	case kindBinary:
 		procs, _, _ := w.host.Candidates(context.Background())
 		for _, p := range procs {
@@ -379,6 +403,23 @@ func TestTheMatrices(t *testing.T) {
 	t.Run("fault", func(t *testing.T) {
 		t.Parallel()
 		theFaultMatrix(t)
+	})
+	t.Run("containerfault", func(t *testing.T) {
+		t.Parallel()
+		theContainersFaultMatrix(t)
+	})
+	t.Run("recreate", func(t *testing.T) {
+		t.Parallel()
+		theRecreateMatrix(t)
+	})
+	t.Run("containers", func(t *testing.T) {
+		t.Parallel()
+		for _, sc := range containerScenarios {
+			t.Run(sc.name, func(t *testing.T) {
+				t.Parallel()
+				sc.run(t)
+			})
+		}
 	})
 	t.Run("walk", func(t *testing.T) {
 		t.Parallel()
@@ -755,4 +796,127 @@ func theFaultMatrix(t *testing.T) {
 		}
 		backAgain(t, deps, rep.Run.ID, snapshot(w, rep.Run.Dir))
 	})
+}
+
+// theContainersFaultMatrix is the fault matrix of a container's run (#47):
+// setup's container, with the host's binary beside it, which a healthy run
+// brings to the container's version. Its invariants: the container runs
+// under its name, the old image or the new, on a volume that holds the
+// traces it held; nothing set aside is gone, and the fake fails any removal.
+func theContainersFaultMatrix(t *testing.T) {
+	swapPoints, backPoints := pointsOf(t, kindContainer)
+	world := func(t *testing.T) (*fakeDocker, Deps) {
+		d := newFakeDocker(t)
+		d.setupContainer(t, t.TempDir())
+		return d, containerDeps(t, d, "0.1.0")
+	}
+	exists := func(d *fakeDocker) func(string) bool {
+		return func(item string) bool {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			kind, name, _ := strings.Cut(item, " ")
+			if kind == "volume" {
+				_, ok := d.volumes[name]
+				return ok
+			}
+			return d.byName[name] != nil
+		}
+	}
+	invariants := func(t *testing.T, d *fakeDocker, dir string, images ...string) {
+		t.Helper()
+		c := d.container("tracepad-app")
+		if c == nil || !c.State.Running || c.State.Restarting {
+			t.Fatalf("no container runs as tracepad-app: %+v", c)
+		}
+		if img := c.Config.Image; !slices.Contains(images, img) {
+			t.Errorf("it runs %s, not one of %q", img, images)
+		}
+		if n := d.traces("tracepad-app"); n != 7 {
+			t.Errorf("its volume holds %d traces, not 7", n)
+		}
+		if dir != "" {
+			nothingDeleted(t, dir, exists(d))
+		}
+	}
+	snapshot := func(d *fakeDocker, dir string) func() string {
+		return func() string {
+			st, err := loadState(dir)
+			if err != nil {
+				return err.Error()
+			}
+			return fmt.Sprintf("%s\nset aside %q\nsteps %d", d.snapshot(), st.SetAside, len(st.Steps))
+		}
+	}
+	const oldImage, newImage = "ghcr.io/tracepad/tracepad:0.1.0", "ghcr.io/tracepad/tracepad:0.2.0"
+	slowDeps := func(deps *Deps) {
+		deps.HTTP = &http.Client{Transport: deps.HTTP.Transport, Timeout: slowWait}
+		deps.HealthWait = slowWait
+	}
+	slowly := func(d *fakeDocker) func() { return func() { d.set(func() { d.slow = slowBy }) } }
+	for _, kind := range faultKinds {
+		for _, point := range swapPoints {
+			t.Run("upgrade/"+kind+"/"+point, func(t *testing.T) {
+				t.Parallel()
+				d, deps := world(t)
+				fast := deps
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				c := &cell{point: point, kind: kind, cancel: cancel, slow: slowly(d)}
+				deps.Fault = c.fault
+				if kind == "slow" {
+					slowDeps(&deps)
+				}
+				rep, code := runIn(t, ctx, deps)
+				d.set(func() { d.slow = 0 })
+				deps = fast
+				if !c.hit.Load() {
+					t.Fatalf("no upgrade passes %s, a step of the table", point)
+				}
+				if kind == "interrupt" && code != exitOK {
+					t.Errorf("interrupted at %s, the upgrade did not finish: %d %s", point, code, rep.Summary)
+				}
+				if rep.Run == nil {
+					invariants(t, d, "", oldImage)
+					return
+				}
+				if code != exitStuck {
+					// Stuck says what is down, and the --back that brings it up.
+					invariants(t, d, rep.Run.Dir, oldImage, newImage)
+				}
+				backUntilDone(t, deps, rep.Run.ID)
+				invariants(t, d, rep.Run.Dir, oldImage)
+				backAgain(t, deps, rep.Run.ID, snapshot(d, rep.Run.Dir))
+			})
+		}
+		for _, point := range backPoints {
+			t.Run("back/"+kind+"/"+point, func(t *testing.T) {
+				t.Parallel()
+				d, deps := world(t)
+				fast := deps
+				rep, code := runIn(t, context.Background(), deps)
+				if code != exitOK {
+					t.Fatalf("upgrade: %d %s", code, rep.Summary)
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				c := &cell{point: point, kind: kind, cancel: cancel, slow: slowly(d)}
+				deps.Fault = c.fault
+				if kind == "slow" {
+					slowDeps(&deps)
+				}
+				_, code = runIn(t, ctx, deps, "--back", rep.Run.ID)
+				d.set(func() { d.slow = 0 })
+				deps = fast
+				if !c.hit.Load() {
+					t.Fatalf("no way back passes %s, a step of the table", point)
+				}
+				if kind == "interrupt" && code != exitOK {
+					t.Errorf("interrupted at %s, the way back did not finish: %d", point, code)
+				}
+				backUntilDone(t, deps, rep.Run.ID)
+				invariants(t, d, rep.Run.Dir, oldImage)
+				backAgain(t, deps, rep.Run.ID, snapshot(d, rep.Run.Dir))
+			})
+		}
+	}
 }

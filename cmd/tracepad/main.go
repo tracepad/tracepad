@@ -159,9 +159,9 @@ Usage:
                              install the agent skill this binary carries
   tracepad skills show [FILE]
                              print the skill, or one of its references
-  tracepad upgrade [--plan | --check RUN | --back RUN] [--to X] [--data-dir DIR] [--json]
-                             upgrade the binary and a server you started,
-                             with a backup and a way back
+  tracepad upgrade [--plan | --check RUN | --back RUN] [--to X] [--data-dir DIR | --container NAME] [--json]
+                             upgrade the binary and a server or container you
+                             started, with a backup and a way back
 
 Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default localhost:4318)

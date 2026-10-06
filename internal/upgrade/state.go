@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,8 +16,9 @@ import (
 
 // Kinds of run.
 const (
-	kindProcess = "process"
-	kindBinary  = "binary"
+	kindProcess   = "process"
+	kindContainer = "container"
+	kindBinary    = "binary"
 )
 
 // State is a run's record, state.json in its directory: data, read into this
@@ -25,13 +27,14 @@ type State struct {
 	Run     string    `json:"run"`
 	Kind    string    `json:"kind"`
 	Created time.Time `json:"created"`
-	// From is the running version of the server, or the
+	// From is the running version of the server or container, or the
 	// binary's for a run with neither; To is the version gone to.
 	From string `json:"from"`
 	To   string `json:"to"`
 
-	Binary  *BinaryState  `json:"binary,omitempty"`
-	Process *ProcessState `json:"process,omitempty"`
+	Binary    *BinaryState    `json:"binary,omitempty"`
+	Process   *ProcessState   `json:"process,omitempty"`
+	Container *ContainerState `json:"container,omitempty"`
 
 	// CountBefore is the trace count read before the stop; nil when it was
 	// not read (no key, or it could not be).
@@ -93,6 +96,30 @@ type ProcessState struct {
 	Old string `json:"old"`
 }
 
+// ContainerState is a container's part of a run. How it was created is in
+// container.json and image.json beside it, and the variables the person gave
+// it in env, mode 0600, because they can hold secrets.
+type ContainerState struct {
+	Name   string `json:"name"`
+	ID     string `json:"id"`
+	Volume string `json:"volume"`
+	URL    string `json:"url"`
+	// OldRef is the image reference it was created from, OldImage that
+	// image's ID; NewRef is the release's.
+	OldRef   string `json:"old_ref"`
+	OldImage string `json:"old_image"`
+	NewRef   string `json:"new_ref"`
+	// Restart is its restart policy, as --restart takes it: the stop sets
+	// it to no, and a way back puts it back.
+	Restart string `json:"restart"`
+	// LogDriver is the daemon's own, which a recreate does not name.
+	LogDriver string `json:"log_driver,omitempty"`
+	// NewID is the container this run made; BackID the old image's
+	// container a way back started, or found running.
+	NewID  string `json:"new_id,omitempty"`
+	BackID string `json:"back_id,omitempty"`
+}
+
 // Step is one thing a run did, and when.
 type Step struct {
 	Name string    `json:"name"`
@@ -137,19 +164,32 @@ func newRunID(now time.Time, from string) string {
 // stateFile is a run's state on disk.
 const stateFile = "state.json"
 
-// save writes the state by rename, so a crash leaves the last whole one.
+// save writes the state by rename, so a crash leaves the last whole one. A
+// state is written only when it loads back by the one rule loadState holds
+// it to (the review of #226: a value docker gave, of a shape the load
+// refuses, made every later --back refuse the run).
 func (s *State) save(dir string) error {
+	if err := s.validate(dir); err != nil {
+		return fmt.Errorf("it would not load back: %w", err)
+	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(dir, stateFile), append(b, '\n'))
+	return writeFile(filepath.Join(dir, stateFile), append(b, '\n'))
 }
 
 // syncFile flushes a file the command relies on to disk before it goes on:
 // a state, a copy of a binary, an archive. A test seam: the gate's fault
 // matrix, whose cells cannot lose power, does without it.
 var syncFile = (*os.File).Sync
+
+// writeFile writes the files a run relies on — its state, what it saved of
+// a server or a container — by writeFileAtomic. A test seam, as syncFile is:
+// the gate's matrices kill the command between two calls, never inside a
+// write, and a temporary file and its rename per write were most of a
+// cell's time on macOS. The production path has no other.
+var writeFile = writeFileAtomic
 
 func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
@@ -177,7 +217,7 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, append(b, '\n'))
+	return writeFile(path, append(b, '\n'))
 }
 
 // private says whether a directory is the person's alone: a real directory,
@@ -250,6 +290,14 @@ func loadState(dir string) (*State, error) {
 }
 
 var (
+	restartPolicy = regexp.MustCompile(`^(no|always|unless-stopped|on-failure(:[1-9][0-9]*)?)$`)
+	containerID   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	dockerName    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+	// imageRef is an image's reference or ID; a tag may hold capitals.
+	imageRef = regexp.MustCompile(`^[a-z0-9][a-zA-Z0-9._/:@-]*$`)
+	// logDriver is a log driver's name: a built-in one, or a plugin's,
+	// which names an image (grafana/loki-docker-driver:latest).
+	logDriver = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$`)
 	sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
@@ -301,6 +349,23 @@ func (s *State) validate(dir string) error {
 		if url, ok := loopbackURL(p.Listen); !ok || p.URL != url {
 			return fmt.Errorf("its server's address %q is not this machine's %q", p.URL, p.Listen)
 		}
+	case kindContainer:
+		c := s.Container
+		if c == nil && early {
+			break
+		}
+		// Every field that goes to docker is held to its shape (the review of
+		// #1), and the address the key goes to is a loopback IP's alone (the
+		// security review of #1).
+		if c == nil || !dockerName.MatchString(c.Name) || !dockerName.MatchString(c.Volume) ||
+			!imageRef.MatchString(c.OldRef) || !imageRef.MatchString(c.NewRef) || !imageRef.MatchString(c.OldImage) ||
+			!restartPolicy.MatchString(c.Restart) || !containerID.MatchString(c.ID) || (c.LogDriver != "" && !logDriver.MatchString(c.LogDriver)) ||
+			(c.NewID != "" && !containerID.MatchString(c.NewID)) || (c.BackID != "" && !containerID.MatchString(c.BackID)) {
+			return errors.New("its container is not one a run records")
+		}
+		if !isLoopbackBase(c.URL) {
+			return fmt.Errorf("its container's address %q is not this machine's", c.URL)
+		}
 	case kindBinary:
 		if s.Binary == nil && !early {
 			return errors.New("it has no binary")
@@ -309,4 +374,19 @@ func (s *State) validate(dir string) error {
 		return fmt.Errorf("its kind %q is not one", s.Kind)
 	}
 	return nil
+}
+
+// isLoopbackBase says whether u is exactly what loopbackBase makes: http, a
+// loopback IP and a port, and nothing else — no name, no user, no path.
+func isLoopbackBase(u string) bool {
+	rest, ok := strings.CutPrefix(u, "http://")
+	if !ok {
+		return false
+	}
+	host, port, err := net.SplitHostPort(rest)
+	if err != nil {
+		return false
+	}
+	want, ok := loopbackBase(host, port)
+	return ok && want == u
 }

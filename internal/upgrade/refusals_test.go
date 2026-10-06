@@ -584,6 +584,13 @@ func theWayBacksRefusals(t *testing.T) {
 			c.report(pc.name)
 		})
 	}
+	// A container's (#47): each cell makes its own world.
+	for _, pc := range containerRefusalCases() {
+		t.Run(pc.name, func(t *testing.T) {
+			t.Parallel()
+			pc.run(&refusalCell{t: t})
+		})
+	}
 }
 
 // The room cells change freeBytes, a package seam: they run one at a time,
@@ -811,24 +818,83 @@ var refusalReasons = []refusalReason{
 	{id: "R27b", fn: "swapBack", prefix: "%s could not be set aside", n: 1, kind: 'M', why: "the parent's rename, which R06's probe makes before the stop"},
 	{id: "R27", fn: "clearPath", n: 5, kind: 'M', cells: []string{"R27-install-dir-readonly/a", "R27-install-dir-readonly/b-healthy"}},
 	{id: "R27c", fn: "moveRestore", n: 2, kind: 'T', cells: []string{"R13-data-dir-back-after-aside/b"}},
+	// A container's way back and its preconditions (#47).
+	{id: "C01", fn: "backContainer", prefix: "docker is not on PATH", n: 1, kind: 'T', cells: []string{"C11-docker-gone/b-healthy"}},
+	{id: "C02", fn: "containerBackPreconditions", prefix: "the old image %s is not there", n: 1, kind: 'T', cells: []string{"C02-old-image-gone/b-healthy"},
+		why: "before the upgrade the container runs on it"},
+	{id: "C03", fn: "ensureBusybox", prefix: "%s, which archives and restores a volume, is not there", n: 1, kind: 'M', cells: []string{"C03-busybox-gone/a", "C03-busybox-gone/b-healthy"}},
+	{id: "C04", fn: "containerBackPreconditions", prefix: "the volume %s exists already", n: 1, kind: 'T', cells: []string{"AWayBackWhoseVolumeExistsTouchesNothing"},
+		why: "its name holds the run's id"},
+	{id: "C05", fn: "containerBackPreconditions", prefix: "whether the ", n: 2, kind: 'T', why: dockerBetween},
+	{id: "C06", fn: "containerBackPreconditions", prefix: "the container %s exists already", n: 1, kind: 'T', cells: []string{"C07-after-exists/b-healthy"},
+		why: "its name holds the run's id"},
+	{id: "C07", fn: "containerBackPreconditions", prefix: "the room for a restore of the volume", n: 1, kind: 'M', cells: []string{"C08-room-untold/a", "C08-room-untold/b-healthy"}},
+	{id: "C08", fn: "containerBackPreconditions", prefix: "no room beside the volume", n: 1, kind: 'M', cells: []string{"C09-no-room/a", "C09-no-room/b-healthy"}},
+	{id: "C10", fn: "backContainer", prefix: "the run's container.json or image.json does not read", n: 1, kind: 'R', cells: []string{"C12-image-json-missing/b-healthy", "C12-container-json-privileged/b-healthy"}},
+	{id: "C11", fn: "backContainer", prefix: "tracepad %s ran on the volume %s, and the run records no archive", n: 1, kind: 'R', why: "a container run archives before it renames and runs"},
+	{id: "C12", fn: "backContainer", prefix: "; nothing was touched", n: 1, kind: 'R', cells: []string{"C02-old-image-gone/b-healthy", "C09-no-room/b-healthy"},
+		why: "passes on the preconditions' refusals and pathAsRecorded's"},
+	{id: "C13", fn: "runs", prefix: "docker cannot say", n: 1, kind: 'T', why: dockerBetween},
+	{id: "C14", fn: "runOld", prefix: "; nothing was started", n: 1, kind: 'T', why: "passes on oldRef's: " + dockerBetween},
+	{id: "C15", fn: "runOld", prefix: "%s did not start", n: 1, kind: 'T', cells: []string{"AFailedRunInTheWayBackDoesNotBlockTheNext"}},
+	{id: "C16", fn: "startOld", prefix: "docker cannot say", n: 1, kind: 'T', why: dockerBetween},
+	{id: "C17", fn: "startOld", prefix: "%s did not start again", n: 1, kind: 'T', cells: []string{"AContainersStartsThatFailAreTakenUpAgain"}},
+	{id: "C18", fn: "renameBack", prefix: "docker cannot say", n: 2, kind: 'T', why: dockerBetween},
+	{id: "C19", fn: "renameBack", prefix: "the container named ", n: 2, kind: 'T',
+		why: "a container someone made under the run's names since; nothing is started over it, as TestAWayBackLeavesALaterRunsContainerAlone holds for the restore"},
+	{id: "C20", fn: "renameBack", prefix: "%s did not start", n: 1, kind: 'T', cells: []string{"AContainersStartsThatFailAreTakenUpAgain"},
+		why: "the run from the record; the other, the same container started again after it ran, is C17's act"},
+	{id: "C22", fn: "renameBack", prefix: "%s could not be put back and started", n: 1, kind: 'T', cells: []string{"AContainersStartsThatFailAreTakenUpAgain"}},
+	{id: "C23", fn: "restoreVolume", prefix: "; nothing was touched", n: 1, kind: 'R', cells: []string{"AContainerArchiveChangedSinceIsNotRestored"}},
+	{id: "C24", fn: "restoreVolume", prefix: "docker cannot say", n: 1, kind: 'T', why: dockerBetween},
+	{id: "C25", fn: "restoreVolume", prefix: "the container named ", n: 1, kind: 'T', cells: []string{"AWayBackLeavesALaterRunsContainerAlone"}},
+	{id: "C26", fn: "checkArchive", prefix: "the archive's database fails its check", n: 1, kind: 'R', why: "the archive's checksum fails first"},
+	{id: "C27", fn: "restoreVolume", prefix: "the volume ", n: 2, kind: 'T', cells: []string{"TestTheMatrices"},
+		why: "the fault matrix's back/fail/back_volume makes the first; the second is a daemon that refuses a volume it can make"},
+	{id: "C28", fn: "restoreVolume", prefix: "the restore into the new volume ", n: 1, kind: 'T', cells: []string{"AFailedRestoreNamesWhatItLeft"}},
+	{id: "C29", fn: "setNewAside", prefix: "%s was asked to stop and has not", n: 1, kind: 'T', cells: []string{"C33-new-container-slow-to-stop/b-healthy"}},
+	{id: "C30", fn: "setNewAside", prefix: "the new container was not set aside", n: 1, kind: 'T', cells: []string{"C33-new-container-slow-to-stop/b-healthy"},
+		why: "the fault matrix's back/fail/back_set_aside makes it too"},
+	{id: "C31", fn: "oldRef", prefix: "docker cannot say ", n: 3, kind: 'T', why: dockerBetween},
+	{id: "C31b", fn: "oldRef", prefix: "the old image %s has no name of the release's", n: 2, kind: 'T', cells: []string{"TheOldImageKeepsAName"},
+		why: "a tag docker refuses, or both the release's tag and the run's own naming other images"},
+	{id: "C36", fn: "containerBackPreconditions", prefix: "the room in %s for the check", n: 1, kind: 'T', why: "as R08: a file system that cannot say its room"},
+	{id: "C37", fn: "containerBackPreconditions", prefix: "no room in %s for the check", n: 1, kind: 'T', cells: []string{"TestAContainersWayBackAsksRoomForItsCheck"}},
+	{id: "C32", fn: "clearName", prefix: "docker cannot say", n: 2, kind: 'T', why: dockerBetween},
+	{id: "C33", fn: "clearName", prefix: "a container named ", n: 1, kind: 'T',
+		why: "a container someone runs under the run's name since; nothing is started over it"},
+	{id: "C34", fn: "clearName", prefix: "the container left as ", n: 1, kind: 'T', why: "a rename docker refuses of a container it just listed"},
+	{id: "C35", fn: "inspectOne", prefix: "docker inspect %s answered", n: 1, kind: 'T', why: "docker answering two containers for one name or id"},
 	// Binary-only runs.
 	{id: "B1", fn: "backBinary", prefix: "; nothing was touched", n: 1, kind: 'T', cells: []string{"TestAWayBackDoesNotPutAnOlderBinaryUnderANewerServer"}},
 	{id: "B2", fn: "backBinary", prefix: "%s could not be put back at %s: %v", n: 1, kind: 'T', cells: []string{"TestNoReplacementPutsAnOlderBinaryUnderANewerServer"}},
 }
 
+// dockerBetween is why a refusal on docker's silence has no cell: a daemon
+// that stops answering between two of its own answers. The fake answers
+// whole or not at all, and ADockerThatDoesNotAnswerSettlesNothing holds
+// the settling of a run to it.
+const dockerBetween = "a daemon that stops answering between two of its own answers"
+
 // refusalSite is one refusal on the way back, as the lint reads it.
 type refusalSite struct{ at, fn, msg string }
 
 // refusalSites reads every fail, Errorf and errors.New on the way back: in
-// back.go and settle.go's settle, and in the checks of apply.go the way back
-// calls (serversOn, putInPlace, launch, isServer). A site's message is the
-// first string in it.
+// back.go and settle.go's settle, in the checks of apply.go the way back
+// calls (serversOn, putInPlace, launch, isServer), and in a container's way
+// back and what it asks docker (container.go, docker.go's inspectOne). A
+// site's message is the first string in it.
 func refusalSites(t *testing.T) []refusalSite {
 	t.Helper()
 	scope := map[string]map[string]bool{
 		"back.go":   nil,
 		"settle.go": {"settle": true},
 		"apply.go":  {"serversOn": true, "putInPlace": true, "launch": true, "isServer": true},
+		// A container's way back and its preconditions (#47).
+		"container.go": {"backContainer": true, "startOld": true, "renameBack": true, "restoreVolume": true, "setNewAside": true,
+			"oldRef": true, "clearName": true, "containerBackPreconditions": true, "containerRunning": true,
+			"ensureBusybox": true, "checkArchive": true, "runs": true, "runOld": true},
+		"docker.go": {"inspectOne": true},
 	}
 	fset := token.NewFileSet()
 	var sites []refusalSite
@@ -899,6 +965,12 @@ func TestEveryRefusalOfTheWayBackIsListed(t *testing.T) {
 		cells[c.name] = true
 	}
 	for _, c := range roomCases(freeBytes) {
+		cells[c.name] = true
+	}
+	for _, c := range containerRefusalCases() {
+		cells[c.name] = true
+	}
+	for _, c := range containerScenarios {
 		cells[c.name] = true
 	}
 	tests := testNames(t)

@@ -34,6 +34,9 @@ type job struct {
 	spec ServerSpec
 	// newProc is the server this run started, while the command runs.
 	newProc Started
+	// ctr is the container a container run recreates: its inspect and its
+	// run, as the plan read them (#47).
+	ctr Container
 	// held are the database locks the command holds, by data directory:
 	// from the stop until a server starts on the data, and through a way
 	// back (spec 054 #26, #28, #32).
@@ -252,12 +255,12 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	rep.Next = nil
 	if len(p.choose) > 0 {
 		rep.ExitCode = exitRefused
-		rep.Summary = "Refused: more than one server is the command's; name the one this run upgrades."
+		rep.Summary = "Refused: more than one server or container is the command's; name the one this run upgrades."
 		rep.Next = next
 		return rep
 	}
 	bin := p.f.Binary
-	if !p.replaceBinary && p.server == nil {
+	if !p.replaceBinary && p.server == nil && p.container == nil {
 		code, summary := verdictOf(p)
 		rep.ExitCode, rep.Summary = code, "Nothing upgraded by this run. "+summary
 		if bin.Ours {
@@ -292,14 +295,16 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 		return rep
 	}
 	// From here a run changes what runs; an interrupt must not leave a
-	// server down half way (the second review), so every swap and its way
-	// back finish on a context of their own. Everything before this —
+	// server or a container down half way (the second review), so every swap
+	// and its way back finish on a context of their own. Everything before this —
 	// downloads, the archive's room — stays interruptible.
 	ctx, cancel := afterStop(ctx)
 	defer cancel()
 	switch {
 	case p.server != nil:
 		j.swapProcess(ctx, p)
+	case p.container != nil:
+		j.swapContainer(ctx, p)
 	default:
 		j.swapBinaryOnly(ctx)
 	}
@@ -331,6 +336,8 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 	switch {
 	case p.server != nil:
 		st.Kind = kindProcess
+	case p.container != nil:
+		st.Kind = kindContainer
 	}
 	st.Run = newRunID(now, p.from)
 	dir := filepath.Join(r.deps.Backups, st.Run)
@@ -353,6 +360,16 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		// binary is the person's and this run never replaces it.
 		st.Binary.From = bin.Version
 	}
+	// A container's run brings the host's binary along only where no server
+	// runs from it (#47 (g)): asked here as the replacement asks, so a
+	// process the plan could not tell is no reason to refuse the container
+	// (the review of #226) — the binary stays, said.
+	if p.replaceBinary && p.container != nil {
+		if err := r.serversOn(ctx, bin.Path, p.to, true); err != nil {
+			p.replaceBinary = false
+			rep.Notes = append(rep.Notes, fmt.Sprintf("%s stays %s after the container's upgrade: %v", bin.Path, bin.Version, err))
+		}
+	}
 	var newBin Fetched
 	if p.replaceBinary {
 		// The installed binary is already the target otherwise, and is what
@@ -369,14 +386,16 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		}
 		st.Binary.Old = old
 		// Before anything stops (the sixth review): a server running the
-		// installed binary at a later version refuses the run here, not
-		// after its server is down. The replacement checks again.
-		var own []int
-		if p.server != nil {
-			own = append(own, p.server.Proc.PID)
-		}
-		if err := r.serversOn(ctx, bin.Path, p.to, true, own...); err != nil {
-			return nil, err.Error()
+		// installed binary refuses the run here, not after its server is
+		// down. The replacement checks again.
+		if p.container == nil {
+			var own []int
+			if p.server != nil {
+				own = append(own, p.server.Proc.PID)
+			}
+			if err := r.serversOn(ctx, bin.Path, p.to, true, own...); err != nil {
+				return nil, err.Error()
+			}
 		}
 	}
 
@@ -396,6 +415,17 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		if err := j.wayBackPreconditions(ctx, size, size, !p.replaceBinary, p.server.Proc.PID); err != nil {
 			return nil, "its way back could not be taken: " + err.Error()
 		}
+	case p.container != nil:
+		size, refusal := j.prepareContainer(ctx, p)
+		if refusal != "" {
+			return nil, refusal
+		}
+		need += size
+		// Its way back, before anything stops (#41, #47): a restore of the
+		// volume as it is now, into a new one beside it.
+		if err := j.containerBackPreconditions(ctx, size, j.ctr.freeKB); err != nil {
+			return nil, "its way back could not be taken: " + err.Error()
+		}
 	}
 	if st.Kind != kindBinary {
 		free, err := freeBytes(dir)
@@ -405,7 +435,13 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		if free < need {
 			return nil, fmt.Sprintf("no room for a backup in %s: %d MiB free, %d MiB needed", dir, free>>20, need>>20)
 		}
-		count, note := r.traceCount(ctx, st.Process.URL)
+		var base string
+		if st.Process != nil {
+			base = st.Process.URL
+		} else {
+			base = st.Container.URL
+		}
+		count, note := r.traceCount(ctx, base)
 		st.CountBefore = count
 		if count != nil {
 			j.done("read the trace count: %d", *count)
@@ -972,11 +1008,30 @@ func (j *job) verdict(ctx context.Context, c Checked) {
 
 // finishHealthy is what a healthy new version is followed by, whichever check
 // found it healthy — the upgrade's own, or a later --check after a decide
-// (the fourth review): the skill.
+// (the fourth review): the host's binary for a container run, and the skill.
 func (j *job) finishHealthy(ctx context.Context) {
 	st := j.st
 	if st.has(stepSkill) {
 		return
+	}
+	if st.Kind == kindContainer && st.Binary != nil && st.Binary.Old != "" && !st.has(stepBinaryReplaced) {
+		// The host's CLI to the container's version, once it is healthy. One
+		// that cannot be put there is a note: the container is upgraded.
+		if err := j.putNew(ctx); err != nil {
+			// The skill follows the binary, and waits for the --check that
+			// puts it there: one note, not a second of the skill's (the
+			// review of #226).
+			j.rep.Notes = append(j.rep.Notes, "the binary at "+st.Binary.Path+" was not replaced: "+err.Error())
+			return
+		}
+	}
+	// A container run that kept the host's binary on purpose — a server
+	// runs from it — installs no skill with it, and says nothing of it: the
+	// plan said why (the review of #226).
+	if st.Kind == kindContainer && st.Binary != nil && st.Binary.Old == "" {
+		if v, err := j.r.deps.Version(ctx, st.Binary.Path); err != nil || v != st.To {
+			return
+		}
 	}
 	if st.Binary != nil && st.Binary.Path != "" && j.r.reinstallSkill(ctx, j.rep, st.Binary.Path, st.To) {
 		j.step(stepSkill)
@@ -1043,6 +1098,11 @@ func (j *job) refresh(ctx context.Context) {
 			s.PID = j.st.Process.NewPID
 		}
 		s.Version, _ = health(ctx, r.deps.HTTP, j.st.Process.URL) // ignored: the report's line only; no answer is said as none
+	}
+	for i := range rep.Containers {
+		if c := &rep.Containers[i]; c.Target && j.st.Container != nil {
+			c.Version, _ = health(ctx, r.deps.HTTP, j.st.Container.URL) // ignored: the report's line only; no answer is said as none
+		}
 	}
 }
 
@@ -1125,10 +1185,24 @@ func (j *job) privacy() {
 }
 
 func backupsSentence(dir string, st *State) string {
-	cmds := []string{"rm -r " + shq(dir)}
+	// Containers before volumes: docker refuses to remove a volume that any
+	// container, a stopped one too, still mounts (the review of #1).
+	dirs, containers, volumes := []string{"rm -r " + shq(dir)}, []string{}, []string{}
 	for _, s := range st.SetAside {
-		cmds = append(cmds, "rm -r "+shq(s))
+		switch {
+		case strings.HasPrefix(s, "container "):
+			containers = append(containers, "docker rm "+shq(strings.TrimPrefix(s, "container ")))
+		case strings.HasPrefix(s, "image "):
+			// A tag the run gave the old image; once the containers that run
+			// it are gone, removing it removes only the name.
+			containers = append(containers, "docker rmi "+shq(strings.TrimPrefix(s, "image ")))
+		case strings.HasPrefix(s, "volume "):
+			volumes = append(volumes, "docker volume rm "+shq(strings.TrimPrefix(s, "volume ")))
+		default:
+			dirs = append(dirs, "rm -r "+shq(s))
+		}
 	}
+	cmds := append(append(dirs, containers...), volumes...)
 	return dir + " is a full copy of the database — every prompt and completion — and of the server's environment, secrets included. " +
 		"It stays until someone deletes it, and erasing traces or a user reaches neither it nor what a way back set aside. " +
 		"Once the new version has run for a while, remove it and what is set aside: " + strings.Join(cmds, "; ")
