@@ -141,6 +141,12 @@ func fileURI(path string) string {
 	return "file:" + strings.NewReplacer("%", "%25", "#", "%23", "?", "%3f").Replace(path)
 }
 
+// FileURI is a database file's DSN as the server opens it: the one spelling,
+// for any other process that opens the same file (spec 054 #40).
+func FileURI(path string) string {
+	return fileURI(path)
+}
+
 // createFile makes a fresh database file in incremental auto-vacuum mode and
 // WAL, in that order: once WAL has written the file's header the mode can no
 // longer change without a VACUUM, which is what every fresh file used to go

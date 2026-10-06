@@ -26,7 +26,9 @@ The agent starts a server on this machine and connects your application. It
 sends a test trace and reads it back. Then it tells you where the key is, what
 it changed, and gives you the link that creates your account.
 [agent-setup.md](agent-setup.md) is what it follows, and lists what it will
-ask you for. The rest of this page is the same by hand.
+ask you for. To update later, the line is
+`Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md`
+([agent-upgrade.md](agent-upgrade.md)). The rest of this page is the same by hand.
 
 ## 1. Run the server
 

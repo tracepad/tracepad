@@ -3,8 +3,9 @@ name: CI
 # Pull requests carry the gate. A push to `main` is a squash-merge of a pull
 # request that already went green on the same tree, so running everything
 # again there paid a second time for the same answer — roughly half of every
-# month's minutes. The push trigger stays for one job only: the multi-arch
-# image build, which needs a run per merge, not per review (see `multiarch`).
+# month's minutes. The push trigger stays for the jobs that need a run per
+# merge, not per review: the multi-arch image build (see `multiarch`), the race
+# detector, and the upgrade against real servers (see `upgrade-integration`).
 on:
   push:
     branches: [main]
@@ -192,6 +193,22 @@ jobs:
   # and on demand. A race it finds is a race in the tree that was merged, and
   # the run of the next merge cancels this one, the newer tree containing the
   # older.
+  # Every platform a release builds, and FreeBSD, type-checked with the
+  # tests (spec 054 #43): a system's own files are compiled by nothing else,
+  # and a break there would surface only at the release tag.
+  cross-build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make cross-build
+
   race:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -231,6 +248,48 @@ jobs:
           name: crash-evidence
           path: ${{ runner.temp }}/crash-evidence/
           retention-days: 7
+
+  # `tracepad upgrade` against real servers (spec 054 #27): two versions of the
+  # binary built, servers started, upgraded, broken and gone back from, and
+  # the fault matrix again on them. The gate runs the command on fakes; this
+  # is the minutes a fake saves, spent only when a pull request touches what
+  # it tests, and on every merge to main. On ubuntu-latest every process sits
+  # in the runner agent's systemd unit, which makes a server the person's
+  # (Decision 29): the tests read their servers as a terminal's, and one test
+  # reads the runner's real cgroup by the rule. A change to the toolchain, the
+  # dependencies, the Makefile's target or this job runs it too (Decision 33).
+  upgrade-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: What this run is for
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=false
+          if [ "$EVENT" != pull_request ]; then
+            run=true
+          else
+            for f in $(git diff --name-only "$BASE" HEAD); do
+              case "$f" in
+                internal/upgrade/*|internal/store/*|internal/server/*|cmd/tracepad/*|internal/config/*|agent/skills/*|scripts/install.sh|scripts/install-test.sh|Dockerfile|.goreleaser.yaml|go.mod|go.sum|Makefile|.github/workflows/ci.yml) run=true ;;
+              esac
+            done
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "upgrade integration: $run"
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - if: steps.scope.outputs.run == 'true'
+        run: make upgrade-integration
 
   # The release, rehearsed (spec 020 #27). Nothing else exercises
   # `.goreleaser.yaml` before a tag does, and `goreleaser check` cannot: it

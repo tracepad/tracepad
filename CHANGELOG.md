@@ -103,5 +103,15 @@ one.
   installs a release candidate only when `TRACEPAD_VERSION` names one.
 - The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
   Markdown beside its HTML, on the documentation site.
+- `tracepad upgrade`: the binary and a server you started, to a newer
+  release, with a backup first and a way back that deletes nothing. `--plan`
+  changes nothing and says what is yours; the upgrade restarts the server with
+  the same arguments and environment, checks it, and goes back at once when
+  it exits or answers as another version. A container is yours: the plan gives
+  the commands that upgrade it. A coding agent does it from one
+  line, `Update Tracepad to the latest release: follow
+  https://tracepad.github.io/tracepad/agent-upgrade.md`, and the install
+  script names what still runs an older version
+  ([docs/cli.md](docs/cli.md#upgrade)).
 
 [Unreleased]: https://github.com/tracepad/tracepad/commits/main

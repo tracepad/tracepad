@@ -306,6 +306,38 @@ data directory and brings it up to date. **A downgrade is not supported** — an
 older binary meeting a newer schema is not a case anything handles — so the
 upgrade is only as safe as the copy you took before it.
 
+**A server you started yourself** — `tracepad serve` from the binary the
+install script put in `~/.local/bin`, listening on this machine only — is
+upgraded by one command, or by your coding agent with one line:
+
+```sh
+tracepad upgrade --plan      # changes nothing: what it will do, and what is yours
+tracepad upgrade             # does it
+```
+
+```text
+Update Tracepad to the latest release: follow https://tracepad.github.io/tracepad/agent-upgrade.md
+```
+
+It archives the data directory into `~/tracepad-backups/<run>/` with the server
+stopped, puts the new binary in place, starts it with the same arguments and
+environment, and checks it; a version that exits or answers as another version
+is rolled back at once, one that runs but stays silent is left for you to
+decide, and `tracepad upgrade --back <run>` takes the way back later. Nothing is
+deleted on the way: what a way back replaces is set aside as
+`<data>.after-<run>`. The whole of it is [cli.md](cli.md#upgrade).
+
+**A backup is personal data with no expiry.** A run directory, like any copy
+you take, holds every prompt and completion and the server's environment,
+secrets included, until someone deletes it; erasing traces or a user's data
+(see [retention.md](retention.md)) reaches neither it nor a data directory a
+way back set aside. Remove them once the new version has proved itself.
+
+A service, or a server open beyond this machine, is upgraded by hand — the
+command's plan says which, and these are the steps (a container's are in
+[docker.md](docker.md#upgrading-and-backing-up-first), and the plan gives them
+with its names filled in):
+
 1. Read the release notes, and [CHANGELOG.md](../CHANGELOG.md) for anything
    marked *Changed*.
 2. [Back up](#backing-up).

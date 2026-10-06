@@ -275,6 +275,12 @@ var flagTargets = []struct {
 // given, and nothing else.
 type Flags struct{ given map[string]string }
 
+// Given is the value a flag was given on the command line, and whether it was.
+func (f *Flags) Given(name string) (string, bool) {
+	v, ok := f.given[name]
+	return v, ok
+}
+
 // ParseFlags reads the server's flags, and nothing from the environment. It is
 // the first of two steps (the second is FromEnv) so that the caller can write
 // the server's first log line between them (spec 001 #25): after the
@@ -805,12 +811,21 @@ func parseDuration(key string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-func defaultDataDir() string {
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+func defaultDataDir() string { return DefaultDataDirFor(os.Getenv) }
+
+// DefaultDataDirFor is the data directory a server uses when neither
+// --data-dir nor TRACEPAD_DATA_DIR says one, in the environment getenv reads:
+// `tracepad upgrade` asks it of another process's environment (spec 054 #4).
+func DefaultDataDirFor(getenv func(string) string) string {
+	if xdg := getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "tracepad")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := getenv("HOME")
+	if runtime.GOOS == "windows" {
+		// os.UserHomeDir's rule there.
+		home = getenv("USERPROFILE")
+	}
+	if home == "" {
 		// Last resort; a relative dir still lets the server start.
 		return "tracepad-data"
 	}

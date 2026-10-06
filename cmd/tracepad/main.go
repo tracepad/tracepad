@@ -23,6 +23,7 @@ import (
 	"github.com/tracepad/tracepad/internal/server"
 	"github.com/tracepad/tracepad/internal/store"
 	"github.com/tracepad/tracepad/internal/ui"
+	"github.com/tracepad/tracepad/internal/upgrade"
 )
 
 // version is stamped by the release build (-ldflags "-X main.version=...").
@@ -67,7 +68,7 @@ var clientCommands = func() map[string]bool {
 // one of them: `clientCommands` is consulted first, so a collision would take
 // `serve` away from the server and hand it to a client command of the same
 // name. Nothing enforces this at compile time, so the test does.
-var serverCommands = []string{"serve", "mcp", "skills", "version", "help"}
+var serverCommands = []string{"serve", "mcp", "skills", "upgrade", "version", "help"}
 
 func main() {
 	cmd, args := splitCommand(os.Args[1:])
@@ -93,6 +94,21 @@ func main() {
 			Stderr:  os.Stderr,
 			Env:     os.Getenv,
 			Getwd:   os.Getwd,
+		}))
+	case cmd == "upgrade":
+		// Local too: it acts on this machine's binary, processes and
+		// containers, and asks servers only at their own addresses (spec 054).
+		// A terminal closed under it is an interrupt like Ctrl-C (#35): once
+		// a server is stopped the run goes on to the end, or back, and every
+		// later SIGHUP is caught here too, so none ends it half way.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		os.Exit(upgrade.Run(ctx, upgrade.Options{
+			Args:    args,
+			Version: currentVersion(),
+			Stdout:  os.Stdout,
+			Stderr:  os.Stderr,
+			Getenv:  os.Getenv,
 		}))
 	case clientCommands[cmd]:
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -143,6 +159,9 @@ Usage:
                              install the agent skill this binary carries
   tracepad skills show [FILE]
                              print the skill, or one of its references
+  tracepad upgrade [--plan | --check RUN | --back RUN] [--to X] [--data-dir DIR] [--json]
+                             upgrade the binary and a server you started,
+                             with a backup and a way back
 
 Flags of serve:
   --listen addr      HTTP listen address        (env TRACEPAD_LISTEN, default localhost:4318)
