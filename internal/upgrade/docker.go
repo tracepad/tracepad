@@ -416,8 +416,8 @@ func containerAdvice(c Container, to string) string {
 	name, old := shq(c.Name), shq(c.Name+"-old")
 	chain, after := containerSteps(c, to)
 	if c.Run == nil {
-		return fmt.Sprintf("Upgrade it yourself (%s), each step only once the one before it worked: %s. Then run %s as %s with the options %s was created with, which the command could not write (%s; docker inspect %s has them), and remove %s once it is healthy",
-			docsDocker, chain, image, name, name, c.RunWhy, old, old)
+		return fmt.Sprintf("Upgrade it yourself (%s), each step only once the one before it worked: %s. Then run %s as %s with the options %s was created with, which the command could not write (%s; docker inspect %s has them), and remove %s once it is healthy. %s",
+			docsDocker, chain, image, name, name, c.RunWhy, old, old, strings.Join(after, ". "))
 	}
 	return fmt.Sprintf("Upgrade it yourself (%s), as one command — a step that fails stops the ones after it: %s. %s. Any other option it was given — a user, limits, labels — is in docker inspect %s",
 		docsDocker, chain, strings.Join(after, ". "), old)
@@ -446,7 +446,7 @@ func containerSteps(c Container, to string) (chain string, after []string) {
 		fmt.Sprintf("docker rename %s %s", name, old),
 	}
 	if c.Run == nil {
-		return strings.Join(steps, " && "), nil
+		return strings.Join(steps, " && "), []string{"Stopped before the rename: docker start " + name}
 	}
 	// The variables it was given go into a file of their own, read from
 	// Docker and never printed (the live run of rc.3): they hold its keys.
@@ -469,6 +469,10 @@ func containerSteps(c Container, to string) (chain string, after []string) {
 		steps = append(steps, "rm "+env)
 	}
 	after = append(after, fmt.Sprintf("Once the new one is healthy: docker rm %s", old))
+	if slices.Contains(c.Run, "-P") {
+		after = append(after, fmt.Sprintf("-P publishes new random host ports: clients that used the old port need the new one (docker port %s)", name))
+	}
+	after = append(after, "Stopped before the rename: docker start "+name)
 	back := fmt.Sprintf("docker rename %s %s && docker start %s", old, name, name)
 	if len(c.EnvNames) > 0 {
 		back = "rm -f " + env + "; " + back

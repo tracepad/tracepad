@@ -647,7 +647,8 @@ rm tracepad.upgrade.env
 the container, read from Docker into a file that holds its keys and is removed
 once the new one runs; the `-p`, `-v` and `serve` are the options you created it
 with. The old container is kept, renamed: once the new one has proved itself,
-`docker rm tracepad-old`. Stopped after the rename, put it back:
+`docker rm tracepad-old`. Stopped before the rename, `docker start tracepad`.
+Stopped after it, put the old one back:
 `docker rm tracepad` if the new one was made, `rm -f tracepad.upgrade.env`, then
 `docker rename tracepad-old tracepad && docker start tracepad`.
 

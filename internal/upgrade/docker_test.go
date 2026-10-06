@@ -205,6 +205,7 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename tracepad-app tracepad-app-old", "docker/#upgrading",
 			"docker rename tracepad-app tracepad-app-old && (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-app-old | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > tracepad-app.upgrade.env) && ",
 			"docker run -d --name tracepad-app --env-file tracepad-app.upgrade.env -p 127.0.0.1:4318:4318 -v tracepad-app:/data -v '/srv/my config:/etc/extra:ro' --restart always ghcr.io/tracepad/tracepad:0.2.0 serve && rm tracepad-app.upgrade.env. Once the new one is healthy: docker rm tracepad-app-old",
+			"Stopped before the rename: docker start tracepad-app",
 			"Stopped after the rename: docker rm tracepad-app if it was made, then rm -f tracepad-app.upgrade.env; docker rename tracepad-app-old tracepad-app && docker start tracepad-app"} {
 			if !strings.Contains(all, want) {
 				t.Errorf("%q: the commands miss %q: %s", mode, want, all)
@@ -370,8 +371,12 @@ func TestTheRunIsTheContainersOwn(t *testing.T) {
 		t.Errorf("%q %v, want %q", run, err, want)
 	}
 	c := Container{Name: "t", Repo: "ghcr.io/tracepad/tracepad", Run: run}
-	if chain, _ := containerSteps(c, "0.2.0"); !strings.Contains(chain, "docker run -d --name t -P --entrypoint '' ghcr.io/tracepad/tracepad:0.2.0 /tracepad serve --listen :8080") {
+	chain, after := containerSteps(c, "0.2.0")
+	if !strings.Contains(chain, "docker run -d --name t -P --entrypoint '' ghcr.io/tracepad/tracepad:0.2.0 /tracepad serve --listen :8080") {
 		t.Errorf("%s", chain)
+	}
+	if !slices.Contains(after, "-P publishes new random host ports: clients that used the old port need the new one (docker port t)") {
+		t.Errorf("%q", after)
 	}
 	ic.Mounts = []mount{{Type: "npipe", Source: `\\.\pipe\docker_engine`, Destination: "/pipe"}}
 	if _, _, err := createdAs(ic, img); err == nil || !strings.Contains(err.Error(), "a mount of type npipe") {
