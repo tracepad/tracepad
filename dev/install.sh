@@ -37,7 +37,7 @@ platform() {
 	case "$(uname -s)" in
 	Linux) os=linux ;;
 	Darwin) os=darwin ;;
-	*) fail "$(uname -s) is not a system this script installs for; the archives for Windows and the rest are listed in https://tracepad.github.io/tracepad/install/" ;;
+	*) fail "$(uname -s) is not a system this script installs for; the archives for Windows and the rest are listed in https://tracepad.github.io/tracepad/latest/install/" ;;
 	esac
 	case "$(uname -m)" in
 	x86_64 | amd64) arch=amd64 ;;
@@ -289,7 +289,7 @@ main() {
 		elif newer "$before" "$version"; then
 			change=downgraded
 			headline="downgraded tracepad $before → $version at $bin, as TRACEPAD_VERSION asked"
-			warning="An older binary does not open a database a newer one migrated: restore the backup taken before that upgrade (https://tracepad.github.io/tracepad/install/#upgrading)."
+			warning="An older binary does not open a database a newer one migrated: restore the backup taken before that upgrade (https://tracepad.github.io/tracepad/latest/install/#upgrading)."
 		else
 			change=updated
 			headline="updated tracepad ${before:-(a binary that gave no version)} → $version at $bin"

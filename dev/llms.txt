@@ -2,53 +2,53 @@
 
 > LLM observability and evals in a single binary — traces, prompts, datasets, scores and review queues for LLM and agent apps, self-hosted.
 
-Every page below is Markdown, and `llms-full.txt` beside this file is all of them in one. These addresses follow the newest release; a version's own pages are under `https://tracepad.github.io/tracepad/dev/<version>/` (`dev` is the tip of `main`).
+Every page below is Markdown, and `llms-full.txt` beside this file is all of them in one. These addresses follow the newest release; a version's own pages are under `https://tracepad.github.io/tracepad/latest/<version>/` (`dev` is the tip of `main`).
 
-A coding agent setting Tracepad up for a project starts at [Agent setup](https://tracepad.github.io/tracepad/dev/agent-setup.md).
+A coding agent setting Tracepad up for a project starts at [Agent setup](https://tracepad.github.io/tracepad/latest/agent-setup.md).
 
 ## Overview
 
-- [Home](https://tracepad.github.io/tracepad/dev/index.md): Tracepad is LLM observability and evals in a single binary: traces, prompt versions, datasets and eval runs, scores and annotation queues for LLM and agent applications, self-hosted on one embedded…
+- [Home](https://tracepad.github.io/tracepad/latest/index.md): Tracepad is LLM observability and evals in a single binary: traces, prompt versions, datasets and eval runs, scores and annotation queues for LLM and agent applications, self-hosted on one embedded…
 
 ## Get started
 
-- [Quickstart](https://tracepad.github.io/tracepad/dev/quickstart.md): From nothing to a trace on screen.
-- [Agent setup](https://tracepad.github.io/tracepad/dev/agent-setup.md): This page is an instruction to a coding agent (Claude Code, Codex, Cursor or any other) that a person has asked to set Tracepad up for the project in front of it.
-- [Agent upgrade](https://tracepad.github.io/tracepad/dev/agent-upgrade.md): This page is an instruction to a coding agent that a person has asked to update Tracepad on this machine: "Update Tracepad to the latest release", or to a version they name.
-- [Installing the binary](https://tracepad.github.io/tracepad/dev/install.md): The release archives are one file each and need nothing installed beside them.
-- [Docker](https://tracepad.github.io/tracepad/dev/docker.md): `ghcr.io/tracepad/tracepad` is the server, the web interface and the CLI in one image — the same binary the release archives carry, built from the `Dockerfile` in this repository.
-- [Configuration](https://tracepad.github.io/tracepad/dev/configuration.md): Every variable the server, the CLI and the packages read, in one place.
-- [How Tracepad compares](https://tracepad.github.io/tracepad/dev/compare.md): Tracepad is one way to keep the traces and evals of an LLM application.
+- [Quickstart](https://tracepad.github.io/tracepad/latest/quickstart.md): From nothing to a trace on screen.
+- [Agent setup](https://tracepad.github.io/tracepad/latest/agent-setup.md): This page is an instruction to a coding agent (Claude Code, Codex, Cursor or any other) that a person has asked to set Tracepad up for the project in front of it.
+- [Agent upgrade](https://tracepad.github.io/tracepad/latest/agent-upgrade.md): This page is an instruction to a coding agent that a person has asked to update Tracepad on this machine: "Update Tracepad to the latest release", or to a version they name.
+- [Installing the binary](https://tracepad.github.io/tracepad/latest/install.md): The release archives are one file each and need nothing installed beside them.
+- [Docker](https://tracepad.github.io/tracepad/latest/docker.md): `ghcr.io/tracepad/tracepad` is the server, the web interface and the CLI in one image — the same binary the release archives carry, built from the `Dockerfile` in this repository.
+- [Configuration](https://tracepad.github.io/tracepad/latest/configuration.md): Every variable the server, the CLI and the packages read, in one place.
+- [How Tracepad compares](https://tracepad.github.io/tracepad/latest/compare.md): Tracepad is one way to keep the traces and evals of an LLM application.
 
 ## Send traces
 
-- [Sending traces](https://tracepad.github.io/tracepad/dev/ingest.md): Tracepad speaks OTLP.
-- [Python package](https://tracepad.github.io/tracepad/dev/sdk-python.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry SDK.
-- [Node package](https://tracepad.github.io/tracepad/dev/sdk-js.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry JS SDK.
-- [Go package](https://tracepad.github.io/tracepad/dev/sdk-go.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry Go SDK.
-- [Media](https://tracepad.github.io/tracepad/dev/media.md): A multimodal call sends the model a picture, and the trace of that call keeps what was sent.
-- [Coming from the Langfuse SDK](https://tracepad.github.io/tracepad/dev/langfuse-sdk.md): Tracepad accepts traces from the Langfuse SDK on the route the SDK already uses, `POST /api/public/otel/v1/traces`.
+- [Sending traces](https://tracepad.github.io/tracepad/latest/ingest.md): Tracepad speaks OTLP.
+- [Python package](https://tracepad.github.io/tracepad/latest/sdk-python.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry SDK.
+- [Node package](https://tracepad.github.io/tracepad/latest/sdk-js.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry JS SDK.
+- [Go package](https://tracepad.github.io/tracepad/latest/sdk-go.md): `tracepad` is a thin layer of ergonomics over the OpenTelemetry Go SDK.
+- [Media](https://tracepad.github.io/tracepad/latest/media.md): A multimodal call sends the model a picture, and the trace of that call keeps what was sent.
+- [Coming from the Langfuse SDK](https://tracepad.github.io/tracepad/latest/langfuse-sdk.md): Tracepad accepts traces from the Langfuse SDK on the route the SDK already uses, `POST /api/public/otel/v1/traces`.
 
 ## Use it
 
-- [Web interface](https://tracepad.github.io/tracepad/dev/ui.md): A browser client of the read API, served by the same binary on the same port.
-- [Scores](https://tracepad.github.io/tracepad/dev/scores.md): A score is a quality judgement attached to a trace, an observation or a session: a number from an eval run, a pass/fail from a guardrail, a verdict from an LLM judge, a rating from a human reviewer.
-- [Prompts](https://tracepad.github.io/tracepad/dev/prompts.md): Tracepad stores prompts as versioned, labelled artefacts.
-- [Datasets and runs](https://tracepad.github.io/tracepad/dev/datasets.md): An eval is a set of cases, a pass over them, and a comparison against last time.
-- [Annotation queues](https://tracepad.github.io/tracepad/dev/annotation.md): Scoring the trace you happen to be reading is one thing.
-- [Quality](https://tracepad.github.io/tracepad/dev/quality.md): A score lives on one trace.
-- [Users](https://tracepad.github.io/tracepad/dev/users.md): A user id rides on most production traces, and until now the store could filter by it, erase by it, and nothing else.
+- [Web interface](https://tracepad.github.io/tracepad/latest/ui.md): A browser client of the read API, served by the same binary on the same port.
+- [Scores](https://tracepad.github.io/tracepad/latest/scores.md): A score is a quality judgement attached to a trace, an observation or a session: a number from an eval run, a pass/fail from a guardrail, a verdict from an LLM judge, a rating from a human reviewer.
+- [Prompts](https://tracepad.github.io/tracepad/latest/prompts.md): Tracepad stores prompts as versioned, labelled artefacts.
+- [Datasets and runs](https://tracepad.github.io/tracepad/latest/datasets.md): An eval is a set of cases, a pass over them, and a comparison against last time.
+- [Annotation queues](https://tracepad.github.io/tracepad/latest/annotation.md): Scoring the trace you happen to be reading is one thing.
+- [Quality](https://tracepad.github.io/tracepad/latest/quality.md): A score lives on one trace.
+- [Users](https://tracepad.github.io/tracepad/latest/users.md): A user id rides on most production traces, and until now the store could filter by it, erase by it, and nothing else.
 
 ## Read it back
 
-- [Read API](https://tracepad.github.io/tracepad/dev/api.md): Everything tracepad knows is readable over HTTP.
-- [CLI](https://tracepad.github.io/tracepad/dev/cli.md): The same binary that runs the server is also its client.
-- [MCP](https://tracepad.github.io/tracepad/dev/mcp.md): Tracepad serves the Model Context Protocol so an agent can read traces as tools rather than as HTTP.
-- [Coding agents](https://tracepad.github.io/tracepad/dev/agents.md): A coding agent can reach everything Tracepad has without help: the CLI answers in JSON when piped, the MCP server is in the binary, and `GET /api/v1` describes every route.
-- [Taking the data out](https://tracepad.github.io/tracepad/dev/export.md): Tracepad keeps every export body it accepts, byte for byte, exactly as the client sent it.
+- [Read API](https://tracepad.github.io/tracepad/latest/api.md): Everything tracepad knows is readable over HTTP.
+- [CLI](https://tracepad.github.io/tracepad/latest/cli.md): The same binary that runs the server is also its client.
+- [MCP](https://tracepad.github.io/tracepad/latest/mcp.md): Tracepad serves the Model Context Protocol so an agent can read traces as tools rather than as HTTP.
+- [Coding agents](https://tracepad.github.io/tracepad/latest/agents.md): A coding agent can reach everything Tracepad has without help: the CLI answers in JSON when piped, the MCP server is in the binary, and `GET /api/v1` describes every route.
+- [Taking the data out](https://tracepad.github.io/tracepad/latest/export.md): Tracepad keeps every export body it accepts, byte for byte, exactly as the client sent it.
 
 ## Operate it
 
-- [Accounts](https://tracepad.github.io/tracepad/dev/accounts.md): People sign in; programs use keys.
-- [Administration](https://tracepad.github.io/tracepad/dev/admin.md): Projects, API keys, retention windows and user-data erasure, over the same JSON API as everything else and through the same binary's CLI.
-- [Retention](https://tracepad.github.io/tracepad/dev/retention.md): A store that only grows is a store you eventually delete by hand.
+- [Accounts](https://tracepad.github.io/tracepad/latest/accounts.md): People sign in; programs use keys.
+- [Administration](https://tracepad.github.io/tracepad/latest/admin.md): Projects, API keys, retention windows and user-data erasure, over the same JSON API as everything else and through the same binary's CLI.
+- [Retention](https://tracepad.github.io/tracepad/latest/retention.md): A store that only grows is a store you eventually delete by hand.
