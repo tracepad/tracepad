@@ -612,7 +612,10 @@ func TestWithoutAKeyTheCountsAreNotCompared(t *testing.T) {
 	w.start()
 	delete(w.env, "TRACEPAD_API_KEY")
 	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
-	if code != exitOK || rep.Check == nil || rep.Check.CountNote == "" {
+	// Said in as many words, in the check and in the notes (the live run
+	// of 0.1.0).
+	if code != exitOK || rep.Check == nil || rep.Check.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" ||
+		!slices.Contains(rep.Notes, "the trace counts are not compared: no TRACEPAD_API_KEY in the environment") {
 		t.Fatalf("exit %d, %+v", code, rep)
 	}
 }

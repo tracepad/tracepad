@@ -1084,8 +1084,9 @@ release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
-command runs from (`~/.local/bin` when it runs from a temporary directory, as
-the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
+command runs from (`~/.local/bin` when it runs from a temporary directory, or
+from `~/.cache/tracepad/release/` as the agent's bridge does;
+`TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a
 server only at the server's own address. It does not run on Windows in this
@@ -1095,8 +1096,11 @@ release: it refuses there before it looks at anything. The design is spec 054.
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
   another binary, a Compose project), and what the upgrade would do, step by
-  step. More than one of the command's behind: name one with `--data-dir` or
-  `--container`.
+  step. What is yours and needs nothing — at the version, past it, or not a
+  release — is listed apart, under *Yours, nothing to do* (`nothing_to_do` in
+  `--json`). A development build at the install path is left as it is, with
+  the install script's line that replaces it. More than one of the command's
+  behind: name one with `--data-dir` or `--container`.
 - **A container** is the command's when it is named `tracepad-<project>`, as
   the setup names one, or with `--container NAME`, and a recreate of it is the
   same container: no Compose, Swarm or Kubernetes label; running; a local named
@@ -1122,9 +1126,13 @@ release: it refuses there before it looks at anything. The design is spec 054.
   of the image is yours, and the plan gives the commands that upgrade it —
   the same `docker run`, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
-  ([docker.md](docker.md#upgrading-and-backing-up-first)) — or Compose's
-  `docker compose up -d`. One whose address cannot be told is said to be not
-  checked, not called behind.
+  ([docker.md](docker.md#upgrading-and-backing-up-first)). A Compose
+  project's are run through its project and file, as Compose labelled the
+  container (`docker compose -p NAME -f FILE`), from any directory: the
+  service stopped, the volume it really has archived — Compose names it
+  `<project>_<volume>` — the image set in the file, with a digest pinned to
+  it taken off, and `up -d`. One whose address cannot be told is said to be
+  not checked, not called behind.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -1168,7 +1176,7 @@ release: it refuses there before it looks at anything. The design is spec 054.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
-  compared). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
+  compared, and the plan and the check say so). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit `4`).
@@ -1213,7 +1221,9 @@ report says what runs and what is where, whatever the status. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
 `back_check` (the way back's check of the old version), `plan`, `done`,
-`set_aside`, `person`, `next` and `notes`.
+`set_aside`, `person`, `next` and `notes`. In `binary`, `servers` and
+`containers`, `whose` is `command` or `person`, with the `reason` of the
+person's, and `nothing_to_do` marks one of the person's that needs nothing.
 
 ## Version skew
 

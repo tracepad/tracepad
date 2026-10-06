@@ -759,6 +759,94 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	}
 }
 
+// A Compose container's commands are whole, run from anywhere (the live run
+// of 0.1.0): the service stopped through its project and file, the volume
+// Compose really named archived — `<project>_<volume>`, never docker.md's
+// `tracepad`, which `docker run` would make empty and archive — the file
+// named, and an image pinned by digest said, since a new tag in front of
+// the old digest leaves Docker on the old image.
+func TestComposeAdvice(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	pinned := "ghcr.io/tracepad/tracepad:0.1.0@sha256:" + strings.Repeat("d", 64)
+	d.image(pinned, "0.1.0")
+	labels := map[string]string{
+		"com.docker.compose.project":              "tracepad",
+		"com.docker.compose.service":              "tracepad",
+		"com.docker.compose.project.working_dir":  "/srv/my app",
+		"com.docker.compose.project.config_files": "/srv/my app/compose.yml,/srv/my app/compose.override.yml",
+	}
+	args := []string{"--name", "tracepad-tracepad-1", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=tracepad_tracepad_data,dst=/data"}
+	for k, l := range labels {
+		args = append(args, "--label", k+"="+l)
+	}
+	d.run(t, append(args, pinned)...)
+	rep, code := runReport(t, containerDeps(t, d), "--plan")
+	all := strings.Join(rep.Person, "\n")
+	compose := "docker compose -p tracepad -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
+	for _, want := range []string{
+		compose + " stop tracepad && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly -v \"$PWD:/backup\" " + busybox + " sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-tracepad-1-0.1.0.tar.gz' && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
+		"set the image of the service tracepad in whichever of /srv/my app/compose.yml, /srv/my app/compose.override.yml sets it to ghcr.io/tracepad/tracepad:0.2.0",
+		"take its digest off: it is pinned to sha256:" + strings.Repeat("d", 64),
+		"docker pull ghcr.io/tracepad/tracepad:0.2.0 prints its digest",
+		"and: " + compose + " up -d tracepad.",
+		"Stopped before the image was set: " + compose + " start tracepad",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the commands miss %q:\n%s", want, all)
+		}
+	}
+	if code != exitDecide || strings.Contains(all, "src=tracepad,") {
+		t.Errorf("%d: %s", code, all)
+	}
+
+	// One file in another directory than the project's is named with it;
+	// an image not pinned says nothing of a digest.
+	c := Container{Name: "obs-tracepad-1", Repo: "ghcr.io/tracepad/tracepad", Ref: "ghcr.io/tracepad/tracepad:0.1", Version: "0.1.0",
+		Compose: "obs", Service: "tp", ComposeDir: "/srv/obs", ComposeFiles: []string{"/etc/obs/compose.yml"}, DataMount: "type=volume,src=obs_data"}
+	got := composeAdvice(c, "0.2.0")
+	for _, want := range []string{"docker compose -p obs --project-directory /srv/obs -f /etc/obs/compose.yml stop tp", "in /etc/obs/compose.yml to ghcr.io/tracepad/tracepad:0.2.0, and"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("one file elsewhere: %q not in %s", want, got)
+		}
+	}
+	if strings.Contains(got, "digest") {
+		t.Errorf("an image with no digest: %s", got)
+	}
+	// Compose's labels missing: its project and directory, and what to look up.
+	c.ComposeFiles, c.Service = nil, ""
+	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop <its service>") {
+		t.Errorf("no file label: %s", got)
+	}
+}
+
+// What is the person's and needs nothing is apart from what needs them (the
+// live run of 0.1.0): in JSON it says nothing_to_do, and the text lists it
+// under a heading of its own, out of the inventory above "Yours, to do".
+func TestThePersonsIdleApart(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	d.add("other-current", "0.2.0", "0.0.0.0", "4330", "current", nil)
+	d.add("other-behind", "0.1.0", "0.0.0.0", "4331", "behind", nil)
+	rep, code := runReport(t, containerDeps(t, d), "--plan")
+	idle := map[string]bool{}
+	for _, c := range rep.Containers {
+		idle[c.Name] = c.Idle
+	}
+	if code != exitDecide || !idle["other-current"] || idle["other-behind"] {
+		t.Fatalf("%d %v", code, idle)
+	}
+	var out bytes.Buffer
+	run(context.Background(), Options{Args: []string{"--plan"}, Stdout: &out, Stderr: io.Discard}, containerDeps(t, d))
+	text := out.String()
+	head, rest, _ := strings.Cut(text, "\nYours, to do:")
+	_, apart, _ := strings.Cut(rest, "\nYours, nothing to do (at 0.2.0, past it, or not a release):\n")
+	if !strings.Contains(head, "container other-behind") || strings.Contains(head, "other-current") ||
+		!strings.HasPrefix(apart, "  container other-current, ghcr.io/tracepad/tracepad:0.2.0, 0.2.0 — yours") {
+		t.Errorf("%s", text)
+	}
+}
+
 // Compose's container is upgraded through its Compose file; one already at
 // the version is not called behind. Each is asked where its server listens
 // — TRACEPAD_LISTEN or --listen, published on any address of this machine —
@@ -779,7 +867,7 @@ func TestWhatThePlanSaysOfContainers(t *testing.T) {
 	d.run(t, "--name", "tracepad-inside", "ghcr.io/tracepad/tracepad:0.1.0")
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	all, notes := strings.Join(rep.Person, "\n"), strings.Join(rep.Notes, "\n")
-	for _, want := range []string{"docker compose up -d", "the project obs", "container tracepad-open runs 0.1.0; it publishes 4318/tcp on 0.0.0.0, beyond this machine",
+	for _, want := range []string{"docker compose -p obs up -d", "the project obs", "container tracepad-open runs 0.1.0; it publishes 4318/tcp on 0.0.0.0, beyond this machine",
 		"container tracepad-mute does not say its version"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("the plan misses %q:\n%s", want, all)
@@ -1880,4 +1968,48 @@ func (l *lateProcess) Candidates(context.Context) ([]Process, int, error) {
 		return nil, 0, nil
 	}
 	return []Process{l.p}, 0, nil
+}
+
+// The plan of a version that is this binary's own looks no release up (the
+// live run of 0.1.0): the install script asks the binary it has just put in
+// place, whose first connection a firewall may hold past the script's
+// fifteen seconds. Another version is still looked up.
+func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	plan := func(version string) Report {
+		var out bytes.Buffer
+		run(context.Background(), Options{Args: []string{"--plan", "--to", "0.9.9", "--json"}, Version: version, Stdout: &out, Stderr: io.Discard}, containerDeps(t, d))
+		var rep Report
+		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+			t.Fatalf("%v: %s", err, out.String())
+		}
+		return rep
+	}
+	if rep := plan("0.9.9"); strings.Contains(rep.Summary, "no release") {
+		t.Errorf("its own version was looked up: %s", rep.Summary)
+	}
+	if rep := plan("0.2.0"); !strings.Contains(rep.Summary, "there is no release v0.9.9") {
+		t.Errorf("another version was not looked up: %s", rep.Summary)
+	}
+}
+
+// A development build at the install path is its builder's: the plan and the
+// upgrade leave it, and give the install script's line that puts the
+// release in its place (the live run of 0.1.0). It is no "nothing to do".
+func TestADevelopmentBuildIsGivenItsReplacement(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	deps := containerDeps(t, d, "97d6b79")
+	bin := filepath.Join(deps.InstallDir, "tracepad")
+	for _, mode := range [][]string{{"--plan"}, {}} {
+		rep, _ := runReport(t, deps, mode...)
+		want := fmt.Sprintf("%s says it is \"97d6b79\", a development build, which the command does not replace; to put 0.2.0 in its place: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.2.0 sh", bin)
+		if !slices.Contains(rep.Person, want) || rep.Binary == nil || rep.Binary.Idle {
+			t.Errorf("%q: %q %+v", mode, rep.Person, rep.Binary)
+		}
+		if v, _ := scriptVersion(context.Background(), bin); v != "97d6b79" {
+			t.Errorf("%q: the build was replaced: %s", mode, v)
+		}
+	}
 }

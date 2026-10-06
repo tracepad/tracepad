@@ -341,8 +341,12 @@ main() {
 			;;
 		0/* | 2/*) ;;
 		*)
+			# Why, in the plan's own first line, or the watchdog's: a new
+			# binary's first connection may wait on a firewall or a scan.
+			why="it did not finish in 15 seconds"
+			[ "$plan_status" -gt 128 ] || why="$(head -n 1 "$tmp/plan")"
 			say ""
-			say "Could not check what still runs an older version; to see it: $bin upgrade --plan"
+			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $bin upgrade --plan"
 			;;
 		esac
 	fi

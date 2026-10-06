@@ -8,8 +8,13 @@ refusal: it says what is the human's.
 
 ## 1. The plan
 
+First `tracepad version` against the skill's `metadata.version`. Older, or a
+development build (`dev`, a commit), and the binary is replaced before anything
+else — ask the human, then `curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=<the skill's> sh`.
+
 With the key in the environment (never on a command line), so the trace counts
-before and after can be compared:
+before and after are compared: `setup.md` keeps it in `.env`; a project that
+keeps it elsewhere (`config/.env.local`, say) has it read from there. Empty, they are not:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH" TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env 2>/dev/null)"
@@ -18,10 +23,12 @@ tracepad upgrade --plan
 
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
 binary predates the command; plan and upgrade with a release's, fetched into a
-directory of its own (it upgrades the installed one), `v` the version named:
+directory of its own that stays the same, which a firewall that asks once per
+path asks once for, `v` the version named. It plans for the installed binary,
+and leaves one that is not a release's, giving the line that replaces it:
 
 ```sh
-v=; dir="$(mktemp -d)"; curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && "$dir/tracepad" upgrade --plan ${v:+--to "$v"}
+v=; dir="${XDG_CACHE_HOME:-$HOME/.cache}/tracepad/release"; mkdir -p "$dir" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
@@ -56,9 +63,9 @@ The same command and flags without `--plan`. Its exit status:
 
 The command installed the skill again wherever a copy was. A pinned
 `tracepad` package goes to the same version in the project's own tool:
-`tracepad==0.1.0rc2` (PyPI's spelling), `tracepad@0.1.0-rc.2` (npm), Go's
-`…/sdk/go@v0.1.0-rc.2`. Not published: keep the pin, and say so. Run the
-project's tests.
+`tracepad==<version>` (PyPI; a candidate `X.Y.ZrcN`), `tracepad@<version>`
+(npm; `X.Y.Z-rc.N`), Go's `…/sdk/go@v<version>`. Not published: keep the pin,
+and say so. Run the project's tests.
 
 ## 4. Report to the human
 

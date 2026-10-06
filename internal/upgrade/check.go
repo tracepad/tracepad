@@ -78,9 +78,14 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 	switch {
 	case before == nil:
 		c.Verdict, c.Why = verdictHealthy, "it answers as "+want
-		if c.CountNote == "" {
-			c.CountNote = "the count before the upgrade was not read, so the counts were not compared"
+		// Said in as many words, whatever the reason (the live run of
+		// 0.1.0: a key the project kept elsewhere left the line reading
+		// only "no TRACEPAD_API_KEY in the environment").
+		why := c.CountNote
+		if why == "" || c.After != nil {
+			why = "the count before the upgrade was not read"
 		}
+		c.CountNote = "the trace counts were not compared: " + why
 	case c.After == nil:
 		c.Verdict = verdictDecide
 		c.Why = "it answers as " + want + ", but its trace count, read before the upgrade, cannot be read now (" + c.CountNote + ")"

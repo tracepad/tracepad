@@ -632,8 +632,12 @@ says why, and gives the steps below with its name, its volume and the release
 filled in, and the `docker run` it was created with — its ports, mounts,
 restart policy, labels and command, read from `docker inspect` — the variables
 it was given passed in a file read from Docker, named and never printed. A
-Compose project takes the new tag in its Compose file and `docker compose up
--d`, after the same backup.
+Compose project gets the same backup with its own names — the service stopped
+through its project and file (`docker compose -p <project> -f <file> stop
+<service>`), the volume Compose made archived — then the new tag in its
+Compose file (a `@sha256:` digest after the old tag taken off: Docker runs the
+digest whatever the tag says) and `docker compose -p <project> -f <file> up -d
+<service>`.
 
 Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
@@ -651,6 +655,21 @@ docker run -d --name tracepad --env-file tracepad.upgrade.env -p 127.0.0.1:4318:
   -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve &&
 rm tracepad.upgrade.env
 ```
+
+**Under Compose the volume is not called `tracepad`.** Compose names it
+`<project>_<volume>` — `tracepad_tracepad_data` for a volume `tracepad_data`
+in a project `tracepad` — and `-v tracepad:/data` copied from here makes a new,
+empty volume called `tracepad` and archives that: a backup that says it worked
+and holds nothing. Read the name before the backup, and put it in place of
+`tracepad` in `-v tracepad:/data`:
+
+```sh
+docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' <container>
+docker volume ls     # every volume, with Compose's names
+```
+
+`tracepad upgrade --plan` prints the steps with the real name, the service and
+the Compose file filled in.
 
 `X.Y.Z` is the release you are moving to; the variables are the ones you gave
 the container, read from Docker into a file that holds its keys and is removed

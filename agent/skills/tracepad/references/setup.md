@@ -11,7 +11,7 @@ tracepad version
 tracepad health
 ```
 
-- `version` prints a release (`0.1.0`) or a candidate (`0.1.0-rc.1`): installed.
+- `version` prints a release (`X.Y.Z`) or a candidate (`X.Y.Z-rc.N`): installed.
   `dev` is a build from a checkout: it serves, but has no image for Docker.
   *command not found* (try `~/.local/bin/tracepad` first, often off `PATH`):
   install with `curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh`.
@@ -60,10 +60,10 @@ human who would rather you made no key, takes the `ingest` key the first start
 prints instead: it cannot read, so step 6 waits for a `read` key the human
 mints (Settings → Project → API keys), and until then step 4's `200` is the
 only check. `how=docker` when the human asks for a container (the image is the
-binary's release; `dev` has none). `path` is step 2's: `package`, `otel`, `langfuse`.
+binary's release; `dev` has none). `via` is step 2's path: `package`, `otel`, `langfuse`.
 
 ```sh
-port=4318; declare=yes; how=binary; path=package
+port=4318; declare=yes; how=binary; via=package
 export PATH="$HOME/.local/bin:$PATH"; umask 077; url="http://localhost:$port"; tag="$(tracepad version)"
 data="${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}"; mkdir -p "$data"; n="$(cat "$data/server.log" 2>/dev/null | wc -l)"
 put() { { grep -v "^$1=" .env 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } >.env.new && mv .env.new .env; }
@@ -71,34 +71,37 @@ project="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" | tr -
 decl=""; [ "$declare" = yes ] && sk="tp-sk-$(openssl rand -hex 32)" && pk="tp-pk-$(openssl rand -hex 16)" && decl="${project:-app}:$pk:$sk"
 if [ "$how" = docker ]; then
   case "$tag" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "STOP: the image needs a release, and tracepad version says '$tag'"; exit 1 ;; esac
-  docker run -d --name "$name" -v "$name:/data" -p "127.0.0.1:$port:4318" -e TRACEPAD_URL="$url" -e TRACEPAD_PROJECTS="$decl" "ghcr.io/tracepad/tracepad:$tag" serve >/dev/null || exit 1
-  logs() { docker logs "$name" 2>&1; }; alive() { true; }; stop() { docker stop "$name"; }
+  docker container inspect "$name" >/dev/null 2>&1 && { echo "STOP: a container named $name is there already (docker ps -a): the human's to keep or remove"; exit 1; }
+  made=; docker volume inspect "$name" >/dev/null 2>&1 || made=yes; logs() { docker logs "$name" 2>&1; }; alive() { true; }
+  stop() { docker rm -f "$name" >/dev/null 2>&1; [ -z "$made" ] || docker volume rm "$name" >/dev/null; }
+  docker run -d --name "$name" -v "$name:/data" -p "127.0.0.1:$port:4318" -e TRACEPAD_URL="$url" -e TRACEPAD_PROJECTS="$decl" "ghcr.io/tracepad/tracepad:$tag" serve >/dev/null || { stop; exit 1; }
 else
   TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
   echo $! >"$data/server.pid.new"; logs() { cat "$data/server.log"; }
   alive() { kill -0 "$(cat "$data/server.pid.new")" && tail -n "+$((n + 1))" "$data/server.log" | grep -q 'listening addr'; }; stop() { kill "$(cat "$data/server.pid.new")"; rm "$data/server.pid.new"; }
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
-alive && tracepad health --url "$url" || { stop; logs | tail -n 5; exit 1; }
+alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }
 [ "$how" = docker ] || mv "$data/server.pid.new" "$data/server.pid"
 [ "$declare" = yes ] || { sk="$(logs | sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' | tail -n 1)"; pk="$(logs | sed -n 's/^ *LANGFUSE_PUBLIC_KEY=\(tp-pk-[^ ]*\)$/\1/p' | tail -n 1)"; }
 [ -n "$sk" ] && [ -n "$pk" ] || { echo "STOP: no key in this server's log"; exit 1; }
-put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$path" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
+put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
 ```
 
 Healthy: `{"version":"…","ok":true}`. Otherwise its log's last lines say why
 (*address already in use*: another port; Docker says its own), the server is
-stopped, `.env` untouched. The project is named after the repository.
+stopped — a container that failed is removed, with the volume it made, so the
+next try takes the same name — and `.env` untouched. The project is named after the repository.
 
-Then the lines of `path`, from `.env`. On a server you did not start, the human
+Then the lines of `via`, from `.env`. On a server you did not start, the human
 puts `TRACEPAD_URL`, the key and, for Langfuse, `LANGFUSE_PUBLIC_KEY` there:
 
 ```sh
-path=package; umask 077
+via=package; umask 077
 put() { { grep -v "^$1=" .env 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } >.env.new && mv .env.new .env; }
 url="$(sed -n 's/^TRACEPAD_URL=//p' .env)"; sk="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env)"; pk="$(sed -n 's/^LANGFUSE_PUBLIC_KEY=//p' .env)"
-[ "$path" != otel ] || { put OTEL_EXPORTER_OTLP_PROTOCOL http/protobuf; put OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$url/v1/traces"; put OTEL_EXPORTER_OTLP_HEADERS "\"authorization=Bearer $sk\""; }
-[ "$path" != langfuse ] || { [ -n "$pk" ] || { echo "STOP: no LANGFUSE_PUBLIC_KEY in .env"; exit 1; }; put LANGFUSE_BASE_URL "$url"; put LANGFUSE_HOST "$url"; put LANGFUSE_SECRET_KEY "$sk"; }
+[ "$via" != otel ] || { put OTEL_EXPORTER_OTLP_PROTOCOL http/protobuf; put OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "$url/v1/traces"; put OTEL_EXPORTER_OTLP_HEADERS "\"authorization=Bearer $sk\""; }
+[ "$via" != langfuse ] || { [ -n "$pk" ] || { echo "STOP: no LANGFUSE_PUBLIC_KEY in .env"; exit 1; }; put LANGFUSE_BASE_URL "$url"; put LANGFUSE_HOST "$url"; put LANGFUSE_SECRET_KEY "$sk"; }
 ```
 
 ## 4. A test span
@@ -120,8 +123,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' "$TRACEPAD_URL/v1/traces" \
 ## 5. Connect the application, and run it once
 
 Section 3 of `instrumenting.md`; the package's own page has the shapes. Add
-the package with the project's own tool, so it is in the manifest; until 0.1.0
-pin the candidate (`tracepad==0.1.0rc1`, `tracepad@next`, `…/sdk/go@v0.1.0-rc.1`).
+the package with the project's own tool, so it is in the manifest; a candidate
+binary's only when pinned: `tracepad==X.Y.ZrcN`, `tracepad@X.Y.Z-rc.N`, `…/sdk/go@vX.Y.Z-rc.N`.
 The SDKs read the process's environment, not `.env`: run through the
 project's loader (dotenv, `node --env-file=.env`) or after `set -a; . ./.env;
 set +a;`. Run the smallest path that calls a model; the provider's key is the

@@ -246,7 +246,8 @@ done
 # --- A plan that could not finish (exit 1: refused, or interrupted) is said,
 # and is never read as something running older.
 run plan-refused 0 FAKE_PLAN="Interrupted: the look at the machine was cut short" FAKE_PLAN_EXIT=1
-has "$out" "Could not check what still runs an older version" plan-refused
+has "$out" "Could not check what still runs an older version (" plan-refused
+has "$out" "Interrupted: the look at the machine was cut short); to see it:" plan-refused
 lacks "$out" "Still running" plan-refused
 ends_with_agent_line plan-refused
 
@@ -255,7 +256,7 @@ started="$(date +%s)"
 run hanging-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG=1
 [ $(($(date +%s) - started)) -lt 30 ] || fail "hanging-plan: the plan held the install up"
 lacks "$out" "Still running" hanging-plan
-has "$out" "Could not check what still runs an older version" hanging-plan
+has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-plan
 ends_with_agent_line hanging-plan
 
 # --- A binary whose answer is not a version is not quoted.

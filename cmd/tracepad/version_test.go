@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +62,36 @@ func TestBuildLabel(t *testing.T) {
 	} {
 		if got := buildLabel(c.ver, c.stamped, c.info); got != c.want {
 			t.Errorf("%s: buildLabel(%q, %q) = %q, want %q", c.name, c.ver, c.stamped, got, c.want)
+		}
+	}
+}
+
+// `tracepad version` into a pipe is the bare version, which scripts compare —
+// the install script and every release's `tracepad upgrade`, 0.1.0's
+// included, hold it to the version they downloaded; a terminal gets the
+// commit too, as the log's first line has it, and --json gives both
+// (spec 001 #27).
+func TestVersionCommand(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		args    []string
+		tty     bool
+		stamped string
+		want    string
+		code    int
+	}{
+		{"a pipe gets the bare version", nil, false, "ef3e349d1", "0.1.0\n", 0},
+		{"a terminal gets the commit", nil, true, "ef3e349d1", "tracepad 0.1.0 (ef3e349)\n", 0},
+		{"a terminal with no commit stamped", nil, true, "", "tracepad 0.1.0\n", 0},
+		{"--json gives both, on a terminal or not", []string{"--json"}, false, "ef3e349d1", `{"version":"0.1.0","commit":"ef3e349"}` + "\n", 0},
+		{"--json with no commit", []string{"--json"}, true, "", `{"version":"0.1.0"}` + "\n", 0},
+		{"an argument it does not take", []string{"--long"}, false, "ef3e349", "", 2},
+		{"a word after it", []string{"now"}, false, "ef3e349", "", 2},
+	} {
+		var out, errw strings.Builder
+		code := versionCommand(c.args, "0.1.0", c.stamped, nil, c.tty, &out, &errw)
+		if code != c.code || out.String() != c.want {
+			t.Errorf("%s: %d %q, want %d %q (stderr %q)", c.name, code, out.String(), c.code, c.want, errw.String())
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -185,9 +186,16 @@ type Container struct {
 	URL       string
 	Version   string
 	Ours      bool
-	// Compose is its Compose project, when Compose made it.
-	Compose string
-	Reason  string
+	// Compose is its Compose project, when Compose made it; Service is its
+	// service there, ComposeFiles the files Compose read for it and
+	// ComposeDir its project directory, all as Compose labelled it (the live
+	// run of 0.1.0: the person's commands said neither the file nor where to
+	// run them from).
+	Compose      string
+	Service      string
+	ComposeFiles []string
+	ComposeDir   string
+	Reason       string
 	// Default is whether it publishes the default port, 4318, on the host.
 	Default bool
 	// Unchecked says why the plan could not tell where to ask it, when it
@@ -890,8 +898,14 @@ func asContainer(ic inspectContainer) (Container, bool) {
 	if !ok {
 		return Container{}, false
 	}
+	labels := ic.Config.Labels
 	c := Container{Name: strings.TrimPrefix(ic.Name, "/"), Ref: ic.Config.Image, Repo: repo,
-		Compose: ic.Config.Labels["com.docker.compose.project"], inspect: ic}
+		Compose: labels["com.docker.compose.project"], Service: labels["com.docker.compose.service"],
+		ComposeDir: labels["com.docker.compose.project.working_dir"], inspect: ic}
+	// Compose writes the files it read joined by commas.
+	if files := labels["com.docker.compose.project.config_files"]; files != "" {
+		c.ComposeFiles = strings.Split(files, ",")
+	}
 	for _, m := range ic.Mounts {
 		switch {
 		case m.Destination != "/data":
@@ -987,8 +1001,7 @@ func (r *runner) inspectImages(ctx context.Context, ids []string) (map[string]im
 func containerAdvice(c Container, to string) string {
 	image := c.Repo + ":" + to
 	if c.Compose != "" {
-		return fmt.Sprintf("Upgrade it with Compose (%s): back up its volume as docs/docker.md shows, set the image to %s in the project %s's Compose file, then: docker compose up -d",
-			docsDocker, image, shq(c.Compose))
+		return composeAdvice(c, to)
 	}
 	name, old := shq(c.Name), shq(c.Name+"-old")
 	chain, after := containerSteps(c, to)
@@ -1002,6 +1015,65 @@ func containerAdvice(c Container, to string) string {
 		advice += fmt.Sprintf(". It was also given what this docker run does not carry — %s — which docker inspect %s shows: add it to the run", strings.Join(lost, ", "), old)
 	}
 	return advice
+}
+
+// composeAdvice is how a container Compose made is upgraded: through its
+// Compose file, which is the person's, after a backup of the volume it
+// really has (the live run of 0.1.0: "back up its volume as docs/docker.md
+// shows" was copied with docker.md's volume name, `tracepad`, where Compose
+// had named it `<project>_<volume>`, and `docker run` made an empty volume
+// of that name and archived it). The commands name the project and its file,
+// so they work from any directory and never start another project; an image
+// pinned by digest is said, since a new tag before the old digest changes
+// nothing.
+func composeAdvice(c Container, to string) string {
+	image := c.Repo + ":" + to
+	compose := composeCommand(c)
+	service := "<its service>"
+	if c.Service != "" {
+		service = shq(c.Service)
+	}
+	where := "the project " + shq(c.Compose) + "'s Compose file"
+	switch len(c.ComposeFiles) {
+	case 0:
+	case 1:
+		where = c.ComposeFiles[0]
+	default:
+		where = "whichever of " + strings.Join(c.ComposeFiles, ", ") + " sets it"
+	}
+	set := fmt.Sprintf("set the image of the service %s in %s to %s", service, where, image)
+	if _, digest, ok := strings.Cut(c.Ref, "@"); ok {
+		set += fmt.Sprintf(" — and take its digest off: it is pinned to %s, which Docker runs whatever the tag says. To pin the new one, docker pull %s prints its digest: %s@<that digest>", digest, image, image)
+	}
+	version := c.Version
+	if version == "" {
+		version = "backup"
+	}
+	data := c.DataMount
+	if data == "" {
+		data = "type=volume,src=<its /data volume>"
+	}
+	chain := strings.Join([]string{
+		compose + " stop " + service,
+		fmt.Sprintf("docker run --rm --mount %s,dst=/data,readonly -v \"$PWD:/backup\" %s sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/%s-%s.tar.gz'", shq(data), busybox, c.Name, version),
+		"docker pull " + image,
+	}, " && ")
+	return fmt.Sprintf("Upgrade it with Compose (%s). First, as one command — a step that fails stops the ones after it: %s. Then %s, and: %s up -d %s. Stopped before the image was set: %s start %s",
+		docsDocker, chain, set, compose, service, compose, service)
+}
+
+// composeCommand is `docker compose` for a container's project, from any
+// directory: its name, its files, and its directory when that is not the
+// first file's.
+func composeCommand(c Container) string {
+	cmd := "docker compose -p " + shq(c.Compose)
+	if c.ComposeDir != "" && (len(c.ComposeFiles) == 0 || c.ComposeDir != filepath.Dir(c.ComposeFiles[0])) {
+		cmd += " --project-directory " + shq(c.ComposeDir)
+	}
+	for _, f := range c.ComposeFiles {
+		cmd += " -f " + shq(f)
+	}
+	return cmd
 }
 
 // notCarried names every setting a container has that its run does not

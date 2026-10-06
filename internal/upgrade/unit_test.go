@@ -660,6 +660,24 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 	}
 }
 
+// The skill's bridge lives in a directory that stays the same, under the
+// user's cache, so that a firewall asks of it once (spec 054 #51); a binary
+// there is a bridge, and plans for the installed one.
+func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ cache, self string }{
+		{"", "/home/u/.cache/tracepad/release/tracepad"},
+		{"/srv/cache", "/srv/cache/tracepad/release/tracepad"},
+	} {
+		if got := installDirFor("", "/home/u", c.self, "/tmp", bridgeDir("/home/u", c.cache)); got != "/home/u/.local/bin" {
+			t.Errorf("%s: %s", c.self, got)
+		}
+	}
+	if got := installDirFor("", "/home/u", "/home/u/.cache/tracepad/tracepad", "/tmp", bridgeDir("/home/u", "")); got != "/home/u/.cache/tracepad" {
+		t.Errorf("beside the bridge's directory is not in it: %s", got)
+	}
+}
+
 // The user's temporary directory is asked only when it can matter (the
 // review of #225): a directory named, a binary not called tracepad, or one
 // already found temporary start no getconf.

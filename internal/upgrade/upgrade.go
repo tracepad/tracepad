@@ -123,6 +123,19 @@ func installDirFor(named, home, self string, tmps ...string) string {
 	return dir
 }
 
+// bridgeDir is where the skill puts the agent's bridge: a directory that
+// stays the same, under the user's cache, since an application firewall
+// asks of an unsigned binary once per path and holds its connections until
+// it is answered — a new temporary directory each time was a new question,
+// and a plan that seemed to hang (spec 054 #51). A binary there is a bridge,
+// as one in a temporary directory is.
+func bridgeDir(home, cache string) string {
+	if cache == "" {
+		cache = filepath.Join(home, ".cache")
+	}
+	return filepath.Join(cache, "tracepad", "release")
+}
+
 // userTempDir is the system's own temporary directory of this user's: a
 // seam, so a test can count the asks.
 var userTempDir = systemUserTempDir
@@ -277,7 +290,8 @@ func realDeps(getenv func(string) string) (Deps, error) {
 	if err != nil {
 		return Deps{}, err
 	}
-	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self, installTemps(getenv("TRACEPAD_INSTALL_DIR"), self)...)
+	installDir := installDirFor(getenv("TRACEPAD_INSTALL_DIR"), home, self,
+		append(installTemps(getenv("TRACEPAD_INSTALL_DIR"), self), bridgeDir(home, getenv("XDG_CACHE_HOME")))...)
 	cwd, _ := os.Getwd() // ignored: none, and no project's copy of the skill is found there
 	base, mirror := getenv("TRACEPAD_DOWNLOAD_URL"), true
 	if base == "" {

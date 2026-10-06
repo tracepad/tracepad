@@ -23,8 +23,11 @@ import (
 // Binary is the installed binary: what the install script and this command
 // put at <install dir>/tracepad.
 type Binary struct {
-	Path    string
-	Exists  bool
+	Path   string
+	Exists bool
+	// Dev: a development build, which the command leaves to its builder
+	// and the install script replaces.
+	Dev     bool
 	Version string
 	// Ours is whether the command may replace it; Reason says why not.
 	Ours   bool
@@ -403,6 +406,7 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		case err != nil:
 			b.Reason = b.Path + " does not run here: " + err.Error()
 		case !IsRelease(b.Version):
+			b.Dev = true
 			b.Reason = fmt.Sprintf("%s says it is %q, a development build", b.Path, b.Version)
 		case !writableDir(filepath.Dir(b.Path)):
 			b.Reason = filepath.Dir(b.Path) + " is not writable by this user"

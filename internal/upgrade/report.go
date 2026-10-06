@@ -77,6 +77,8 @@ type BinaryReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	First   string `json:"first_on_path,omitempty"`
+	// Idle: the person's, and nothing behind the plan's version in it.
+	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
 type ServerReport struct {
@@ -89,6 +91,9 @@ type ServerReport struct {
 	Whose   string   `json:"whose"`
 	Reason  string   `json:"reason,omitempty"`
 	Target  bool     `json:"target,omitempty"`
+	// Idle: the person's, at the plan's version, past it, or not a
+	// release — nothing to do.
+	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
 type ContainerReport struct {
@@ -100,6 +105,9 @@ type ContainerReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	Target  bool   `json:"target,omitempty"`
+	// Idle: the person's, at the plan's version, past it, or not a
+	// release — nothing to do.
+	Idle bool `json:"nothing_to_do,omitempty"`
 }
 
 func whose(ours bool) string {
@@ -146,15 +154,27 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 	if rep.Run != nil {
 		line("  run       %s", rep.Run.Dir)
 	}
+	// What is the person's and needs nothing is listed apart from what
+	// does (the live run of 0.1.0: another project's server at the
+	// version, a development build and the container behind it were one
+	// list, each "yours").
+	var idle []string
+	item := func(isIdle bool, format string, args ...any) {
+		if isIdle {
+			idle = append(idle, fmt.Sprintf(format, args...))
+			return
+		}
+		line("  "+format, args...)
+	}
 	if rep.Binary != nil {
 		bin := rep.Binary
 		v := bin.Version
 		if v == "" {
 			v = "none"
 		}
-		line("  binary    %s (%s)%s", bin.Path, v, reasonSuffix(bin.Whose, bin.Reason))
+		item(bin.Idle, "binary    %s (%s)%s", bin.Path, v, reasonSuffix(bin.Whose, bin.Reason))
 		if bin.First != "" {
-			line("            another tracepad comes first on PATH: %s", bin.First)
+			item(bin.Idle, "          another tracepad comes first on PATH: %s", bin.First)
 		}
 	}
 	for _, s := range rep.Servers {
@@ -162,15 +182,15 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 		if s.Target {
 			mark = " ← this run"
 		}
-		line("  server    pid %d, %s, data %s, %s%s%s", s.PID, orNone(s.Version), s.DataDir, s.Listen, mark, reasonSuffix(s.Whose, s.Reason))
-		line("            %s", strings.Join(s.Command, " "))
+		item(s.Idle, "server    pid %d, %s, data %s, %s%s%s", s.PID, orNone(s.Version), s.DataDir, s.Listen, mark, reasonSuffix(s.Whose, s.Reason))
+		item(s.Idle, "          %s", strings.Join(s.Command, " "))
 	}
 	for _, c := range rep.Containers {
 		mark := ""
 		if c.Target {
 			mark = " ← this run"
 		}
-		line("  container %s, %s, %s%s%s", c.Name, c.Image, orNone(c.Version), mark, reasonSuffix(c.Whose, c.Reason))
+		item(c.Idle, "container %s, %s, %s%s%s", c.Name, c.Image, orNone(c.Version), mark, reasonSuffix(c.Whose, c.Reason))
 	}
 	if p := rep.Probe; p != nil {
 		line("  %s answers as %s: %s", p.URL, p.Version, p.Whose)
@@ -208,7 +228,14 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 	section("The plan:", rep.Plan)
 	section("Done:", rep.Done)
 	section("Set aside, kept until you remove it:", rep.SetAside)
-	section("Yours:", rep.Person)
+	section("Yours, to do:", rep.Person)
+	if len(idle) > 0 {
+		line("")
+		line("Yours, nothing to do (at %s, past it, or not a release):", rep.To)
+		for _, it := range idle {
+			line("  %s", it)
+		}
+	}
 	section("Next:", rep.Next)
 	section("Notes:", rep.Notes)
 	_, _ = io.WriteString(w, termsafe.Text(b.String())) // ignored: the report is the last thing the command writes

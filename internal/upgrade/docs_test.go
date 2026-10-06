@@ -38,7 +38,7 @@ func TestTheDocsNameOnlyTheCommandsFlags(t *testing.T) {
 		for _, m := range upgradeLine.FindAllStringSubmatch(string(b), -1) {
 			seen++
 			for _, word := range strings.Fields(m[1]) {
-				word = strings.Trim(word, "[]|()")
+				word = strings.Trim(word, "[]|();")
 				name, ok := strings.CutPrefix(word, "--")
 				if !ok || name == "" {
 					continue

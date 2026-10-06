@@ -74,6 +74,11 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		to = latest
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
+	case to == r.version:
+		// This binary is that release: it is not looked up. The install
+		// script asks the binary it just put in place for its own version,
+		// and a new binary's first connection may wait on a firewall or a
+		// scan past the script's fifteen seconds (the live run of 0.1.0).
 	default:
 		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
@@ -370,6 +375,14 @@ func (r *runner) othersBehind(p *plan) {
 	if b := p.f.Binary; !b.Ours && b.Exists && (b.Version == "" || older(b.Version)) {
 		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
 	}
+	// A development build is its builder's, and the command does not replace
+	// it; the install script puts the release in its place, and the plan
+	// gives its line (the live run of 0.1.0: the plan named the build and
+	// said nothing of how to replace it).
+	if b := p.f.Binary; b.Dev {
+		p.binaries = append(p.binaries, fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
+			b.Path, b.Version, p.to, r.installLine(filepath.Dir(b.Path), p.to)))
+	}
 	if b := p.f.Binary; b.First != "" {
 		v, err := b.FirstVersion, b.FirstErr
 		if err != nil {
@@ -478,6 +491,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Containers[i].Target = p.container != nil && rep.Containers[i].Name == p.container.Name
 	}
 	rep.Person = append(append(append(rep.Person, p.held...), p.person...), p.binaries...)
+	r.markIdle(p, rep)
 	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
@@ -541,6 +555,26 @@ func (r *runner) describe(p *plan, rep *Report) {
 	}
 	for _, l := range p.later {
 		rep.Next = append(rep.Next, "then "+l)
+	}
+}
+
+// markIdle marks what is the person's and needs nothing: it answers a
+// version the target is not ahead of, or one that is not a release (a
+// development build), so it is in none of the plan's lists. What does not
+// say its version, or was not checked, stays where the person looks.
+func (r *runner) markIdle(p *plan, rep *Report) {
+	current := func(v string) bool {
+		order, ok := Compare(p.to, v)
+		return v != "" && (!ok || order <= 0)
+	}
+	for i, s := range p.f.Servers {
+		rep.Servers[i].Idle = !s.Ours && s.Unchecked == "" && current(s.Version)
+	}
+	for i, c := range p.f.Containers {
+		rep.Containers[i].Idle = !c.Ours && c.Unchecked == "" && current(c.Version)
+	}
+	if b := p.f.Binary; rep.Binary != nil && !b.Ours && !b.Dev && b.Exists && current(b.Version) {
+		rep.Binary.Idle = b.First == "" || (b.FirstErr == nil && current(b.FirstVersion))
 	}
 }
 
