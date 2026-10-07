@@ -207,8 +207,13 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 			args := filepath.Join(t.TempDir(), "args")
 			cmd := exec.Command(sh, "-c", strings.Replace(line, "v=;", "v="+v+";", 1))
 			cmd.Env = []string{"PATH=" + stub + ":/usr/bin:/bin", "ARGS=" + args, "HOME=" + home, "TMPDIR=" + t.TempDir()}
-			if out, err := cmd.CombinedOutput(); err != nil {
+			out, err := cmd.CombinedOutput()
+			if err != nil {
 				t.Fatalf("%s, v=%q: %v %s", sh, v, err, out)
+			}
+			// The path, said: the agent's next shell does not have $dir.
+			if !regexp.MustCompile(`BRIDGE: \S+/\.cache/tracepad/tmp\.\w+\n`).Match(out) {
+				t.Errorf("%s, v=%q: the bridge does not name its directory: %s", sh, v, out)
 			}
 			if got, _ := os.ReadFile(args); string(got) != want {
 				t.Errorf("%s, v=%q: the plan was run with %q, want %q", sh, v, got, want)
@@ -252,6 +257,12 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 		if left, _ := os.ReadDir(filepath.Join(home, ".cache", "tracepad")); len(left) != 1 || left[0].Name() != "tmp.release" {
 			t.Errorf("%s: a failed download left %v", sh, left)
 		}
+		// No directory to make is a STOP of its own, never curl's.
+		cmd = exec.Command(sh, "-c", line)
+		cmd.Env = []string{"PATH=" + failing + ":/usr/bin:/bin", "HOME=" + filepath.Join(stale, "home")}
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "STOP: no directory for the bridge") || strings.Contains(string(out), "curl") {
+			t.Errorf("%s: no directory: %v %s", sh, err, out)
+		}
 	}
 }
 
@@ -264,22 +275,28 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 func TestEveryExitAfterAStartStopsWhatStarted(t *testing.T) {
 	t.Parallel()
 	start := regexp.MustCompile(`docker run |[^&]&\s*$`)
-	exit := regexp.MustCompile(`(\S+)\s*;?\s*exit\s+[1-9]`)
+	// A failing end: an exit but `exit 0`, false, or a return but `return 0`.
+	exit := regexp.MustCompile(`(\S+)\s*;?\s*\b(?:exit|false|return)\b(\s+0\b)?`)
 	unstopped := func(text string) []string {
 		var bad []string
 		started := false
 		for _, l := range strings.Split(text, "\n") {
 			started = started || start.MatchString(l)
 			for _, m := range exit.FindAllStringSubmatch(l, -1) {
-				if started && m[1] != "stop;" && m[1] != "stop" {
+				if started && m[2] == "" && m[1] != "stop;" && m[1] != "stop" {
 					bad = append(bad, strings.TrimSpace(l))
 				}
 			}
 		}
 		return bad
 	}
-	if unstopped("stop() { :; }\ndocker run -d x || { stop; exit 1; }\n[ -n \"$sk\" ] || { echo \"STOP: no key\"; exit 1; }") == nil {
-		t.Fatal("the check does not see an exit after a start that does not stop it")
+	for _, c := range []string{`exit 1; }`, `false; }`, `exit "$?"; }`, `exit; }`, `return 1; }`} {
+		if unstopped("stop() { :; }\ndocker run -d x || { stop; exit 1; }\n[ -n \"$sk\" ] || { echo \"STOP: no key\"; "+c) == nil {
+			t.Errorf("the check does not see %q after a start that does not stop it", c)
+		}
+	}
+	if unstopped("stop() { :; }\ndocker run -d x || { stop; exit 1; }\n[ -n \"$sk\" ] || { echo \"KEY: theirs\"; exit 0; }") != nil {
+		t.Error("the check takes a deliberate exit 0 for a failing one")
 	}
 	n := 0
 	for _, b := range shellBlocks(t) {

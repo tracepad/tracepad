@@ -126,15 +126,3 @@ func memDial(ctx context.Context, _, addr string) (net.Conn, error) {
 func memTransport() *http.Transport {
 	return &http.Transport{Proxy: nil, DialContext: memDial}
 }
-
-// memServe serves h at addr until the test ends, and is the address.
-func memServe(t *testing.T, addr string, h http.Handler) (string, error) {
-	l, err := memListen(addr)
-	if err != nil {
-		return "", err
-	}
-	srv := &http.Server{Handler: h}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	return addr, nil
-}

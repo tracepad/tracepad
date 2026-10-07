@@ -48,7 +48,13 @@ git check-ignore -q .env || echo "NOT IGNORED"
 
 - `NOT FRESH` (for Docker: `docker volume inspect tracepad-<project>`
   succeeds): an earlier install. Ask whether to start that one, whose key is
-  the human's to give, or to give this project a new data directory.
+  the human's to give, or to give this project a new data directory. That one
+  starts with no key made or read (Docker: `docker start tracepad-<project>`):
+  ```sh
+  port=4318; url="http://localhost:$port"; data="${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}"; export PATH="$HOME/.local/bin:$PATH"
+  TRACEPAD_URL="$url" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 & echo $! >"$data/server.pid"
+  for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" 2>/dev/null && break; done && { grep -v '^TRACEPAD_URL=' .env 2>/dev/null; echo "TRACEPAD_URL=$url"; } >.env.new && mv .env.new .env && echo "KEY: the human's to give" || { echo "STOP: it does not answer; its log says why:"; tail -n 5 "$data/server.log"; }
+  ```
 - `TRACKED`: write no key into `.env`; ask where it should go.
 - `NOT IGNORED`: add `.env` to `.gitignore`, creating it if missing, before
   writing `.env`, and say so in the report. (Outside a git repository it prints too.)
@@ -76,25 +82,22 @@ if [ "$how" = docker ]; then
   stop() { docker rm -f "$name" >/dev/null 2>&1; [ -z "$made" ] || docker volume rm "$name" >/dev/null; }
   docker run -d --name "$name" -v "$name:/data" -p "127.0.0.1:$port:4318" -e TRACEPAD_URL="$url" -e TRACEPAD_PROJECTS="$decl" "ghcr.io/tracepad/tracepad:$tag" serve >/dev/null || { stop; exit 1; }
 else
-  made=; [ -e "$data/tracepad.db" ] || made=yes; TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
-  echo $! >"$data/server.pid.new"; logs() { cat "$data/server.log"; }
-  alive() { kill -0 "$(cat "$data/server.pid.new")" && tail -n "+$((n + 1))" "$data/server.log" | grep -q 'listening addr'; }; stop() { kill "$(cat "$data/server.pid.new")"; rm "$data/server.pid.new"; }
+  TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
+  echo $! >"$data/server.pid.new"; logs() { tail -n "+$((n + 1))" "$data/server.log"; }
+  alive() { kill -0 "$(cat "$data/server.pid.new")" && logs | grep -q 'listening addr'; }; stop() { kill "$(cat "$data/server.pid.new")"; rm "$data/server.pid.new"; }
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
 alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }
 [ "$declare" = yes ] || { sk="$(logs | sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' | tail -n 1)"; pk="$(logs | sed -n 's/^ *LANGFUSE_PUBLIC_KEY=\(tp-pk-[^ ]*\)$/\1/p' | tail -n 1)"; }
-[ -n "$sk" ] && [ -n "$pk" ] || [ -z "$made" ] || { echo "STOP: no key in this server's log"; stop; exit 1; }
+[ -n "$sk" ] && [ -n "$pk" ] || { echo "STOP: no key in this server's log"; stop; exit 1; }
 [ "$how" = docker ] || mv "$data/server.pid.new" "$data/server.pid"
-put TRACEPAD_URL "$url"; [ -n "$sk" ] || { echo "KEY: the data was there before; its key is the human's to give, and the server runs"; exit 0; }
-put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
+put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
 ```
 
 Healthy: `{"version":"…","ok":true}`. Otherwise its log's last lines say why
 (*address already in use*: another port; Docker says its own). Then, as on
 any `STOP` after the start, the server is stopped — a container that failed is removed, with the volume it made, so the
-next try takes the same name — and `.env` untouched. `KEY:` is the earlier
-install the human chose to start (`NOT FRESH`): it prints no key, so it keeps
-running, `.env` has its URL, and the human puts its key there. The project is named after the repository.
+next try takes the same name — and `.env` untouched. The project is named after the repository.
 
 Then the lines of `via`, from `.env`. On a server you did not start, the human
 puts `TRACEPAD_URL`, the key and, for Langfuse, `LANGFUSE_PUBLIC_KEY` there:

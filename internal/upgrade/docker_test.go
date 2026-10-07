@@ -794,31 +794,6 @@ func TestASkillAheadOfTheServerIsSaid(t *testing.T) {
 	}
 }
 
-// A bridge's report gives the line that removes its directory, and the
-// tmp.release an older skill shared (spec 054 #63): the agent's next shell
-// may not know the path. A binary run from anywhere else gets no such line.
-func TestABridgeSaysHowToRemoveItself(t *testing.T) {
-	t.Parallel()
-	for _, mode := range [][]string{{"--plan"}, {}} {
-		deps := containerDeps(t, newFakeDocker(t), "0.2.0")
-		cache := filepath.Join(deps.Home, ".cache", "tracepad")
-		bridge := filepath.Join(cache, "tmp.Q7xK2p")
-		_ = os.MkdirAll(filepath.Join(cache, "tmp.release"), 0o700)
-		_ = os.MkdirAll(bridge, 0o700)
-		scriptBinary(t, filepath.Join(bridge, "tracepad"), "0.2.0")
-		deps.Self = filepath.Join(bridge, "tracepad")
-		rep, _ := runReport(t, deps, mode...)
-		want := "rm -r " + shq(canonicalDir(bridge)) + " " + shq(filepath.Join(cache, "tmp.release"))
-		if got := strings.Join(rep.Notes, "\n"); !strings.Contains(got, want) {
-			t.Errorf("%q: no %q in %s", mode, want, got)
-		}
-		deps.Self = filepath.Join(deps.InstallDir, "tracepad")
-		if rep, _ := runReport(t, deps, mode...); strings.Contains(strings.Join(rep.Notes, "\n"), "rm -r") {
-			t.Errorf("%q: the installed binary is told to remove a directory: %q", mode, rep.Notes)
-		}
-	}
-}
-
 // A Compose container's commands are whole, run from anywhere (the live run
 // of 0.1.0): the service stopped through its project and file, the volume
 // Compose really named archived — `<project>_<volume>`, never docker.md's

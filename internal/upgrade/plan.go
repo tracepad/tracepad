@@ -428,25 +428,6 @@ func (r *runner) firstOnPath(b Binary) string {
 	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
-// bridgeNote is the line that removes the directory the agent's bridge runs
-// from (spec 054 #63): one mktemp named, made for this upgrade, which the
-// agent's next shell may not know the path of, and the tmp.release an older
-// skill shared, when it is there. Only a directory by mktemp's name: never a
-// temporary directory itself.
-func (r *runner) bridgeNote() string {
-	dir := filepath.Dir(canonicalPath(r.deps.Self))
-	if !mktempName.MatchString(filepath.Base(dir)) {
-		return ""
-	}
-	dirs := []string{shq(dir)}
-	if old := filepath.Join(r.deps.Home, ".cache", "tracepad", "tmp.release"); canonicalDir(old) != dir {
-		if _, err := os.Lstat(old); err == nil {
-			dirs = append(dirs, shq(old))
-		}
-	}
-	return "this binary runs from " + dir + ", a bridge of the upgrade's own; once the upgrade is done: rm -r " + strings.Join(dirs, " ")
-}
-
 // skillAhead is the plan's note on a copy of the skill newer than a server
 // or container of the person's (the live run of 0.1.1: a Compose server
 // behind a skill one release ahead). A fact read from the copies' .version
@@ -622,9 +603,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 		if note := r.skillAhead(p.f); note != "" {
 			rep.Notes = append(rep.Notes, note)
 		}
-	}
-	if note := r.bridgeNote(); note != "" {
-		rep.Notes = append(rep.Notes, note)
 	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
