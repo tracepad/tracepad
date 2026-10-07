@@ -596,6 +596,11 @@ func (s *Store) Observation(ctx context.Context, projectID, traceID, id string) 
 // *observations*: a trace has no model, so that one dimension counts a
 // different unit and the response says so (spec 004 Decision 23).
 const (
+	// GroupByMinute is the timeline of a short window — the last hour, a
+	// run of twenty minutes — which an hour cannot draw as a shape (spec 034
+	// #15). `stats_hourly` knows no minutes, so it is answered by the live
+	// scan alone, and the handler bounds its window to keep that scan small.
+	GroupByMinute      = "minute"
 	GroupByHour        = "hour"
 	GroupByDay         = "day"
 	GroupByModel       = "model"
@@ -812,6 +817,8 @@ func statsWhere(projectID string, filter StatsFilter, observations bool) ([]stri
 // statsKey is the trace-unit bucket expression of a grouping.
 func statsKey(groupBy string) string {
 	switch groupBy {
+	case GroupByMinute:
+		return `strftime('%Y-%m-%dT%H:%M:00Z', t.timestamp / 1000000000, 'unixepoch')`
 	case GroupByHour:
 		return `strftime('%Y-%m-%dT%H:00:00Z', t.timestamp / 1000000000, 'unixepoch')`
 	case GroupByDay:

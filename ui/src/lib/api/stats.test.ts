@@ -108,8 +108,22 @@ describe('the time series', () => {
 	it('reads bucket keys in UTC, the way the server writes them', () => {
 		const at = Date.parse('2026-09-01T02:30:00Z');
 
+		expect(key(at + 42_000, 'minute')).toBe('2026-09-01T02:30:00Z');
 		expect(key(at, 'hour')).toBe('2026-09-01T02:00:00Z');
 		expect(key(at, 'day')).toBe('2026-09-01');
+	});
+
+	it('lays a minute timeline out a minute apart, gaps kept', () => {
+		const series = buildSeries([bucket('2026-09-01T05:12:00Z', { count: 3 })], {
+			from: '2026-09-01T05:10:30Z',
+			to: '2026-09-01T05:14:00Z',
+			bucket: 'minute',
+			now: NOW
+		});
+
+		// 05:10 (the window starts inside it), 05:11, 05:12, 05:13.
+		expect(series.x[1] - series.x[0]).toBe(60);
+		expect(series.count).toEqual([null, null, 3, null]);
 	});
 });
 

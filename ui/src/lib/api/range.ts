@@ -87,6 +87,49 @@ export function readBucket(params: URLSearchParams, range: Range, now: Date): Bu
 	return BUCKETS.includes(asked as Bucket) ? (asked as Bucket) : defaultBucket(range, now);
 }
 
+/**
+ * The dashboard's timeline sizes: the two above and the minute (spec 034 #15).
+ * Minutes are read from the traces rather than from a rollup, which the score
+ * trends do not have, so Quality and the user page stay on `BUCKETS`.
+ */
+export const TIMELINES = ['minute', ...BUCKETS] as const;
+export type Timeline = (typeof TIMELINES)[number];
+
+/**
+ * Where the automatic size turns to minutes: up to two hours is 120 points.
+ * The same rule as `HOURLY_LIMIT_MS` one size down — a window the coarser size
+ * would draw as two points or fewer is read in the finer one — so *Last hour*
+ * is a minute timeline and *Last 24 hours* stays at 24 hours.
+ */
+export const MINUTELY_LIMIT_MS = 2 * 3_600_000;
+
+/**
+ * The longest window the server answers by the minute, 1,440 points, with the
+ * minute of grace it allows for a window that ends now and was resolved a
+ * moment before the request was read.
+ */
+export const MINUTE_WINDOW_MS = 24 * 3_600_000 + PRESET_TOLERANCE_MS;
+
+/** Whether a window is short enough to be read by the minute. */
+export function minutesFit(range: Range, now: Date): boolean {
+	return spanMs(range, now) <= MINUTE_WINDOW_MS;
+}
+
+/**
+ * The dashboard's size: the one in the URL when the window takes it, else the
+ * automatic one. A `minute` over a window longer than a day is not refused on
+ * screen and not sent to be refused by the server — it reads as unchosen.
+ */
+export function readTimeline(params: URLSearchParams, range: Range, now: Date): Timeline {
+	const asked = params.get('group_by');
+	if (asked === 'minute') return minutesFit(range, now) ? 'minute' : automatic(range, now);
+	return BUCKETS.includes(asked as Bucket) ? (asked as Bucket) : automatic(range, now);
+}
+
+function automatic(range: Range, now: Date): Timeline {
+	return spanMs(range, now) <= MINUTELY_LIMIT_MS ? 'minute' : defaultBucket(range, now);
+}
+
 /** How long a window is, in milliseconds. An open start is unbounded. */
 export function spanMs(range: Range, now: Date): number {
 	if (!range.from) return Number.POSITIVE_INFINITY;

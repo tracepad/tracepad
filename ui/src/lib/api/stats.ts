@@ -1,6 +1,6 @@
 import { ABSENT, cost, count, duration, fineDuration } from '$lib/format';
 import { billedTokens, tokenClasses, type Tokens } from '$lib/tokens';
-import type { Bucket } from './range';
+import type { Timeline } from './range';
 
 // Turning `GET /api/v1/stats` into what the Stats screen draws. Pure, because
 // the interesting part is arithmetic and the interesting failures are silent:
@@ -48,7 +48,7 @@ export type Series = {
 	p95: (number | null)[];
 };
 
-const STEP_MS: Record<Bucket, number> = { hour: 3_600_000, day: 86_400_000 };
+const STEP_MS: Record<Timeline, number> = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
 
 /**
  * A ceiling on how many points a chart is asked to hold. It exists for the
@@ -68,7 +68,7 @@ const MAX_POINTS = 100_000;
  */
 export function buildSeries(
 	buckets: StatsBucket[],
-	window: { from?: string; to?: string; bucket: Bucket; now: Date }
+	window: { from?: string; to?: string; bucket: Timeline; now: Date }
 ): Series {
 	const step = STEP_MS[window.bucket];
 	const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
@@ -133,8 +133,9 @@ export function buildSeries(
  * server's `strftime` is: reading the keys back in the reader's own zone would
  * shift every point by the offset.
  */
-export function key(at: number, bucket: Bucket): string {
+export function key(at: number, bucket: Timeline): string {
 	const iso = new Date(at).toISOString();
+	if (bucket === 'minute') return `${iso.slice(0, 16)}:00Z`;
 	return bucket === 'hour' ? `${iso.slice(0, 13)}:00:00Z` : iso.slice(0, 10);
 }
 
@@ -143,7 +144,7 @@ function boundary(instant: string | undefined, step: number, offsetMs = 0): numb
 	if (!instant) return null;
 	const at = Date.parse(instant) + offsetMs;
 	if (Number.isNaN(at)) return null;
-	// The epoch is on an hour and a day boundary in UTC, so flooring is
+	// The epoch is on a minute, an hour and a day boundary in UTC, so flooring is
 	// modular arithmetic rather than calendar arithmetic.
 	return at - ((at % step) + step) % step;
 }

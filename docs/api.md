@@ -911,9 +911,9 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
 }
 ```
 
-`group_by` is `hour`, `day`, `model`, `environment`, `release` or `total`
-(default `day`), and `unit` says what a bucket counts. Grouping by hour,
-day, environment, release or total counts **traces**; grouping by model
+`group_by` is `minute`, `hour`, `day`, `model`, `environment`, `release` or
+`total` (default `day`), and `unit` says what a bucket counts. Grouping by
+minute, hour, day, environment, release or total counts **traces**; grouping by model
 counts **observations**, because a trace has no model. The two counts are
 not comparable, which is why the response says which one you are looking at.
 
@@ -934,9 +934,21 @@ requests and a subtraction the caller does — there is no `compare`.
 curl … "http://localhost:4318/api/v1/stats?group_by=total&from=2026-09-08T00:00:00Z"
 ```
 
+Grouped by `minute`, the keys are `2026-09-08T14:05:00Z` and the window is
+**at most 24 hours**: `from` is required, and a window longer than a day —
+with a minute of grace for an open one that ended *now* when the request was
+sent — is a `400` that says to group by hour or day. Minutes are read from
+the traces themselves, not from the hourly rollup, so they are exact and
+live, and they exist only for as long as the traces do: past `retention_days`
+a minute timeline is empty where an hourly one still answers.
+
+```sh
+curl … "http://localhost:4318/api/v1/stats?group_by=minute&from=2026-09-08T14:00:00Z"
+```
+
 `user_id` restricts every bucket to one end user. The shape, the groupings and
-`unit` do not change; with `group_by=hour`, `group_by=day` or
-`group_by=total` each bucket additionally carries `sessions` — how many of
+`unit` do not change; with `group_by=minute`, `group_by=hour`, `group_by=day`
+or `group_by=total` each bucket additionally carries `sessions` — how many of
 that user's sessions *began* in it, so a sum over any range is exact. Without
 the filter the key is absent rather than zero, because the statistics rollup
 holds no such number. The per-user answer trails the raw data by the same lag
@@ -1013,8 +1025,8 @@ gone, and it keeps the classes it had — none of the new ones — for ever.
 ### Where the numbers come from
 
 Closed hours are rolled up in the background and answered from that rollup;
-the hour in progress is always answered live. Three consequences worth
-knowing:
+the hour in progress is always answered live, and so is every `minute`
+timeline. Three consequences worth knowing:
 
 - The statistics **trail the raw data by up to twice the rollup interval**
   (`TRACEPAD_ROLLUP_INTERVAL`, five minutes by default, so ten in the worst

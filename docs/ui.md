@@ -530,7 +530,7 @@ cards and leads here.
 
 The filter bar is the dashboard's: the time window (`?from=&to=`, the one this
 browser [remembers](#the-remembered-window) or the last 30 days), the
-environment box, and the hourly/daily choice (`?group_by=`).
+environment box, and the minutely/hourly/daily choice (`?group_by=`).
 
 **Quality** (`/quality`) is a card per score name in the window, over one
 request. A card is the name, its data type, how many scores it holds, and a
@@ -666,20 +666,27 @@ write among them. Cache read is on the chart, where it explains a bill that is
 smaller than the tokens suggest, and out of the column, where it would count
 the same tokens twice for the providers that report cached tokens inside the
 input. The
-bucket switcher is hourly/daily and defaults to hours for windows up to 48
-hours, days above. In the release table, the traces that named none are one
+bucket switcher is minutely/hourly/daily and defaults to minutes for windows
+up to two hours, hours up to 48 hours, days above — *Last hour* is sixty
+points, *Last 24 hours* twenty-four. Minutes are offered for windows of 24
+hours or less; past that the button is disabled and a link that asks for
+minutes reads as if it asked for nothing. The **Quality** block stays hourly
+under a minute timeline: scores are rolled up by the hour. In the release table, the traces that named none are one
 row called *(no release)* rather than a row that is missing.
 
 A bucket the server did not return is drawn as a **gap**, never as a zero,
 and a bucket that reported no cost has no cost point — nor a token point when
 none of its calls reported usage, and a table row without one shows `—`: the
-API refuses to fabricate rows and so does the screen. An empty window says so
+API refuses to fabricate rows and so does the screen. A value with a gap on
+both sides is drawn as a **point**, so a burst in one hour of a week shows
+where it is rather than leaving the chart blank. An empty window says so
 rather than drawing an empty frame. A project with traces but none in the
 window shows dashes, empty axes and the true last-trace time: not the
 instructions.
 
 The numbers behind the charts come from an hourly rollup for closed hours and
-from the live rows for the hour in progress, which is why a month reads as
+from the live rows for the hour in progress (a minute timeline reads the live
+rows alone), which is why a month reads as
 fast as a day and why the charts keep answering about data retention has
 since deleted. The latency percentiles are histogram-based, accurate to a few
 percent — see [api.md](api.md#where-the-numbers-come-from).

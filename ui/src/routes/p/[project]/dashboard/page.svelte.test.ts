@@ -155,6 +155,33 @@ describe('the blocks', () => {
 	});
 });
 
+describe('the timeline size', () => {
+	const timeline = () =>
+		getStats.mock.calls.map(([query]) => query.group_by).filter((group) => ['minute', 'hour', 'day'].includes(group));
+
+	it('reads the last hour by the minute, and the quality cards by the hour', async () => {
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/dashboard?from=2026-09-15T11:00:00Z`);
+		render(Page);
+		await settled();
+		await waitFor(() => expect(getScoreTrends).toHaveBeenCalled());
+
+		expect(timeline()).toEqual(['minute']);
+		expect(getScoreTrends.mock.calls[0][0]).toMatchObject({ group_by: 'hour' });
+		expect(screen.getByRole('button', { name: 'Minutely' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('offers no minutes over a week, whatever the link says', async () => {
+		url.current = new URL(`${AT}&group_by=minute`);
+		render(Page);
+		await settled();
+
+		expect(timeline()).toEqual(['day']);
+		const minutely = screen.getByRole('button', { name: 'Minutely' });
+		expect(minutely).toBeDisabled();
+		expect(minutely).toHaveAttribute('title', expect.stringContaining('24 hours or less'));
+	});
+});
+
 describe('the last-trace line', () => {
 	it('says when the newest trace arrived, with the instant in the tooltip', async () => {
 		render(Page);
