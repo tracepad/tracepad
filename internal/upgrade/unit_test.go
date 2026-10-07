@@ -676,15 +676,16 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 	}
 }
 
-// The skill's bridge lives in a directory that stays the same, under the
-// user's cache, so that a firewall asks of it once (spec 054 #51), named as
-// mktemp names one, tmp.release: every release that knows a bridge, 0.1.0's
-// included, takes a binary there for one and plans for the installed binary
-// (the sixth review of #228: a name of this PR's own was a bridge only to
-// the releases after it).
+// The skill's bridge lives under the user's cache in a directory mktemp
+// makes for the run (spec 054 #63; before it, the one tmp.release of #57,
+// which the skills of 0.1.1 still name): every release that knows a bridge,
+// 0.1.0's included, takes a binary there for one and plans for the installed
+// binary (the sixth review of #228: a name of this PR's own was a bridge
+// only to the releases after it).
 func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ self, want string }{
+		{"/home/u/.cache/tracepad/tmp.Q7xK2p/tracepad", "/home/u/.local/bin"},
 		{"/home/u/.cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
 		{"/srv/cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
 		{"/home/u/.cache/tracepad/tracepad", "/home/u/.cache/tracepad"},
@@ -692,6 +693,20 @@ func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
 		if got := installDirFor("", "/home/u", c.self, "/tmp"); got != c.want {
 			t.Errorf("%s: %s, want %s", c.self, got, c.want)
 		}
+	}
+}
+
+// A binary that does not say its version says why, in the first line it
+// wrote to stderr (spec 054 #63): the exit status alone named nothing.
+func TestABinaryThatDoesNotSayItsVersionSaysWhy(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "tracepad")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'tracepad: unknown command \"version\"' >&2\necho 'run tracepad help' >&2\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := binaryVersion(context.Background(), path)
+	if err == nil || !strings.HasSuffix(err.Error(), `exit status 2: tracepad: unknown command "version"`) {
+		t.Errorf("%v", err)
 	}
 }
 

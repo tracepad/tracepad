@@ -19,8 +19,10 @@ const (
 	EnvPackage
 	// EnvInstaller: read by scripts/install.sh (spec 053 #10), and two of them,
 	// TRACEPAD_INSTALL_DIR and TRACEPAD_DOWNLOAD_URL, by `tracepad upgrade`,
-	// which installs as the script does (spec 054 #3). Listed so that one left
-	// exported is not called a typo.
+	// which installs as the script does (spec 054 #3); TRACEPAD_RELEASE_FETCHED
+	// the script sets, not a person, for the plan it asks of the binary it put
+	// in place (spec 054 #63). Listed so that one left exported is not called
+	// a typo.
 	EnvInstaller
 )
 
@@ -80,6 +82,7 @@ var Env = []EnvVar{
 	{Name: "TRACEPAD_INSTALL_DIR", Kind: EnvInstaller},
 	{Name: "TRACEPAD_NO_SKILL", Kind: EnvInstaller},
 	{Name: "TRACEPAD_DOWNLOAD_URL", Kind: EnvInstaller},
+	{Name: "TRACEPAD_RELEASE_FETCHED", Kind: EnvInstaller},
 }
 
 // IsKnownEnv reports whether anything reads the variable — the server, the

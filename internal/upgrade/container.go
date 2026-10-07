@@ -486,7 +486,7 @@ func (j *job) containerBackPreconditions(ctx context.Context, restoreBytes, free
 		// Its check reads the archive's database on this machine, in the
 		// run's directory: room for it there too (the review of #226).
 		if st.Archive != nil {
-			hostFree, err := freeBytes(j.dir)
+			hostFree, err := j.r.freeBytes(j.dir)
 			if err != nil {
 				return fmt.Errorf("the room in %s for the check of the archive's database cannot be told (%v)", j.dir, err)
 			}

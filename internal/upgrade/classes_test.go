@@ -8,12 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -663,7 +661,7 @@ func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	w.host.setSlow(time.Second)
-	deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 50 * time.Millisecond}
+	deps.HTTP = &http.Client{Transport: memTransport(), Timeout: 50 * time.Millisecond}
 	rep, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew, "--data-dir", w.data)
 	w.host.setSlow(0)
 	if code != exitRefused || !strings.Contains(rep.Summary, "does not answer") && !strings.Contains(rep.Summary, "does not say its version") {
@@ -787,23 +785,18 @@ func TestWhatCannotBeReadRefuses(t *testing.T) {
 	// During a way back: it refuses with nothing touched, the new version
 	// running on its data.
 	for _, tc := range []struct {
-		name   string
-		setup  func(w *fakeWorld, newPID int)
-		says   string
-		global bool // sets a package seam: not beside the others
+		name  string
+		setup func(w *fakeWorld, deps *Deps, newPID int)
+		says  string
 	}{
-		{"processes that could not be read (1)", func(w *fakeWorld, _ int) { w.host.unread = 1 }, "could not be read", false},
-		{"the room beside the data that could not be told (7)", func(w *fakeWorld, _ int) {
-			saved := freeBytes
-			freeBytes = func(string) (int64, error) { return 0, errors.New("statfs: not implemented") }
-			w.t.Cleanup(func() { freeBytes = saved })
-		}, "for a restore cannot be told", true},
-		{"the run's own server that could not be read (9)", func(w *fakeWorld, newPID int) { w.host.unreadable[newPID] = true }, "nothing was touched", false},
+		{"processes that could not be read (1)", func(w *fakeWorld, _ *Deps, _ int) { w.host.unread = 1 }, "could not be read"},
+		{"the room beside the data that could not be told (7)", func(_ *fakeWorld, deps *Deps, _ int) {
+			deps.FreeBytes = func(string) (int64, error) { return 0, errors.New("statfs: not implemented") }
+		}, "for a restore cannot be told"},
+		{"the run's own server that could not be read (9)", func(w *fakeWorld, _ *Deps, newPID int) { w.host.unreadable[newPID] = true }, "nothing was touched"},
 	} {
 		t.Run("back/"+tc.name, func(t *testing.T) {
-			if !tc.global {
-				t.Parallel()
-			}
+			t.Parallel()
 			w := newFakeWorld(t, 2)
 			deps := w.deps()
 			rep, code := runIn(t, context.Background(), deps, "--to", fNew, "--data-dir", w.data)
@@ -811,7 +804,7 @@ func TestWhatCannotBeReadRefuses(t *testing.T) {
 				t.Fatalf("%d %s", code, rep.Summary)
 			}
 			st, _ := loadState(rep.Run.Dir)
-			tc.setup(w, st.Process.NewPID)
+			tc.setup(w, &deps, st.Process.NewPID)
 			back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
 			if code == exitOK || !strings.Contains(back.Summary, tc.says) {
 				t.Errorf("%d %s", code, back.Summary)
@@ -1010,15 +1003,6 @@ func TestAServerOnEveryAddressIsAskedOnLoopback(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "[::]"} {
 		w := newFakeWorld(t, 2)
 		addr := host + ":" + strings.Split(freeAddr(t), ":")[1]
-		if host == "[::]" {
-			l, err := net.Listen("tcp", "[::1]:0")
-			if err != nil {
-				t.Logf("no IPv6 loopback here: %v", err)
-				continue
-			}
-			addr = host + ":" + strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
-			l.Close()
-		}
 		other := t.TempDir()
 		argv := []string{"tracepad", "serve", "--listen", addr, "--data-dir", other}
 		s, err := w.host.Start(StartSpec{Path: w.install, Argv: argv, Dir: w.home, Log: filepath.Join(other, "server.log")})
@@ -1170,7 +1154,7 @@ func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
 			deps.HealthWait = 300 * time.Millisecond
 			// Not answering is a request past the client's deadline,
 			// kept short: the wait is the test's whole length.
-			deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 500 * time.Millisecond}
+			deps.HTTP = &http.Client{Transport: memTransport(), Timeout: 500 * time.Millisecond}
 			deps.Fault = func(point string) error {
 				if c.slow && point == stepStarted {
 					w.host.setSlow(2 * time.Second)

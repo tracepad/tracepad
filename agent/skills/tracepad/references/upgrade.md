@@ -25,12 +25,14 @@ tracepad upgrade --plan
 
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
 binary predates the command; plan and upgrade with a release's, fetched into a
-directory of its own that stays the same, which a firewall that asks once per
-path asks once for, emptied first so a failed download runs no older one; `v` the version named. It plans for the installed binary,
-and leaves one that is not a release's, giving the line that replaces it:
+new directory of this upgrade's own, so another session's fetch is never the
+one that runs; `v` the version named. It plans for the installed binary, and
+leaves one that is not a release's, giving the line that replaces it. The
+plan's commands name that binary by its path; remove its directory once the
+upgrade is done:
 
 ```sh
-v=; dir="$HOME/.cache/tracepad/tmp.release"; mkdir -p "$dir" && rm -f "$dir/tracepad" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null; [ -x "$dir/tracepad" ] || { echo "STOP: the release did not download (curl said why above)"; false; } && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
+v=; dir="$(mkdir -p "$HOME/.cache/tracepad" && mktemp -d "$HOME/.cache/tracepad/tmp.XXXXXX")" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && [ -x "$dir/tracepad" ] || { echo "STOP: the release did not download (curl said why above)"; false; } && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
@@ -47,7 +49,10 @@ server or container that is the command's: ask which, and pass its
 The same command and flags without `--plan`. Its exit status:
 
 - `0`: upgraded, healthy (or nothing at all was behind). After an upgrade, run
-  `setup.md`'s step 4 span and step 6 read-back.
+  `setup.md`'s step 4 span and step 6 read-back. When it replaced the binary,
+  the plan you showed was the old binary's: run `tracepad upgrade --plan`
+  again and give the human what the new one says is theirs, with its
+  commands.
 - `3`: not upgraded; the old version runs again. Say what failed (the first
   line of the report) and stop.
 - `4` with a run in the report: the new version runs, but its check needs the
@@ -79,4 +84,4 @@ and say so. Run the project's tests.
   nor what a way back set aside. Give the report's commands to remove them
   once the new version has run a while; deleting is theirs.
 - **What changed**: the skill's copies, the package's pin, the tests' result.
-- **What is theirs**: the plan's list, with its commands.
+- **What is theirs**: the last plan's list, with its commands.

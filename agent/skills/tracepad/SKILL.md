@@ -89,9 +89,9 @@ tracepad traces ls --since 24h --min-cost 0.05 --limit 500 | jq '.traces | sort_
 
 2. **Read it.** `tracepad traces show` draws the tree: each observation's
    kind, name, model, duration, tokens, cost, the prompt it ran, and the error
-   of one that failed. `--full` adds every input, output and metadata. For
-   "the latest one that…", `tracepad traces last` takes the listing's filters
-   and returns the newest match whole:
+   of one that failed. `--full` adds every input, output and metadata; scores
+   are apart: `scores ls --trace <trace-id>`. For "the latest one that…",
+   `tracepad traces last` takes the listing's filters and returns it whole:
 
 ```sh
 tracepad traces show <trace-id> --full

@@ -57,8 +57,13 @@ type Deps struct {
 	// StopWait is how long a stopped server may take to exit; HealthWait how
 	// long a started one may take to answer; ProbeWait the default address's.
 	StopWait, HealthWait, ProbeWait time.Duration
-	// DiscoverWait bounds the plan's look at the machine as a whole.
-	DiscoverWait time.Duration
+	// DiscoverWait bounds the plan's look at the machine as a whole;
+	// LookupWait its look at the releases. Zero is the default of each.
+	DiscoverWait, LookupWait time.Duration
+	// FreeBytes is the room on a directory's file system; nil is statFree.
+	// Like the waits, a test's to set per run, so the tests that set it run
+	// side by side (spec 054 #63).
+	FreeBytes func(dir string) (int64, error)
 	// Fault is a test's: called at every step of a swap and of a way back
 	// by name, an error from it is that step failing (spec 054 #26, the
 	// matrix). Nil in the binary.

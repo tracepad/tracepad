@@ -24,7 +24,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -121,9 +120,12 @@ func (s *refusalHost) exited(spec StartSpec) Started {
 }
 
 type refusalCell struct {
-	t        *testing.T
-	w        *fakeWorld
-	deps     Deps
+	t    *testing.T
+	w    *fakeWorld
+	deps Deps
+	// free is the room a room cell gives the data's file system, while
+	// set; the cell's deps ask it (spec 054 #63: no package seam).
+	free     func(dir string) (int64, error)
 	sys      *refusalHost
 	problems []string
 	log      []string
@@ -134,6 +136,12 @@ func newRefusalCell(t *testing.T) *refusalCell {
 	c := &refusalCell{t: t, w: w, deps: w.deps()}
 	c.sys = &refusalHost{fakeHost: w.host, inspectFail: map[int]bool{}, ignoreTerm: map[int]bool{}}
 	c.deps.Sys = c.sys
+	c.deps.FreeBytes = func(dir string) (int64, error) {
+		if c.free != nil {
+			return c.free(dir)
+		}
+		return statFree(dir)
+	}
 	c.deps.StopWait = 400 * time.Millisecond
 	c.deps.HealthWait = 1500 * time.Millisecond
 	return c
@@ -425,7 +433,7 @@ func refusalCases() []refusalCase {
 		}},
 		{"R28-address-taken/b-during", func(c *refusalCell) {
 			c.bDuringUpgrade(func() func() {
-				l, err := net.Listen("tcp", c.w.listen)
+				l, err := memListen(c.w.listen)
 				if err != nil {
 					c.problem("listen: %v", err)
 					return func() {}
@@ -573,10 +581,10 @@ func refusalCases() []refusalCase {
 	}
 }
 
-// theWayBacksRefusals runs every cell but the room's, side by side, under
-// TestTheMatrices, whose seams they share.
+// theWayBacksRefusals runs every cell, side by side, under TestTheMatrices,
+// whose seams they share.
 func theWayBacksRefusals(t *testing.T) {
-	for _, pc := range refusalCases() {
+	for _, pc := range append(refusalCases(), roomCases()...) {
 		t.Run(pc.name, func(t *testing.T) {
 			t.Parallel()
 			c := newRefusalCell(t)
@@ -593,28 +601,11 @@ func theWayBacksRefusals(t *testing.T) {
 	}
 }
 
-// The room cells change freeBytes, a package seam: they run one at a time,
-// as a test of their own.
-func TestTheWayBacksRefusalsOfRoom(t *testing.T) {
-	inProcess(t)
-	saved := freeBytes
-	t.Cleanup(func() { freeBytes = saved })
-	for _, pc := range roomCases(saved) {
-		t.Run(pc.name, func(t *testing.T) {
-			c := newRefusalCell(t)
-			pc.run(c)
-			freeBytes = saved
-			c.report(pc.name)
-		})
-	}
-}
-
-// roomCases are the cells that set the room on the data's file system; saved
-// is freeBytes as it was.
-func roomCases(saved func(string) (int64, error)) []refusalCase {
+// roomCases are the cells that set the room on the data's file system.
+func roomCases() []refusalCase {
 	lowBeside := func(c *refusalCell, room func() int64) {
 		parent := filepath.Dir(c.w.data)
-		freeBytes = func(dir string) (int64, error) {
+		c.free = func(dir string) (int64, error) {
 			if dir == parent {
 				return room(), nil
 			}
@@ -627,7 +618,7 @@ func roomCases(saved func(string) (int64, error)) []refusalCase {
 			size, _ := survey(c.w.data)
 			c.aCell(fBroken, func() func() {
 				lowBeside(c, func() int64 { return size + mib100 - 1 })
-				return func() { freeBytes = saved }
+				return func() { c.free = nil }
 			})
 		}},
 		// R9 with the archive on the same file system: room for the
@@ -636,13 +627,13 @@ func roomCases(saved func(string) (int64, error)) []refusalCase {
 			size, _ := survey(c.w.data)
 			c.aCell(fBroken, func() func() {
 				lowBeside(c, func() int64 { return size + mib100 + size/2 })
-				return func() { freeBytes = saved }
+				return func() { c.free = nil }
 			})
 		}},
 		{"R09-no-room-beside-data/b-healthy", func(c *refusalCell) {
 			c.bAfterHealthy(func(_ string, st *State) func() {
 				lowBeside(c, func() int64 { return st.Archive.Bytes + mib100 - 1 })
-				return func() { freeBytes = saved }
+				return func() { c.free = nil }
 			})
 		}},
 		// (c) R18: after back_restored the restore exists; its room is not
@@ -665,7 +656,7 @@ func roomCases(saved func(string) (int64, error)) []refusalCase {
 			c.cmd(deps, "--back", rep.Run.ID)
 			lowBeside(c, func() int64 { return st.Archive.Bytes + mib100 - 1 })
 			ok := c.backUntil(rep.Run.ID, 3)
-			freeBytes = saved
+			c.free = nil
 			if !ok {
 				c.problem("after back_restored, --back asked for room the restore already has, and never reached 0")
 				c.backUntil(rep.Run.ID, 1)
@@ -690,7 +681,7 @@ func roomCases(saved func(string) (int64, error)) []refusalCase {
 			_ = c.w.host.Signal(st.Process.NewPID, syscall.SIGTERM)
 			lowBeside(c, func() int64 { return st.Archive.Bytes + mib100 - 1 })
 			ok := c.backUntil(rep.Run.ID, 3)
-			freeBytes = saved
+			c.free = nil
 			if !ok {
 				c.problem("after back_restored, --back asked for room the restore already has, and never reached 0")
 				c.backUntil(rep.Run.ID, 1)
@@ -964,7 +955,7 @@ func TestEveryRefusalOfTheWayBackIsListed(t *testing.T) {
 	for _, c := range refusalCases() {
 		cells[c.name] = true
 	}
-	for _, c := range roomCases(freeBytes) {
+	for _, c := range roomCases() {
 		cells[c.name] = true
 	}
 	for _, c := range containerRefusalCases() {

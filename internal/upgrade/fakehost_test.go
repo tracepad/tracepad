@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -209,7 +208,7 @@ func (h *fakeHost) Start(spec StartSpec) (Started, error) {
 	h.held[version+" "+dataDir] = true
 	h.mu.Unlock()
 	_ = os.WriteFile(lock, []byte(strconv.Itoa(pid)+"\n"), 0o600)
-	ln, err := net.Listen("tcp", listen)
+	ln, err := memListen(listen)
 	if err != nil {
 		return exit()
 	}
@@ -424,21 +423,10 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// freeAddr is a loopback address nothing listens on.
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().String()
-}
-
 func (w *fakeWorld) url() string { return "http://" + w.listen }
 
 func (w *fakeWorld) answers() string {
-	v, _ := health(context.Background(), http.DefaultClient, w.url())
+	v, _ := health(context.Background(), &http.Client{Transport: memTransport()}, w.url())
 	return v
 }
 
@@ -469,7 +457,7 @@ func (w *fakeWorld) addTrace() {
 func (w *fakeWorld) deps() Deps {
 	return Deps{
 		Sys:        w.host,
-		HTTP:       &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 2 * time.Second},
+		HTTP:       &http.Client{Transport: memTransport(), Timeout: 2 * time.Second},
 		Releases:   fakeReleases(w.t, w.mirror),
 		InstallDir: filepath.Dir(w.install),
 		Backups:    filepath.Join(w.home, "tracepad-backups"),

@@ -760,6 +760,30 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	}
 }
 
+// The skill's copies follow the installed binary, and a container of the
+// person's left behind is told apart from them (spec 054 #63): a note, in
+// the plan and the run alike, and none when nothing of theirs is behind.
+func TestASkillAheadOfTheServerIsSaid(t *testing.T) {
+	t.Parallel()
+	const note = "the skill's copies follow the installed binary to 0.2.0"
+	d := newFakeDocker(t)
+	for _, installed := range []string{"0.1.0", "0.2.0"} {
+		if rep, _ := runReport(t, containerDeps(t, d, installed), "--plan"); strings.Contains(strings.Join(rep.Notes, "\n"), note) {
+			t.Errorf("%s: nothing of the person's is behind, and the plan says the skill is ahead: %q", installed, rep.Notes)
+		}
+	}
+	d.run(t, "--name", "myapp", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=myapp,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0", "serve")
+	for _, mode := range [][]string{{"--plan"}, {}} {
+		if rep, code := runReport(t, containerDeps(t, d, "0.2.0"), mode...); code != exitDecide || !strings.Contains(strings.Join(rep.Notes, "\n"), note) {
+			t.Errorf("%q: exit %d, notes %q", mode, code, rep.Notes)
+		}
+	}
+	// No binary installed: no copy of the skill follows one.
+	if rep, _ := runReport(t, containerDeps(t, d), "--plan"); strings.Contains(strings.Join(rep.Notes, "\n"), note) {
+		t.Errorf("no binary installed, and the plan says the skill is ahead: %q", rep.Notes)
+	}
+}
+
 // A Compose container's commands are whole, run from anywhere (the live run
 // of 0.1.0): the service stopped through its project and file, the volume
 // Compose really named archived — `<project>_<volume>`, never docker.md's
@@ -2092,19 +2116,26 @@ func (l *lateProcess) Candidates(context.Context) ([]Process, int, error) {
 	return []Process{l.p}, 0, nil
 }
 
-// The installed binary's plan of its own version looks no release up (the
-// live run of 0.1.0): the install script asks the binary it has just put in
-// place, whose first connection a firewall may hold past the script's
-// fifteen seconds. Any other version, a binary run from elsewhere, or a run
-// still looks (the second review of #228): a version stamped on a build
-// need not be a release.
+// The plan of the release the install script just fetched, by the binary it
+// put in place, looks no release up (the live run of 0.1.0): its first
+// connection a firewall may hold past the script's fifteen seconds. Only
+// the script's word skips the lookup (spec 054 #63): a build stamped with a
+// release's version, at the install path, is looked up and refused as its
+// run is, so the plan and the run never part. Any other version, a binary
+// run from elsewhere, or a run still looks (the second review of #228).
 func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 	t.Parallel()
 	d := newFakeDocker(t)
-	ask := func(version string, self bool, args ...string) Report {
+	ask := func(version string, self bool, fetched string, args ...string) Report {
 		deps := containerDeps(t, d, version)
 		if self {
 			deps.Self = filepath.Join(deps.InstallDir, "tracepad")
+		}
+		deps.Getenv = func(k string) string {
+			if k == fetchedEnv {
+				return fetched
+			}
+			return ""
 		}
 		var out bytes.Buffer
 		run(context.Background(), Options{Args: append(args, "--to", "0.9.9", "--json"), Version: version, Stdout: &out, Stderr: io.Discard}, deps)
@@ -2114,13 +2145,16 @@ func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 		}
 		return rep
 	}
-	if rep := ask("0.9.9", true, "--plan"); strings.Contains(rep.Summary, "no release") {
-		t.Errorf("the installed binary's own version was looked up: %s", rep.Summary)
+	if rep := ask("0.9.9", true, "0.9.9", "--plan"); strings.Contains(rep.Summary, "no release") {
+		t.Errorf("the release the install script fetched was looked up: %s", rep.Summary)
 	}
 	for name, rep := range map[string]Report{
-		"another version":             ask("0.2.0", true, "--plan"),
-		"a binary run from elsewhere": ask("0.9.9", false, "--plan"),
-		"a run":                       ask("0.9.9", true),
+		"a build stamped 0.9.9, its plan":               ask("0.9.9", true, "", "--plan"),
+		"a build stamped 0.9.9, its run":                ask("0.9.9", true, ""),
+		"a release the script fetched, another version": ask("0.9.9", true, "0.2.0", "--plan"),
+		"another version":                               ask("0.2.0", true, "0.9.9", "--plan"),
+		"a binary run from elsewhere":                   ask("0.9.9", false, "0.9.9", "--plan"),
+		"a run":                                         ask("0.9.9", true, "0.9.9"),
 	} {
 		if !strings.Contains(rep.Summary, "there is no release v0.9.9") {
 			t.Errorf("%s was not looked up: %s", name, rep.Summary)
@@ -2181,7 +2215,7 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 		"a development build": {func(t *testing.T, deps *Deps) { scriptBinary(t, bin(deps), "97d6b79") },
 			want{kind: binDev, code: exitDecide, line: `says it is "97d6b79", a development build, which the command does not replace; to put 0.2.0 in its place: curl`}},
 		"a development build, linked": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "dev") },
-			want{kind: binLinked, code: exitDecide, line: `which says it is "dev", a development build; the command replaces no link. The install script puts 0.2.0 in place of the link, which is then a file (`}},
+			want{kind: binDevLink, code: exitDecide, line: `which says it is "dev", a development build; the command replaces no link. The install script puts 0.2.0 in place of the link, which is then a file (`}},
 		"a release, linked, current": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "0.2.0") },
 			want{kind: binLinked, code: exitOK, idle: true}},
 		"a release, linked, past it": {func(t *testing.T, deps *Deps) { linked(t, bin(deps), "0.3.0") },
@@ -2248,6 +2282,26 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 			scriptBinary(t, first, "0.1.0")
 			deps.LookPath = func(string) string { return first }
 		}, want{kind: binLinked, code: exitOK, idle: true, note: "another tracepad comes first on PATH: "}},
+		// First on PATH, a link into Homebrew's tree is Homebrew's, as at
+		// the install path: told by one rule, managedBy (spec 054 #63).
+		"current, and Homebrew's link first on PATH": {func(t *testing.T, deps *Deps) {
+			linked(t, bin(deps), "0.2.0")
+			target := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.1.0", "bin", "tracepad")
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			scriptBinary(t, target, "0.1.0")
+			first := filepath.Join(t.TempDir(), "tracepad")
+			if err := os.Symlink(target, first); err != nil {
+				t.Fatal(err)
+			}
+			deps.LookPath = func(string) string { return first }
+		}, want{kind: binLinked, code: exitOK, idle: true, note: "; what upgrades it is Homebrew's: brew upgrade tracepad"}},
+		// One that does not say its version says why (spec 054 #63).
+		"current, and one first on PATH that does not run": {func(t *testing.T, deps *Deps) {
+			linked(t, bin(deps), "0.2.0")
+			first := filepath.Join(t.TempDir(), "tracepad")
+			_ = os.WriteFile(first, []byte("not a program"), 0o755)
+			deps.LookPath = func(string) string { return first }
+		}, want{kind: binLinked, code: exitOK, idle: true, note: "(it does not say its version: "}},
 	}
 	for kind := binNone; kind <= binOurs; kind++ {
 		if !slices.ContainsFunc(slices.Collect(maps.Values(cases)), func(c cell) bool { return c.want.kind == kind }) {
@@ -2269,6 +2323,25 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 				t.Errorf("exit %d, idle %v, person %q; want %+v (%s)", code, rep.Binary.Idle, person, c.want, rep.Summary)
 			}
 		})
+	}
+}
+
+// A refusal after the look at the machine says what it saw first on PATH
+// in its text too, not only in the JSON (spec 054 #63): the note is the
+// look's, and every report that looked has it.
+func TestARefusalNamesTheTracepadFirstOnPath(t *testing.T) {
+	t.Parallel()
+	deps := containerDeps(t, newFakeDocker(t))
+	scriptBinary(t, filepath.Join(deps.InstallDir, "tracepad"), "0.2.0")
+	first := filepath.Join(t.TempDir(), "tracepad")
+	scriptBinary(t, first, "0.1.0")
+	deps.LookPath = func(string) string { return first }
+	for _, mode := range [][]string{{"--plan"}, {}} {
+		var out bytes.Buffer
+		code := run(context.Background(), Options{Args: append(mode, "--data-dir", t.TempDir()), Stdout: &out, Stderr: io.Discard}, deps)
+		if code != exitRefused || !strings.Contains(out.String(), "another tracepad comes first on PATH: "+first+" (0.1.0)") {
+			t.Errorf("%v: exit %d, %s", mode, code, out.String())
+		}
 	}
 }
 

@@ -82,15 +82,15 @@ else
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
 alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }
-[ "$how" = docker ] || mv "$data/server.pid.new" "$data/server.pid"
 [ "$declare" = yes ] || { sk="$(logs | sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' | tail -n 1)"; pk="$(logs | sed -n 's/^ *LANGFUSE_PUBLIC_KEY=\(tp-pk-[^ ]*\)$/\1/p' | tail -n 1)"; }
-[ -n "$sk" ] && [ -n "$pk" ] || { echo "STOP: no key in this server's log"; exit 1; }
+[ -n "$sk" ] && [ -n "$pk" ] || { echo "STOP: no key in this server's log"; stop; exit 1; }
+[ "$how" = docker ] || mv "$data/server.pid.new" "$data/server.pid"
 put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
 ```
 
 Healthy: `{"version":"…","ok":true}`. Otherwise its log's last lines say why
-(*address already in use*: another port; Docker says its own), the server is
-stopped — a container that failed is removed, with the volume it made, so the
+(*address already in use*: another port; Docker says its own). Then, as on
+any `STOP` after the start, the server is stopped — a container that failed is removed, with the volume it made, so the
 next try takes the same name — and `.env` untouched. The project is named after the repository.
 
 Then the lines of `via`, from `.env`. On a server you did not start, the human

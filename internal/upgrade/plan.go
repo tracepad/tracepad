@@ -54,8 +54,13 @@ func (p *plan) pending() bool {
 	return p.replaceBinary || p.server != nil || p.container != nil || len(p.choose) > 0
 }
 
-// lookupWait is how long the plan's look at the releases may take.
-var lookupWait = 45 * time.Second
+// fetchedEnv is what the install script sets, to the version it fetched and
+// verified, for the plan it asks of the binary it put in place.
+const fetchedEnv = "TRACEPAD_RELEASE_FETCHED"
+
+// lookupWait is how long the plan's look at the releases may take, unless
+// Deps.LookupWait says otherwise.
+const lookupWait = 45 * time.Second
 
 // makePlan resolves the target version and works out the plan. A refusal is
 // its sentence; the plan is nil then.
@@ -64,7 +69,11 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	// The release is looked up under a deadline of its own (the live run of
 	// rc.3): a network or a firewall that holds the connection must not hold
 	// the plan, which an agent runs with no watchdog over it.
-	lctx, cancel := context.WithTimeout(ctx, lookupWait)
+	wait := r.deps.LookupWait
+	if wait <= 0 {
+		wait = lookupWait
+	}
+	lctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	switch {
 	case to == "":
@@ -75,18 +84,16 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		to = latest
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
-	case r.flags.plan && to == r.version && sameFile(r.deps.Self, filepath.Join(r.deps.InstallDir, "tracepad")):
-		// The installed binary planning for its own version, as the install
-		// script asks the binary it just put in place: that release is the
-		// binary, and is not looked up, since a new binary's first
-		// connection may wait on a firewall past the script's fifteen
-		// seconds (the live run of 0.1.0). With no TRACEPAD_INSTALL_DIR the
-		// running binary's directory is the install path, so any binary
-		// planning for the version stamped on it is taken at its word, as
-		// `tracepad version` is everywhere in the command (spec 054 #58
-		// (e)): the lookup would prove nothing of a build stamped with a
-		// release's version. A run, another version, or a binary run from
-		// elsewhere than TRACEPAD_INSTALL_DIR names, still looks.
+	case r.flags.plan && to == r.version && r.deps.Getenv(fetchedEnv) == to && sameFile(r.deps.Self, filepath.Join(r.deps.InstallDir, "tracepad")):
+		// The binary the install script just fetched and put in place,
+		// planning for its own version: the script found that release, so
+		// it is not looked up again, since a new binary's first connection
+		// may wait on a firewall past the script's fifteen seconds (the live
+		// run of 0.1.0). Only the script says so (spec 054 #63): a build
+		// stamped with a release's version that no release has is looked
+		// up, and refused, as its run would be — the plan and the run never
+		// part. A run, another version, or a binary run from elsewhere than
+		// the install path, still looks.
 	default:
 		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
@@ -392,30 +399,32 @@ func (r *runner) othersBehind(p *plan) {
 	if note != "" {
 		p.notes = append(p.notes, note)
 	}
-	// A tracepad first on PATH is another file, which runs nothing: said
-	// as it is, in a note, sorted into nothing (the ninth review of #228,
-	// after three rounds that each sorted it once more).
-	if b := p.f.Binary; b.First != "" {
-		v := b.FirstVersion
-		if b.FirstErr != nil {
-			v = "it does not say its version"
-		}
-		// What put it there upgrades it: a package manager's, or the
-		// install script's, which installs into any directory it is given
-		// (the live run of rc.3: a binary in ~/.local/bin was told its
-		// package manager upgrades it). Unpinned: the newest stable
-		// release, which the script never steps back from, whatever this
-		// one says (the tenth review of #228: pinned to the target, it
-		// would take a newer one back).
-		script := "the install script: " + r.installLine(filepath.Dir(b.First), "")
-		upgrades := script
-		if pm := packageManager(canonicalPath(b.First)); pm != "" {
-			upgrades = pm
-		} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
-			upgrades = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
-		}
-		p.notes = append(p.notes, fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades))
+}
+
+// firstOnPath is the note on a tracepad first on PATH that is another file,
+// which runs nothing: said as it is, sorted into nothing (the ninth review
+// of #228, after three rounds that each sorted it once more), in every
+// report that looked at the machine, a refusal's too (spec 054 #63).
+func (r *runner) firstOnPath(b Binary) string {
+	if b.First == "" {
+		return ""
 	}
+	v := b.FirstVersion
+	if b.FirstErr != nil {
+		v = "it does not say its version: " + firstLine(b.FirstErr.Error())
+	}
+	// What put it there upgrades it: a package manager's, as the binary at
+	// the install path is told (managedBy), or the install script's, which
+	// installs into any directory it is given (the live run of rc.3: a
+	// binary in ~/.local/bin was told its package manager upgrades it).
+	// Unpinned: the newest stable release, which the script never steps
+	// back from, whatever this one says (the tenth review of #228: pinned
+	// to the target, it would take a newer one back).
+	upgrades := managedBy(b.First)
+	if upgrades == "" {
+		upgrades = "the install script: " + r.installLine(filepath.Dir(b.First), "")
+	}
+	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
 // binaryTodo is the plan's table of the binary at the install path: by its
@@ -435,8 +444,7 @@ func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
 	case b.Kind == binDev:
 		return fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
 			b.Path, b.Version, to, r.installLine(filepath.Dir(b.Path), to)), ""
-	case b.Kind == binLinked && b.Version != "" && !IsRelease(b.Version):
-		// A build linked from its checkout (the review of #228).
+	case b.Kind == binDevLink:
 		return fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
 			b.Path, b.Link, b.Version, to, b.Link, r.installLine(filepath.Dir(b.Path), to)), ""
 	}
@@ -559,6 +567,13 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Person = append(rep.Person, p.installed)
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
+	if b := p.f.Binary; (len(p.held) > 0 || len(p.person) > 0) && (b.Ours() || needsNothing(p.to, b.Version)) {
+		// The skill's copies follow the installed binary — the command's,
+		// which a run replaces, or one at the target already — and a
+		// server or container of the person's stays where it is (the live
+		// run of 0.1.1: a Compose server behind a skill one release ahead).
+		rep.Notes = append(rep.Notes, fmt.Sprintf("the skill's copies follow the installed binary to %s; until you upgrade a server or container of yours listed above, the skill may name what it does not have", p.to))
+	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {

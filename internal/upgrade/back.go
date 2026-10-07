@@ -386,7 +386,7 @@ func (j *job) wayBackPreconditions(ctx context.Context, restoreBytes, archiveByt
 func (j *job) restoreRoom(restoreBytes, archiveBytes int64) error {
 	dataDir := j.st.Process.DataDir
 	parent := filepath.Dir(dataDir)
-	free, err := freeBytes(parent)
+	free, err := j.r.freeBytes(parent)
 	if err != nil {
 		return fmt.Errorf("the room beside %s for a restore cannot be told (%v)", dataDir, err)
 	}

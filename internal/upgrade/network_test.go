@@ -46,9 +46,7 @@ func TestASilentReleaseServerIsAnAnswerInTime(t *testing.T) {
 // answers — holds the plan no longer than its look at the releases may take,
 // and the plan says why it stopped.
 func TestTheReleaseLookupKeepsItsDeadline(t *testing.T) {
-	saved := lookupWait
-	lookupWait = 300 * time.Millisecond
-	t.Cleanup(func() { lookupWait = saved })
+	t.Parallel()
 	held := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -56,6 +54,7 @@ func TestTheReleaseLookupKeepsItsDeadline(t *testing.T) {
 	for _, args := range [][]string{{"--plan", "--to", "0.2.0"}, {"--plan"}} {
 		deps := containerDeps(t, newFakeDocker(t))
 		deps.Releases = &Releases{Base: githubReleases, API: "https://api.github.com/repos/" + repo, HTTP: held}
+		deps.LookupWait = 300 * time.Millisecond
 		start := time.Now()
 		rep, code := runReport(t, deps, args...)
 		if code != exitRefused || !strings.Contains(rep.Summary, "did not answer in") || !strings.Contains(rep.Summary, "a firewall") {
