@@ -82,7 +82,7 @@ does not warn about one left exported.
 | `TRACEPAD_INSTALL_DIR` | `~/.local/bin` | Where the binary goes. Never needs `sudo` unless you point it somewhere that does. |
 | `TRACEPAD_NO_SKILL` | unset | `1` installs the binary alone, without the agent skill. |
 | `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
-| `TRACEPAD_RELEASE_FETCHED` | unset | Set by the script itself, never by you: the release it fetched, for the `tracepad upgrade --plan` it asks of the binary it put in place, which then does not look that release up again. |
+| `TRACEPAD_RELEASE_FETCHED` | unset | Internal, not a setting: the install script sets it, never you, to the release it fetched, for the `tracepad upgrade --plan` it asks of the binary it put in place, which then does not look that release up again. |
 
 See [install.md](install.md#with-the-install-script).
 

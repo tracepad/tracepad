@@ -14,7 +14,7 @@ import (
 // key in this process, never a port of the machine. With real ports, a port
 // freeAddr chose was free only until it closed its listener, and a server the
 // command stopped freed its port until the next start took it: in either
-// window a parallel test, or a gate in another checkout, could take it (two
+// window a parallel test, or another process on the machine, could take it (two
 // flakes of the 0.1.1 gate). Here nothing outside the process listens, a key
 // is never handed out twice, and a dial where nothing listens is refused at
 // once, as loopback refuses it.

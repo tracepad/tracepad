@@ -3,6 +3,7 @@ package upgrade
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -427,6 +428,56 @@ func (r *runner) firstOnPath(b Binary) string {
 	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
+// bridgeNote is the line that removes the directory the agent's bridge runs
+// from (spec 054 #63): one mktemp named, made for this upgrade, which the
+// agent's next shell may not know the path of, and the tmp.release an older
+// skill shared, when it is there. Only a directory by mktemp's name: never a
+// temporary directory itself.
+func (r *runner) bridgeNote() string {
+	dir := filepath.Dir(canonicalPath(r.deps.Self))
+	if !mktempName.MatchString(filepath.Base(dir)) {
+		return ""
+	}
+	dirs := []string{shq(dir)}
+	if old := filepath.Join(r.deps.Home, ".cache", "tracepad", "tmp.release"); canonicalDir(old) != dir {
+		if _, err := os.Lstat(old); err == nil {
+			dirs = append(dirs, shq(old))
+		}
+	}
+	return "this binary runs from " + dir + ", a bridge of the upgrade's own; once the upgrade is done: rm -r " + strings.Join(dirs, " ")
+}
+
+// skillAhead is the plan's note on a copy of the skill newer than a server
+// or container of the person's (the live run of 0.1.1: a Compose server
+// behind a skill one release ahead). A fact read from the copies' .version
+// markers, never what a run will do: a run refused, or one that installs no
+// skill, changes nothing it said (spec 054 #63). After an upgrade that put
+// the skill ahead, the skill plans again and reads it so.
+func (r *runner) skillAhead(f Findings) string {
+	var newest, at string
+	for _, c := range r.skillCopies() {
+		b, err := os.ReadFile(c.marker)
+		if v := strings.TrimSpace(string(b)); err == nil && IsRelease(v) && (newest == "" || behindTo(v, newest)) {
+			newest, at = v, filepath.Dir(c.marker)
+		}
+	}
+	var behind []string
+	for _, s := range f.Servers {
+		if !s.Ours && behindTo(newest, s.Version) {
+			behind = append(behind, fmt.Sprintf("server pid %d runs %s", s.Proc.PID, s.Version))
+		}
+	}
+	for _, c := range f.Containers {
+		if !c.Ours && behindTo(newest, c.Version) {
+			behind = append(behind, fmt.Sprintf("container %s runs %s", c.Name, c.Version))
+		}
+	}
+	if len(behind) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the skill at %s is %s, and what is yours is older (%s): the skill may name what that does not have until you upgrade it", at, newest, strings.Join(behind, "; "))
+}
+
 // binaryTodo is the plan's table of the binary at the install path: by its
 // kind (installedBinary), what the person is told to do, or "" for nothing —
 // the command's own, which a run replaces, or one that needs nothing — and a
@@ -567,12 +618,13 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Person = append(rep.Person, p.installed)
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
-	if b := p.f.Binary; (len(p.held) > 0 || len(p.person) > 0) && (b.Ours() || needsNothing(p.to, b.Version)) {
-		// The skill's copies follow the installed binary — the command's,
-		// which a run replaces, or one at the target already — and a
-		// server or container of the person's stays where it is (the live
-		// run of 0.1.1: a Compose server behind a skill one release ahead).
-		rep.Notes = append(rep.Notes, fmt.Sprintf("the skill's copies follow the installed binary to %s; until you upgrade a server or container of yours listed above, the skill may name what it does not have", p.to))
+	if r.flags.plan {
+		if note := r.skillAhead(p.f); note != "" {
+			rep.Notes = append(rep.Notes, note)
+		}
+	}
+	if note := r.bridgeNote(); note != "" {
+		rep.Notes = append(rep.Notes, note)
 	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))

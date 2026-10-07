@@ -345,10 +345,10 @@ func binaryVersion(ctx context.Context, path string) (string, error) {
 		cmd.Stderr = &errOut
 		return cmd.Run()
 	})
-	if why := strings.TrimSpace(firstLine(strings.TrimSpace(errOut.String()))); err != nil && why != "" {
-		return "", fmt.Errorf("%w: %s", err, why)
-	}
 	if err != nil {
+		if why := firstLine(strings.TrimSpace(errOut.String())); why != "" {
+			return "", fmt.Errorf("%w: %s", err, why)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil

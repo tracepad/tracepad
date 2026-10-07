@@ -224,8 +224,10 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 				t.Errorf("%s: the bridge's directory %s is not one a release tells for a temporary one", sh, d.Name())
 			}
 		}
-		// A download that fails runs no bridge an earlier run left (the
-		// review of #228): curl fails, sh reads nothing and exits 0.
+		// A download that fails stops, runs no binary where a bridge of a
+		// shared directory would find one (the review of #228), and leaves
+		// no directory of its own behind (the review of #231): curl fails,
+		// sh reads nothing and exits 0.
 		home = t.TempDir()
 		stale := filepath.Join(home, ".cache", "tracepad", "tmp.release", "tracepad")
 		ran := filepath.Join(t.TempDir(), "ran")
@@ -245,7 +247,10 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 			t.Errorf("%s: a failed download: %v %s", sh, err, out)
 		}
 		if _, err := os.Stat(ran); err == nil {
-			t.Errorf("%s: a failed download ran the bridge an earlier run left", sh)
+			t.Errorf("%s: a failed download ran the binary an earlier bridge left", sh)
+		}
+		if left, _ := os.ReadDir(filepath.Join(home, ".cache", "tracepad")); len(left) != 1 || left[0].Name() != "tmp.release" {
+			t.Errorf("%s: a failed download left %v", sh, left)
 		}
 	}
 }
@@ -254,11 +259,12 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 // of 0.1.1): a server left running, or a container on the volume it made,
 // meets the next try as "a container named … is there already". A block
 // that defines stop() starts something; from its first start on, every exit
-// comes right after stop.
+// that fails comes right after stop. One that succeeds leaves the server on
+// purpose: the earlier install the human chose to start, whose key is theirs.
 func TestEveryExitAfterAStartStopsWhatStarted(t *testing.T) {
 	t.Parallel()
 	start := regexp.MustCompile(`docker run |[^&]&\s*$`)
-	exit := regexp.MustCompile(`(\S+)\s*;?\s*exit\b`)
+	exit := regexp.MustCompile(`(\S+)\s*;?\s*exit\s+[1-9]`)
 	unstopped := func(text string) []string {
 		var bad []string
 		started := false

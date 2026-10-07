@@ -760,27 +760,62 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	}
 }
 
-// The skill's copies follow the installed binary, and a container of the
-// person's left behind is told apart from them (spec 054 #63): a note, in
-// the plan and the run alike, and none when nothing of theirs is behind.
+// A copy of the skill newer than a container of the person's is said in the
+// plan, as a fact of the copies' .version markers (spec 054 #63): never a
+// forecast of the run, which may be refused or install no skill, and never
+// without a copy there.
 func TestASkillAheadOfTheServerIsSaid(t *testing.T) {
 	t.Parallel()
-	const note = "the skill's copies follow the installed binary to 0.2.0"
+	const note = "the skill at "
 	d := newFakeDocker(t)
-	for _, installed := range []string{"0.1.0", "0.2.0"} {
-		if rep, _ := runReport(t, containerDeps(t, d, installed), "--plan"); strings.Contains(strings.Join(rep.Notes, "\n"), note) {
-			t.Errorf("%s: nothing of the person's is behind, and the plan says the skill is ahead: %q", installed, rep.Notes)
-		}
-	}
 	d.run(t, "--name", "myapp", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=myapp,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0", "serve")
-	for _, mode := range [][]string{{"--plan"}, {}} {
-		if rep, code := runReport(t, containerDeps(t, d, "0.2.0"), mode...); code != exitDecide || !strings.Contains(strings.Join(rep.Notes, "\n"), note) {
-			t.Errorf("%q: exit %d, notes %q", mode, code, rep.Notes)
+	plan := func(skill string, args ...string) []string {
+		deps := containerDeps(t, d, "0.2.0")
+		if skill != "" {
+			dir := filepath.Join(deps.Home, ".claude", "skills", "tracepad")
+			_ = os.MkdirAll(dir, 0o700)
+			_ = os.WriteFile(filepath.Join(dir, ".version"), []byte(skill+"\n"), 0o600)
+		}
+		rep, _ := runReport(t, deps, args...)
+		return rep.Notes
+	}
+	got := strings.Join(plan("0.2.0", "--plan"), "\n")
+	if !strings.Contains(got, ".claude/skills/tracepad is 0.2.0, and what is yours is older (container myapp runs 0.1.0)") {
+		t.Errorf("a copy at 0.2.0, a container at 0.1.0: %s", got)
+	}
+	for name, notes := range map[string][]string{
+		"no copy of the skill":      plan("", "--plan"),
+		"a copy at the container's": plan("0.1.0", "--plan"),
+		"a run, not a plan":         plan("0.2.0"),
+	} {
+		if got := strings.Join(notes, "\n"); strings.Contains(got, note) {
+			t.Errorf("%s: %s", name, got)
 		}
 	}
-	// No binary installed: no copy of the skill follows one.
-	if rep, _ := runReport(t, containerDeps(t, d), "--plan"); strings.Contains(strings.Join(rep.Notes, "\n"), note) {
-		t.Errorf("no binary installed, and the plan says the skill is ahead: %q", rep.Notes)
+}
+
+// A bridge's report gives the line that removes its directory, and the
+// tmp.release an older skill shared (spec 054 #63): the agent's next shell
+// may not know the path. A binary run from anywhere else gets no such line.
+func TestABridgeSaysHowToRemoveItself(t *testing.T) {
+	t.Parallel()
+	for _, mode := range [][]string{{"--plan"}, {}} {
+		deps := containerDeps(t, newFakeDocker(t), "0.2.0")
+		cache := filepath.Join(deps.Home, ".cache", "tracepad")
+		bridge := filepath.Join(cache, "tmp.Q7xK2p")
+		_ = os.MkdirAll(filepath.Join(cache, "tmp.release"), 0o700)
+		_ = os.MkdirAll(bridge, 0o700)
+		scriptBinary(t, filepath.Join(bridge, "tracepad"), "0.2.0")
+		deps.Self = filepath.Join(bridge, "tracepad")
+		rep, _ := runReport(t, deps, mode...)
+		want := "rm -r " + shq(canonicalDir(bridge)) + " " + shq(filepath.Join(cache, "tmp.release"))
+		if got := strings.Join(rep.Notes, "\n"); !strings.Contains(got, want) {
+			t.Errorf("%q: no %q in %s", mode, want, got)
+		}
+		deps.Self = filepath.Join(deps.InstallDir, "tracepad")
+		if rep, _ := runReport(t, deps, mode...); strings.Contains(strings.Join(rep.Notes, "\n"), "rm -r") {
+			t.Errorf("%q: the installed binary is told to remove a directory: %q", mode, rep.Notes)
+		}
 	}
 }
 

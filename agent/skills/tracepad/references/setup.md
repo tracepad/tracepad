@@ -76,22 +76,25 @@ if [ "$how" = docker ]; then
   stop() { docker rm -f "$name" >/dev/null 2>&1; [ -z "$made" ] || docker volume rm "$name" >/dev/null; }
   docker run -d --name "$name" -v "$name:/data" -p "127.0.0.1:$port:4318" -e TRACEPAD_URL="$url" -e TRACEPAD_PROJECTS="$decl" "ghcr.io/tracepad/tracepad:$tag" serve >/dev/null || { stop; exit 1; }
 else
-  TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
+  made=; [ -e "$data/tracepad.db" ] || made=yes; TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
   echo $! >"$data/server.pid.new"; logs() { cat "$data/server.log"; }
   alive() { kill -0 "$(cat "$data/server.pid.new")" && tail -n "+$((n + 1))" "$data/server.log" | grep -q 'listening addr'; }; stop() { kill "$(cat "$data/server.pid.new")"; rm "$data/server.pid.new"; }
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
 alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }
 [ "$declare" = yes ] || { sk="$(logs | sed -n 's/^ *OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer \(tp-sk-[^"]*\)"$/\1/p' | tail -n 1)"; pk="$(logs | sed -n 's/^ *LANGFUSE_PUBLIC_KEY=\(tp-pk-[^ ]*\)$/\1/p' | tail -n 1)"; }
-[ -n "$sk" ] && [ -n "$pk" ] || { echo "STOP: no key in this server's log"; stop; exit 1; }
+[ -n "$sk" ] && [ -n "$pk" ] || [ -z "$made" ] || { echo "STOP: no key in this server's log"; stop; exit 1; }
 [ "$how" = docker ] || mv "$data/server.pid.new" "$data/server.pid"
-put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
+put TRACEPAD_URL "$url"; [ -n "$sk" ] || { echo "KEY: the data was there before; its key is the human's to give, and the server runs"; exit 0; }
+put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || put LANGFUSE_PUBLIC_KEY "$pk"
 ```
 
 Healthy: `{"version":"…","ok":true}`. Otherwise its log's last lines say why
 (*address already in use*: another port; Docker says its own). Then, as on
 any `STOP` after the start, the server is stopped — a container that failed is removed, with the volume it made, so the
-next try takes the same name — and `.env` untouched. The project is named after the repository.
+next try takes the same name — and `.env` untouched. `KEY:` is the earlier
+install the human chose to start (`NOT FRESH`): it prints no key, so it keeps
+running, `.env` has its URL, and the human puts its key there. The project is named after the repository.
 
 Then the lines of `via`, from `.env`. On a server you did not start, the human
 puts `TRACEPAD_URL`, the key and, for Langfuse, `LANGFUSE_PUBLIC_KEY` there:
