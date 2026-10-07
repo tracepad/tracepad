@@ -733,7 +733,7 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 			t.Fatalf("%q: %d %s", mode, code, rep.Summary)
 		}
 		all := strings.Join(rep.Person, "\n")
-		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", "sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh myapp-0.1.0.tar.gz",
+		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", busybox + " tar czf - -C /data . > myapp-0.1.0.tar.gz)",
 			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename myapp myapp-old", "docker/#upgrading",
 			"docker rename myapp myapp-old && (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' myapp-old | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > myapp.upgrade.env) && ",
 			"docker run -d --name myapp --env-file myapp.upgrade.env -p 127.0.0.1:4318:4318 --mount type=volume,src=myapp,dst=/data --mount 'type=bind,src=/srv/my config,dst=/etc/extra,readonly' --restart always ghcr.io/tracepad/tracepad:0.2.0 serve && rm myapp.upgrade.env. Once the new one is healthy: docker rm myapp-old",
@@ -787,7 +787,7 @@ func TestComposeAdvice(t *testing.T) {
 	all := strings.Join(rep.Person, "\n")
 	compose := "docker compose -p tracepad --env-file '/srv/my app/.env.prod' -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
 	for _, want := range []string{
-		compose + " stop tracepad && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly -v \"$PWD:/backup\" " + busybox + " sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh tracepad-tracepad-1-0.1.0.tar.gz && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
+		compose + " stop tracepad && (umask 077 && set -C && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly " + busybox + " tar czf - -C /data . > tracepad-tracepad-1-0.1.0.tar.gz) && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
 		"set the image of the service tracepad in whichever of /srv/my app/compose.yml, /srv/my app/compose.override.yml sets it to ghcr.io/tracepad/tracepad:0.2.0",
 		"take its digest off: it is pinned to sha256:" + strings.Repeat("d", 64),
 		"docker pull ghcr.io/tracepad/tracepad:0.2.0 prints its digest",
@@ -844,6 +844,16 @@ func TestComposeAdvice(t *testing.T) {
 	if got := composeAdvice(c, "0.2.0"); strings.Contains(got, "docker compose") || !strings.Contains(got, "its Compose files are not known here") ||
 		!strings.Contains(got, "docker run --rm --mount type=volume,src=obs_data,dst=/data,readonly") || !strings.Contains(got, "docker pull ghcr.io/tracepad/tracepad:0.2.0") {
 		t.Errorf("no file or directory label: %s", got)
+	}
+	// Files named relative, and no directory: not known either (the ninth
+	// review); absolute, they are, and need no directory.
+	c.ComposeFiles = []string{"compose.yaml"}
+	if got := composeAdvice(c, "0.2.0"); strings.Contains(got, "docker compose") {
+		t.Errorf("relative files, no directory: %s", got)
+	}
+	c.ComposeFiles = []string{"/srv/obs/compose.yaml"}
+	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs -f /srv/obs/compose.yaml stop") {
+		t.Errorf("absolute files, no directory: %s", got)
 	}
 }
 
@@ -961,18 +971,15 @@ func TestAContainerWhoseImageCannotBeReadGetsTheSentence(t *testing.T) {
 	}
 }
 
-// fakeDockerCLI is a `docker` for a shell: it logs each call, runs a
-// backup's own sh -c against a data directory of its own, and answers an
-// inspect with two variables.
+// fakeDockerCLI is a `docker` for a shell: it logs each call, writes a
+// backup's archive of a data directory of its own to its output, and answers
+// an inspect with two variables.
 const fakeDockerCLI = `#!/bin/sh
 echo "$*" >> "$LOG"
 case "$1 $2" in
 "run --rm")
-	# … busybox sh -c SCRIPT sh FILE: the archive's name is the script's $1.
-	eval "cmd=\${$(($# - 2))}"
-	eval "file=\${$#}"
-	cmd=$(printf '%s' "$cmd" | sed "s#\"/backup/#\"$PWD/#; s#-C /data#-C $DATA#")
-	exec sh -c "$cmd" sh "$file" ;;
+	# … busybox tar czf - -C /data .: the archive, to its output.
+	exec tar czf - -C "$DATA" . ;;
 "inspect --format") printf 'TRACEPAD_PROJECTS=p\nTRACEPAD_URL=u\n' ;;
 esac
 exit 0
@@ -2102,8 +2109,8 @@ func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 // development build is the person's to replace, exit 4, never 0; a package
 // manager's is its manager's, whatever it says, never the install script's
 // line over its link (the fifth review of #228). A tracepad first on PATH
-// that is behind is named and not counted, and leaves the installed one's
-// nothing_to_do to its own version (the seventh review).
+// is a note, sorted into nothing, and leaves the installed one's
+// nothing_to_do to its own version (the seventh and ninth reviews).
 func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 	t.Parallel()
 	type want struct {
@@ -2171,6 +2178,16 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 			want{kind: binOdd, code: exitDecide, line: "is not a regular file"}},
 		"a release where this user cannot write, behind": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "0.1.0") },
 			want{kind: binUnwritable, code: exitDecide, line: "is not writable by this user"}},
+		"a development build where this user cannot write": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "97d6b79") },
+			want{kind: binUnwritable, code: exitDecide, line: "is not writable by this user", never: "install.sh"}},
+		"a development build linked where this user cannot write": {func(t *testing.T, deps *Deps) {
+			if os.Geteuid() == 0 {
+				t.Skip("root writes into any directory")
+			}
+			linked(t, bin(deps), "dev")
+			_ = os.Chmod(deps.InstallDir, 0o500)
+			t.Cleanup(func() { _ = os.Chmod(deps.InstallDir, 0o700) })
+		}, want{kind: binUnwritable, code: exitDecide, line: "is not writable by this user", never: "install.sh"}},
 		"a release where this user cannot write, current": {func(t *testing.T, deps *Deps) { readOnly(t, deps, "0.2.0") },
 			want{kind: binUnwritable, code: exitOK, idle: true}},
 		"Homebrew's, behind": {func(t *testing.T, deps *Deps) { scriptBinary(t, cellar(t, deps), "0.1.0") },
@@ -2204,7 +2221,7 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 			first := filepath.Join(t.TempDir(), "tracepad")
 			scriptBinary(t, first, "0.1.0")
 			deps.LookPath = func(string) string { return first }
-		}, want{kind: binLinked, code: exitOK, idle: true, line: ", first on PATH, is 0.1.0: "}},
+		}, want{kind: binLinked, code: exitOK, idle: true, note: "another tracepad comes first on PATH: "}},
 	}
 	for kind := binNone; kind <= binOurs; kind++ {
 		if !slices.ContainsFunc(slices.Collect(maps.Values(cases)), func(c cell) bool { return c.want.kind == kind }) {

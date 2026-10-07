@@ -1214,7 +1214,7 @@ The exit status, by mode — one table, which the skill reads too:
 
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
-| `0` | nothing runs older (an older `tracepad` first on `PATH` is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `0` | nothing runs older (a `tracepad` first on `PATH` is named in the notes, with what upgrades it, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
 | `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
@@ -1232,7 +1232,9 @@ prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `set_aside`, `person`, `next` and `notes`. In `binary`, `servers` and
 `containers`, `whose` is `command` or `person`, with the `reason` of the
 person's, and `nothing_to_do` marks one that needs nothing — a release at
-the target or past it — whoever's it is.
+the target or past it — whoever's it is. `binary` has `first_on_path` and
+`first_on_path_version` when another `tracepad` comes first on `PATH`: a fact,
+marked neither way.
 
 ## Version skew
 

@@ -45,9 +45,17 @@ bad_links() {
 		esac
 		[ "$page" != "$rest" ] || page=""
 		page="${page%%#*}"
-		# A page is a path with no extension; what the build adds beside
-		# the pages — assets/, search/, sitemap.xml, a file — is not docs/'s.
-		case "$page" in assets/* | search/* | *.*) continue ;; esac
+		# What the build adds beside the pages, named: its assets, its
+		# search index, its sitemap and its 404. A Markdown file is served
+		# at the root only; anything else is a page of docs/ (the ninth
+		# review of #228).
+		case "$page" in
+		assets/* | search/* | sitemap.xml | sitemap.xml.gz | 404.html) continue ;;
+		*.md)
+			echo "tracepad.github.io/tracepad/$rest: a Markdown page is served at the site's root, not under latest/ or dev/"
+			continue
+			;;
+		esac
 		page="${page%/}"
 		md="$docs/${page:-index}.md"
 		[ -f "$md" ] || echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"
@@ -68,6 +76,8 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/latest/install/#upgrading' \
 		'https://tracepad.github.io/tracepad/latest/assets/images/logo.png' \
 		'https://tracepad.github.io/tracepad/latest/sitemap.xml' \
+		'https://tracepad.github.io/tracepad/latest/sitemap.xml.gz' \
+		'https://tracepad.github.io/tracepad/latest/404.html' \
 		'https://tracepad.github.io/tracepad/latest/search/' \
 		'see https://tracepad.github.io/tracepad/latest/install/.' \
 		'https://tracepad.github.io/tracepad/latest/docker/#upgrading-and-backing-up-first.' \
@@ -85,8 +95,10 @@ if [ "${1:-}" = --self-test ]; then
 		'https://tracepad.github.io/tracepad/latest/quickstart/' \
 		'https://tracepad.github.io/tracepad/latest/quickstart/#a-heading' \
 		'https://tracepad.github.io/tracepad/dev/gone/.' \
-		'https://tracepad.github.io/tracepad/agent-upgade.md' | bad_links "$fixture" | wc -l | tr -d ' ')
-	[ "$bad" = 9 ] || { echo "site-links self-test: found $bad of 9 links the site does not serve" >&2; exit 1; }
+		'https://tracepad.github.io/tracepad/agent-upgade.md' \
+		'https://tracepad.github.io/tracepad/latest/install.md' \
+		'https://tracepad.github.io/tracepad/latest/notes.txt' | bad_links "$fixture" | wc -l | tr -d ' ')
+	[ "$bad" = 11 ] || { echo "site-links self-test: found $bad of 11 links the site does not serve" >&2; exit 1; }
 	echo "site-links: the rule answers as expected"
 	exit 0
 fi

@@ -29,14 +29,11 @@ type plan struct {
 	later []string
 	// person are the person's servers and containers, older than to, each
 	// with what to do; installed, what the person does with the binary at
-	// the install path (binaryTodo); binaries, the tracepad first on PATH
-	// when it is behind. The first two make the plan's exit 4; the last
-	// does not (the eighth review: an older tracepad first on PATH runs
-	// nothing, and the install path is where the command and the skill
-	// look — the fifth review of #228).
+	// the install path (binaryTodo). Both make the plan's exit 4: the
+	// install path is where the command and the skill look (the fifth
+	// review of #228).
 	person    []string
 	installed string
-	binaries  []string
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
 	// ahead: what the command looks after runs past the latest stable
@@ -391,26 +388,26 @@ func (r *runner) othersBehind(p *plan) {
 	if note != "" {
 		p.notes = append(p.notes, note)
 	}
+	// A tracepad first on PATH is another file, which runs nothing: said
+	// as it is, in a note, sorted into nothing (the ninth review of #228,
+	// after three rounds that each sorted it once more).
 	if b := p.f.Binary; b.First != "" {
-		v, err := b.FirstVersion, b.FirstErr
-		switch {
-		case !firstBehind(b, p.to):
-		case err != nil:
-			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
-		default:
-			// What put it there upgrades it: a package manager's, or the
-			// install script's, which installs into any directory it is
-			// given (the live run of rc.3: a binary in ~/.local/bin was told
-			// its package manager upgrades it).
-			script := "the install script upgrades it: " + r.installLine(filepath.Dir(b.First), p.to)
-			advice := script
-			if pm := packageManager(canonicalPath(b.First)); pm != "" {
-				advice = pm
-			} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
-				advice = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
-			}
-			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
+		v := b.FirstVersion
+		if b.FirstErr != nil {
+			v = "it does not say its version"
 		}
+		// What put it there upgrades it: a package manager's, or the
+		// install script's, which installs into any directory it is given
+		// (the live run of rc.3: a binary in ~/.local/bin was told its
+		// package manager upgrades it).
+		script := "the install script: " + r.installLine(filepath.Dir(b.First), p.to)
+		upgrades := script
+		if pm := packageManager(canonicalPath(b.First)); pm != "" {
+			upgrades = pm
+		} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
+			upgrades = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
+		}
+		p.notes = append(p.notes, fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades))
 	}
 }
 
@@ -439,12 +436,6 @@ func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
 	// Packaged, linked, silent, unwritable, odd: its reason says whose and
 	// what upgrades it.
 	return fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason), ""
-}
-
-// firstBehind is whether the tracepad first on PATH, another than the
-// installed one, is behind to or does not say.
-func firstBehind(b Binary, to string) bool {
-	return b.First != "" && (b.FirstErr != nil || behindTo(to, b.FirstVersion))
 }
 
 // installLine is the install script's command that puts version to into
@@ -552,13 +543,11 @@ func (r *runner) describe(p *plan, rep *Report) {
 		// Its own version alone: a tracepad first on PATH is another file,
 		// with a line of its own (the seventh review of #228).
 		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version)
-		rep.Binary.firstBehind = firstBehind(p.f.Binary, p.to)
 	}
 	rep.Person = append(append(rep.Person, p.held...), p.person...)
 	if p.installed != "" {
 		rep.Person = append(rep.Person, p.installed)
 	}
-	rep.Person = append(rep.Person, p.binaries...)
 	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))

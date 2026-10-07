@@ -512,8 +512,9 @@ func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
 }
 
 // An older tracepad first on PATH runs nothing (the eighth review): the plan
-// names it with what upgrades it, and does not call anything behind — exit
-// 0, not the 4 the install script reads as "still running an older version".
+// names it with what upgrades it, in a note, and does not call anything
+// behind — exit 0, not the 4 the install script reads as "still running an
+// older version".
 func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
@@ -526,8 +527,8 @@ func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
 	scriptBinary(t, brew, fOld)
 	deps.LookPath = func(string) string { return brew }
 	plan, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
-	if code != exitOK || !strings.Contains(strings.Join(plan.Person, "\n"), "first on PATH") {
-		t.Errorf("%d %s %q", code, plan.Summary, plan.Person)
+	if code != exitOK || !strings.Contains(strings.Join(plan.Notes, "\n"), "comes first on PATH: "+brew+" ("+fOld+")") || len(plan.Person) > 0 {
+		t.Errorf("%d %s %q %q", code, plan.Summary, plan.Person, plan.Notes)
 	}
 }
 
@@ -1186,10 +1187,10 @@ func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
 	}
 }
 
-// The line of a tracepad first on PATH is with what needs the person when it
-// is behind, whatever the installed one needs: Homebrew's at the target, an
-// older one first on PATH (the eighth review of #228).
-func TestAnOlderTracepadFirstOnPathIsNotNothingToDo(t *testing.T) {
+// A tracepad first on PATH is a fact, in a note, sorted into neither "Yours,
+// to do" nor "Yours, nothing to do" (the eighth and ninth reviews of #228):
+// Homebrew's at the target, an older one first on PATH.
+func TestATracepadFirstOnPathIsANoteOnly(t *testing.T) {
 	t.Parallel()
 	cellar := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.2.0", "bin")
 	_ = os.MkdirAll(cellar, 0o755)
@@ -1201,9 +1202,13 @@ func TestAnOlderTracepadFirstOnPathIsNotNothingToDo(t *testing.T) {
 	deps.LookPath = func(string) string { return first }
 	var out bytes.Buffer
 	run(context.Background(), Options{Args: []string{"--plan"}, Stdout: &out, Stderr: io.Discard}, deps)
-	head, idle, _ := strings.Cut(out.String(), "\nYours, nothing to do")
-	if !strings.Contains(head, "another tracepad comes first on PATH: "+first) || strings.Contains(idle, first+"\n") ||
-		!strings.Contains(idle, "binary    "+filepath.Join(cellar, "tracepad")) {
-		t.Errorf("%s", out.String())
+	text := out.String()
+	_, notes, _ := strings.Cut(text, "\nNotes:\n")
+	if strings.Count(text, first) != 1 || !strings.Contains(notes, "another tracepad comes first on PATH: "+first+" (0.1.0)") {
+		t.Errorf("%s", text)
+	}
+	rep, _ := runReport(t, deps, "--plan")
+	if rep.Binary.First != first || rep.Binary.FirstVersion != "0.1.0" || !rep.Binary.Idle {
+		t.Errorf("%+v", rep.Binary)
 	}
 }

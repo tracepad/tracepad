@@ -77,13 +77,12 @@ type BinaryReport struct {
 	Whose   string `json:"whose"`
 	Reason  string `json:"reason,omitempty"`
 	First   string `json:"first_on_path,omitempty"`
+	// FirstVersion is what the tracepad first on PATH says it is: a fact,
+	// sorted into nothing (the ninth review of #228).
+	FirstVersion string `json:"first_on_path_version,omitempty"`
 	// Idle: needsNothing — a release at the plan's version or past it,
 	// whoever's it is; the text lists the person's apart.
 	Idle bool `json:"nothing_to_do,omitempty"`
-	// firstBehind: the tracepad first on PATH is behind, or does not say,
-	// so its line in the text is with what needs the person, whatever the
-	// installed one needs (the eighth review of #228).
-	firstBehind bool
 }
 
 type ServerReport struct {
@@ -124,7 +123,7 @@ func whose(ours bool) string {
 
 func (rep *Report) fill(f Findings) {
 	b := f.Binary
-	rep.Binary = &BinaryReport{Path: b.Path, Version: b.Version, Whose: whose(b.Ours()), Reason: b.Reason, First: b.First}
+	rep.Binary = &BinaryReport{Path: b.Path, Version: b.Version, Whose: whose(b.Ours()), Reason: b.Reason, First: b.First, FirstVersion: b.FirstVersion}
 	rep.Servers = []ServerReport{}
 	for _, s := range f.Servers {
 		rep.Servers = append(rep.Servers, ServerReport{PID: s.Proc.PID, Command: s.Proc.Argv, Exe: s.Proc.Exe,
@@ -178,9 +177,6 @@ func (rep *Report) write(w io.Writer, asJSON bool) {
 			v = "none"
 		}
 		item(bin.Idle && bin.Whose == "person", "binary    %s (%s)%s", bin.Path, v, reasonSuffix(bin.Whose, bin.Reason))
-		if bin.First != "" {
-			item(!bin.firstBehind, "          another tracepad comes first on PATH: %s", bin.First)
-		}
 	}
 	for _, s := range rep.Servers {
 		mark := ""

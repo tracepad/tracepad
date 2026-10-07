@@ -26,12 +26,17 @@ func hostile(base string) string {
 	return base + `'it's "$(touch canary)" ` + "`touch canary`" + ` * ; a\b` + "\nline"
 }
 
-// printedRun runs line with sh in a directory of its own, with stand-ins for
-// docker, systemctl, sudo, launchctl and curl that record their arguments,
-// and answers each call's argv in order.
+// printedRun runs line with sh in a directory of its own — named with a colon
+// and a comma, which docker's -v and --mount would read as separators (the
+// ninth review of #228) — with stand-ins for docker, systemctl, sudo,
+// launchctl and curl that record their arguments, and answers each call's
+// argv in order.
 func printedRun(t *testing.T, line string, env ...string) [][]string {
 	t.Helper()
-	stubs, log, cwd := t.TempDir(), t.TempDir(), t.TempDir()
+	stubs, log, cwd := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "backups:2026,a")
+	if err := os.Mkdir(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	record := `#!/bin/sh
 n=$(ls "$LOG" | wc -l | tr -d ' ')
 { printf '%s\0' "$(basename "$0")"; for a; do printf '%s\0' "$a"; done; } > "$LOG/$n"
@@ -103,8 +108,9 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 		}
 		sameArgs(t, "stop", calls[0], []string{"docker", "stop", c.Name})
 		// A version that is not a release's is not in the archive's name.
-		sameArgs(t, "backup", calls[1], []string{"docker", "run", "--rm", "--mount", c.DataMount, "-v", calls[1][6], busybox,
-			"sh", "-c", `umask 077 && set -C && tar czf - -C /data . > "/backup/$1"`, "sh", c.Name + "-backup.tar.gz"})
+		// No directory of the person's is mounted: the archive is their
+		// shell's file, wherever it is run from.
+		sameArgs(t, "backup", calls[1], []string{"docker", "run", "--rm", "--mount", c.DataMount, busybox, "tar", "czf", "-", "-C", "/data", "."})
 		// Docker reads the value as CSV: the source, a comma and quotes in
 		// it, is one field.
 		if f, err := csv.NewReader(strings.NewReader(calls[1][4])).Read(); err != nil || len(f) != 4 || f[1] != "src="+v("/srv/data")+",b" {
@@ -123,7 +129,7 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 			t.Errorf("a variable named %q: %v", v("ENV"), err)
 		}
 		sameArgs(t, "the archive of a release's version", []string{backupStep(Container{Name: "n", Version: "0.1.0", DataMount: dataMount("volume", "v")})},
-			[]string{`docker run --rm --mount type=volume,src=v,dst=/data,readonly -v "$PWD:/backup" ` + busybox + ` sh -c 'umask 077 && set -C && tar czf - -C /data . > "/backup/$1"' sh n-0.1.0.tar.gz`})
+			[]string{`(umask 077 && set -C && docker run --rm --mount type=volume,src=v,dst=/data,readonly ` + busybox + ` tar czf - -C /data . > n-0.1.0.tar.gz)`})
 	})
 
 	t.Run("a Compose project's", func(t *testing.T) {
@@ -138,7 +144,7 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 		}
 		sameArgs(t, "stop", calls[0], append(compose, "stop", c.Service))
 		sameArgs(t, "backup's mount", calls[1][3:5], []string{"--mount", c.DataMount})
-		sameArgs(t, "backup's name", calls[1][len(calls[1])-1:], []string{c.Name + "-0.1.0.tar.gz"})
+		sameArgs(t, "backup's command", calls[1][5:], []string{busybox, "tar", "czf", "-", "-C", "/data", "."})
 		sameArgs(t, "up", calls[3], append(compose, "up", "-d", c.Service))
 		sameArgs(t, "start", calls[4], append(compose, "start", c.Service))
 	})

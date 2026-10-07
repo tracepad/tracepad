@@ -53,7 +53,7 @@ const (
 	binLinked                       // a link of the person's
 	binSilent                       // a file that does not say its version
 	binDev                          // a file that says a version no release has
-	binUnwritable                   // a release's file in a directory this user cannot write
+	binUnwritable                   // a file, or a development build's link, in a directory this user cannot write
 	binOurs                         // a release's file the command replaces
 )
 
@@ -435,6 +435,11 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		b.Link = target
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Kind, b.Reason = binLinked, b.Path+" is a symbolic link to "+target+": its owner's to replace"
+		if b.Version != "" && !IsRelease(b.Version) && !writableDir(filepath.Dir(b.Path)) {
+			// The install script's line, which replaces the link, could
+			// not write there (the ninth review of #228).
+			b.Kind, b.Reason = binUnwritable, b.Reason+"; "+filepath.Dir(b.Path)+" is not writable by this user"
+		}
 	case !st.Mode().IsRegular():
 		b.Kind, b.Reason = binOdd, b.Path+" is not a regular file"
 	default:
@@ -442,10 +447,12 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		switch {
 		case err != nil:
 			b.Kind, b.Reason = binSilent, b.Path+" does not run here: "+err.Error()
+		case !writableDir(filepath.Dir(b.Path)):
+			// Before a development build: the install script's line could
+			// not write there either (the ninth review of #228).
+			b.Kind, b.Reason = binUnwritable, filepath.Dir(b.Path)+" is not writable by this user"
 		case !IsRelease(b.Version):
 			b.Kind, b.Reason = binDev, fmt.Sprintf("%s says it is %q, a development build", b.Path, b.Version)
-		case !writableDir(filepath.Dir(b.Path)):
-			b.Kind, b.Reason = binUnwritable, filepath.Dir(b.Path)+" is not writable by this user"
 		default:
 			b.Kind = binOurs
 		}

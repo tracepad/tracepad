@@ -106,8 +106,8 @@ func TestABinaryOnPathGetsTheInstallScriptsLine(t *testing.T) {
 	deps := w.deps()
 	deps.LookPath = func(string) string { return first }
 	rep, _ := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
-	want := "the install script upgrades it: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=" + fNew + " TRACEPAD_INSTALL_DIR=" + shq(filepath.Dir(first)) + " sh"
-	if all := strings.Join(rep.Person, "\n"); !strings.Contains(all, want) {
+	want := "what upgrades it is the install script: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=" + fNew + " TRACEPAD_INSTALL_DIR=" + shq(filepath.Dir(first)) + " sh"
+	if all := strings.Join(rep.Notes, "\n"); !strings.Contains(all, want) {
 		t.Errorf("the plan says:\n%s\nnot %s", all, want)
 	}
 	r := &runner{deps: Deps{Home: "/home/a"}}

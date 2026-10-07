@@ -1085,12 +1085,12 @@ func composeAdvice(c Container, to string) string {
 	if _, digest, ok := strings.Cut(c.Ref, "@"); ok {
 		set += fmt.Sprintf(" — and take its digest off: it is pinned to %s, which Docker runs whatever the tag says. To pin the new one, docker pull %s prints its digest: %s@<that digest>", digest, image, image)
 	}
-	if len(c.ComposeFiles) == 0 && c.ComposeDir == "" {
-		// No label names its files or its directory: a compose command
-		// would read whatever file is where it is run, and `up -d` there
-		// start another project's services under this name. None is
-		// printed; what does not read a Compose file is (the eighth review
-		// of #228).
+	if !composeKnown(c) {
+		// What its labels name does not settle where its files are: a
+		// compose command would read whatever file is where it is run,
+		// and `up -d` there start another project's services under this
+		// name. None is printed; what does not read a Compose file is (the
+		// eighth and ninth reviews of #228).
 		return fmt.Sprintf("Upgrade it with Compose (%s), from the project's own directory: its Compose files are not known here — the container has no label naming them or the project's directory — so no compose command is given, which would read the file of whatever directory it is run in. Stop the service %s, archive its volume: %s; docker pull %s; then %s, and bring the service up again",
 			docsDocker, service, backupStep(c), shq(image), set)
 	}
@@ -1112,6 +1112,24 @@ func composeSteps(c Container, to string) (chain, up, start string) {
 	return chain, compose + " up -d " + service, compose + " start " + service
 }
 
+// composeKnown is whether a compose command for the container reads its own
+// files wherever it is run: its directory is labelled, or its files are, each
+// absolute, and its env files too.
+func composeKnown(c Container) bool {
+	if c.ComposeDir != "" {
+		return true
+	}
+	if len(c.ComposeFiles) == 0 {
+		return false
+	}
+	for _, f := range append(slices.Clone(c.ComposeFiles), c.ComposeEnv...) {
+		if !filepath.IsAbs(f) {
+			return false
+		}
+	}
+	return true
+}
+
 // composeService is the container's Compose service, or the placeholder
 // the person fills in when it has no label saying it: one place, so the
 // prose and the commands name it alike (the fourth review of #228).
@@ -1124,10 +1142,12 @@ func composeService(c Container) string {
 
 // backupStep archives a stopped container's /data from busybox into the
 // directory the person runs it in, never over an earlier archive (set -C),
-// readable by them alone (umask 077). The archive's name is an argument of
-// the script, quoted, never part of it: a version is what a server answered,
-// and a name in the script would be run as shell (the second review of
-// #228). A version that is not a release's is not put in the name at all.
+// readable by them alone (umask 077). busybox writes the archive to its
+// output and the person's shell into the file: no directory of theirs is
+// mounted, so its name — a colon, a comma — is never docker's to parse (the
+// ninth review of #228), and the archive's name is a word of their shell,
+// quoted: a version is what a server answered (the second review of #228).
+// A version that is not a release's is not put in the name at all.
 func backupStep(c Container) string {
 	version := c.Version
 	if !IsRelease(version) {
@@ -1137,7 +1157,7 @@ func backupStep(c Container) string {
 	if data == "" {
 		data = dataMount("volume", "<its /data volume>")
 	}
-	return fmt.Sprintf("docker run --rm --mount %s -v \"$PWD:/backup\" %s sh -c 'umask 077 && set -C && tar czf - -C /data . > \"/backup/$1\"' sh %s",
+	return fmt.Sprintf("(umask 077 && set -C && docker run --rm --mount %s %s tar czf - -C /data . > %s)",
 		shq(data), busybox, shq(c.Name+"-"+version+".tar.gz"))
 }
 

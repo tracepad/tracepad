@@ -646,8 +646,8 @@ one before it worked, so a backup that is refused stops everything after it:
 
 ```sh
 docker stop tracepad &&
-docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz' &&
+(umask 077 && set -C && docker run --rm -v tracepad:/data:ro busybox \
+  tar czf - -C /data . > "tracepad-$(date +%F).tar.gz") &&
 docker pull ghcr.io/tracepad/tracepad:X.Y.Z &&
 docker rename tracepad tracepad-old &&
 (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-old \
@@ -685,9 +685,11 @@ Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
 readable by its owner alone; it is the whole database, and without it the file
 lands in your directory as readable as that directory lets it be. `set -C`
-keeps it from writing over an earlier backup of the same name. Restoring is the
-same command the other way round, `tar xzf - -C /data < /backup/<the file>`,
-into a stopped container's volume mounted without `readonly`.
+keeps it from writing over an earlier backup of the same name. busybox writes
+the archive to its output and your shell writes the file, so no directory of
+yours is mounted into the container. Restoring is the same the other way round,
+`docker run --rm -i -v tracepad:/data busybox tar xzf - -C /data < <the file>`,
+into a stopped container's volume.
 
 **One server per volume.** The server holds a lock on `tracepad.db.lock`, beside the
 database, for as long as it runs, and a second one started on the same

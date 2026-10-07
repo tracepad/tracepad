@@ -253,9 +253,11 @@ done
 
 # --- A plan that could not finish (exit 1: refused, or interrupted) is said,
 # and is never read as something running older.
-run plan-refused 0 FAKE_PLAN="Interrupted: the look at the machine was cut short" FAKE_PLAN_EXIT=1
+# A refusal is said in its own words, never taken for the watchdog's.
+run plan-refused 0 FAKE_PLAN="Refused: the installed binary says it is newer" FAKE_PLAN_EXIT=1
 has "$out" "Could not check what still runs an older version (" plan-refused
-has "$out" "Interrupted: the look at the machine was cut short); to see it:" plan-refused
+has "$out" "Refused: the installed binary says it is newer); to see it:" plan-refused
+lacks "$out" "15 seconds" plan-refused
 lacks "$out" "Still running" plan-refused
 ends_with_agent_line plan-refused
 
