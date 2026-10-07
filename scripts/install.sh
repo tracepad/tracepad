@@ -76,10 +76,16 @@ no_stable() {
 			say "The newest release is $candidate. To install it:"
 		else
 			say "The releases are listed at https://github.com/$REPO/releases. To install one:"
-			candidate="<version>"
+			# Quoted: pasted unfilled, a version no release has, never a
+			# redirection (the eighth review of #228).
+			candidate="'<version>'"
 		fi
+		# Into the directory named, quoted, as the line that installs over a
+		# newer binary does.
+		into=""
+		[ -z "${TRACEPAD_INSTALL_DIR:-}" ] || into=" TRACEPAD_INSTALL_DIR=$(q "$TRACEPAD_INSTALL_DIR")"
 		say ""
-		say "  curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$candidate sh"
+		say "  curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$candidate$into sh"
 	} >&2
 	exit 1
 }
@@ -207,21 +213,24 @@ skill_into() {
 # (spec 054 #15): each server and container, whose it is, and what to do. Its
 # report escapes what other programs supplied. Fifteen seconds at most: this is
 # advice, not a step that may hang: the watchdog's SIGTERM ends it with exit 1
-# and no verdict, and leaves $tmp/timeout behind — the plan catches SIGTERM, so
-# its exit status cannot say it was the watchdog (the review of #228).
+# and no verdict. The plan catches SIGTERM, so its exit status cannot say it
+# was the watchdog; the watchdog's own does (timed_out): 0 only when its kill
+# found the plan running (the reviews of #228).
 # plan_status is its exit status: 10 or 4 when something runs older, 0 when
 # nothing does, 2 from a binary from before the command; anything else — a
 # refusal, the watchdog — is "could not check", never "runs older".
 plan() {
 	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
-	# The marker only for a plan still running: one that ended on its own at
-	# the fifteenth second says why itself (the sixth review of #228).
-	(sleep 15 && kill -0 "$planner" && : >"$tmp/timeout" && kill "$planner") >/dev/null 2>&1 &
+	(sleep 15 && kill "$planner") >/dev/null 2>&1 &
 	watchdog=$!
 	plan_status=0
 	wait "$planner" || plan_status=$?
+	# Still asleep, it is ended here, and a plan that ended on its own at the
+	# fifteenth second finds its kill failing: either way, not a timeout.
 	kill "$watchdog" 2>/dev/null || true
+	timed_out=no
+	if wait "$watchdog" 2>/dev/null; then timed_out=yes; fi
 }
 
 # install_skill installs the skill where an agent on this machine reads
@@ -360,7 +369,7 @@ main() {
 			# Why, in the plan's own first line, or the watchdog's: a new
 			# binary's first connection may wait on a firewall or a scan.
 			why="it did not finish in 15 seconds"
-			[ -e "$tmp/timeout" ] || why="$(head -n 1 "$tmp/plan")"
+			[ "$timed_out" = yes ] || why="$(head -n 1 "$tmp/plan")"
 			say ""
 			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $(q "$bin") upgrade --plan"
 			;;

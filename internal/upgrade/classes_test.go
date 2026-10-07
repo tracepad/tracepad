@@ -3,9 +3,11 @@
 package upgrade
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -1181,5 +1183,27 @@ func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
 				t.Fatalf("exit %d, %s, check %+v, notes %q", code, rep.Summary, rep.Check, rep.Notes)
 			}
 		})
+	}
+}
+
+// The line of a tracepad first on PATH is with what needs the person when it
+// is behind, whatever the installed one needs: Homebrew's at the target, an
+// older one first on PATH (the eighth review of #228).
+func TestAnOlderTracepadFirstOnPathIsNotNothingToDo(t *testing.T) {
+	t.Parallel()
+	cellar := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.2.0", "bin")
+	_ = os.MkdirAll(cellar, 0o755)
+	scriptBinary(t, filepath.Join(cellar, "tracepad"), "0.2.0")
+	first := filepath.Join(t.TempDir(), "tracepad")
+	scriptBinary(t, first, "0.1.0")
+	deps := containerDeps(t, newFakeDocker(t))
+	deps.InstallDir = cellar
+	deps.LookPath = func(string) string { return first }
+	var out bytes.Buffer
+	run(context.Background(), Options{Args: []string{"--plan"}, Stdout: &out, Stderr: io.Discard}, deps)
+	head, idle, _ := strings.Cut(out.String(), "\nYours, nothing to do")
+	if !strings.Contains(head, "another tracepad comes first on PATH: "+first) || strings.Contains(idle, first+"\n") ||
+		!strings.Contains(idle, "binary    "+filepath.Join(cellar, "tracepad")) {
+		t.Errorf("%s", out.String())
 	}
 }

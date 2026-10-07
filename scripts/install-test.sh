@@ -150,8 +150,10 @@ release 0.1.0-rc.1
 fresh_home "$home/.claude"
 run no-stable 1
 has "$err" "there is no stable release" no-stable
-has "$err" "| TRACEPAD_VERSION=<version> sh" no-stable
+has "$err" "| TRACEPAD_VERSION='<version>' sh" no-stable
 [ ! -e "$bin" ] || fail "no-stable: something was installed"
+run no-stable-dir 1 TRACEPAD_INSTALL_DIR="$home/my bin"
+has "$err" "| TRACEPAD_VERSION='<version>' TRACEPAD_INSTALL_DIR='$home/my bin' sh" no-stable-dir
 
 # --- The newest stable release, by default.
 release 0.2.0 stable

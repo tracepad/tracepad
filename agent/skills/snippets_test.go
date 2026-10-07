@@ -120,7 +120,31 @@ var zshKeeps = []string{"argv", "cdpath", "commands", "fignore", "fpath", "funct
 var (
 	assignment = regexp.MustCompile(`(?:^|[\s;&|({])([a-z_][a-z0-9_]*)=`)
 	lowerName  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	// What else sets a name with no `=` (the eighth review of #228): a
+	// loop's or a menu's variable, getopts', and the words after read or
+	// a declaration.
+	loopName    = regexp.MustCompile(`(?:^|[\s;&|({])(?:for|select)\s+([a-z_][a-z0-9_]*)\b`)
+	getoptsName = regexp.MustCompile(`(?:^|[\s;&|({])getopts\s+\S+\s+([a-z_][a-z0-9_]*)\b`)
+	declaration = regexp.MustCompile(`(?:^|[\s;&|({])(?:read|typeset|local|declare|export|readonly|integer|float)\b([^;&|\n)]*)`)
 )
+
+// bound are the names a block of shell sets.
+func bound(text string) []string {
+	var names []string
+	for _, re := range []*regexp.Regexp{assignment, loopName, getoptsName} {
+		for _, m := range re.FindAllStringSubmatch(text, -1) {
+			names = append(names, m[1])
+		}
+	}
+	for _, m := range declaration.FindAllStringSubmatch(text, -1) {
+		for _, word := range strings.Fields(m[1]) {
+			if name, _, _ := strings.Cut(word, "="); lowerName.MatchString(name) {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
 
 func TestTheSkillAssignsNoNameZshKeeps(t *testing.T) {
 	t.Parallel()
@@ -135,14 +159,17 @@ func TestTheSkillAssignsNoNameZshKeeps(t *testing.T) {
 		}
 	}
 	for _, b := range shellBlocks(t) {
-		for _, m := range assignment.FindAllStringSubmatch(b.text, -1) {
-			if slices.Contains(keeps, m[1]) {
-				t.Errorf("%s:%d assigns %s, which zsh keeps for itself", b.file, b.line, m[1])
+		for _, name := range bound(b.text) {
+			if slices.Contains(keeps, name) {
+				t.Errorf("%s:%d sets %s, which zsh keeps for itself", b.file, b.line, name)
 			}
 		}
 	}
-	if bad := assignment.FindAllStringSubmatch("x=1; path=package", -1); len(bad) != 2 || bad[1][1] != "path" {
-		t.Fatalf("the check does not see an assignment: %q", bad)
+	for _, c := range []string{"x=1; path=package", "for path in a b; do :; done", "read -r status", "select path in a b; do break; done",
+		"getopts ab path", "typeset -a path", "local status=1", "while read -r a status; do :; done"} {
+		if !slices.ContainsFunc(bound(c), func(n string) bool { return n == "path" || n == "status" }) {
+			t.Errorf("the check does not see what %q sets: %q", c, bound(c))
+		}
 	}
 }
 

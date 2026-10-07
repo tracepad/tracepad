@@ -552,6 +552,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 		// Its own version alone: a tracepad first on PATH is another file,
 		// with a line of its own (the seventh review of #228).
 		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version)
+		rep.Binary.firstBehind = firstBehind(p.f.Binary, p.to)
 	}
 	rep.Person = append(append(rep.Person, p.held...), p.person...)
 	if p.installed != "" {

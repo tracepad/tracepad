@@ -910,20 +910,25 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 	return cs, ""
 }
 
-// composePaths are the paths a Compose label holds. Compose joins them with
-// commas and writes them absolute, so a part that is not absolute after
-// another is the rest of that one, whose path has a comma in it (the sixth
-// review of #228: /srv/a,b/compose.yaml was -f /srv/a -f b/compose.yaml); a
-// first one that is not absolute is read from the project's directory, where
-// Compose itself looked for it (the second review of #228).
+// composePaths are the paths a Compose label holds, joined with commas.
+// Compose writes them absolute, so when the first is, a part that is not is
+// the rest of the one before it, whose path has a comma in it (the sixth
+// review of #228: /srv/a,b/compose.yaml was -f /srv/a -f b/compose.yaml).
+// When the first is not, none is taken for a rest: each is a path of its own,
+// read from the project's directory, where Compose itself looked for it (the
+// second and eighth reviews of #228).
 func composePaths(label, dir string) []string {
 	var paths []string
-	for _, part := range strings.Split(label, ",") {
+	parts := strings.Split(label, ",")
+	absolute := filepath.IsAbs(parts[0])
+	for _, part := range parts {
 		switch {
 		case part == "":
-		case len(paths) > 0 && !filepath.IsAbs(part):
+		case filepath.IsAbs(part):
+			paths = append(paths, part)
+		case absolute && len(paths) > 0:
 			paths[len(paths)-1] += "," + part
-		case !filepath.IsAbs(part) && dir != "":
+		case dir != "":
 			paths = append(paths, filepath.Join(dir, part))
 		default:
 			paths = append(paths, part)
@@ -1079,6 +1084,15 @@ func composeAdvice(c Container, to string) string {
 	set := fmt.Sprintf("set the image of the service %s in %s to %s", service, where, image)
 	if _, digest, ok := strings.Cut(c.Ref, "@"); ok {
 		set += fmt.Sprintf(" — and take its digest off: it is pinned to %s, which Docker runs whatever the tag says. To pin the new one, docker pull %s prints its digest: %s@<that digest>", digest, image, image)
+	}
+	if len(c.ComposeFiles) == 0 && c.ComposeDir == "" {
+		// No label names its files or its directory: a compose command
+		// would read whatever file is where it is run, and `up -d` there
+		// start another project's services under this name. None is
+		// printed; what does not read a Compose file is (the eighth review
+		// of #228).
+		return fmt.Sprintf("Upgrade it with Compose (%s), from the project's own directory: its Compose files are not known here — the container has no label naming them or the project's directory — so no compose command is given, which would read the file of whatever directory it is run in. Stop the service %s, archive its volume: %s; docker pull %s; then %s, and bring the service up again",
+			docsDocker, service, backupStep(c), shq(image), set)
 	}
 	chain, up, start := composeSteps(c, to)
 	return fmt.Sprintf("Upgrade it with Compose (%s). First, as one command — a step that fails stops the ones after it: %s. Then %s, and: %s. Stopped before the image was set: %s",

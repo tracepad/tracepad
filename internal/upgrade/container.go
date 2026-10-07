@@ -130,7 +130,7 @@ const lookScript = `set -e; find /data \( -type l -o -type f -links +1 -o ! -typ
 
 // lookAt looks at a volume, mounted read-only, from one busybox container.
 func (r *runner) lookAt(ctx context.Context, volume string) (volumeLook, error) {
-	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox, "sh", "-c", lookScript)
+	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", dataMount("volume", volume), busybox, "sh", "-c", lookScript)
 	if err != nil {
 		return volumeLook{}, err
 	}
@@ -243,7 +243,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	var a Archived
 	err = j.act(stepArchived, "archive the volume "+cs.Volume+" into "+archive, func() error {
 		out, err := docker.Run(ctx, "run", "--rm",
-			"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/data", "readonly"),
+			"--mount", dataMount("volume", cs.Volume),
 			"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup"),
 			busybox, "sh", "-c", script)
 		if err != nil {

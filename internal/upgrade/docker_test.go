@@ -837,6 +837,14 @@ func TestComposeAdvice(t *testing.T) {
 	if got := composeAdvice(c, "0.2.0"); !strings.Contains(got, "docker compose -p obs --project-directory /srv/obs stop '<its service>'") {
 		t.Errorf("no file label: %s", got)
 	}
+	// Neither its files nor its directory: no compose command, which would
+	// read the file of whatever directory it is pasted in; the backup and
+	// the pull, which read none, are given (the eighth review of #228).
+	c.ComposeDir = ""
+	if got := composeAdvice(c, "0.2.0"); strings.Contains(got, "docker compose") || !strings.Contains(got, "its Compose files are not known here") ||
+		!strings.Contains(got, "docker run --rm --mount type=volume,src=obs_data,dst=/data,readonly") || !strings.Contains(got, "docker pull ghcr.io/tracepad/tracepad:0.2.0") {
+		t.Errorf("no file or directory label: %s", got)
+	}
 }
 
 // What is the person's and needs nothing is apart from what needs them (the
@@ -881,7 +889,7 @@ func TestThePersonsIdleApart(t *testing.T) {
 func TestWhatThePlanSaysOfContainers(t *testing.T) {
 	t.Parallel()
 	d := newFakeDocker(t)
-	d.add("obs-tracepad-1", "0.1.0", "127.0.0.1", "4318", "obs_data", map[string]string{"com.docker.compose.project": "obs"})
+	d.add("obs-tracepad-1", "0.1.0", "127.0.0.1", "4318", "obs_data", map[string]string{"com.docker.compose.project": "obs", "com.docker.compose.project.working_dir": "/srv/obs"})
 	d.add("tracepad-current", "0.2.0", "127.0.0.1", "4319", "current", nil)
 	d.add("tracepad-open", "0.1.0", "0.0.0.0", "4320", "open", nil)
 	d.run(t, "--name", "tracepad-moved", "-e", "TRACEPAD_LISTEN=:8080", "-p", "127.0.0.1:18080:8080", "ghcr.io/tracepad/tracepad:0.2.0")
@@ -890,7 +898,7 @@ func TestWhatThePlanSaysOfContainers(t *testing.T) {
 	d.run(t, "--name", "tracepad-inside", "ghcr.io/tracepad/tracepad:0.1.0")
 	rep, code := runReport(t, containerDeps(t, d), "--plan")
 	all, notes := strings.Join(rep.Person, "\n"), strings.Join(rep.Notes, "\n")
-	for _, want := range []string{"docker compose -p obs up -d", "the project obs", "container tracepad-open runs 0.1.0; it publishes 4318/tcp on 0.0.0.0, beyond this machine",
+	for _, want := range []string{"docker compose -p obs --project-directory /srv/obs up -d", "the project obs", "container tracepad-open runs 0.1.0; it publishes 4318/tcp on 0.0.0.0, beyond this machine",
 		"container tracepad-mute does not say its version"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("the plan misses %q:\n%s", want, all)
@@ -2295,6 +2303,9 @@ func TestComposePathsKeepACommaInAPath(t *testing.T) {
 		{"/srv/a,b/compose.yaml", []string{"/srv/a,b/compose.yaml"}},
 		{"/srv/a,b/one.yml,/srv/a,b/two.yml", []string{"/srv/a,b/one.yml", "/srv/a,b/two.yml"}},
 		{"prod.env", []string{"/srv/obs/prod.env"}},
+		// Relative from the first, each is its own (the eighth review).
+		{"docker-compose.yml,docker-compose.override.yml", []string{"/srv/obs/docker-compose.yml", "/srv/obs/docker-compose.override.yml"}},
+		{"a.env,b.env", []string{"/srv/obs/a.env", "/srv/obs/b.env"}},
 	} {
 		if got := composePaths(c.label, "/srv/obs"); !slices.Equal(got, c.want) {
 			t.Errorf("%q: %q, want %q", c.label, got, c.want)
