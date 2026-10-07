@@ -2418,22 +2418,41 @@ says why, and gives the steps below with its name, its volume and the release
 filled in, and the <code>docker run</code> it was created with — its ports, mounts,
 restart policy, labels and command, read from <code>docker inspect</code> — the variables
 it was given passed in a file read from Docker, named and never printed. A
-Compose project takes the new tag in its Compose file and <code>docker compose up
--d</code>, after the same backup.</p>
+Compose project gets the same backup with its own names — the service stopped
+through its project and file (<code>docker compose -p &lt;project&gt; -f &lt;file&gt; stop
+&lt;service&gt;</code>, with <code>--env-file</code> for each env file the project was started
+with), the volume Compose made archived — then the new tag in its
+Compose file (a <code>@sha256:</code> digest after the old tag taken off: Docker runs the
+digest whatever the tag says) and <code>docker compose -p &lt;project&gt; -f &lt;file&gt; up -d
+&lt;service&gt;</code>.</p>
 <p>Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
 one before it worked, so a backup that is refused stops everything after it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>docker<span class="w"> </span>stop<span class="w"> </span>tracepad<span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">:/backup"</span><span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">'umask 077 &amp;&amp; set -C &amp;&amp; tar czf - -C /data . &gt; /backup/tracepad-$(date +%F).tar.gz'</span><span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>rename<span class="w"> </span>tracepad<span class="w"> </span>tracepad-old<span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="o">(</span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">set</span><span class="w"> </span>-C<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{range .Config.Env}}{{println .}}{{end}}'</span><span class="w"> </span>tracepad-old<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(TRACEPAD_PROJECTS|TRACEPAD_URL)='</span><span class="w"> </span>&gt;<span class="w"> </span>tracepad.upgrade.env<span class="o">)</span><span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>--env-file<span class="w"> </span>tracepad.upgrade.env<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">  </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span>serve<span class="w"> </span><span class="o">&amp;&amp;</span>
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>rm<span class="w"> </span>tracepad.upgrade.env
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="o">(</span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">set</span><span class="w"> </span>-C<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">f</span><span class="o">=</span><span class="s2">"tracepad-</span><span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span><span class="s2">.tar.gz"</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span>-e<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">"</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2"> is there already"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">fi</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">.part"</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">  </span>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data:ro<span class="w"> </span>busybox<span class="w"> </span>tar<span class="w"> </span>czf<span class="w"> </span>-<span class="w"> </span>-C<span class="w"> </span>/data<span class="w"> </span>.<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">.part"</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span>mv<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">.part"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">.part"</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">})</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>docker<span class="w"> </span>rename<span class="w"> </span>tracepad<span class="w"> </span>tracepad-old<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="o">(</span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">set</span><span class="w"> </span>-C<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{range .Config.Env}}{{println .}}{{end}}'</span><span class="w"> </span>tracepad-old<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(TRACEPAD_PROJECTS|TRACEPAD_URL)='</span><span class="w"> </span>&gt;<span class="w"> </span>tracepad.upgrade.env<span class="o">)</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>tracepad<span class="w"> </span>--env-file<span class="w"> </span>tracepad.upgrade.env<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:4318:4318<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="w">  </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>ghcr.io/tracepad/tracepad:X.Y.Z<span class="w"> </span>serve<span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>rm<span class="w"> </span>tracepad.upgrade.env
 </code></pre></div>
+<p><strong>Under Compose the volume is not called <code>tracepad</code>.</strong> Compose names it
+<code>&lt;project&gt;_&lt;volume&gt;</code> — <code>tracepad_tracepad_data</code> for a volume <code>tracepad_data</code>
+in a project <code>tracepad</code> — and <code>-v tracepad:/data</code> copied from here makes a new,
+empty volume called <code>tracepad</code> and archives that: a backup that says it worked
+and holds nothing. Read the name before the backup, and put it in place of
+<code>tracepad</code> in <code>-v tracepad:/data</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'</span><span class="w"> </span>&lt;container&gt;
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>docker<span class="w"> </span>volume<span class="w"> </span>ls<span class="w">     </span><span class="c1"># every volume, with Compose's names</span>
+</code></pre></div>
+<p><code>tracepad upgrade --plan</code> prints the steps with the real name, the service and
+the Compose file filled in.</p>
 <p><code>X.Y.Z</code> is the release you are moving to; the variables are the ones you gave
 the container, read from Docker into a file that holds its keys and is removed
 once the new one runs; the <code>-p</code>, <code>-v</code> and <code>serve</code> are the options you created it
@@ -2445,10 +2464,15 @@ Stopped after it, put the old one back:
 <p>Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. <code>umask 077</code> makes the archive
 readable by its owner alone; it is the whole database, and without it the file
-lands in your directory as readable as that directory lets it be. <code>set -C</code>
-keeps it from writing over an earlier backup of the same name. Restoring is the
-same command the other way round, <code>tar xzf - -C /data &lt; /backup/&lt;the file&gt;</code>,
-into a stopped container's volume mounted without <code>readonly</code>.</p>
+lands in your directory as readable as that directory lets it be. An earlier
+backup of the same name stops it rather than being written over. busybox
+writes the archive to its output and your shell writes the file, so no
+directory of yours is mounted into the container; the file is <code>….part</code> until
+docker has written it whole, so a backup that fails — docker not answering,
+the image not pulled — leaves no empty archive that looks like one, and the
+same command can simply be run again. Restoring is the same the other way round,
+<code>docker run --rm -i -v tracepad:/data busybox tar xzf - -C /data &lt; &lt;the file&gt;</code>,
+into a stopped container's volume.</p>
 <p><strong>One server per volume.</strong> The server holds a lock on <code>tracepad.db.lock</code>, beside the
 database, for as long as it runs, and a second one started on the same
 directory exits at once, telling you a server is already running there and the
@@ -2472,8 +2496,8 @@ everything erased or swept since, as does any tar of the volume taken in it.
 Once the upgrade has proved itself you can remove it sooner. This removes
 every backup the server wrote, names each one, and does nothing on a volume
 that has none:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span>find<span class="w"> </span>/data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db.pre-[0-9][0-9][0-9][0-9]_*.bak'</span><span class="w"> </span>-print<span class="w"> </span>-exec<span class="w"> </span>rm<span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span>tracepad:/data<span class="w"> </span>busybox<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span>find<span class="w"> </span>/data<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'tracepad.db.pre-[0-9][0-9][0-9][0-9]_*.bak'</span><span class="w"> </span>-print<span class="w"> </span>-exec<span class="w"> </span>rm<span class="w"> </span><span class="o">{}</span><span class="w"> </span><span class="se">\;</span>
 </code></pre></div>
 <p>The server deletes only files named exactly that way — <code>pre-</code>, the four-digit
 number of a migration, an underscore and its name — so a copy you take yourself
@@ -2488,7 +2512,7 @@ erasure's answer names it and the day it goes — see
 <p>The <code>Dockerfile</code> is the whole recipe — it builds the interface and the binary
 from the sources in the checkout, so a fork or a patched tree produces the same
 kind of artifact the releases do:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span><span class="m">0</span>.1.0-mine<span class="w"> </span>-t<span class="w"> </span>tracepad:mine<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span><span class="m">0</span>.1.0-mine<span class="w"> </span>-t<span class="w"> </span>tracepad:mine<span class="w"> </span>.
 </code></pre></div>
 <p>Without <code>--build-arg VERSION</code>, the image reports <code>dev</code>. <code>make image</code> and <code>make
 image-check</code> are the same build and the boot test CI runs against it.</p>

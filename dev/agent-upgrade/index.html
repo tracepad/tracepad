@@ -1604,10 +1604,19 @@ package moves to the same version, and you report.</p>
   setting its <code>docker run</code> would not carry. The plan names each, with its
   reason and the commands for it — for a container: stop it, back its volume
   up, pull the release, and the <code>docker run</code> it was created with, read from
-  <code>docker inspect</code>, its variables passed in a file and never printed.</li>
+  <code>docker inspect</code>, its variables passed in a file and never printed; for
+  Compose's, the same through its project and its file, the volume under the
+  name Compose gave it. A development build where the binary is installed is
+  the person's too: the plan gives the install script's line that replaces it.</li>
 <li>A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.</li>
 <li>Free space for the backup, when there is not enough.</li>
+<li>An application firewall's question (LuLu, Little Snitch): a step that reaches
+  the network and seems to hang — the plan's look at the releases, a
+  download — is often a new binary's first connection, held until someone
+  answers the firewall's window. The firewall asks once per path, which is why
+  the skill keeps the release it fetches in one place,
+  <code>~/.cache/tracepad/tmp.release/</code>.</li>
 <li>Deleting the backups, and whatever a way back set aside.</li>
 </ul>
 <h2 id="the-backup-said-plainly">The backup, said plainly</h2>

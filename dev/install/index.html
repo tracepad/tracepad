@@ -1870,6 +1870,9 @@ for the release <code>0.1.0</code> that follows it:</p>
 </tr>
 </tbody>
 </table>
+<p><code>tracepad version</code> prints the version alone, which is what scripts compare;
+<code>tracepad version --json</code> adds the commit the build was made from, as the log's
+first line has it (<code>{"version":"0.1.0","commit":"ef3e349"}</code>).</p>
 <p>Python's spelling is the only one that differs from the tag's, and it is derived
 from it (<code>-rc.N</code> is <code>rcN</code>, <code>-beta.N</code> is <code>bN</code>, <code>-alpha.N</code> is <code>aN</code>). A candidate
 moves nothing that says "latest" — not the image's <code>latest</code> or <code>X.Y</code>, not npm's
@@ -2078,6 +2081,15 @@ is rolled back at once, one that runs but stays silent is left for you to
 decide, and <code>tracepad upgrade --back &lt;run&gt;</code> takes the way back later. Nothing is
 deleted on the way: what a way back replaces is set aside as
 <code>&lt;data&gt;.after-&lt;run&gt;</code>. The whole of it is <a href="../cli/#upgrade">cli.md</a>.</p>
+<p>A development build in the install directory — one you built and copied or
+linked there, whose <code>tracepad version</code> says <code>dev</code> or a commit — is yours: the
+command does not replace it, and the plan gives the install script's line
+that puts the release in its place (in place of a link, the link itself; the
+build it points to stays) (<code>curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=X.Y.Z sh</code>).</p>
+<p>A step that reaches the network and seems to hang — the install script's
+download, the plan's look at the releases — is often an application
+firewall (LuLu, Little Snitch) holding a new binary's first connection until
+its window is answered: look for the window.</p>
 <p><strong>A backup is personal data with no expiry.</strong> A run directory, like any copy
 you take, holds every prompt and completion and the server's environment,
 secrets included, until someone deletes it; erasing traces or a user's data
