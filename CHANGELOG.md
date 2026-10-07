@@ -11,6 +11,38 @@ their own headings.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-07
+
+### Fixed
+
+- The agent skill's setup: a `STOP` after the server or container started now
+  stops it, and when the data was fresh it leaves it fresh — the database this
+  start made is removed, never one that was there before or one another
+  server holds — so the next try neither meets *a container named … is there
+  already* nor mistakes the empty database for an earlier install. An earlier
+  install's data is no longer started by the skill: the human starts it and
+  gives its URL and key, or the project gets a new data directory. Keys are
+  read from this start's log lines only.
+- The agent skill's upgrade: the release fetched to plan with goes to a new
+  directory of its own per upgrade (`~/.cache/tracepad/tmp.XXXXXX`, printed as
+  `BRIDGE:`), so two sessions upgrading at once no longer take each other's
+  binary, and a failed download stops there instead of running an older one.
+  After the binary is replaced, the skill plans again with the new one and
+  shows its advice.
+- `tracepad upgrade --plan`: a `tracepad` first on `PATH` that a package
+  manager owns through a link is given its manager's command, never the
+  install script's line; that note now appears when a plan is refused too, and
+  a binary that does not say its version says why. A local build stamped with
+  an unreleased version is refused by the plan, as by the run.
+
+### Changed
+
+- `tracepad upgrade --plan` says, in one line, when the skill's copies are
+  newer than a server or container that is yours to upgrade. It does not
+  change the exit status.
+- `traces show` carries no scores, by design; the agent skill and
+  `docs/cli.md` point at `scores ls --trace`.
+
 ## [0.1.1] - 2026-10-07
 
 ### Fixed
@@ -156,6 +188,7 @@ one.
 - The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
   Markdown beside its HTML, on the documentation site.
 
-[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/tracepad/tracepad/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tracepad/tracepad/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tracepad/tracepad/releases/tag/v0.1.0
