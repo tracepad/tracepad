@@ -1860,6 +1860,11 @@ does not warn about one left exported.</p>
 <td><code>https://github.com/tracepad/tracepad/releases</code></td>
 <td>A mirror with the same layout (<code>download/v&lt;version&gt;/…</code>, <code>latest/download/checksums.txt</code>), over <code>https://</code> or <code>file://</code>.</td>
 </tr>
+<tr>
+<td><code>TRACEPAD_RELEASE_FETCHED</code></td>
+<td>unset</td>
+<td>Internal, not a setting: the install script sets it, never you, to the release whose checksums it fetched, for the <code>tracepad upgrade --plan</code> it asks of the binary at the install path, which then does not look that release up again.</td>
+</tr>
 </tbody>
 </table>
 <p>See <a href="../install/#with-the-install-script">install.md</a>.</p>
@@ -1897,7 +1902,7 @@ open GitHub when you follow one, not before.</p>
 <tr>
 <td><code>tracepad upgrade</code></td>
 <td>GitHub's releases (or <code>TRACEPAD_DOWNLOAD_URL</code>), for the release list and the archive; <code>gh attestation verify</code> asks GitHub too, when <code>gh</code> is logged in; a container's upgrade has Docker pull the image from its registry</td>
-<td>when you run it; <code>--plan</code> reads the release list only — and nothing when the binary at the install path runs it with <code>--to</code> its own version, as the install script does</td>
+<td>when you run it; <code>--plan</code> reads the release list only — and nothing when the install script asks the binary at the install path for the version it just fetched</td>
 </tr>
 <tr>
 <td>The install script</td>

@@ -598,8 +598,10 @@ as another version is rolled back at once; one that
 runs but stays silent through the wait (a long migration runs before the
 server listens), or answers with a trace count that looks wrong, is left
 running, and the person decides (exit `4`). Nothing is ever deleted:
-what a way back replaces is set aside, renamed. Then the project's `tracepad`
-package moves to the same version, and you report.
+what a way back replaces is set aside, renamed. When it replaced the binary,
+you plan once more with the new one, whose advice for what is the person's is
+the new release's. Then the project's `tracepad` package moves to the same
+version, and you report.
 
 ## What needs the person
 
@@ -620,9 +622,10 @@ package moves to the same version, and you report.
 - An application firewall's question (LuLu, Little Snitch): a step that reaches
   the network and seems to hang — the plan's look at the releases, a
   download — is often a new binary's first connection, held until someone
-  answers the firewall's window. The firewall asks once per path, which is why
-  the skill keeps the release it fetches in one place,
-  `~/.cache/tracepad/tmp.release/`.
+  answers the firewall's window. The firewall asks once per path: a binary
+  older than `tracepad upgrade` is upgraded through a release the skill
+  fetches into a new directory of that upgrade's own,
+  `~/.cache/tracepad/tmp.XXXXXX/`, so it asks once for each such upgrade.
 - Deleting the backups, and whatever a way back set aside.
 
 ## The backup, said plainly
@@ -1901,6 +1904,7 @@ does not warn about one left exported.
 | `TRACEPAD_INSTALL_DIR` | `~/.local/bin` | Where the binary goes. Never needs `sudo` unless you point it somewhere that does. |
 | `TRACEPAD_NO_SKILL` | unset | `1` installs the binary alone, without the agent skill. |
 | `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
+| `TRACEPAD_RELEASE_FETCHED` | unset | Internal, not a setting: the install script sets it, never you, to the release whose checksums it fetched, for the `tracepad upgrade --plan` it asks of the binary at the install path, which then does not look that release up again. |
 
 See [install.md](install.md#with-the-install-script).
 
@@ -1919,7 +1923,7 @@ What does go out, and where:
 | The CLI and `tracepad mcp` | your server, at `TRACEPAD_URL` (or `--url`) | every command |
 | The Python, Node and Go packages | your server, at `TRACEPAD_URL` | when they export |
 | `tracepad export` | the address you give it, and only that one | when you run it |
-| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the binary at the install path runs it with `--to` its own version, as the install script does |
+| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the install script asks the binary at the install path for the version it just fetched |
 | The install script | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`) | when you run it |
 
 `tracepad upgrade` also asks servers and containers on this machine for their
@@ -9919,7 +9923,9 @@ tracepad traces show 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f --full
 
 The observation tree. `--full` adds every payload, asking for the largest
 budget the API allows; a payload still too large for it prints its preview and
-the URL that returns the rest.
+the URL that returns the rest. A trace's scores are not in it, with `--json`
+or without: [`scores ls --trace ID`](#scores-ls) lists them, as the trace page
+reads them beside the trace.
 
 Each observation's line names its kind, and — where the client sent them —
 `ttft` and the prompt it ran:
@@ -10807,7 +10813,7 @@ back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, or
-from `~/.cache/tracepad/tmp.release/` as the agent's bridge does;
+from a directory `mktemp -d` names, `tmp.XXXXXX`, as the agent's bridge does;
 `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a

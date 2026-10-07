@@ -197,7 +197,9 @@ tracepad traces show 4f8c1d2e3a5b6c7d8e9f0a1b2c3d4e5f --full
 
 The observation tree. `--full` adds every payload, asking for the largest
 budget the API allows; a payload still too large for it prints its preview and
-the URL that returns the rest.
+the URL that returns the rest. A trace's scores are not in it, with `--json`
+or without: [`scores ls --trace ID`](#scores-ls) lists them, as the trace page
+reads them beside the trace.
 
 Each observation's line names its kind, and — where the client sent them —
 `ttft` and the prompt it ran:
@@ -1085,7 +1087,7 @@ back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
 command runs from (`~/.local/bin` when it runs from a temporary directory, or
-from `~/.cache/tracepad/tmp.release/` as the agent's bridge does;
+from a directory `mktemp -d` names, `tmp.XXXXXX`, as the agent's bridge does;
 `TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a

@@ -2464,7 +2464,9 @@ newest page, which is not a question about text.</p>
 </code></pre></div>
 <p>The observation tree. <code>--full</code> adds every payload, asking for the largest
 budget the API allows; a payload still too large for it prints its preview and
-the URL that returns the rest.</p>
+the URL that returns the rest. A trace's scores are not in it, with <code>--json</code>
+or without: <a href="#scores-ls"><code>scores ls --trace ID</code></a> lists them, as the trace page
+reads them beside the trace.</p>
 <p>Each observation's line names its kind, and — where the client sent them —
 <code>ttft</code> and the prompt it ran:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>· generation  chat-completion  claude-sonnet-5  740ms  ttft 388ms  169 tokens  $0.001000  prompt support-answer@7  [2b3c4d5e6f7a8b9c]
@@ -3149,7 +3151,7 @@ back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (<code>--to 0.2.0-rc.1 --data-dir DIR</code>, or <code>--container NAME</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
 command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, or
-from <code>~/.cache/tracepad/tmp.release/</code> as the agent's bridge does;
+from a directory <code>mktemp -d</code> names, <code>tmp.XXXXXX</code>, as the agent's bridge does;
 <code>TRACEPAD_INSTALL_DIR</code> names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, <code>/usr/bin</code> — is
 yours, and the plan names the manager's command. It is local, like <code>skills</code>: it reads this machine's processes and containers and asks a

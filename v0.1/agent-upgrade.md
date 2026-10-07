@@ -46,8 +46,10 @@ as another version is rolled back at once; one that
 runs but stays silent through the wait (a long migration runs before the
 server listens), or answers with a trace count that looks wrong, is left
 running, and the person decides (exit `4`). Nothing is ever deleted:
-what a way back replaces is set aside, renamed. Then the project's `tracepad`
-package moves to the same version, and you report.
+what a way back replaces is set aside, renamed. When it replaced the binary,
+you plan once more with the new one, whose advice for what is the person's is
+the new release's. Then the project's `tracepad` package moves to the same
+version, and you report.
 
 ## What needs the person
 
@@ -68,9 +70,10 @@ package moves to the same version, and you report.
 - An application firewall's question (LuLu, Little Snitch): a step that reaches
   the network and seems to hang — the plan's look at the releases, a
   download — is often a new binary's first connection, held until someone
-  answers the firewall's window. The firewall asks once per path, which is why
-  the skill keeps the release it fetches in one place,
-  `~/.cache/tracepad/tmp.release/`.
+  answers the firewall's window. The firewall asks once per path: a binary
+  older than `tracepad upgrade` is upgraded through a release the skill
+  fetches into a new directory of that upgrade's own,
+  `~/.cache/tracepad/tmp.XXXXXX/`, so it asks once for each such upgrade.
 - Deleting the backups, and whatever a way back set aside.
 
 ## The backup, said plainly
