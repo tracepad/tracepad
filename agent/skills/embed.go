@@ -11,10 +11,12 @@ package skills
 import (
 	"embed"
 	"io/fs"
+
+	"github.com/tracepad/tracepad/agent/skills/skillmark"
 )
 
 // Name is the skill's name and the directory it is installed as.
-const Name = "tracepad"
+const Name = skillmark.Name
 
 // Without `all:`, so a `.DS_Store` or an editor's dotfile in the directory is
 // never compiled in, installed, listed or counted against the budget.

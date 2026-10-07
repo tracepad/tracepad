@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tracepad/tracepad/agent/skills/skillmark"
 	"github.com/tracepad/tracepad/internal/store"
 )
 
@@ -1128,11 +1129,46 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: "+j.upgradeCmd("--back "+st.Run))
 }
 
+// skillCopy is a copy of the skill by its own rule (spec 037 #16,
+// skillmark), or a place one may be that could not be read (err), and what
+// `skills install` is given to put it there again.
+type skillCopy struct {
+	dir, version string
+	err          error
+	args         []string
+}
+
+// skillCopies are the skill's copies a run installs again and the plan
+// reads (spec 054 #64): one list for both. The project's copy is the
+// user's when the command runs in the home directory, however either is
+// spelled (sameFile): one copy, listed once.
+func (r *runner) skillCopies() []skillCopy {
+	var copies []skillCopy
+	claude, agents := filepath.Join(r.deps.Home, ".claude", "skills"), filepath.Join(r.deps.Home, ".agents", "skills")
+	for _, at := range []struct {
+		skills string
+		args   []string
+	}{
+		{claude, []string{"--dir", claude}},
+		{agents, []string{"--dir", agents}},
+		{filepath.Join(r.deps.Cwd, ".claude", "skills"), []string{"--project"}},
+	} {
+		dir := filepath.Join(at.skills, skillmark.Name)
+		ok, v, err := skillmark.Read(dir)
+		if (err == nil && !ok) || slices.ContainsFunc(copies, func(c skillCopy) bool { return sameFile(c.dir, dir) }) {
+			continue
+		}
+		copies = append(copies, skillCopy{dir, v, err, at.args})
+	}
+	return copies
+}
+
 // reinstallSkill installs the skill again, with the binary at bin when it is
-// version to, wherever a copy carries its marker (Decision 12).
+// version to, at each of its copies (Decision 12; skillCopies, by spec 037
+// #16's rule: a marker alone is no copy).
 //
 // It answers whether that is done, so the run records it: a binary that does
-// not say its version, a marker that cannot be looked at, or an install that
+// not say its version, a copy that cannot be read, or an install that
 // failed is a note, and is not done (the audit of #223). A binary that is not
 // version to has nothing to install.
 func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string) bool {
@@ -1149,25 +1185,15 @@ func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string
 		return false
 	}
 	done := true
-	targets := []struct {
-		marker string
-		args   []string
-	}{
-		{filepath.Join(r.deps.Home, ".claude", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".claude", "skills")}},
-		{filepath.Join(r.deps.Home, ".agents", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".agents", "skills")}},
-		{filepath.Join(r.deps.Cwd, ".claude", "skills", "tracepad", ".version"), []string{"--project"}},
-	}
-	for _, t := range targets {
-		if _, err := os.Stat(t.marker); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not looked at: %v", filepath.Dir(filepath.Dir(t.marker)), err))
+	for _, c := range r.skillCopies() {
+		if c.err != nil {
+			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not looked at: %v", c.dir, c.err))
 			done = false
 			continue
 		}
-		out, err := r.deps.Skills(ctx, bin, r.deps.Cwd, t.args...)
+		out, err := r.deps.Skills(ctx, bin, r.deps.Cwd, c.args...)
 		if err != nil {
-			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not installed again: %s", filepath.Dir(filepath.Dir(t.marker)), firstLine(out)))
+			rep.Notes = append(rep.Notes, fmt.Sprintf("the skill at %s was not installed again: %s", c.dir, firstLine(out)))
 			done = false
 			continue
 		}

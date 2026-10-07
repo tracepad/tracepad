@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -427,6 +428,46 @@ func (r *runner) firstOnPath(b Binary) string {
 	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
+// skillAhead is the plan's line on the skill's copies when they are newer
+// than a server or container of the person's (spec 054 #64): the skill then
+// names what that server does not have. A fact, sorted into nothing: a copy
+// by the skill's own rule (spec 037 #16, skillmark), never a marker alone,
+// and one that could not be read said so, since unreadable is not absent.
+// With no such server or container, no copy is read.
+func (r *runner) skillAhead(f Findings) []string {
+	if !slices.ContainsFunc(f.Servers, func(s Server) bool { return !s.Ours }) &&
+		!slices.ContainsFunc(f.Containers, func(c Container) bool { return !c.Ours }) {
+		return nil
+	}
+	var notes, at, behind []string
+	var newest string
+	for _, c := range r.skillCopies() {
+		switch {
+		case c.err != nil:
+			notes = append(notes, fmt.Sprintf("the skill at %s was not looked at: %v", c.dir, c.err))
+		case !IsRelease(c.version) || behindTo(newest, c.version):
+		case newest == "" || behindTo(c.version, newest):
+			newest, at = c.version, []string{c.dir}
+		default:
+			at = append(at, c.dir)
+		}
+	}
+	for _, s := range f.Servers {
+		if !s.Ours && behindTo(newest, s.Version) {
+			behind = append(behind, fmt.Sprintf("server pid %d runs %s", s.Proc.PID, s.Version))
+		}
+	}
+	for _, c := range f.Containers {
+		if !c.Ours && behindTo(newest, c.Version) {
+			behind = append(behind, fmt.Sprintf("container %s runs %s", c.Name, c.Version))
+		}
+	}
+	if len(behind) > 0 {
+		notes = append(notes, fmt.Sprintf("the skill's copies at %s are %s; %s", strings.Join(at, ", "), newest, strings.Join(behind, "; ")))
+	}
+	return notes
+}
+
 // binaryTodo is the plan's table of the binary at the install path: by its
 // kind (installedBinary), what the person is told to do, or "" for nothing —
 // the command's own, which a run replaces, or one that needs nothing — and a
@@ -500,6 +541,7 @@ func (r *runner) planMode(ctx context.Context) *Report {
 		return rep
 	}
 	r.describe(p, rep)
+	rep.Notes = append(rep.Notes, r.skillAhead(p.f)...)
 	rep.ExitCode, rep.Summary = verdictOf(p)
 	return rep
 }

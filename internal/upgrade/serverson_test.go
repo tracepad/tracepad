@@ -128,9 +128,7 @@ func TestAWayBackPutsTheSkillBack(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
-	marker := filepath.Join(deps.Home, ".claude", "skills", "tracepad", ".version")
-	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
-	_ = os.WriteFile(marker, []byte(fOld+"\n"), 0o600)
+	skillCopyAt(t, deps.Home, fOld)
 	var by []string
 	deps.Skills = func(ctx context.Context, bin, _ string, _ ...string) (string, error) {
 		v, _ := scriptVersion(ctx, bin)
@@ -142,8 +140,9 @@ func TestAWayBackPutsTheSkillBack(t *testing.T) {
 		t.Fatalf("%d %s", code, rep.Summary)
 	}
 	back, code := runIn(t, context.Background(), deps, "--back", rep.Run.ID)
-	// The world's working directory is its home: the copy is found twice.
-	if code != exitOK || len(by) < 2 || by[0] != fNew || by[len(by)-1] != fOld || !strings.Contains(strings.Join(back.Done, "\n"), "skill: installed "+fOld) {
+	// The world's working directory is its home: one copy, installed once
+	// each way, never again as the project's.
+	if code != exitOK || len(by) != 2 || by[0] != fNew || by[1] != fOld || !strings.Contains(strings.Join(back.Done, "\n"), "skill: installed "+fOld) {
 		t.Errorf("%d %s; installed by %q; done %q", code, back.Summary, by, back.Done)
 	}
 }

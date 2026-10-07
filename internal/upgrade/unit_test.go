@@ -833,15 +833,62 @@ func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
 	}
 }
 
+// ourSkillMD is a SKILL.md that names the skill, as every install writes.
+const ourSkillMD = "---\nname: tracepad\n---\n"
+
+// skillCopyAt puts a copy of the skill at version in home's
+// ~/.claude/skills, by the skill's own rule (spec 037 #16): a .version beside
+// a SKILL.md that names it. It answers the copy's directory.
+func skillCopyAt(t *testing.T, home, version string) string {
+	t.Helper()
+	return skillFilesAt(t, home, version, ourSkillMD)
+}
+
+// skillFilesAt writes what is given of a copy in home's ~/.claude/skills — a
+// .version with version, a SKILL.md with skillMD, either left out when "" —
+// and answers its directory. A write that fails ends the test: a cell that
+// expects no copy must not pass for want of a file.
+func skillFilesAt(t *testing.T, home, version, skillMD string) string {
+	t.Helper()
+	dir := filepath.Join(home, ".claude", "skills", "tracepad")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{".version": version + "\n", "SKILL.md": skillMD} {
+		if strings.TrimSpace(body) == "" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// The project's copy is the user's when the command runs in the home
+// directory, however the two are spelled (the second review of #232): one
+// copy, listed once, so a run installs it once.
+func TestTheSkillsCopyIsListedOnceHoweverItIsSpelled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(home, link); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	skillCopyAt(t, home, "0.5.0")
+	r := &runner{deps: Deps{Home: home, Cwd: link}}
+	if copies := r.skillCopies(); len(copies) != 1 || copies[0].args[0] != "--dir" {
+		t.Errorf("copies %+v", copies)
+	}
+}
+
 // The skill is recorded as installed only when it was (the twelfth review):
 // a binary that is not the run's version any more installs nothing, says
 // so, and leaves the step for a later check.
 func TestASkillIsDoneOnlyWhenInstalled(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	marker := filepath.Join(home, ".claude", "skills", "tracepad", ".version")
-	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
-	_ = os.WriteFile(marker, []byte("0.5.0\n"), 0o600)
+	skillCopyAt(t, home, "0.5.0")
 	installs := 0
 	r := &runner{deps: Deps{Home: home, Cwd: home,
 		Version: func(context.Context, string) (string, error) { return "0.4.0", nil },

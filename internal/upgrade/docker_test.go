@@ -760,6 +760,41 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	}
 }
 
+// The plan says when the skill's copies are newer than a container of the
+// person's (spec 054 #64): one line of fact, in --plan, with no effect on
+// the exit status. A copy is one by the skill's own rule (spec 037 #16): a
+// .version alone, or beside a SKILL.md naming another skill, is none.
+func TestTheSkillsCopiesAheadOfAServerAreSaid(t *testing.T) {
+	t.Parallel()
+	d := newFakeDocker(t)
+	d.run(t, "--name", "myapp", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=myapp,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0", "serve")
+	plan := func(version, skillMD string) (string, int, string) {
+		deps := containerDeps(t, d, "0.2.0")
+		dir := skillFilesAt(t, deps.Home, version, skillMD)
+		rep, code := runReport(t, deps, "--plan")
+		return strings.Join(rep.Notes, "\n"), code, dir
+	}
+	const ours, theirs = ourSkillMD, "---\nname: other\n---\n"
+	notes, code, dir := plan("0.2.0", ours)
+	if want := "the skill's copies at " + dir + " are 0.2.0; container myapp runs 0.1.0"; !strings.Contains(notes, want) {
+		t.Errorf("a copy at 0.2.0, a container at 0.1.0: no %q in %s", want, notes)
+	}
+	_, quiet, _ := plan("", "")
+	if code != quiet {
+		t.Errorf("the line changed the exit status: %d, %d without it", code, quiet)
+	}
+	for name, c := range map[string][2]string{
+		"no copy":                   {"", ""},
+		"a bare .version":           {"0.2.0", ""},
+		"a SKILL.md naming another": {"0.2.0", theirs},
+		"a copy at the container's": {"0.1.0", ours},
+	} {
+		if notes, _, _ := plan(c[0], c[1]); strings.Contains(notes, "the skill's copies at") {
+			t.Errorf("%s: %s", name, notes)
+		}
+	}
+}
+
 // A Compose container's commands are whole, run from anywhere (the live run
 // of 0.1.0): the service stopped through its project and file, the volume
 // Compose really named archived — `<project>_<volume>`, never docker.md's
