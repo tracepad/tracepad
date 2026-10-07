@@ -129,7 +129,7 @@ func TestPrintedCommandsPassValuesWhole(t *testing.T) {
 			t.Errorf("a variable named %q: %v", v("ENV"), err)
 		}
 		sameArgs(t, "the archive of a release's version", []string{backupStep(Container{Name: "n", Version: "0.1.0", DataMount: dataMount("volume", "v")})},
-			[]string{`(umask 077 && set -C && docker run --rm --mount type=volume,src=v,dst=/data,readonly ` + busybox + ` tar czf - -C /data . > n-0.1.0.tar.gz)`})
+			[]string{`(umask 077 && set -C && if [ -e n-0.1.0.tar.gz ]; then echo 'an archive of that name is there already' >&2; exit 1; fi && rm -f n-0.1.0.tar.gz.part && docker run --rm --mount type=volume,src=v,dst=/data,readonly ` + busybox + ` tar czf - -C /data . > n-0.1.0.tar.gz.part && mv n-0.1.0.tar.gz.part n-0.1.0.tar.gz || { rm -f n-0.1.0.tar.gz.part; exit 1; })`})
 	})
 
 	t.Run("a Compose project's", func(t *testing.T) {
@@ -245,7 +245,8 @@ func TestPrintedCommandsHaveNoBarePlaceholder(t *testing.T) {
 		syntax := outsideQuotes(cmd)
 		for i := strings.IndexAny(syntax, "<>"); i >= 0; i = strings.IndexAny(syntax, "<>") {
 			after := strings.TrimLeft(syntax[i+1:], " ")
-			if syntax[i] == '<' || after == "" || !strings.ContainsRune("Qabcdefghijklmnopqrstuvwxyz0123456789_./-", rune(after[0])) {
+			// A name, quoted or of safe characters, or a descriptor (>&2).
+			if syntax[i] == '<' || after == "" || !strings.ContainsRune("Qabcdefghijklmnopqrstuvwxyz0123456789_./-&", rune(after[0])) {
 				t.Errorf("%s: a bare %q in %s", name, syntax[i:], cmd)
 				break
 			}

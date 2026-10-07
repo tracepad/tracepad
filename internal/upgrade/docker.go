@@ -1136,13 +1136,17 @@ func composeService(c Container) string {
 }
 
 // backupStep archives a stopped container's /data from busybox into the
-// directory the person runs it in, never over an earlier archive (set -C),
-// readable by them alone (umask 077). busybox writes the archive to its
-// output and the person's shell into the file: no directory of theirs is
-// mounted, so its name — a colon, a comma — is never docker's to parse (the
-// ninth review of #228), and the archive's name is a word of their shell,
-// quoted: a version is what a server answered (the second review of #228).
-// A version that is not a release's is not put in the name at all.
+// directory the person runs it in, never over an earlier archive, readable
+// by them alone (umask 077). busybox writes the archive to its output and
+// the person's shell into the file: no directory of theirs is mounted, so its
+// name — a colon, a comma — is never docker's to parse (the ninth review of
+// #228), and the archive's name is a word of their shell, quoted: a version
+// is what a server answered (the second review of #228). A version that is
+// not a release's is not put in the name at all. The shell's file is made
+// before docker runs, so it is NAME.part, and becomes NAME only once docker
+// has written it whole; a failure removes it, and leaves no empty archive
+// that looks like a backup, nor a name a second try is refused (the
+// eleventh review of #228).
 func backupStep(c Container) string {
 	version := c.Version
 	if !IsRelease(version) {
@@ -1152,8 +1156,9 @@ func backupStep(c Container) string {
 	if data == "" {
 		data = dataMount("volume", "<its /data volume>")
 	}
-	return fmt.Sprintf("(umask 077 && set -C && docker run --rm --mount %s %s tar czf - -C /data . > %s)",
-		shq(data), busybox, shq(c.Name+"-"+version+".tar.gz"))
+	name := c.Name + "-" + version + ".tar.gz"
+	return fmt.Sprintf("(umask 077 && set -C && if [ -e %[1]s ]; then echo 'an archive of that name is there already' >&2; exit 1; fi && rm -f %[2]s && docker run --rm --mount %[3]s %[4]s tar czf - -C /data . > %[2]s && mv %[2]s %[1]s || { rm -f %[2]s; exit 1; })",
+		shq(name), shq(name+".part"), shq(data), busybox)
 }
 
 // dataMount is a /data of the given type and source, read-only, written as

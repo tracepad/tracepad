@@ -733,7 +733,7 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 			t.Fatalf("%q: %d %s", mode, code, rep.Summary)
 		}
 		all := strings.Join(rep.Person, "\n")
-		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", busybox + " tar czf - -C /data . > myapp-0.1.0.tar.gz)",
+		for _, want := range []string{"name it with --container to upgrade it", "docker stop myapp", "src=myapp,dst=/data,readonly", busybox + " tar czf - -C /data . > myapp-0.1.0.tar.gz.part && mv myapp-0.1.0.tar.gz.part myapp-0.1.0.tar.gz || {",
 			"docker pull ghcr.io/tracepad/tracepad:0.2.0", "docker rename myapp myapp-old", "docker/#upgrading",
 			"docker rename myapp myapp-old && (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' myapp-old | grep -E '^(TRACEPAD_PROJECTS|TRACEPAD_URL)=' > myapp.upgrade.env) && ",
 			"docker run -d --name myapp --env-file myapp.upgrade.env -p 127.0.0.1:4318:4318 --mount type=volume,src=myapp,dst=/data --mount 'type=bind,src=/srv/my config,dst=/etc/extra,readonly' --restart always ghcr.io/tracepad/tracepad:0.2.0 serve && rm myapp.upgrade.env. Once the new one is healthy: docker rm myapp-old",
@@ -787,7 +787,7 @@ func TestComposeAdvice(t *testing.T) {
 	all := strings.Join(rep.Person, "\n")
 	compose := "docker compose -p tracepad --env-file '/srv/my app/.env.prod' -f '/srv/my app/compose.yml' -f '/srv/my app/compose.override.yml'"
 	for _, want := range []string{
-		compose + " stop tracepad && (umask 077 && set -C && docker run --rm --mount type=volume,src=tracepad_tracepad_data,dst=/data,readonly " + busybox + " tar czf - -C /data . > tracepad-tracepad-1-0.1.0.tar.gz) && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
+		compose + " stop tracepad && " + backupStep(Container{Name: "tracepad-tracepad-1", Version: "0.1.0", DataMount: dataMount("volume", "tracepad_tracepad_data")}) + " && docker pull ghcr.io/tracepad/tracepad:0.2.0. ",
 		"set the image of the service tracepad in whichever of /srv/my app/compose.yml, /srv/my app/compose.override.yml sets it to ghcr.io/tracepad/tracepad:0.2.0",
 		"take its digest off: it is pinned to sha256:" + strings.Repeat("d", 64),
 		"docker pull ghcr.io/tracepad/tracepad:0.2.0 prints its digest",
@@ -980,7 +980,9 @@ const fakeDockerCLI = `#!/bin/sh
 echo "$*" >> "$LOG"
 case "$1 $2" in
 "run --rm")
-	# … busybox tar czf - -C /data .: the archive, to its output.
+	# … busybox tar czf - -C /data .: the archive, to its output; or a
+	# daemon that does not answer, which writes nothing.
+	[ -z "${FAIL_BACKUP:-}" ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
 	exec tar czf - -C "$DATA" . ;;
 "inspect --format") printf 'TRACEPAD_PROJECTS=p\nTRACEPAD_URL=u\n' ;;
 esac
@@ -1002,13 +1004,13 @@ func TestAContainersStepsStopAtTheFirstThatFails(t *testing.T) {
 	c := Container{Name: "tracepad-app", Repo: "ghcr.io/tracepad/tracepad", Version: "0.1.0", DataMount: dataMount("volume", "tracepad-app"),
 		Run: []string{"-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=tracepad-app,dst=/data", imageSlot, "serve"}, EnvNames: []string{"TRACEPAD_PROJECTS", "TRACEPAD_URL"}}
 	chain, _ := containerSteps(c, "0.2.0")
-	run := func(t *testing.T, before func(dir string)) (calls string, err error, dir string) {
+	run := func(t *testing.T, before func(dir string), env ...string) (calls string, err error, dir string) {
 		dir = t.TempDir()
 		before(dir)
 		log := filepath.Join(dir, "calls")
 		cmd := exec.Command("sh", "-c", chain)
 		cmd.Dir = dir
-		cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "LOG=" + log, "DATA=" + data}
+		cmd.Env = append([]string{"PATH=" + bin + ":/usr/bin:/bin", "LOG=" + log, "DATA=" + data}, env...)
 		err = cmd.Run()
 		b, _ := os.ReadFile(log)
 		return string(b), err, dir
@@ -1026,9 +1028,31 @@ func TestAContainersStepsStopAtTheFirstThatFails(t *testing.T) {
 		t.Error("the file of variables was left")
 	}
 
-	calls, err, _ = run(t, func(dir string) { _ = os.WriteFile(filepath.Join(dir, archive), []byte("an earlier backup"), 0o600) })
-	if err == nil || strings.Contains(calls, "pull") || strings.Contains(calls, "rename") {
-		t.Errorf("a backup refused went on: %v\n%s", err, calls)
+	calls, err, dir = run(t, func(dir string) { _ = os.WriteFile(filepath.Join(dir, archive), []byte("an earlier backup"), 0o600) })
+	if b, _ := os.ReadFile(filepath.Join(dir, archive)); err == nil || strings.Contains(calls, "pull") || strings.Contains(calls, "rename") || string(b) != "an earlier backup" {
+		t.Errorf("a backup refused went on, or wrote over the earlier one: %v\n%s", err, calls)
+	}
+
+	// A docker that fails leaves no archive, empty or cut, that looks like
+	// a backup, and nothing a second try is refused for (the eleventh
+	// review of #228).
+	calls, err, dir = run(t, func(string) {}, "FAIL_BACKUP=1")
+	if err == nil || strings.Contains(calls, "pull") {
+		t.Errorf("a failed backup went on: %v\n%s", err, calls)
+	}
+	for _, left := range []string{archive, archive + ".part"} {
+		if _, err := os.Stat(filepath.Join(dir, left)); err == nil {
+			t.Errorf("a failed backup left %s", left)
+		}
+	}
+	cmd := exec.Command("sh", "-c", chain)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "LOG=" + filepath.Join(dir, "calls"), "DATA=" + data}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("the second try, once docker answers: %v %s", err, out)
+	}
+	if info, err := os.Stat(filepath.Join(dir, archive)); err != nil || info.Size() == 0 {
+		t.Errorf("the second try's archive: %v %v", info, err)
 	}
 
 	calls, err, dir = run(t, func(dir string) {
