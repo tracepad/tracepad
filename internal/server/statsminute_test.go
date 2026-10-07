@@ -78,6 +78,10 @@ func TestStatsMinuteTakesADayAtMost(t *testing.T) {
 	expectError(t, h.get(t, "/api/v1/stats?group_by=minute"), http.StatusBadRequest, "needs from")
 	expectError(t, h.get(t, minuteURL(0, 25*3600, "")), http.StatusBadRequest, "at most 24 hours")
 	expectStatus(t, h.get(t, minuteURL(0, 24*3600, "")), http.StatusOK)
+	// Bounds near either end of what a timestamp can be: their difference
+	// does not fit in an int64, and must not wrap into a short window.
+	expectError(t, h.get(t, "/api/v1/stats?group_by=minute&from=1700-01-01T00:00:00Z&to=2200-01-01T00:00:00Z"),
+		http.StatusBadRequest, "at most 24 hours")
 
 	// An open window ends now: the last day passes, with the moment the
 	// request took to arrive; the last two do not.

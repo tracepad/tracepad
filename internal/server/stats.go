@@ -203,9 +203,14 @@ func minuteWindow(filter store.StatsFilter, now time.Time) error {
 	if filter.To != nil {
 		to = *filter.To
 	}
-	if span := time.Duration(to - *filter.From); span > minuteWindowLimit+minuteWindowGrace {
-		return fmt.Errorf("group_by=minute answers a window of at most 24 hours, this one is %s; group by hour or day",
-			span.Round(time.Minute))
+	if to <= *filter.From {
+		return nil // an empty window: nothing to scan
+	}
+	// The bounds reach either end of int64, so their difference can wrap
+	// negative and pass for a short window; a wrapped one is the longest.
+	span := to - *filter.From
+	if span < 0 || time.Duration(span) > minuteWindowLimit+minuteWindowGrace {
+		return errors.New("group_by=minute answers a window of at most 24 hours; group by hour or day")
 	}
 	return nil
 }
