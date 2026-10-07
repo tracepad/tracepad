@@ -89,6 +89,10 @@ upgrade)
 	[ -n "\${FAKE_PLAN:-}" ] || { echo "tracepad: unknown command" >&2; exit 2; }
 	# A hanging plan answers SIGTERM as the real one does: exit 1, and the
 	# line of a plan cut short (the review of #228).
+	# One held before it could catch anything: SIGTERM's own death, 143.
+	if [ -n "\${FAKE_PLAN_HANG_BARE:-}" ]; then
+		exec sleep 60
+	fi
 	if [ -n "\${FAKE_PLAN_HANG:-}" ]; then
 		trap 'echo "Interrupted: the look at the machine was cut short"; kill \$! 2>/dev/null; exit 1' TERM
 		sleep 60 &
@@ -268,6 +272,9 @@ run hanging-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG=1
 lacks "$out" "Still running" hanging-plan
 has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-plan
 ends_with_agent_line hanging-plan
+# Held before it could catch the signal: killed by it, saying nothing.
+run hanging-bare-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG_BARE=1
+has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-bare-plan
 
 # --- A binary whose answer is not a version is not quoted.
 printf '#!/bin/sh\nprintf "1.0\\033]52;c;eA==\\007\\n"\n' >"$bin"

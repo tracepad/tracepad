@@ -43,7 +43,8 @@ their own headings.
 
 - `tracepad version --json` gives the commit the build was made from beside
   the version, as the log's first line does; `tracepad version` still prints
-  the version alone.
+  the version alone. Any other argument is now a usage error (exit `2`,
+  nothing on stdout) rather than ignored.
 - `docs/configuration.md` says what reaches the network: the server nothing.
 
 ## [0.1.0] - 2026-10-06

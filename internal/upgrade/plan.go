@@ -80,9 +80,13 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		// script asks the binary it just put in place: that release is the
 		// binary, and is not looked up, since a new binary's first
 		// connection may wait on a firewall past the script's fifteen
-		// seconds (the live run of 0.1.0). A binary elsewhere, or a run,
-		// still looks: a version stamped on a build need not be a release
-		// (the second review of #228).
+		// seconds (the live run of 0.1.0). With no TRACEPAD_INSTALL_DIR the
+		// running binary's directory is the install path, so any binary
+		// planning for the version stamped on it is taken at its word, as
+		// `tracepad version` is everywhere in the command (spec 054 #58
+		// (e)): the lookup would prove nothing of a build stamped with a
+		// release's version. A run, another version, or a binary run from
+		// elsewhere than TRACEPAD_INSTALL_DIR names, still looks.
 	default:
 		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
@@ -399,8 +403,11 @@ func (r *runner) othersBehind(p *plan) {
 		// What put it there upgrades it: a package manager's, or the
 		// install script's, which installs into any directory it is given
 		// (the live run of rc.3: a binary in ~/.local/bin was told its
-		// package manager upgrades it).
-		script := "the install script: " + r.installLine(filepath.Dir(b.First), p.to)
+		// package manager upgrades it). Unpinned: the newest stable
+		// release, which the script never steps back from, whatever this
+		// one says (the tenth review of #228: pinned to the target, it
+		// would take a newer one back).
+		script := "the install script: " + r.installLine(filepath.Dir(b.First), "")
 		upgrades := script
 		if pm := packageManager(canonicalPath(b.First)); pm != "" {
 			upgrades = pm
@@ -441,11 +448,14 @@ func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
 // installLine is the install script's command that puts version to into
 // dir: the directory named unless it is the script's own default.
 func (r *runner) installLine(dir, to string) string {
-	env := "TRACEPAD_VERSION=" + to
-	if dir != filepath.Join(r.deps.Home, ".local", "bin") {
-		env += " TRACEPAD_INSTALL_DIR=" + shq(dir)
+	var env []string
+	if to != "" {
+		env = append(env, "TRACEPAD_VERSION="+to)
 	}
-	return "curl -fsSL https://tracepad.github.io/tracepad/install.sh | " + env + " sh"
+	if dir != filepath.Join(r.deps.Home, ".local", "bin") {
+		env = append(env, "TRACEPAD_INSTALL_DIR="+shq(dir))
+	}
+	return "curl -fsSL https://tracepad.github.io/tracepad/install.sh | " + strings.Join(append(env, "sh"), " ")
 }
 
 func serverAdvice(s Server) string {

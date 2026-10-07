@@ -823,14 +823,16 @@ func TestComposeAdvice(t *testing.T) {
 		t.Errorf("env files: %s", got)
 	}
 	c.ComposeEnv = nil
-	// An env file Compose wrote relative is read from the project's
-	// directory (the second review of #228).
+	// An env file a label names relative was resolved from wherever
+	// Compose was run, which no label says: kept as written, and no compose
+	// command names it (the tenth review of #228).
 	ic := inspectContainer{Name: "/obs-tracepad-1"}
 	ic.Config.Image = "ghcr.io/tracepad/tracepad:0.1.0"
 	ic.Config.Labels = map[string]string{"com.docker.compose.project": "obs", "com.docker.compose.project.working_dir": "/srv/obs",
-		"com.docker.compose.project.environment_file": "prod.env,/etc/obs/base.env"}
-	if got, _ := asContainer(ic); !slices.Equal(got.ComposeEnv, []string{"/srv/obs/prod.env", "/etc/obs/base.env"}) {
-		t.Errorf("relative env files: %q", got.ComposeEnv)
+		"com.docker.compose.project.environment_file": "deploy/.env,/etc/obs/base.env"}
+	if got, _ := asContainer(ic); !slices.Equal(got.ComposeEnv, []string{"deploy/.env", "/etc/obs/base.env"}) ||
+		strings.Contains(composeAdvice(got, "0.2.0"), "docker compose") {
+		t.Errorf("relative env files: %q, %s", got.ComposeEnv, composeAdvice(got, "0.2.0"))
 	}
 	// Compose's labels missing: its project and directory, and what to look up.
 	c.ComposeFiles, c.Service = nil, ""
@@ -2306,8 +2308,9 @@ func TestARelativeLinkIsNamedWhole(t *testing.T) {
 }
 
 // Compose's path labels are comma-joined absolute paths: a part that is not
-// absolute after another is that one's rest (the sixth review of #228), and
-// a first one that is not is the project directory's.
+// absolute after another is that one's rest (the sixth review of #228); a
+// first one that is not leaves each part as written (the eighth and tenth
+// reviews).
 func TestComposePathsKeepACommaInAPath(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -2319,12 +2322,12 @@ func TestComposePathsKeepACommaInAPath(t *testing.T) {
 		{"/srv/obs/a.yml,/srv/obs/b.yml", []string{"/srv/obs/a.yml", "/srv/obs/b.yml"}},
 		{"/srv/a,b/compose.yaml", []string{"/srv/a,b/compose.yaml"}},
 		{"/srv/a,b/one.yml,/srv/a,b/two.yml", []string{"/srv/a,b/one.yml", "/srv/a,b/two.yml"}},
-		{"prod.env", []string{"/srv/obs/prod.env"}},
-		// Relative from the first, each is its own (the eighth review).
-		{"docker-compose.yml,docker-compose.override.yml", []string{"/srv/obs/docker-compose.yml", "/srv/obs/docker-compose.override.yml"}},
-		{"a.env,b.env", []string{"/srv/obs/a.env", "/srv/obs/b.env"}},
+		{"prod.env", []string{"prod.env"}},
+		{"docker-compose.yml,docker-compose.override.yml", []string{"docker-compose.yml", "docker-compose.override.yml"}},
+		{"a.env,b.env", []string{"a.env", "b.env"}},
+		{"deploy/.env,/etc/obs/base.env", []string{"deploy/.env", "/etc/obs/base.env"}},
 	} {
-		if got := composePaths(c.label, "/srv/obs"); !slices.Equal(got, c.want) {
+		if got := composePaths(c.label); !slices.Equal(got, c.want) {
 			t.Errorf("%q: %q, want %q", c.label, got, c.want)
 		}
 	}

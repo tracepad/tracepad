@@ -914,22 +914,20 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 // Compose writes them absolute, so when the first is, a part that is not is
 // the rest of the one before it, whose path has a comma in it (the sixth
 // review of #228: /srv/a,b/compose.yaml was -f /srv/a -f b/compose.yaml).
-// When the first is not, none is taken for a rest: each is a path of its own,
-// read from the project's directory, where Compose itself looked for it (the
-// second and eighth reviews of #228).
-func composePaths(label, dir string) []string {
+// When the first is not, each part is its own, kept as written: a relative
+// one was resolved from wherever Compose was run, which no label says, so
+// the commands that would name it are not printed (composeKnown; the tenth
+// review of #228: joined to the project's directory, deploy/.env became
+// deploy/deploy/.env).
+func composePaths(label string) []string {
 	var paths []string
 	parts := strings.Split(label, ",")
 	absolute := filepath.IsAbs(parts[0])
 	for _, part := range parts {
 		switch {
 		case part == "":
-		case filepath.IsAbs(part):
-			paths = append(paths, part)
-		case absolute && len(paths) > 0:
+		case absolute && len(paths) > 0 && !filepath.IsAbs(part):
 			paths[len(paths)-1] += "," + part
-		case dir != "":
-			paths = append(paths, filepath.Join(dir, part))
 		default:
 			paths = append(paths, part)
 		}
@@ -948,8 +946,8 @@ func asContainer(ic inspectContainer) (Container, bool) {
 	c := Container{Name: strings.TrimPrefix(ic.Name, "/"), Ref: ic.Config.Image, Repo: repo,
 		Compose: labels["com.docker.compose.project"], Service: labels["com.docker.compose.service"],
 		ComposeDir: labels["com.docker.compose.project.working_dir"], inspect: ic}
-	c.ComposeFiles = composePaths(labels["com.docker.compose.project.config_files"], c.ComposeDir)
-	c.ComposeEnv = composePaths(labels["com.docker.compose.project.environment_file"], c.ComposeDir)
+	c.ComposeFiles = composePaths(labels["com.docker.compose.project.config_files"])
+	c.ComposeEnv = composePaths(labels["com.docker.compose.project.environment_file"])
 	for _, m := range ic.Mounts {
 		switch {
 		case m.Destination != "/data":
@@ -1113,13 +1111,10 @@ func composeSteps(c Container, to string) (chain, up, start string) {
 }
 
 // composeKnown is whether a compose command for the container reads its own
-// files wherever it is run: its directory is labelled, or its files are, each
-// absolute, and its env files too.
+// files wherever it is run: its directory or its files are labelled, and
+// every file and env file named is absolute.
 func composeKnown(c Container) bool {
-	if c.ComposeDir != "" {
-		return true
-	}
-	if len(c.ComposeFiles) == 0 {
+	if c.ComposeDir == "" && len(c.ComposeFiles) == 0 {
 		return false
 	}
 	for _, f := range append(slices.Clone(c.ComposeFiles), c.ComposeEnv...) {

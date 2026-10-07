@@ -46,16 +46,10 @@ bad_links() {
 		[ "$page" != "$rest" ] || page=""
 		page="${page%%#*}"
 		# What the build adds beside the pages, named: its assets, its
-		# search index, its sitemap and its 404. A Markdown file is served
-		# at the root only; anything else is a page of docs/ (the ninth
-		# review of #228).
-		case "$page" in
-		assets/* | search/* | sitemap.xml | sitemap.xml.gz | 404.html) continue ;;
-		*.md)
-			echo "tracepad.github.io/tracepad/$rest: a Markdown page is served at the site's root, not under latest/ or dev/"
-			continue
-			;;
-		esac
+		# search index, its sitemap and its 404; anything else is a page of
+		# docs/ (the ninth review of #228). A Markdown file under latest/ or
+		# dev/ was refused above: the site serves it at its root only.
+		case "$page" in assets/* | search/* | sitemap.xml | sitemap.xml.gz | 404.html) continue ;; esac
 		page="${page%/}"
 		md="$docs/${page:-index}.md"
 		[ -f "$md" ] || echo "tracepad.github.io/tracepad/$rest: no page ${page:-index}, since $md is not there"

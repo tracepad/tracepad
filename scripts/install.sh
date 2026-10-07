@@ -214,9 +214,10 @@ skill_into() {
 # report escapes what other programs supplied. Fifteen seconds at most: this is
 # advice, not a step that may hang: the watchdog's SIGTERM ends it with exit 1
 # and no verdict, its first line "Interrupted: …" — every release's plan says
-# that to a SIGTERM, and the watchdog is the only one this script sends, so
-# that line is how the timeout is told, with no race between two processes
-# (the reviews of #228).
+# that to a SIGTERM — or, before the plan's handler is in place (a first
+# start held by a scan), with 143 and nothing said. The watchdog is the only
+# sender of SIGTERM here, so either is how the timeout is told, with no race
+# between two processes (the reviews of #228).
 # plan_status is its exit status: 10 or 4 when something runs older, 0 when
 # nothing does, 2 from a binary from before the command; anything else — a
 # refusal, the watchdog — is "could not check", never "runs older".
@@ -366,7 +367,7 @@ main() {
 			# Why, in the plan's own first line, or the watchdog's: a new
 			# binary's first connection may wait on a firewall or a scan.
 			why="$(head -n 1 "$tmp/plan")"
-			case "$why" in Interrupted:*) why="it did not finish in 15 seconds" ;; esac
+			case "$plan_status/$why" in 143/* | */Interrupted:*) why="it did not finish in 15 seconds" ;; esac
 			say ""
 			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $(q "$bin") upgrade --plan"
 			;;
