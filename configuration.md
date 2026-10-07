@@ -82,6 +82,7 @@ does not warn about one left exported.
 | `TRACEPAD_INSTALL_DIR` | `~/.local/bin` | Where the binary goes. Never needs `sudo` unless you point it somewhere that does. |
 | `TRACEPAD_NO_SKILL` | unset | `1` installs the binary alone, without the agent skill. |
 | `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
+| `TRACEPAD_RELEASE_FETCHED` | unset | Internal, not a setting: the install script sets it, never you, to the release whose checksums it fetched, for the `tracepad upgrade --plan` it asks of the binary at the install path, which then does not look that release up again. |
 
 See [install.md](install.md#with-the-install-script).
 
@@ -100,7 +101,7 @@ What does go out, and where:
 | The CLI and `tracepad mcp` | your server, at `TRACEPAD_URL` (or `--url`) | every command |
 | The Python, Node and Go packages | your server, at `TRACEPAD_URL` | when they export |
 | `tracepad export` | the address you give it, and only that one | when you run it |
-| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the binary at the install path runs it with `--to` its own version, as the install script does |
+| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the install script asks the binary at the install path for the version it just fetched |
 | The install script | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`) | when you run it |
 
 `tracepad upgrade` also asks servers and containers on this machine for their
