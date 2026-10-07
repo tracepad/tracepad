@@ -38,12 +38,12 @@ leaves out. Read the one that fits **before** the task's first command, and only
 ## Connecting
 
 The CLI reads `TRACEPAD_URL` (default `http://localhost:4318`) and
-`TRACEPAD_API_KEY` (a project's secret key, `tp-sk-…`). Start by asking the
-server for its version: `health` needs no key and says why it cannot reach
-the server. A command that needs the key and has none exits `2`, *no API key*.
+`TRACEPAD_API_KEY` (a project's secret key, `tp-sk-…`). Start with both
+versions: a binary older than this skill is fixed first (below); `health` needs
+no key and says why it cannot reach the server. No key where one is needed: exit `2`.
 
 ```sh
-tracepad health
+tracepad version; tracepad health
 ```
 
 - If the key is not set and no Tracepad MCP server is connected, **ask the
@@ -67,9 +67,7 @@ tracepad health
    CLI. They only read, with a `read` key: nothing through MCP writes.
 3. **The HTTP API, for what neither covers.** Find the route in `GET /api/v1`
    and its parameters in `GET /api/v1/openapi.json`; send the key as
-   `Authorization: Bearer $TRACEPAD_API_KEY`.
-
-All three return the same bytes: pick the door by what you have.
+   `Authorization: Bearer $TRACEPAD_API_KEY`. All three return the same bytes.
 
 ## Reading a trace
 
@@ -195,6 +193,8 @@ that has moved since.
   the server are different builds. Usually harmless; when a command or a flag
   seems missing, the server's `GET /api/v1` is the truth.
 - **This skill and the binary disagree** (`tracepad version` against this file's
-  `metadata.version`; `dev` matches anything): `tracepad skills install` again, as it was installed.
+  `metadata.version`, unless that is `dev`). A binary older than the skill, or a
+  development build (`dev`, a commit), is replaced before anything else, as
+  `references/upgrade.md` step 1 says; a newer one, `tracepad skills install` again.
 - **The server itself seems wrong.** `tracepad system`: version, uptime, row
   counts, ingest counters — the thing to paste into a bug report.

@@ -23,7 +23,8 @@ it beside the tools that cover the same ground.
 - [Installing the binary](install.md): download, verify, run as a service,
   upgrade, back up.
 - [Docker](docker.md): the image, its volume, TLS in front, upgrades.
-- [Configuration](configuration.md): every environment variable.
+- [Configuration](configuration.md): every environment variable, and
+  [what reaches the network](configuration.md#what-reaches-the-network).
 - [How Tracepad compares](compare.md): what other tools need to run, and
   where they do more.
 

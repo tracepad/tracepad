@@ -361,7 +361,7 @@ var shared struct {
 func sharedMirror(t *testing.T) string {
 	t.Helper()
 	shared.once.Do(func() {
-		shared.mirror, shared.err = os.MkdirTemp("", "tracepad-upgrade-mirror-")
+		shared.mirror, shared.err = packageTempDir("tracepad-upgrade-mirror-")
 		if shared.err != nil {
 			return
 		}
@@ -375,19 +375,51 @@ func sharedMirror(t *testing.T) string {
 	return shared.mirror
 }
 
-// atExit are what tests made once for the package — images, say — to
-// remove when they are done.
-var atExit []func()
+// atExit are what tests made once for the package — images, a directory
+// of binaries — to remove when they are done; tempDirs, the directories
+// packageTempDir made. Tests add to them from parallel tests, under mu.
+var (
+	exitMu   sync.Mutex
+	atExit   []func()
+	tempDirs []string
+)
 
-// TestMain removes the shared mirror, and what atExit names, once the
-// package's tests are done.
+func onExit(f func()) {
+	exitMu.Lock()
+	defer exitMu.Unlock()
+	atExit = append(atExit, f)
+}
+
+// packageTempDir is a directory that outlives one test — a build shared by
+// the package's tests — and is removed when they are done. Not t.TempDir,
+// which goes with its test; not a bare os.MkdirTemp, which nothing removed:
+// each run of the integration tests left its binaries in $TMPDIR, 56 MB a
+// time, and they filled a disk (the second review of #228).
+func packageTempDir(prefix string) (string, error) {
+	dir, err := os.MkdirTemp("", prefix)
+	if err == nil {
+		exitMu.Lock()
+		tempDirs = append(tempDirs, dir)
+		exitMu.Unlock()
+	}
+	return dir, err
+}
+
+// TestMain removes what atExit names and every packageTempDir once the
+// package's tests are done, and fails the run if one is still there.
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if shared.mirror != "" {
-		_ = os.RemoveAll(shared.mirror) // ignored: a test's temporary directory
-	}
+	exitMu.Lock()
+	defer exitMu.Unlock()
 	for _, f := range atExit {
 		f()
+	}
+	for _, dir := range tempDirs {
+		_ = os.RemoveAll(dir) // ignored: checked just below
+		if _, err := os.Lstat(dir); err == nil {
+			fmt.Fprintf(os.Stderr, "the package's temporary directory %s is still there\n", dir)
+			code = 1
+		}
 	}
 	os.Exit(code)
 }

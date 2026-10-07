@@ -49,7 +49,7 @@ func TestALinkedBinaryIsNotTheCommands(t *testing.T) {
 	}
 	r := &runner{deps: Deps{InstallDir: bin, Version: scriptVersion, LookPath: func(string) string { return "" }}}
 	b := r.installedBinary(context.Background())
-	if b.Ours || !strings.Contains(b.Reason, "symbolic link") {
+	if b.Ours() || !strings.Contains(b.Reason, "symbolic link") {
 		t.Errorf("%+v", b)
 	}
 }

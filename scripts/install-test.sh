@@ -87,7 +87,17 @@ upgrade)
 	# The plan (spec 054): from the case's environment; a binary from before
 	# the command does not know the word.
 	[ -n "\${FAKE_PLAN:-}" ] || { echo "tracepad: unknown command" >&2; exit 2; }
-	[ -z "\${FAKE_PLAN_HANG:-}" ] || sleep 60
+	# A hanging plan answers SIGTERM as the real one does: exit 1, and the
+	# line of a plan cut short (the review of #228).
+	# One held before it could catch anything: SIGTERM's own death, 143.
+	if [ -n "\${FAKE_PLAN_HANG_BARE:-}" ]; then
+		exec sleep 60
+	fi
+	if [ -n "\${FAKE_PLAN_HANG:-}" ]; then
+		trap 'echo "Interrupted: the look at the machine was cut short"; kill \$! 2>/dev/null; exit 1' TERM
+		sleep 60 &
+		wait \$!
+	fi
 	echo "\$*: \$FAKE_PLAN"
 	exit "\${FAKE_PLAN_EXIT:-0}" ;;
 skills)
@@ -144,8 +154,10 @@ release 0.1.0-rc.1
 fresh_home "$home/.claude"
 run no-stable 1
 has "$err" "there is no stable release" no-stable
-has "$err" "| TRACEPAD_VERSION=<version> sh" no-stable
+has "$err" "| TRACEPAD_VERSION='<version>' sh" no-stable
 [ ! -e "$bin" ] || fail "no-stable: something was installed"
+run no-stable-dir 1 TRACEPAD_INSTALL_DIR="$home/my bin"
+has "$err" "| TRACEPAD_VERSION='<version>' TRACEPAD_INSTALL_DIR='$home/my bin' sh" no-stable-dir
 
 # --- The newest stable release, by default.
 release 0.2.0 stable
@@ -245,8 +257,11 @@ done
 
 # --- A plan that could not finish (exit 1: refused, or interrupted) is said,
 # and is never read as something running older.
-run plan-refused 0 FAKE_PLAN="Interrupted: the look at the machine was cut short" FAKE_PLAN_EXIT=1
-has "$out" "Could not check what still runs an older version" plan-refused
+# A refusal is said in its own words, never taken for the watchdog's.
+run plan-refused 0 FAKE_PLAN="Refused: the installed binary says it is newer" FAKE_PLAN_EXIT=1
+has "$out" "Could not check what still runs an older version (" plan-refused
+has "$out" "Refused: the installed binary says it is newer); to see it:" plan-refused
+lacks "$out" "15 seconds" plan-refused
 lacks "$out" "Still running" plan-refused
 ends_with_agent_line plan-refused
 
@@ -255,8 +270,11 @@ started="$(date +%s)"
 run hanging-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG=1
 [ $(($(date +%s) - started)) -lt 30 ] || fail "hanging-plan: the plan held the install up"
 lacks "$out" "Still running" hanging-plan
-has "$out" "Could not check what still runs an older version" hanging-plan
+has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-plan
 ends_with_agent_line hanging-plan
+# Held before it could catch the signal: killed by it, saying nothing.
+run hanging-bare-plan 0 FAKE_PLAN=x FAKE_PLAN_HANG_BARE=1
+has "$out" "Could not check what still runs an older version (it did not finish in 15 seconds)" hanging-bare-plan
 
 # --- A binary whose answer is not a version is not quoted.
 printf '#!/bin/sh\nprintf "1.0\\033]52;c;eA==\\007\\n"\n' >"$bin"
@@ -318,6 +336,28 @@ fresh_home
 run install-dir 0 TRACEPAD_INSTALL_DIR="$home/bin/" PATH="$home/bin:$fake:$sys"
 has "$out" "installed tracepad 0.3.0 at $home/bin/tracepad" install-dir
 lacks "$out" "is not on your PATH" install-dir
+
+# --- A directory whose name the shell would read as code is printed quoted:
+# the export line, pasted, puts that very directory on the PATH.
+fresh_home
+odd="$home/it's a \$(touch $tmp/canary) dir"
+run odd-dir 0 TRACEPAD_INSTALL_DIR="$odd"
+line="$(sed -n 's/^  export PATH=/export PATH=/p' "$out")"
+got="$(PATH=/usr/bin:/bin sh -c "$line"'; printf %s "$PATH"')"
+[ "$got" = "$odd:/usr/bin:/bin" ] || fail "odd-dir: the export line puts '$got' on the PATH"
+[ ! -e "$tmp/canary" ] || fail "odd-dir: the printed line ran code"
+
+# --- The line that installs over a newer binary names the directory it
+# speaks of, quoted: pasted, it puts the release there, not in ~/.local/bin.
+release 0.4.0-rc.1
+run odd-pinned 0 TRACEPAD_INSTALL_DIR="$odd" TRACEPAD_VERSION=0.4.0-rc.1
+run odd-newer 0 TRACEPAD_INSTALL_DIR="$odd"
+line="$(sed -n 's/^.*To install 0.3.0 over it anyway: //p' "$out")"
+/usr/bin/env -i HOME="$home" PATH="$fake:$sys" TRACEPAD_DOWNLOAD_URL="file://$releases" sh -c "$line" >/dev/null 2>&1 ||
+	fail "odd-newer: the printed line failed: $line"
+[ "$("$odd/tracepad" version)" = 0.3.0 ] || fail "odd-newer: the printed line did not install over $odd/tracepad"
+[ ! -e "$home/.local/bin/tracepad" ] || fail "odd-newer: the printed line installed into ~/.local/bin"
+[ ! -e "$tmp/canary" ] || fail "odd-newer: the printed line ran code"
 
 # --- Platforms.
 fresh_home

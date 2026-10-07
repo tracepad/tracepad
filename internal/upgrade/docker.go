@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -185,17 +187,28 @@ type Container struct {
 	URL       string
 	Version   string
 	Ours      bool
-	// Compose is its Compose project, when Compose made it.
-	Compose string
-	Reason  string
+	// Compose is its Compose project, when Compose made it; Service is its
+	// service there, ComposeFiles the files Compose read for it and
+	// ComposeDir its project directory, all as Compose labelled it (the live
+	// run of 0.1.0: the person's commands said neither the file nor where to
+	// run them from).
+	Compose      string
+	Service      string
+	ComposeFiles []string
+	ComposeDir   string
+	// ComposeEnv are the files the project's --env-file named, in order:
+	// without them `up -d` interpolates the file otherwise, and may name
+	// another volume (the review of #228).
+	ComposeEnv []string
+	Reason     string
 	// Default is whether it publishes the default port, 4318, on the host.
 	Default bool
 	// Unchecked says why the plan could not tell where to ask it, when it
 	// could not: a container not checked is said, not called behind (the
 	// final review).
 	Unchecked string
-	// DataMount is its /data as busybox's --mount takes it, empty when it
-	// has none.
+	// DataMount is its /data, read-only, as busybox's --mount takes it
+	// (dataMount), empty when it has none.
 	DataMount string
 	// Run is how it was created, as `docker run` takes it — the options,
 	// the image's place (imageSlot), its command — and EnvNames the
@@ -215,6 +228,11 @@ type Container struct {
 	inspect inspectContainer
 	image   imageConfig
 }
+
+// envName is a variable's name as docker's env file takes it: no space, no
+// `=`. A name the shell would not take (`my.var`) is carried all the same;
+// the person's grep quotes it (regexp.QuoteMeta, then shq).
+var envName = regexp.MustCompile(`^[^\s=]+$`)
 
 // imageSlot stands for the image in Container.Run.
 const imageSlot = "\x00image"
@@ -328,7 +346,22 @@ func createdAs(ic inspectContainer, img imageConfig, logDriver string) (run, env
 	run = append(run, imageSlot)
 	run = append(run, args...)
 	for _, kv := range ic.Config.Env {
-		if name, _, ok := strings.Cut(kv, "="); ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
+		// A variable goes through an env file, one line each, and the
+		// person's commands pick it by name with grep from every variable
+		// the container has, the image's too. What an env file cannot
+		// carry — a line break in any value, which grep would cut short or
+		// read as a variable of its own; a name with a space, which docker
+		// refuses there — leaves no run written, for the command and the
+		// person alike: this is the one place that says so (the reviews of
+		// #228).
+		name, _, ok := strings.Cut(kv, "=")
+		if strings.ContainsAny(kv, "\r\n") {
+			return nil, nil, fmt.Errorf("its variable %s holds a line break, which an env file cannot carry", name)
+		}
+		if ok && !slices.Contains(img.Config.Env, kv) && !slices.Contains(envNames, name) {
+			if !envName.MatchString(name) {
+				return nil, nil, fmt.Errorf("its variable %q has a name an env file cannot carry", name)
+			}
 			envNames = append(envNames, name)
 		}
 	}
@@ -672,12 +705,6 @@ func containerRefusal(c Container, named string, info dockerInfo) string {
 	if len(c.Unreproduced) > 0 {
 		return "it has settings the command does not reproduce (" + strings.Join(c.Unreproduced, ", ") + "): back up its volume and recreate it yourself"
 	}
-	for _, kv := range ic.Config.Env {
-		if strings.ContainsAny(kv, "\r\n") {
-			k, _, _ := strings.Cut(kv, "=")
-			return "its variable " + k + " holds a line break, which an env file cannot carry"
-		}
-	}
 	return ""
 }
 
@@ -883,6 +910,31 @@ func (r *runner) containers(ctx context.Context) ([]Container, string) {
 	return cs, ""
 }
 
+// composePaths are the paths a Compose label holds, joined with commas.
+// Compose writes them absolute, so when the first is, a part that is not is
+// the rest of the one before it, whose path has a comma in it (the sixth
+// review of #228: /srv/a,b/compose.yaml was -f /srv/a -f b/compose.yaml).
+// When the first is not, each part is its own, kept as written: a relative
+// one was resolved from wherever Compose was run, which no label says, so
+// the commands that would name it are not printed (composeKnown; the tenth
+// review of #228: joined to the project's directory, deploy/.env became
+// deploy/deploy/.env).
+func composePaths(label string) []string {
+	var paths []string
+	parts := strings.Split(label, ",")
+	absolute := filepath.IsAbs(parts[0])
+	for _, part := range parts {
+		switch {
+		case part == "":
+		case absolute && len(paths) > 0 && !filepath.IsAbs(part):
+			paths[len(paths)-1] += "," + part
+		default:
+			paths = append(paths, part)
+		}
+	}
+	return paths
+}
+
 // asContainer reads a container of the image from its inspect; ok is false
 // for any other image's.
 func asContainer(ic inspectContainer) (Container, bool) {
@@ -890,15 +942,19 @@ func asContainer(ic inspectContainer) (Container, bool) {
 	if !ok {
 		return Container{}, false
 	}
+	labels := ic.Config.Labels
 	c := Container{Name: strings.TrimPrefix(ic.Name, "/"), Ref: ic.Config.Image, Repo: repo,
-		Compose: ic.Config.Labels["com.docker.compose.project"], inspect: ic}
+		Compose: labels["com.docker.compose.project"], Service: labels["com.docker.compose.service"],
+		ComposeDir: labels["com.docker.compose.project.working_dir"], inspect: ic}
+	c.ComposeFiles = composePaths(labels["com.docker.compose.project.config_files"])
+	c.ComposeEnv = composePaths(labels["com.docker.compose.project.environment_file"])
 	for _, m := range ic.Mounts {
 		switch {
 		case m.Destination != "/data":
 		case m.Type == "volume":
-			c.Volume, c.DataMount = m.Name, "type=volume,src="+m.Name
+			c.Volume, c.DataMount = m.Name, dataMount("volume", m.Name)
 		case m.Type == "bind":
-			c.DataMount = "type=bind,src=" + m.Source
+			c.DataMount = dataMount("bind", m.Source)
 		}
 	}
 	c.URL, c.Default, c.Unchecked = containerAddress(ic)
@@ -987,8 +1043,7 @@ func (r *runner) inspectImages(ctx context.Context, ids []string) (map[string]im
 func containerAdvice(c Container, to string) string {
 	image := c.Repo + ":" + to
 	if c.Compose != "" {
-		return fmt.Sprintf("Upgrade it with Compose (%s): back up its volume as docs/docker.md shows, set the image to %s in the project %s's Compose file, then: docker compose up -d",
-			docsDocker, image, shq(c.Compose))
+		return composeAdvice(c, to)
 	}
 	name, old := shq(c.Name), shq(c.Name+"-old")
 	chain, after := containerSteps(c, to)
@@ -1002,6 +1057,132 @@ func containerAdvice(c Container, to string) string {
 		advice += fmt.Sprintf(". It was also given what this docker run does not carry — %s — which docker inspect %s shows: add it to the run", strings.Join(lost, ", "), old)
 	}
 	return advice
+}
+
+// composeAdvice is how a container Compose made is upgraded: through its
+// Compose file, which is the person's, after a backup of the volume it
+// really has (the live run of 0.1.0: "back up its volume as docs/docker.md
+// shows" was copied with docker.md's volume name, `tracepad`, where Compose
+// had named it `<project>_<volume>`, and `docker run` made an empty volume
+// of that name and archived it). The commands name the project and its file,
+// so they work from any directory and never start another project; an image
+// pinned by digest is said, since a new tag before the old digest changes
+// nothing.
+func composeAdvice(c Container, to string) string {
+	image := c.Repo + ":" + to
+	service := composeService(c)
+	where := "the project " + c.Compose + "'s Compose file"
+	switch len(c.ComposeFiles) {
+	case 0:
+	case 1:
+		where = c.ComposeFiles[0]
+	default:
+		where = "whichever of " + strings.Join(c.ComposeFiles, ", ") + " sets it"
+	}
+	set := fmt.Sprintf("set the image of the service %s in %s to %s", service, where, image)
+	if _, digest, ok := strings.Cut(c.Ref, "@"); ok {
+		set += fmt.Sprintf(" — and take its digest off: it is pinned to %s, which Docker runs whatever the tag says. To pin the new one, docker pull %s prints its digest: %s@<that digest>", digest, image, image)
+	}
+	if !composeKnown(c) {
+		// What its labels name does not settle where its files are: a
+		// compose command would read whatever file is where it is run,
+		// and `up -d` there start another project's services under this
+		// name. None is printed; what does not read a Compose file is (the
+		// eighth and ninth reviews of #228).
+		return fmt.Sprintf("Upgrade it with Compose (%s), from the project's own directory: its Compose files are not known here — the container has no label naming them or the project's directory — so no compose command is given, which would read the file of whatever directory it is run in. Stop the service %s, archive its volume: %s; docker pull %s; then %s, and bring the service up again",
+			docsDocker, service, backupStep(c), shq(image), set)
+	}
+	chain, up, start := composeSteps(c, to)
+	return fmt.Sprintf("Upgrade it with Compose (%s). First, as one command — a step that fails stops the ones after it: %s. Then %s, and: %s. Stopped before the image was set: %s",
+		docsDocker, chain, set, up, start)
+}
+
+// composeSteps are a Compose container's commands: the chain that stops it,
+// archives its volume and pulls the release; the `up -d` once its file names
+// the release; and the start for a chain stopped before that. Every value
+// in them that Docker or Compose gave is quoted (the second review of #228).
+func composeSteps(c Container, to string) (chain, up, start string) {
+	compose := composeCommand(c)
+	// Quoted, the placeholder too: pasted, it is a service Compose does not
+	// have, never a redirection (the third review of #228).
+	service := shq(composeService(c))
+	chain = strings.Join([]string{compose + " stop " + service, backupStep(c), "docker pull " + shq(c.Repo+":"+to)}, " && ")
+	return chain, compose + " up -d " + service, compose + " start " + service
+}
+
+// composeKnown is whether a compose command for the container reads its own
+// files wherever it is run: its directory or its files are labelled, and
+// every file and env file named is absolute.
+func composeKnown(c Container) bool {
+	if c.ComposeDir == "" && len(c.ComposeFiles) == 0 {
+		return false
+	}
+	for _, f := range append(slices.Clone(c.ComposeFiles), c.ComposeEnv...) {
+		if !filepath.IsAbs(f) {
+			return false
+		}
+	}
+	return true
+}
+
+// composeService is the container's Compose service, or the placeholder
+// the person fills in when it has no label saying it: one place, so the
+// prose and the commands name it alike (the fourth review of #228).
+func composeService(c Container) string {
+	if c.Service == "" {
+		return "<its service>"
+	}
+	return c.Service
+}
+
+// backupStep archives a stopped container's /data from busybox into the
+// directory the person runs it in, never over an earlier archive, readable
+// by them alone (umask 077). busybox writes the archive to its output and
+// the person's shell into the file: no directory of theirs is mounted, so its
+// name — a colon, a comma — is never docker's to parse (the ninth review of
+// #228), and the archive's name is a word of their shell, quoted: a version
+// is what a server answered (the second review of #228). A version that is
+// not a release's is not put in the name at all. The shell's file is made
+// before docker runs, so it is NAME.part, and becomes NAME only once docker
+// has written it whole; a failure removes it, and leaves no empty archive
+// that looks like a backup, nor a name a second try is refused (the
+// eleventh review of #228).
+func backupStep(c Container) string {
+	version := c.Version
+	if !IsRelease(version) {
+		version = "backup"
+	}
+	data := c.DataMount
+	if data == "" {
+		data = dataMount("volume", "<its /data volume>")
+	}
+	name := c.Name + "-" + version + ".tar.gz"
+	return fmt.Sprintf("(umask 077 && set -C && if [ -e %[1]s ]; then echo 'an archive of that name is there already' >&2; exit 1; fi && rm -f %[2]s && docker run --rm --mount %[3]s %[4]s tar czf - -C /data . > %[2]s && mv %[2]s %[1]s || { rm -f %[2]s; exit 1; })",
+		shq(name), shq(name+".part"), shq(data), busybox)
+}
+
+// dataMount is a /data of the given type and source, read-only, written as
+// docker reads --mount, CSV: a source with a comma or a quote stays one field
+// (the fifth review of #228).
+func dataMount(typ, src string) string {
+	return csvField("type="+typ, "src="+src, "dst=/data", "readonly")
+}
+
+// composeCommand is `docker compose` for a container's project, from any
+// directory: its name, its env files, its files, and its directory when that
+// is not the first file's.
+func composeCommand(c Container) string {
+	cmd := "docker compose -p " + shq(c.Compose)
+	if c.ComposeDir != "" && (len(c.ComposeFiles) == 0 || c.ComposeDir != filepath.Dir(c.ComposeFiles[0])) {
+		cmd += " --project-directory " + shq(c.ComposeDir)
+	}
+	for _, f := range c.ComposeEnv {
+		cmd += " --env-file " + shq(f)
+	}
+	for _, f := range c.ComposeFiles {
+		cmd += " -f " + shq(f)
+	}
+	return cmd
 }
 
 // notCarried names every setting a container has that its run does not
@@ -1021,20 +1202,11 @@ func notCarried(c Container) []string {
 // nothing after it), and the sentences for after it.
 func containerSteps(c Container, to string) (chain string, after []string) {
 	image := c.Repo + ":" + to
-	version := c.Version
-	if version == "" {
-		version = "backup"
-	}
-	data := c.DataMount
-	if data == "" {
-		data = "type=volume,src=<its /data volume>"
-	}
 	name, old := shq(c.Name), shq(c.Name+"-old")
 	steps := []string{
 		"docker stop " + name,
-		// set -C: an earlier backup of the same name is never written over.
-		fmt.Sprintf("docker run --rm --mount %s,dst=/data,readonly -v \"$PWD:/backup\" %s sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/%s-%s.tar.gz'", shq(data), busybox, c.Name, version),
-		"docker pull " + image,
+		backupStep(c),
+		"docker pull " + shq(image),
 		fmt.Sprintf("docker rename %s %s", name, old),
 	}
 	if c.Run == nil {
@@ -1047,7 +1219,12 @@ func containerSteps(c Container, to string) (chain string, after []string) {
 	run := []string{"docker run -d --name", name}
 	env := shq(c.Name + ".upgrade.env")
 	if len(c.EnvNames) > 0 {
-		steps = append(steps, fmt.Sprintf("(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s | grep -E '^(%s)=' > %s)", old, strings.Join(c.EnvNames, "|"), env))
+		// The names are Docker's: quoted for the shell, and for grep.
+		names := make([]string, len(c.EnvNames))
+		for i, n := range c.EnvNames {
+			names[i] = regexp.QuoteMeta(n)
+		}
+		steps = append(steps, fmt.Sprintf("(umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s | grep -E %s > %s)", old, shq("^("+strings.Join(names, "|")+")="), env))
 		run = append(run, "--env-file", env)
 	}
 	for _, a := range c.Run {

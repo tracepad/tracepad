@@ -3,9 +3,11 @@
 package upgrade
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -510,8 +512,9 @@ func TestAWayBackRefusedOnAPreconditionStopsNothing(t *testing.T) {
 }
 
 // An older tracepad first on PATH runs nothing (the eighth review): the plan
-// names it with what upgrades it, and does not call anything behind — exit
-// 0, not the 4 the install script reads as "still running an older version".
+// names it with what upgrades it, in a note, and does not call anything
+// behind — exit 0, not the 4 the install script reads as "still running an
+// older version".
 func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
@@ -524,8 +527,8 @@ func TestAnOlderBinaryElsewhereIsNamedNotCounted(t *testing.T) {
 	scriptBinary(t, brew, fOld)
 	deps.LookPath = func(string) string { return brew }
 	plan, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
-	if code != exitOK || !strings.Contains(strings.Join(plan.Person, "\n"), "first on PATH") {
-		t.Errorf("%d %s %q", code, plan.Summary, plan.Person)
+	if code != exitOK || !strings.Contains(strings.Join(plan.Notes, "\n"), "comes first on PATH: "+brew+" ("+fOld+")") || len(plan.Person) > 0 {
+		t.Errorf("%d %s %q %q", code, plan.Summary, plan.Person, plan.Notes)
 	}
 }
 
@@ -1128,5 +1131,84 @@ func TestAProcessIsItsPIDAndItsStart(t *testing.T) {
 	w.host.unreadable[p.PID] = true
 	if _, err := r.isServer(p.PID, 0, w.data, spec); err == nil {
 		t.Error("one of this user's that cannot be read: no error")
+	}
+}
+
+// Counts not compared are said by the check in one sentence, whatever its
+// verdict, with the reason the read before the stop found (the fourth and
+// fifth reviews of #228): no key, and a server that exits (exit 3) or does
+// not answer (exit 4); a key the old server refused. The run's notes do not
+// say it again.
+func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
+	t.Parallel()
+	const noKeyNote = "the trace counts were not compared: no TRACEPAD_API_KEY in the environment"
+	for name, c := range map[string]struct {
+		to      string
+		key     bool
+		slow    bool
+		refused bool
+		code    int
+		want    string
+	}{
+		"no key, a server that exits":           {to: fBroken, code: exitWentBack, want: noKeyNote},
+		"no key, a server that does not answer": {to: fNew, slow: true, code: exitDecide, want: noKeyNote},
+		"a key the old server refused": {to: fNew, key: true, refused: true, code: exitOK,
+			want: "the trace counts were not compared: /api/v1/system answered HTTP 401"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			w := newFakeWorld(t, 2)
+			deps := w.deps()
+			if !c.key {
+				deps.Getenv = func(string) string { return "" }
+			}
+			if c.refused {
+				w.host.mu.Lock()
+				w.host.uncounted[fOld] = true
+				w.host.mu.Unlock()
+			}
+			deps.HealthWait = 300 * time.Millisecond
+			// Not answering is a request past the client's deadline,
+			// kept short: the wait is the test's whole length.
+			deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 500 * time.Millisecond}
+			deps.Fault = func(point string) error {
+				if c.slow && point == stepStarted {
+					w.host.setSlow(2 * time.Second)
+				}
+				return nil
+			}
+			rep, code := runIn(t, context.Background(), deps, "--to", c.to, "--data-dir", w.data)
+			w.host.setSlow(0)
+			if code != c.code || rep.Check == nil || rep.Check.CountNote != c.want ||
+				strings.Contains(strings.Join(rep.Notes, "\n"), "not compared") {
+				t.Fatalf("exit %d, %s, check %+v, notes %q", code, rep.Summary, rep.Check, rep.Notes)
+			}
+		})
+	}
+}
+
+// A tracepad first on PATH is a fact, in a note, sorted into neither "Yours,
+// to do" nor "Yours, nothing to do" (the eighth and ninth reviews of #228):
+// Homebrew's at the target, an older one first on PATH.
+func TestATracepadFirstOnPathIsANoteOnly(t *testing.T) {
+	t.Parallel()
+	cellar := filepath.Join(t.TempDir(), "Cellar", "tracepad", "0.2.0", "bin")
+	_ = os.MkdirAll(cellar, 0o755)
+	scriptBinary(t, filepath.Join(cellar, "tracepad"), "0.2.0")
+	first := filepath.Join(t.TempDir(), "tracepad")
+	scriptBinary(t, first, "0.1.0")
+	deps := containerDeps(t, newFakeDocker(t))
+	deps.InstallDir = cellar
+	deps.LookPath = func(string) string { return first }
+	var out bytes.Buffer
+	run(context.Background(), Options{Args: []string{"--plan"}, Stdout: &out, Stderr: io.Discard}, deps)
+	text := out.String()
+	_, notes, _ := strings.Cut(text, "\nNotes:\n")
+	if strings.Count(text, first) != 1 || !strings.Contains(notes, "another tracepad comes first on PATH: "+first+" (0.1.0)") {
+		t.Errorf("%s", text)
+	}
+	rep, _ := runReport(t, deps, "--plan")
+	if rep.Binary.First != first || rep.Binary.FirstVersion != "0.1.0" || !rep.Binary.Idle {
+		t.Errorf("%+v", rep.Binary)
 	}
 }

@@ -752,10 +752,12 @@ func (r *runner) watch(pid int, start int64, dataDir string, spec ServerSpec) (f
 }
 
 // checkWatched is a check of a server this invocation did not start.
-func (r *runner) checkWatched(ctx context.Context, base, want string, before *int64, pid int, start int64, dataDir string, spec ServerSpec) Checked {
+func (r *runner) checkWatched(ctx context.Context, base, want string, before counted, pid int, start int64, dataDir string, spec ServerSpec) Checked {
 	alive, err := r.watch(pid, start, dataDir, spec)
 	if err != nil {
-		return Checked{Before: before, Verdict: verdictDecide, Why: err.Error()}
+		c := before.checked()
+		c.Verdict, c.Why = verdictDecide, err.Error()
+		return c
 	}
 	return r.confirm(r.check(ctx, base, want, before, alive), pid, start, dataDir, spec)
 }
@@ -798,10 +800,10 @@ func (j *job) checkBack(ctx context.Context, started Started, pid int, start int
 	}
 	var c Checked
 	if started != nil {
-		c = j.r.check(ctx, ps.URL, j.st.From, j.st.CountBefore, running(started))
+		c = j.r.check(ctx, ps.URL, j.st.From, j.st.before(), running(started))
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	} else {
-		c = j.r.checkWatched(ctx, ps.URL, j.st.From, j.st.CountBefore, pid, start, ps.DataDir, j.spec)
+		c = j.r.checkWatched(ctx, ps.URL, j.st.From, j.st.before(), pid, start, ps.DataDir, j.spec)
 	}
 	j.rep.BackCheck = &c
 	return checked(j.st.From+" started again but is not healthy", c)
@@ -942,7 +944,7 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 				pid, start = holder, 0
 			}
 		}
-		c = r.checkWatched(ctx, ps.URL, st.To, st.CountBefore, pid, start, ps.DataDir, spec)
+		c = r.checkWatched(ctx, ps.URL, st.To, st.before(), pid, start, ps.DataDir, spec)
 		c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	case kindContainer:
 		cs := st.Container
@@ -960,7 +962,7 @@ func (r *runner) checkMode(ctx context.Context) (rep *Report) {
 			rep.ExitCode, rep.Summary = exitRefused, fmt.Sprintf("Refused: the container named %s: %s; nothing was recorded.", cs.Name, why)
 			return rep
 		}
-		c = r.checkContainer(ctx, cs.URL, st.To, st.CountBefore, cs.NewID, false)
+		c = r.checkContainer(ctx, cs.URL, st.To, st.before(), cs.NewID, false)
 	default:
 		rep.ExitCode, rep.Summary = exitRefused, "Refused: a run of the binary alone has no server to check."
 		return rep

@@ -23,11 +23,14 @@ import (
 // Binary is the installed binary: what the install script and this command
 // put at <install dir>/tracepad.
 type Binary struct {
-	Path    string
-	Exists  bool
+	Path string
+	// Kind is what it is, which the plan's table (binaryTodo) turns into
+	// what is printed and whether it is the person's to do.
+	Kind    binaryKind
 	Version string
-	// Ours is whether the command may replace it; Reason says why not.
-	Ours   bool
+	// Link is where the install path links to, when it is a link.
+	Link string
+	// Reason says why it is not the command's to replace.
 	Reason string
 	// First is the `tracepad` first on PATH when that is another one, and
 	// what it says it is.
@@ -35,6 +38,27 @@ type Binary struct {
 	FirstVersion string
 	FirstErr     error
 }
+
+// binaryKind is what the binary at the install path is, one of a closed set
+// decided in one place, installedBinary, in this order: a package manager's
+// before anything else, so a link into its tree is never taken for a
+// person's link or a development build (the fifth review of #228).
+type binaryKind int
+
+const (
+	binNone       binaryKind = iota // nothing there
+	binUnread                       // its path could not be read: not checked
+	binOdd                          // not a file
+	binPackaged                     // a package manager's: a file or a link in its tree
+	binLinked                       // a link of the person's
+	binSilent                       // a file that does not say its version
+	binDev                          // a file that says a version no release has
+	binUnwritable                   // a file, or a development build's link, in a directory this user cannot write
+	binOurs                         // a release's file the command replaces
+)
+
+// Ours is whether the command may replace it.
+func (b Binary) Ours() bool { return b.Kind == binOurs }
 
 // Server is a `tracepad serve` process this user runs.
 type Server struct {
@@ -377,37 +401,60 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	// Lstat: a link there is someone else's install (a package manager's),
 	// never replaced with a file (the final review).
 	st, err := os.Lstat(b.Path)
+	link := err == nil && st.Mode()&os.ModeSymlink != 0
+	// Whose it is, asked once: of where it is, and for a link of where it
+	// leads too — a link from ~/.local/bin into Homebrew's Cellar is
+	// Homebrew's binary (the seventh review of #228).
+	pm := packageManager(canonicalPath(b.Path))
+	if pm == "" && link {
+		if real, rerr := filepath.EvalSymlinks(b.Path); rerr == nil {
+			pm = packageManager(real)
+		}
+	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		b.Reason = "no binary is installed at " + b.Path
+		b.Kind, b.Reason = binNone, "no binary is installed at "+b.Path
 	case err != nil:
-		b.Reason = err.Error()
-	case st.Mode()&os.ModeSymlink != 0:
-		b.Exists = true
-		target, _ := os.Readlink(b.Path)           // ignored: the message's; a link is the person's either way
-		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
-		b.Reason = b.Path + " is a symbolic link to " + target + ": its owner's to replace"
-	case !st.Mode().IsRegular():
-		b.Exists = true
-		b.Reason = b.Path + " is not a regular file"
-	case packageManager(canonicalPath(b.Path)) != "":
-		// A package manager's file, though not a link: replaced under it,
-		// the manager's record and the binary part (the ninth review).
-		b.Exists = true
+		// Not checked, and said so, as anything else the plan could not
+		// look at: no step of the person's (the sixth review of #228).
+		b.Kind, b.Reason = binUnread, err.Error()
+	case pm != "" && (link || st.Mode().IsRegular()):
+		// A package manager's, a link into its tree or a file: replaced
+		// under it, the manager's record and the binary part (the ninth
+		// review), whatever version it says. Anything else there is not a
+		// file, below.
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a package manager's binary is the person's either way
-		b.Reason = b.Path + " is " + packageManager(canonicalPath(b.Path))
+		b.Kind, b.Reason = binPackaged, b.Path+" is "+pm
+	case link:
+		target, _ := os.Readlink(b.Path) // ignored: the message's; a link is the person's either way
+		if target != "" && !filepath.IsAbs(target) {
+			// Named from the link's directory, which the reader is not in
+			// (the fourth review of #228).
+			target = filepath.Join(filepath.Dir(b.Path), target)
+		}
+		b.Link = target
+		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
+		b.Kind, b.Reason = binLinked, b.Path+" is a symbolic link to "+target+": its owner's to replace"
+		if b.Version != "" && !IsRelease(b.Version) && !writableDir(filepath.Dir(b.Path)) {
+			// The install script's line, which replaces the link, could
+			// not write there (the ninth review of #228).
+			b.Kind, b.Reason = binUnwritable, b.Reason+"; "+filepath.Dir(b.Path)+" is not writable by this user"
+		}
+	case !st.Mode().IsRegular():
+		b.Kind, b.Reason = binOdd, b.Path+" is not a regular file"
 	default:
-		b.Exists = true
 		b.Version, err = r.deps.Version(ctx, b.Path)
 		switch {
 		case err != nil:
-			b.Reason = b.Path + " does not run here: " + err.Error()
-		case !IsRelease(b.Version):
-			b.Reason = fmt.Sprintf("%s says it is %q, a development build", b.Path, b.Version)
+			b.Kind, b.Reason = binSilent, b.Path+" does not run here: "+err.Error()
 		case !writableDir(filepath.Dir(b.Path)):
-			b.Reason = filepath.Dir(b.Path) + " is not writable by this user"
+			// Before a development build: the install script's line could
+			// not write there either (the ninth review of #228).
+			b.Kind, b.Reason = binUnwritable, filepath.Dir(b.Path)+" is not writable by this user"
+		case !IsRelease(b.Version):
+			b.Kind, b.Reason = binDev, fmt.Sprintf("%s says it is %q, a development build", b.Path, b.Version)
 		default:
-			b.Ours = true
+			b.Kind = binOurs
 		}
 	}
 	if first := r.deps.LookPath("tracepad"); first != "" && !sameFile(first, b.Path) {

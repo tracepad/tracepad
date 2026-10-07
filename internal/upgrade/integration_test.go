@@ -54,7 +54,7 @@ func builtBinaries(t *testing.T) string {
 		t.Skip("builds the binary twice")
 	}
 	buildOnce.Do(func() {
-		buildDir, buildErr = os.MkdirTemp("", "tracepad-upgrade-bin-")
+		buildDir, buildErr = packageTempDir("tracepad-upgrade-bin-")
 		if buildErr != nil {
 			return
 		}
@@ -612,7 +612,10 @@ func TestWithoutAKeyTheCountsAreNotCompared(t *testing.T) {
 	w.start()
 	delete(w.env, "TRACEPAD_API_KEY")
 	rep, code := w.run(w.deps(), "--to", vNew, "--data-dir", w.data)
-	if code != exitOK || rep.Check == nil || rep.Check.CountNote == "" {
+	// Said in as many words, once, by the check (the live run of 0.1.0;
+	// the second review of #228).
+	if code != exitOK || rep.Check == nil || rep.Check.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" ||
+		strings.Contains(strings.Join(rep.Notes, "\n"), "TRACEPAD_API_KEY") {
 		t.Fatalf("exit %d, %+v", code, rep)
 	}
 }

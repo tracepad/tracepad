@@ -21,6 +21,13 @@ SCRIPT_URL=https://tracepad.github.io/tracepad/install.sh
 AGENT_LINE='Set up Tracepad for this project: follow https://tracepad.github.io/tracepad/agent-setup.md'
 UPGRADE_PAGE=https://tracepad.github.io/tracepad/agent-upgrade.md
 
+# q quotes a word for the shell, for a command this script prints: a path is
+# the person's to choose, and one with a quote, a space or a `$(` in it must
+# paste as itself (the second review of #228).
+q() {
+	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 say() { printf '%s\n' "$*"; }
 fail() {
 	printf 'tracepad install: %s\n' "$*" >&2
@@ -69,10 +76,16 @@ no_stable() {
 			say "The newest release is $candidate. To install it:"
 		else
 			say "The releases are listed at https://github.com/$REPO/releases. To install one:"
-			candidate="<version>"
+			# Quoted: pasted unfilled, a version no release has, never a
+			# redirection (the eighth review of #228).
+			candidate="'<version>'"
 		fi
+		# Into the directory named, quoted, as the line that installs over a
+		# newer binary does.
+		into=""
+		[ -z "${TRACEPAD_INSTALL_DIR:-}" ] || into=" TRACEPAD_INSTALL_DIR=$(q "$TRACEPAD_INSTALL_DIR")"
 		say ""
-		say "  curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$candidate sh"
+		say "  curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$candidate$into sh"
 	} >&2
 	exit 1
 }
@@ -200,9 +213,14 @@ skill_into() {
 # (spec 054 #15): each server and container, whose it is, and what to do. Its
 # report escapes what other programs supplied. Fifteen seconds at most: this is
 # advice, not a step that may hang: the watchdog's SIGTERM ends it with exit 1
-# and no verdict. plan_status is its exit status: 10 or 4 when something runs
-# older, 0 when nothing does, 2 from a binary from before the command; anything
-# else — a refusal, the watchdog — is "could not check", never "runs older".
+# and no verdict, its first line "Interrupted: …" — every release's plan says
+# that to a SIGTERM — or, before the plan's handler is in place (a first
+# start held by a scan), with 143 and nothing said. The watchdog is the only
+# sender of SIGTERM here, so either is how the timeout is told, with no race
+# between two processes (the reviews of #228).
+# plan_status is its exit status: 10 or 4 when something runs older, 0 when
+# nothing does, 2 from a binary from before the command; anything else — a
+# refusal, the watchdog — is "could not check", never "runs older".
 plan() {
 	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
@@ -276,7 +294,10 @@ main() {
 		# database the newer binary ran on may be migrated past this one.
 		headline="tracepad $before is installed at $bin, newer than the newest stable release, $version: nothing changed"
 		verified="unchanged"
-		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$version sh"
+		# Into the directory it speaks of, quoted (the seventh review of #228).
+		over="TRACEPAD_VERSION=$version"
+		[ -z "${TRACEPAD_INSTALL_DIR:-}" ] || over="$over TRACEPAD_INSTALL_DIR=$(q "$dir")"
+		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | $over sh"
 		version="$before"
 	else
 		existed=no
@@ -312,20 +333,22 @@ main() {
 		first="$(command -v tracepad 2>/dev/null || true)"
 		if [ -n "$first" ] && [ "$first" != "$bin" ]; then
 			say ""
-			say "Another tracepad comes first on your PATH: $first. Remove it, or run $bin."
+			say "Another tracepad comes first on your PATH: $first. Remove it, or run $(q "$bin")."
 		fi
 		;;
 	*)
 		say ""
 		say "$dir is not on your PATH. Add it in your shell's profile (~/.zshrc, ~/.bashrc), then open a new terminal:"
-		say "  export PATH=\"$dir:\$PATH\""
+		say "  export PATH=$(q "$dir"):\"\$PATH\""
 		;;
 	esac
 
 	# A server or container started from an older version keeps running it
 	# until it is restarted: the binary's plan names each, whose it is, and
 	# what to do. After a downgrade, what runs is newer, and the plan says to
-	# leave it. Not after a first install: nothing of this binary's runs yet.
+	# leave it. Not after a first install: nothing of this binary's runs yet
+	# (the agent's bridge removes its binary first, so it is always one, and
+	# runs its own plan next).
 	plan_status=none
 	if [ "$change" != installed ]; then
 		plan
@@ -341,8 +364,12 @@ main() {
 			;;
 		0/* | 2/*) ;;
 		*)
+			# Why, in the plan's own first line, or the watchdog's: a new
+			# binary's first connection may wait on a firewall or a scan.
+			why="$(head -n 1 "$tmp/plan")"
+			case "$plan_status/$why" in 143/* | */Interrupted:*) why="it did not finish in 15 seconds" ;; esac
 			say ""
-			say "Could not check what still runs an older version; to see it: $bin upgrade --plan"
+			say "Could not check what still runs an older version (${why:-it said nothing}); to see it: $(q "$bin") upgrade --plan"
 			;;
 		esac
 	fi

@@ -75,17 +75,16 @@ func testImages(t *testing.T, d Docker) {
 			return
 		}
 		arch := strings.TrimSpace(string(out))
-		atExit = append(atExit, func() {
+		onExit(func() {
 			for _, v := range []string{vOld, vNew, vBroken} {
 				_, _ = d.Run(context.Background(), "image", "rm", "ghcr.io/tracepad/tracepad:"+v) // ignored: the test's own tags; one in use stays
 			}
 		})
-		dir, err := os.MkdirTemp("", "tracepad-upgrade-images-")
+		dir, err := packageTempDir("tracepad-upgrade-images-")
 		if err != nil {
 			imagesErr = err
 			return
 		}
-		defer os.RemoveAll(dir)
 		for _, v := range []string{vOld, vNew, vBroken} {
 			ctxDir := filepath.Join(dir, v)
 			_ = os.MkdirAll(filepath.Join(ctxDir, "data"), 0o700)

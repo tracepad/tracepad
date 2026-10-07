@@ -632,8 +632,13 @@ says why, and gives the steps below with its name, its volume and the release
 filled in, and the `docker run` it was created with — its ports, mounts,
 restart policy, labels and command, read from `docker inspect` — the variables
 it was given passed in a file read from Docker, named and never printed. A
-Compose project takes the new tag in its Compose file and `docker compose up
--d`, after the same backup.
+Compose project gets the same backup with its own names — the service stopped
+through its project and file (`docker compose -p <project> -f <file> stop
+<service>`, with `--env-file` for each env file the project was started
+with), the volume Compose made archived — then the new tag in its
+Compose file (a `@sha256:` digest after the old tag taken off: Docker runs the
+digest whatever the tag says) and `docker compose -p <project> -f <file> up -d
+<service>`.
 
 Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
@@ -641,8 +646,11 @@ one before it worked, so a backup that is refused stops everything after it:
 
 ```sh
 docker stop tracepad &&
-docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz' &&
+(umask 077 && set -C && f="tracepad-$(date +%F).tar.gz" &&
+  if [ -e "$f" ]; then echo "$f is there already" >&2; exit 1; fi &&
+  rm -f "$f.part" &&
+  docker run --rm -v tracepad:/data:ro busybox tar czf - -C /data . > "$f.part" &&
+  mv "$f.part" "$f" || { rm -f "$f.part"; exit 1; }) &&
 docker pull ghcr.io/tracepad/tracepad:X.Y.Z &&
 docker rename tracepad tracepad-old &&
 (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-old \
@@ -651,6 +659,21 @@ docker run -d --name tracepad --env-file tracepad.upgrade.env -p 127.0.0.1:4318:
   -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve &&
 rm tracepad.upgrade.env
 ```
+
+**Under Compose the volume is not called `tracepad`.** Compose names it
+`<project>_<volume>` — `tracepad_tracepad_data` for a volume `tracepad_data`
+in a project `tracepad` — and `-v tracepad:/data` copied from here makes a new,
+empty volume called `tracepad` and archives that: a backup that says it worked
+and holds nothing. Read the name before the backup, and put it in place of
+`tracepad` in `-v tracepad:/data`:
+
+```sh
+docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' <container>
+docker volume ls     # every volume, with Compose's names
+```
+
+`tracepad upgrade --plan` prints the steps with the real name, the service and
+the Compose file filled in.
 
 `X.Y.Z` is the release you are moving to; the variables are the ones you gave
 the container, read from Docker into a file that holds its keys and is removed
@@ -664,10 +687,15 @@ Stopped after it, put the old one back:
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
 readable by its owner alone; it is the whole database, and without it the file
-lands in your directory as readable as that directory lets it be. `set -C`
-keeps it from writing over an earlier backup of the same name. Restoring is the
-same command the other way round, `tar xzf - -C /data < /backup/<the file>`,
-into a stopped container's volume mounted without `readonly`.
+lands in your directory as readable as that directory lets it be. An earlier
+backup of the same name stops it rather than being written over. busybox
+writes the archive to its output and your shell writes the file, so no
+directory of yours is mounted into the container; the file is `….part` until
+docker has written it whole, so a backup that fails — docker not answering,
+the image not pulled — leaves no empty archive that looks like one, and the
+same command can simply be run again. Restoring is the same the other way round,
+`docker run --rm -i -v tracepad:/data busybox tar xzf - -C /data < <the file>`,
+into a stopped container's volume.
 
 **One server per volume.** The server holds a lock on `tracepad.db.lock`, beside the
 database, for as long as it runs, and a second one started on the same

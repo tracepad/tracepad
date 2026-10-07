@@ -15,7 +15,37 @@ their own headings.
 
 - The links to the documentation that the install script, `tracepad upgrade` and
   the agent skill print pointed at pages under the site's root, which does not
-  hold them; they now go to `latest/`.
+  hold them; they now go to `latest/`, and the gate holds each link's page and
+  heading to `docs/`.
+- `tracepad upgrade --plan` gives a Compose container whole commands: the
+  service stopped through its project and Compose file (`-p`, `-f`), the volume
+  Compose really named archived — the old advice, copied, archived an empty
+  volume called `tracepad` — the file to edit, and `up -d`. An image pinned by
+  digest is said, since Docker keeps the digest whatever the new tag says.
+- Every command `tracepad upgrade` and the install script print quotes the
+  values it did not choose — names, paths, labels, a version a server
+  answered — so pasting one runs nothing but the command.
+- The plan lists what is yours and needs nothing apart from what needs you,
+  says when the trace counts will not be compared and why, and gives a
+  development build at the install path the line that replaces it, exiting
+  `4` (yours to do) rather than `0`; a package manager's binary there is
+  always given its manager's command.
+- The install script's check of what still runs an older version no longer
+  goes to the network, which a firewall could hold past its fifteen seconds,
+  and says why when it cannot check.
+- The agent skill: its shell works in zsh (`path=` emptied `PATH` there, and
+  the upgrade's `--to` stayed one word), a failed container start in setup is
+  removed so the next try can take the name, it names no stale release
+  candidate, it replaces a binary older than itself first, and the release it
+  fetches to plan with stays in one directory, which a firewall asks about once.
+
+### Changed
+
+- `tracepad version --json` gives the commit the build was made from beside
+  the version, as the log's first line does; `tracepad version` still prints
+  the version alone. Any other argument is now a usage error (exit `2`,
+  nothing on stdout) rather than ignored.
+- `docs/configuration.md` says what reaches the network: the server nothing.
 
 ## [0.1.0] - 2026-10-06
 

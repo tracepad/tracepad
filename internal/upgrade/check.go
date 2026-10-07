@@ -34,8 +34,8 @@ type Checked struct {
 
 // check asks the server at base, while alive says it runs, whether it is
 // version want, and compares its trace count with before (Decision 9).
-func (r *runner) check(ctx context.Context, base, want string, before *int64, alive func() bool) Checked {
-	c := Checked{Before: before}
+func (r *runner) check(ctx context.Context, base, want string, before counted, alive func() bool) Checked {
+	c := before.checked()
 	deadline := r.deps.Now().Add(r.deps.HealthWait)
 	answered := false
 	for {
@@ -74,32 +74,64 @@ func (r *runner) check(ctx context.Context, base, want string, before *int64, al
 		c.Why = fmt.Sprintf("the server runs but has not answered at %s in %s; a migration of a large database runs before it listens", base, r.deps.HealthWait)
 		return c
 	}
-	c.After, c.CountNote = r.traceCount(ctx, base)
+	after, note := r.traceCount(ctx, base)
+	c.After = after
 	switch {
-	case before == nil:
+	case before.n == nil:
 		c.Verdict, c.Why = verdictHealthy, "it answers as "+want
-		if c.CountNote == "" {
-			c.CountNote = "the count before the upgrade was not read, so the counts were not compared"
-		}
 	case c.After == nil:
+		c.Verdict, c.CountNote = verdictDecide, notCompared+note
+		c.Why = "it answers as " + want + ", but its trace count, read before the upgrade, cannot be read now (" + note + ")"
+	case *c.After < *before.n:
 		c.Verdict = verdictDecide
-		c.Why = "it answers as " + want + ", but its trace count, read before the upgrade, cannot be read now (" + c.CountNote + ")"
-	case *c.After < *before:
-		c.Verdict = verdictDecide
-		c.Why = fmt.Sprintf("it answers as %s, but it counts %d traces where there were %d", want, *c.After, *before)
+		c.Why = fmt.Sprintf("it answers as %s, but it counts %d traces where there were %d", want, *c.After, *before.n)
 	default:
-		c.Verdict, c.Why = verdictHealthy, fmt.Sprintf("it answers as %s, with %d traces where there were %d", want, *c.After, *before)
+		c.Verdict, c.Why = verdictHealthy, fmt.Sprintf("it answers as %s, with %d traces where there were %d", want, *c.After, *before.n)
 	}
 	return c
 }
+
+// counted is the trace count read before the stop, or why there is none.
+type counted struct {
+	n   *int64
+	why string
+}
+
+// noKey is why there is no count when no key was given; notCompared heads
+// every note of counts not compared.
+const (
+	noKey       = "no TRACEPAD_API_KEY in the environment"
+	notCompared = "the trace counts were not compared: "
+)
+
+// checked starts every verdict on before: its count, or, when there was
+// none, the note that says so, whatever the verdict — a check that returns
+// before it reads a count says it too — in as many words, with the reason
+// the read before found (the reviews of #228; the live run of 0.1.0 found
+// "no TRACEPAD_API_KEY in the environment" alone unclear).
+func (b counted) checked() Checked {
+	c := Checked{Before: b.n}
+	if b.n == nil {
+		why := b.why
+		if why == "" {
+			why = "the count before the upgrade was not read"
+		}
+		c.CountNote = notCompared + why
+	}
+	return c
+}
+
+// apiKey is the key a trace count is read with: the one place the
+// environment is asked for it.
+func (r *runner) apiKey() string { return r.deps.Getenv("TRACEPAD_API_KEY") }
 
 // traceCount reads `database.rows.traces` of /api/v1/system with the key in
 // TRACEPAD_API_KEY, which is read from the environment and never put on a
 // command line. note says why there is no count.
 func (r *runner) traceCount(ctx context.Context, base string) (*int64, string) {
-	key := r.deps.Getenv("TRACEPAD_API_KEY")
+	key := r.apiKey()
 	if key == "" {
-		return nil, "no TRACEPAD_API_KEY in the environment"
+		return nil, noKey
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

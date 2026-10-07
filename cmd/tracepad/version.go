@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
 	"runtime/debug"
 	"strings"
 
@@ -54,7 +58,22 @@ const shortCommitLen = 7
 // stamp was dropped, which is the mistake the archive check exists to catch;
 // and an image build has no checkout at all (spec 020 #12).
 func buildLabel(ver, stamped string, info *debug.BuildInfo) string {
-	rev, dirty := stamped, false
+	rev, dirty := buildRevision(ver, stamped, info)
+	label := "tracepad " + ver
+	switch {
+	case rev == "":
+	case dirty:
+		label += " (" + rev + ", dirty)"
+	default:
+		label += " (" + rev + ")"
+	}
+	return label
+}
+
+// buildRevision is the commit buildLabel names, short, and whether the tree
+// it was built from had changes.
+func buildRevision(ver, stamped string, info *debug.BuildInfo) (rev string, dirty bool) {
+	rev = stamped
 	if rev == "" && ver == "dev" && info != nil {
 		for _, s := range info.Settings {
 			switch s.Key {
@@ -65,18 +84,38 @@ func buildLabel(ver, stamped string, info *debug.BuildInfo) string {
 			}
 		}
 	}
-	label := "tracepad " + ver
 	if len(rev) > shortCommitLen {
 		rev = rev[:shortCommitLen]
 	}
-	switch {
-	case rev == "":
-	case dirty:
-		label += " (" + rev + ", dirty)"
-	default:
-		label += " (" + rev + ")"
+	return rev, dirty
+}
+
+// versionCommand is `tracepad version` (spec 001 #27). It prints the bare
+// version and nothing else, wherever its output goes: scripts and agents
+// compare it, the install script and `tracepad upgrade` among them — 0.1.0's
+// included, which runs the next release's binary and holds what it prints to
+// the version it downloaded — and an agent's tool may run it on a terminal.
+// `--json` gives the commit too.
+func versionCommand(args []string, ver, stamped string, info *debug.BuildInfo, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "")
+	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
+		fmt.Fprintln(stderr, "usage: tracepad version [--json]")
+		return 2
 	}
-	return label
+	rev, dirty := buildRevision(ver, stamped, info)
+	switch {
+	case *asJSON:
+		_ = json.NewEncoder(stdout).Encode(struct {
+			Version string `json:"version"`
+			Commit  string `json:"commit,omitempty"`
+			Dirty   bool   `json:"dirty,omitempty"`
+		}{ver, rev, dirty}) // ignored: the last thing the command writes
+	default:
+		fmt.Fprintln(stdout, ver)
+	}
+	return 0
 }
 
 // label is buildLabel for this binary.

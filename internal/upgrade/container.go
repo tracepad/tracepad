@@ -130,7 +130,7 @@ const lookScript = `set -e; find /data \( -type l -o -type f -links +1 -o ! -typ
 
 // lookAt looks at a volume, mounted read-only, from one busybox container.
 func (r *runner) lookAt(ctx context.Context, volume string) (volumeLook, error) {
-	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", csvField("type=volume", "src="+volume, "dst=/data", "readonly"), busybox, "sh", "-c", lookScript)
+	out, err := r.deps.Docker.Run(ctx, "run", "--rm", "--mount", dataMount("volume", volume), busybox, "sh", "-c", lookScript)
 	if err != nil {
 		return volumeLook{}, err
 	}
@@ -243,7 +243,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 	var a Archived
 	err = j.act(stepArchived, "archive the volume "+cs.Volume+" into "+archive, func() error {
 		out, err := docker.Run(ctx, "run", "--rm",
-			"--mount", csvField("type=volume", "src="+cs.Volume, "dst=/data", "readonly"),
+			"--mount", dataMount("volume", cs.Volume),
 			"--mount", csvField("type=bind", "src="+j.dir, "dst=/backup"),
 			busybox, "sh", "-c", script)
 		if err != nil {
@@ -312,7 +312,7 @@ func (j *job) swapContainer(ctx context.Context, p *plan) {
 		j.goBack(ctx, "not healthy: "+err.Error())
 		return
 	}
-	c := r.checkContainer(ctx, cs.URL, p.to, st.CountBefore, cs.NewID, true)
+	c := r.checkContainer(ctx, cs.URL, p.to, st.before(), cs.NewID, true)
 	j.verdict(ctx, c)
 }
 
@@ -397,7 +397,7 @@ func (r *runner) containerRunning(ctx context.Context, id string, fresh bool) (b
 // while docker says it runs — a docker that cannot say is not an exit — and,
 // once healthy, read again: what answered must still be the run's container,
 // running.
-func (r *runner) checkContainer(ctx context.Context, base, want string, before *int64, id string, fresh bool) Checked {
+func (r *runner) checkContainer(ctx context.Context, base, want string, before counted, id string, fresh bool) Checked {
 	alive := func() bool {
 		ok, err := r.containerRunning(ctx, id, fresh)
 		return ok || err != nil
@@ -1033,7 +1033,7 @@ func (j *job) checkBackContainer(ctx context.Context, id string, fresh bool) wen
 		return wentBack{ok: true, unconfirmed: true, why: "its check failed: " + err.Error()}
 	}
 	cs := j.st.Container
-	c := j.r.checkContainer(ctx, cs.URL, j.st.From, j.st.CountBefore, id, fresh)
+	c := j.r.checkContainer(ctx, cs.URL, j.st.From, j.st.before(), id, fresh)
 	j.rep.BackCheck = &c
 	return checked(j.st.From+" started again but is not healthy", c)
 }

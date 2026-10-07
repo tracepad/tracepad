@@ -28,11 +28,12 @@ type plan struct {
 	// that this run does not take (another run will).
 	later []string
 	// person are the person's servers and containers, older than to, each
-	// with what to do; binaries, the person's binaries older than to — what
-	// runs older is the first, and only it makes the plan's exit 4 (the
-	// eighth review: an older tracepad first on PATH runs nothing).
-	person   []string
-	binaries []string
+	// with what to do; installed, what the person does with the binary at
+	// the install path (binaryTodo). Both make the plan's exit 4: the
+	// install path is where the command and the skill look (the fifth
+	// review of #228).
+	person    []string
+	installed string
 	// notes are what the plan could not check, said without a verdict.
 	notes []string
 	// ahead: what the command looks after runs past the latest stable
@@ -74,6 +75,18 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		to = latest
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
+	case r.flags.plan && to == r.version && sameFile(r.deps.Self, filepath.Join(r.deps.InstallDir, "tracepad")):
+		// The installed binary planning for its own version, as the install
+		// script asks the binary it just put in place: that release is the
+		// binary, and is not looked up, since a new binary's first
+		// connection may wait on a firewall past the script's fifteen
+		// seconds (the live run of 0.1.0). With no TRACEPAD_INSTALL_DIR the
+		// running binary's directory is the install path, so any binary
+		// planning for the version stamped on it is taken at its word, as
+		// `tracepad version` is everywhere in the command (spec 054 #58
+		// (e)): the lookup would prove nothing of a build stamped with a
+		// release's version. A run, another version, or a binary run from
+		// elsewhere than TRACEPAD_INSTALL_DIR names, still looks.
 	default:
 		if err := r.deps.Releases.Exists(lctx, to); err != nil {
 			return nil, err.Error()
@@ -85,7 +98,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	// release and the installed binary (the final review): a candidate
 	// installed is not gone back from, and a server behind it is not taken
 	// to it unasked.
-	if b := p.f.Binary; r.flags.to == "" && b.Ours {
+	if b := p.f.Binary; r.flags.to == "" && b.Ours() {
 		if order, ok := Compare(b.Version, to); ok && order > 0 {
 			p.latest, p.raised = to, true
 			p.to, to = b.Version, b.Version
@@ -97,7 +110,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 		return nil, err.Error()
 	}
 	bin := p.f.Binary
-	if bin.Ours {
+	if bin.Ours() {
 		order, ok := Compare(to, bin.Version)
 		if !ok {
 			return nil, fmt.Sprintf("the installed binary says %q, which cannot be ordered against %s", bin.Version, to)
@@ -112,7 +125,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	p.from = bin.Version
 	switch {
 	case p.server != nil:
-		if !bin.Ours {
+		if !bin.Ours() {
 			return nil, fmt.Sprintf("server pid %d runs %s, which the command cannot replace: %s", p.server.Proc.PID, bin.Path, bin.Reason)
 		}
 		// A server named that does not say its version — still starting, or
@@ -221,7 +234,7 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 
 func downgrade(to, what, running string) string {
 	return fmt.Sprintf("%s is older than %s, which %s runs: migrations run forward only, and an older binary does not open a database a newer one migrated. "+
-		"The way back from an upgrade is that upgrade's: tracepad upgrade --back <run>", to, running, what)
+		"The way back from an upgrade is that upgrade's: tracepad upgrade --back RUN", to, running, what)
 }
 
 // pickTarget chooses the server or container this run upgrades: the one
@@ -230,10 +243,7 @@ func (r *runner) pickTarget(p *plan) error {
 	// Only what runs older than the target is a choice: two servers already
 	// at it would otherwise keep a plan pending that the upgrade refuses (the
 	// review of #1). A flag still names any of the command's.
-	behind := func(v string) bool {
-		order, ok := Compare(p.to, v)
-		return ok && order > 0
-	}
+	behind := func(v string) bool { return behindTo(p.to, v) }
 	// Behind a raised target, a server is the person's to take there by
 	// naming it: neither picked nor a choice.
 	if p.raised {
@@ -314,13 +324,25 @@ func canonicalDir(dir string) string {
 	return filepath.Clean(dir)
 }
 
+// behindTo and needsNothing are the two answers of the one comparison with
+// the target (the seventh review of #228): behind, a release older than to;
+// needing nothing — what `nothing_to_do` means (spec 054 #55) — a release at
+// to or past it. A version that is not a release's — a development build,
+// one not said — is neither: it may need anything, the binary's install line
+// among them, so it is never marked, and is never called behind.
+func behindTo(to, v string) bool {
+	order, ok := Compare(to, v)
+	return ok && order > 0
+}
+
+func needsNothing(to, v string) bool {
+	order, ok := Compare(to, v)
+	return ok && order <= 0
+}
+
 // othersBehind lists what runs older than the target version and this run
 // does not upgrade: the command's own (for a later run) and the person's.
 func (r *runner) othersBehind(p *plan) {
-	older := func(v string) bool {
-		order, ok := Compare(p.to, v)
-		return ok && order > 0
-	}
 	for i := range p.f.Servers {
 		s := &p.f.Servers[i]
 		switch {
@@ -332,7 +354,7 @@ func (r *runner) othersBehind(p *plan) {
 		case s.Version == "":
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
-		case !older(s.Version):
+		case !behindTo(p.to, s.Version):
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -355,7 +377,7 @@ func (r *runner) othersBehind(p *plan) {
 			p.notes = append(p.notes, fmt.Sprintf("container %s was not checked: %s. Whether it is behind %s is yours to look at: docker exec %s /tracepad version", c.Name, c.Unchecked, p.to, shq(c.Name)))
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
-		case !older(c.Version):
+		case !behindTo(p.to, c.Version):
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -365,53 +387,97 @@ func (r *runner) othersBehind(p *plan) {
 			p.person = append(p.person, fmt.Sprintf("container %s runs %s; %s. %s", c.Name, c.Version, c.Reason, containerAdvice(c, p.to)))
 		}
 	}
-	// A binary runs nothing (#37 (e)): one behind, or one that does not say
-	// its version, is named, and not counted.
-	if b := p.f.Binary; !b.Ours && b.Exists && (b.Version == "" || older(b.Version)) {
-		p.binaries = append(p.binaries, fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason))
+	var note string
+	p.installed, note = r.binaryTodo(p.f.Binary, p.to)
+	if note != "" {
+		p.notes = append(p.notes, note)
 	}
+	// A tracepad first on PATH is another file, which runs nothing: said
+	// as it is, in a note, sorted into nothing (the ninth review of #228,
+	// after three rounds that each sorted it once more).
 	if b := p.f.Binary; b.First != "" {
-		v, err := b.FirstVersion, b.FirstErr
-		if err != nil {
-			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, does not say its version (%v)", b.First, err))
-		} else if older(v) {
-			// What put it there upgrades it: a package manager's, or the
-			// install script's, which installs into any directory it is
-			// given (the live run of rc.3: a binary in ~/.local/bin was told
-			// its package manager upgrades it).
-			script := "the install script upgrades it: " + r.installLine(filepath.Dir(b.First), p.to)
-			advice := script
-			if pm := packageManager(canonicalPath(b.First)); pm != "" {
-				advice = pm
-			} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
-				advice = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
-			}
-			p.binaries = append(p.binaries, fmt.Sprintf("%s, first on PATH, is %s: %s", b.First, v, advice))
+		v := b.FirstVersion
+		if b.FirstErr != nil {
+			v = "it does not say its version"
 		}
+		// What put it there upgrades it: a package manager's, or the
+		// install script's, which installs into any directory it is given
+		// (the live run of rc.3: a binary in ~/.local/bin was told its
+		// package manager upgrades it). Unpinned: the newest stable
+		// release, which the script never steps back from, whatever this
+		// one says (the tenth review of #228: pinned to the target, it
+		// would take a newer one back).
+		script := "the install script: " + r.installLine(filepath.Dir(b.First), "")
+		upgrades := script
+		if pm := packageManager(canonicalPath(b.First)); pm != "" {
+			upgrades = pm
+		} else if strings.HasPrefix(b.First, "/usr/local/bin/") {
+			upgrades = "brew upgrade tracepad, if Homebrew installed it; otherwise " + script
+		}
+		p.notes = append(p.notes, fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades))
 	}
+}
+
+// binaryTodo is the plan's table of the binary at the install path: by its
+// kind (installedBinary), what the person is told to do, or "" for nothing —
+// the command's own, which a run replaces, or one that needs nothing — and a
+// note for one that could not be read, which is not checked, as nothing
+// else the plan could not look at is called behind. Every todo makes the
+// plan's exit 4 (spec 054 #56). A package manager's is upgraded by its
+// manager, whatever it says it is, and never given the install script's line
+// over its link.
+func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
+	switch {
+	case b.Kind == binUnread:
+		return "", fmt.Sprintf("the binary at %s was not checked: %s", b.Path, b.Reason)
+	case b.Kind == binNone || b.Kind == binOurs || needsNothing(to, b.Version):
+		return "", ""
+	case b.Kind == binDev:
+		return fmt.Sprintf("%s says it is %q, a development build, which the command does not replace; to put %s in its place: %s",
+			b.Path, b.Version, to, r.installLine(filepath.Dir(b.Path), to)), ""
+	case b.Kind == binLinked && b.Version != "" && !IsRelease(b.Version):
+		// A build linked from its checkout (the review of #228).
+		return fmt.Sprintf("%s is a link to %s, which says it is %q, a development build; the command replaces no link. The install script puts %s in place of the link, which is then a file (%s itself stays): %s",
+			b.Path, b.Link, b.Version, to, b.Link, r.installLine(filepath.Dir(b.Path), to)), ""
+	}
+	// Packaged, linked, silent, unwritable, odd: its reason says whose and
+	// what upgrades it.
+	return fmt.Sprintf("%s is %s; %s", b.Path, orNone(b.Version), b.Reason), ""
 }
 
 // installLine is the install script's command that puts version to into
 // dir: the directory named unless it is the script's own default.
 func (r *runner) installLine(dir, to string) string {
-	env := "TRACEPAD_VERSION=" + to
-	if dir != filepath.Join(r.deps.Home, ".local", "bin") {
-		env += " TRACEPAD_INSTALL_DIR=" + shq(dir)
+	var env []string
+	if to != "" {
+		env = append(env, "TRACEPAD_VERSION="+to)
 	}
-	return "curl -fsSL https://tracepad.github.io/tracepad/install.sh | " + env + " sh"
+	if dir != filepath.Join(r.deps.Home, ".local", "bin") {
+		env = append(env, "TRACEPAD_INSTALL_DIR="+shq(dir))
+	}
+	return "curl -fsSL https://tracepad.github.io/tracepad/install.sh | " + strings.Join(append(env, "sh"), " ")
 }
 
 func serverAdvice(s Server) string {
-	m := s.Proc.Manager
-	switch {
-	case strings.HasPrefix(m, "the user systemd unit "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: systemctl --user restart %s (%s)", strings.TrimPrefix(m, "the user systemd unit "), docsUpgrading)
-	case strings.HasPrefix(m, "the systemd unit "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: sudo systemctl restart %s (%s)", strings.TrimPrefix(m, "the systemd unit "), docsUpgrading)
-	case strings.HasPrefix(m, "the launchd job "):
-		return fmt.Sprintf("Back up its data directory, install the new binary, then: launchctl kickstart -k gui/$(id -u)/%s (%s)", strings.TrimPrefix(m, "the launchd job "), docsUpgrading)
+	if restart := serviceRestart(s.Proc.Manager); restart != "" {
+		return fmt.Sprintf("Back up its data directory, install the new binary, then: %s (%s)", restart, docsUpgrading)
 	}
 	return "Back it up and restart it yourself (" + docsUpgrading + ")"
+}
+
+// serviceRestart is the command that restarts a service, from the manager
+// a process listing named: the unit's or the job's name is the system's,
+// quoted (the second review of #228).
+func serviceRestart(m string) string {
+	switch {
+	case strings.HasPrefix(m, "the user systemd unit "):
+		return "systemctl --user restart " + shq(strings.TrimPrefix(m, "the user systemd unit "))
+	case strings.HasPrefix(m, "the systemd unit "):
+		return "sudo systemctl restart " + shq(strings.TrimPrefix(m, "the systemd unit "))
+	case strings.HasPrefix(m, "the launchd job "):
+		return "launchctl kickstart -k gui/$(id -u)/" + shq(strings.TrimPrefix(m, "the launchd job "))
+	}
+	return ""
 }
 
 // planMode is `--plan`: what would happen, and nothing done.
@@ -456,7 +522,7 @@ func verdictOf(p *plan) (int, string) {
 		return exitPending, fmt.Sprintf("An upgrade to %s is pending for another of the command's: %s.", p.to, strings.Join(p.later, "; "))
 	case len(p.held) > 0:
 		return exitDecide, fmt.Sprintf("The installed binary is %s, a release candidate past the latest stable release %s, and a server or container runs behind it: yours to take there by naming it, as said below.", p.to, p.latest)
-	case len(p.person) > 0:
+	case len(p.person) > 0 || p.installed != "":
 		return exitDecide, fmt.Sprintf("Nothing of the command's is behind %s; what is, or may be, is yours.", p.to)
 	}
 	switch {
@@ -471,13 +537,27 @@ func verdictOf(p *plan) (int, string) {
 // describe writes the plan's steps, what is the person's, and the next
 // command into the report.
 func (r *runner) describe(p *plan, rep *Report) {
+	// Idle is needsNothing of each entry's own version; never the target,
+	// which is behind by its choice (the reviews of #228).
 	for i := range rep.Servers {
-		rep.Servers[i].Target = p.server != nil && rep.Servers[i].PID == p.server.Proc.PID
+		s := &rep.Servers[i]
+		s.Target = p.server != nil && s.PID == p.server.Proc.PID
+		s.Idle = !s.Target && needsNothing(p.to, s.Version)
 	}
 	for i := range rep.Containers {
-		rep.Containers[i].Target = p.container != nil && rep.Containers[i].Name == p.container.Name
+		c := &rep.Containers[i]
+		c.Target = p.container != nil && c.Name == p.container.Name
+		c.Idle = !c.Target && needsNothing(p.to, c.Version)
 	}
-	rep.Person = append(append(append(rep.Person, p.held...), p.person...), p.binaries...)
+	if rep.Binary != nil {
+		// Its own version alone: a tracepad first on PATH is another file,
+		// with a line of its own (the seventh review of #228).
+		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version)
+	}
+	rep.Person = append(append(rep.Person, p.held...), p.person...)
+	if p.installed != "" {
+		rep.Person = append(rep.Person, p.installed)
+	}
 	rep.Notes = append(rep.Notes, p.notes...)
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
@@ -492,8 +572,8 @@ func (r *runner) describe(p *plan, rep *Report) {
 		steps = append(steps, fmt.Sprintf("download tracepad %s and check it against the release's checksums.txt (and its attestation when gh is logged in)", p.to))
 	}
 	count := "read the trace count with TRACEPAD_API_KEY, to compare after"
-	if r.deps.Getenv("TRACEPAD_API_KEY") == "" {
-		count = "no TRACEPAD_API_KEY in the environment: the trace counts will not be compared"
+	if r.apiKey() == "" {
+		count = noKey + ": the trace counts will not be compared"
 	}
 	switch {
 	case p.server != nil:

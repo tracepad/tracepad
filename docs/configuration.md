@@ -85,6 +85,27 @@ does not warn about one left exported.
 
 See [install.md](install.md#with-the-install-script).
 
+## What reaches the network
+
+**The server reaches nothing.** It sends no telemetry, checks for no update and
+asks no other host anything: it answers the requests it is sent, and that is
+all. Its web interface loads nothing from anywhere else either — its content
+security policy allows its own address only — and its links to these pages
+open GitHub when you follow one, not before.
+
+What does go out, and where:
+
+| Who | Where to | When |
+|---|---|---|
+| The CLI and `tracepad mcp` | your server, at `TRACEPAD_URL` (or `--url`) | every command |
+| The Python, Node and Go packages | your server, at `TRACEPAD_URL` | when they export |
+| `tracepad export` | the address you give it, and only that one | when you run it |
+| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the binary at the install path runs it with `--to` its own version, as the install script does |
+| The install script | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`) | when you run it |
+
+`tracepad upgrade` also asks servers and containers on this machine for their
+version, at their own addresses; nothing it reads there leaves the machine.
+
 ## Sending from any OpenTelemetry SDK
 
 These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:

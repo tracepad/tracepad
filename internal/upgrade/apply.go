@@ -263,7 +263,7 @@ func (r *runner) upgrade(ctx context.Context) (rep *Report) {
 	if !p.replaceBinary && p.server == nil && p.container == nil {
 		code, summary := verdictOf(p)
 		rep.ExitCode, rep.Summary = code, "Nothing upgraded by this run. "+summary
-		if bin.Ours {
+		if bin.Ours() {
 			r.reinstallSkill(ctx, rep, bin.Path, p.to)
 		}
 		rep.Next = append(rep.Next, laterOnly(next)...)
@@ -441,12 +441,11 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		} else {
 			base = st.Container.URL
 		}
-		count, note := r.traceCount(ctx, base)
-		st.CountBefore = count
-		if count != nil {
-			j.done("read the trace count: %d", *count)
-		} else {
-			rep.Notes = append(rep.Notes, "the trace counts are not compared: "+note)
+		// Why there is no count is kept with it, and the check says it,
+		// whatever its verdict, in one sentence (the reviews of #228).
+		st.CountBefore, st.CountNote = r.traceCount(ctx, base)
+		if st.CountBefore != nil {
+			j.done("read the trace count: %d", *st.CountBefore)
 		}
 	}
 	// Not written, nothing stopped: a refusal, and the run's directory, which
@@ -874,7 +873,7 @@ func (j *job) swapProcess(ctx context.Context, p *plan) {
 		j.goBack(ctx, "not healthy: "+err.Error())
 		return
 	}
-	c := r.check(ctx, ps.URL, p.to, st.CountBefore, running(started))
+	c := r.check(ctx, ps.URL, p.to, st.before(), running(started))
 	c.LogLine = firstLogLine(ps.Log, ps.LogOffset)
 	// What answered must have opened this data directory: the lock of it
 	// records the new server. A server that resolved its data elsewhere — a

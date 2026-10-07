@@ -106,13 +106,18 @@ func TestABinaryOnPathGetsTheInstallScriptsLine(t *testing.T) {
 	deps := w.deps()
 	deps.LookPath = func(string) string { return first }
 	rep, _ := runIn(t, context.Background(), deps, "--plan", "--to", fNew)
-	want := "the install script upgrades it: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=" + fNew + " TRACEPAD_INSTALL_DIR=" + shq(filepath.Dir(first)) + " sh"
-	if all := strings.Join(rep.Person, "\n"); !strings.Contains(all, want) {
+	// Unpinned: the script never steps back from a newer one (the tenth
+	// review of #228).
+	want := "what upgrades it is the install script: curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_INSTALL_DIR=" + shq(filepath.Dir(first)) + " sh"
+	if all := strings.Join(rep.Notes, "\n"); !strings.Contains(all, want) {
 		t.Errorf("the plan says:\n%s\nnot %s", all, want)
 	}
 	r := &runner{deps: Deps{Home: "/home/a"}}
 	if got := r.installLine("/home/a/.local/bin", "0.2.0"); got != "curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=0.2.0 sh" {
 		t.Errorf("the script's own directory: %s", got)
+	}
+	if got := r.installLine("/home/a/.local/bin", ""); got != "curl -fsSL https://tracepad.github.io/tracepad/install.sh | sh" {
+		t.Errorf("unpinned: %s", got)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -124,7 +125,8 @@ func main() {
 			Now:     time.Now,
 		}))
 	case cmd == "version":
-		fmt.Println(currentVersion())
+		info, _ := debug.ReadBuildInfo()
+		os.Exit(versionCommand(args, currentVersion(), commit, info, os.Stdout, os.Stderr))
 	case cmd == "help", cmd == "-h", cmd == "--help":
 		usage()
 	default:
@@ -154,7 +156,8 @@ func helpText() string {
 Usage:
   tracepad [serve] [flags]   run the server (default command)
   tracepad mcp [flags]       serve MCP over stdio, against a running server
-  tracepad version           print the version
+  tracepad version [--json]  print the version (in JSON, with the commit it
+                             was built from)
   tracepad skills install [--project | --dir DIR] [--force]
                              install the agent skill this binary carries
   tracepad skills show [FILE]

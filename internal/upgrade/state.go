@@ -37,8 +37,10 @@ type State struct {
 	Container *ContainerState `json:"container,omitempty"`
 
 	// CountBefore is the trace count read before the stop; nil when it was
-	// not read (no key, or it could not be).
+	// not read, and CountNote then says why (no key, or what the read
+	// found), for the check to say in its one sentence.
 	CountBefore *int64    `json:"count_before,omitempty"`
+	CountNote   string    `json:"count_note,omitempty"`
 	Archive     *Archived `json:"archive,omitempty"`
 
 	Steps []Step `json:"steps"`
@@ -51,6 +53,9 @@ type State struct {
 	// person to remove.
 	SetAside []string `json:"set_aside,omitempty"`
 }
+
+// before is the count read before the stop, or why there is none.
+func (s *State) before() counted { return counted{n: s.CountBefore, why: s.CountNote} }
 
 // BinaryState is the installed binary's part of a run.
 type BinaryState struct {

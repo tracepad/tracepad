@@ -57,6 +57,10 @@ for the release `0.1.0` that follows it:
 | Go module | tag of the nested module | `sdk/go/v0.1.0-rc.1` | `sdk/go/v0.1.0` |
 | `tracepad version`, the first line of the server's log | semver, without the `v` | `0.1.0-rc.1` | `0.1.0` |
 
+`tracepad version` prints the version alone, which is what scripts compare;
+`tracepad version --json` adds the commit the build was made from, as the log's
+first line has it (`{"version":"0.1.0","commit":"ef3e349"}`).
+
 Python's spelling is the only one that differs from the tag's, and it is derived
 from it (`-rc.N` is `rcN`, `-beta.N` is `bN`, `-alpha.N` is `aN`). A candidate
 moves nothing that says "latest" — not the image's `latest` or `X.Y`, not npm's
@@ -326,6 +330,17 @@ is rolled back at once, one that runs but stays silent is left for you to
 decide, and `tracepad upgrade --back <run>` takes the way back later. Nothing is
 deleted on the way: what a way back replaces is set aside as
 `<data>.after-<run>`. The whole of it is [cli.md](cli.md#upgrade).
+
+A development build in the install directory — one you built and copied or
+linked there, whose `tracepad version` says `dev` or a commit — is yours: the
+command does not replace it, and the plan gives the install script's line
+that puts the release in its place (in place of a link, the link itself; the
+build it points to stays) (`curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=X.Y.Z sh`).
+
+A step that reaches the network and seems to hang — the install script's
+download, the plan's look at the releases — is often an application
+firewall (LuLu, Little Snitch) holding a new binary's first connection until
+its window is answered: look for the window.
 
 **A backup is personal data with no expiry.** A run directory, like any copy
 you take, holds every prompt and completion and the server's environment,

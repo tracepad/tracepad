@@ -477,10 +477,11 @@ func TestTheCheckVerdicts(t *testing.T) {
 	}))
 	defer srv.Close()
 	now := time.Unix(0, 0)
+	key := "tp-sk-x"
 	r := &runner{deps: Deps{HTTP: srv.Client(), HealthWait: 3 * time.Second,
 		Getenv: func(k string) string {
 			if k == "TRACEPAD_API_KEY" {
-				return "tp-sk-x"
+				return key
 			}
 			return ""
 		},
@@ -488,7 +489,7 @@ func TestTheCheckVerdicts(t *testing.T) {
 		Sleep: func(context.Context, time.Duration) error { now = now.Add(time.Second); return nil }}}
 	ctx := context.Background()
 	up := func() bool { return true }
-	n := func(v int64) *int64 { return &v }
+	n := func(v int64) counted { return counted{n: &v} }
 
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictHealthy {
 		t.Errorf("healthy: %+v", c)
@@ -497,10 +498,13 @@ func TestTheCheckVerdicts(t *testing.T) {
 		t.Errorf("fewer: %+v", c)
 	}
 	system = http.StatusInternalServerError
-	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "cannot be read now") {
+	// Read before and not after: the one sentence too, with why (the
+	// fifth review of #228).
+	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "cannot be read now") ||
+		c.CountNote != "the trace counts were not compared: /api/v1/system answered HTTP 500" {
 		t.Errorf("unreadable after: %+v", c)
 	}
-	if c := r.check(ctx, srv.URL, "0.2.0", nil, up); c.Verdict != verdictHealthy {
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{}, up); c.Verdict != verdictHealthy {
 		t.Errorf("not read before: %+v", c)
 	}
 	system = http.StatusOK
@@ -511,8 +515,20 @@ func TestTheCheckVerdicts(t *testing.T) {
 	if c := r.check(ctx, srv.URL, "0.2.0", n(5), func() bool { return false }); c.Verdict != verdictNotHealthy || !strings.Contains(c.Why, "exited") {
 		t.Errorf("exited: %+v", c)
 	}
+	// Counts not compared are said whatever the verdict, with the reason
+	// the read before found (the fourth and fifth reviews of #228): a
+	// verdict that comes before any count read said nothing.
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{}, up); c.Verdict != verdictNotHealthy || c.CountNote != "the trace counts were not compared: the count before the upgrade was not read" {
+		t.Errorf("another version, not read before: %+v", c)
+	}
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{why: noKey}, up); c.CountNote != "the trace counts were not compared: no TRACEPAD_API_KEY in the environment" {
+		t.Errorf("another version, no key: %+v", c)
+	}
 	srv.Close()
-	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "has not answered") {
+	if c := r.check(ctx, srv.URL, "0.2.0", counted{why: "/api/v1/system answered HTTP 401"}, up); c.Verdict != verdictDecide || c.CountNote != "the trace counts were not compared: /api/v1/system answered HTTP 401" {
+		t.Errorf("alive and silent, a key refused before: %+v", c)
+	}
+	if c := r.check(ctx, srv.URL, "0.2.0", n(5), up); c.Verdict != verdictDecide || !strings.Contains(c.Why, "has not answered") || c.CountNote != "" {
 		t.Errorf("alive and silent: %+v", c)
 	}
 }
@@ -660,6 +676,25 @@ func TestTheBridgeIsTemporaryWithNoTMPDIR(t *testing.T) {
 	}
 }
 
+// The skill's bridge lives in a directory that stays the same, under the
+// user's cache, so that a firewall asks of it once (spec 054 #51), named as
+// mktemp names one, tmp.release: every release that knows a bridge, 0.1.0's
+// included, takes a binary there for one and plans for the installed binary
+// (the sixth review of #228: a name of this PR's own was a bridge only to
+// the releases after it).
+func TestTheBridgeInTheCacheIsABridge(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ self, want string }{
+		{"/home/u/.cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
+		{"/srv/cache/tracepad/tmp.release/tracepad", "/home/u/.local/bin"},
+		{"/home/u/.cache/tracepad/tracepad", "/home/u/.cache/tracepad"},
+	} {
+		if got := installDirFor("", "/home/u", c.self, "/tmp"); got != c.want {
+			t.Errorf("%s: %s, want %s", c.self, got, c.want)
+		}
+	}
+}
+
 // The user's temporary directory is asked only when it can matter (the
 // review of #225): a directory named, a binary not called tracepad, or one
 // already found temporary start no getconf.
@@ -676,6 +711,7 @@ func TestTheUsersTempDirIsAskedOnlyWhenItMatters(t *testing.T) {
 		{"", "/home/u/tracepad-backups/r/upgrader", 0},
 		{"", filepath.Join(os.TempDir(), "tmp.Ab12Cd", "tracepad"), 0},
 		{"", "/opt/tools/tracepad", 1},
+		{"", "/home/u/.cache/tracepad/tmp.release/tracepad", 0},
 	} {
 		asked = 0
 		installTemps(tc.named, tc.self)
@@ -774,9 +810,9 @@ func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 	sleeps := 0
-	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour,
+	r := &runner{deps: Deps{HTTP: srv.Client(), Now: time.Now, HealthWait: time.Hour, Getenv: func(string) string { return "" },
 		Sleep: func(context.Context, time.Duration) error { sleeps++; return nil }}}
-	c := r.check(context.Background(), srv.URL, "0.5.1", nil, func() bool { return true })
+	c := r.check(context.Background(), srv.URL, "0.5.1", counted{}, func() bool { return true })
 	if c.Verdict != verdictNotHealthy || c.Health != "9.9.9" || sleeps > 0 {
 		t.Errorf("%+v after %d waits", c, sleeps)
 	}

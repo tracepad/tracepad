@@ -8,8 +8,15 @@ refusal: it says what is the human's.
 
 ## 1. The plan
 
+First `tracepad version` against the skill's `metadata.version`. Older, or a
+development build (`dev`, a commit), and the binary goes first: plan with
+`--to` the skill's version, which says how — the upgrade replaces a release's,
+a package manager's names that manager's command, a development build gets the
+install script's line. A skill that says `dev` names no release: ask which.
+
 With the key in the environment (never on a command line), so the trace counts
-before and after can be compared:
+before and after are compared: `setup.md` keeps it in `.env`; a project that
+keeps it elsewhere (`config/.env.local`, say) has it read from there. Empty, they are not:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH" TRACEPAD_API_KEY="$(sed -n 's/^TRACEPAD_API_KEY=//p' .env 2>/dev/null)"
@@ -18,14 +25,17 @@ tracepad upgrade --plan
 
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
 binary predates the command; plan and upgrade with a release's, fetched into a
-directory of its own (it upgrades the installed one), `v` the version named:
+directory of its own that stays the same, which a firewall that asks once per
+path asks once for, emptied first so a failed download runs no older one; `v` the version named. It plans for the installed binary,
+and leaves one that is not a release's, giving the line that replaces it:
 
 ```sh
-v=; dir="$(mktemp -d)"; curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && "$dir/tracepad" upgrade --plan ${v:+--to "$v"}
+v=; dir="$HOME/.cache/tracepad/tmp.release"; mkdir -p "$dir" && rm -f "$dir/tracepad" && curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null; [ -x "$dir/tracepad" ] || { echo "STOP: the release did not download (curl said why above)"; false; } && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi
 ```
 
 The exit status: `10` an upgrade is pending; `0` nothing to do; `4` only what
-is the human's is behind (a server behind an installed candidate too); `1`
+is the human's is behind (a server behind an installed candidate, or the
+binary step 1 replaces, too); `1`
 refused or interrupted — say why (*no stable release*, from the plan or the install script: name the candidate it gives, and ask). Show the human what it will do, and what it says
 is theirs: a service, a Compose project, a server or container open beyond
 this machine — show them the commands the plan gives for each. More than one
@@ -56,9 +66,9 @@ The same command and flags without `--plan`. Its exit status:
 
 The command installed the skill again wherever a copy was. A pinned
 `tracepad` package goes to the same version in the project's own tool:
-`tracepad==0.1.0rc2` (PyPI's spelling), `tracepad@0.1.0-rc.2` (npm), Go's
-`…/sdk/go@v0.1.0-rc.2`. Not published: keep the pin, and say so. Run the
-project's tests.
+`tracepad==<version>` (PyPI; a candidate `X.Y.ZrcN`), `tracepad@<version>`
+(npm; `X.Y.Z-rc.N`), Go's `…/sdk/go@v<version>`. Not published: keep the pin,
+and say so. Run the project's tests.
 
 ## 4. Report to the human
 
