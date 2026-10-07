@@ -1128,6 +1128,23 @@ func (j *job) swapBinaryOnly(ctx context.Context) {
 	rep.Next = append(rep.Next, "to put "+st.Binary.From+" back: "+j.upgradeCmd("--back "+st.Run))
 }
 
+// skillCopy is where a copy of the skill may be, marked with its .version,
+// and what `skills install` is given to put it there again.
+type skillCopy struct {
+	marker string
+	args   []string
+}
+
+// skillCopies are the places a run installs the skill again, and the plan
+// reads the skill's copies at (spec 054 #64): one list for both.
+func (r *runner) skillCopies() []skillCopy {
+	return []skillCopy{
+		{filepath.Join(r.deps.Home, ".claude", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".claude", "skills")}},
+		{filepath.Join(r.deps.Home, ".agents", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".agents", "skills")}},
+		{filepath.Join(r.deps.Cwd, ".claude", "skills", "tracepad", ".version"), []string{"--project"}},
+	}
+}
+
 // reinstallSkill installs the skill again, with the binary at bin when it is
 // version to, wherever a copy carries its marker (Decision 12).
 //
@@ -1149,15 +1166,7 @@ func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string
 		return false
 	}
 	done := true
-	targets := []struct {
-		marker string
-		args   []string
-	}{
-		{filepath.Join(r.deps.Home, ".claude", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".claude", "skills")}},
-		{filepath.Join(r.deps.Home, ".agents", "skills", "tracepad", ".version"), []string{"--dir", filepath.Join(r.deps.Home, ".agents", "skills")}},
-		{filepath.Join(r.deps.Cwd, ".claude", "skills", "tracepad", ".version"), []string{"--project"}},
-	}
-	for _, t := range targets {
+	for _, t := range r.skillCopies() {
 		if _, err := os.Stat(t.marker); errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {

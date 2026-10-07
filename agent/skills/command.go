@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tracepad/tracepad/agent/skills/skillmark"
 	"github.com/tracepad/tracepad/internal/cli"
 )
 
@@ -31,7 +32,7 @@ const (
 // marker is the file that says a directory is an installed copy of this skill
 // and which version it is (#6, #7). Without it, a directory called `tracepad`
 // is somebody else's and is not overwritten.
-const marker = ".version"
+const marker = skillmark.File
 
 // Usage is the command's help text.
 const Usage = `Usage:
@@ -345,7 +346,7 @@ func install(files fs.FS, root, target, version string, force, project bool) (ou
 		return done, err
 	}
 	if done.replaced && info.IsDir() {
-		if done.marked, done.previous, err = ours(done.target); err != nil {
+		if done.marked, done.previous, err = skillmark.Read(done.target); err != nil {
 			return done, err
 		}
 	}
@@ -409,55 +410,6 @@ func install(files fs.FS, root, target, version string, force, project bool) (ou
 // ownMark says what makes a directory this command's own skill, for the
 // refusals that name its absence.
 const ownMark = "no SKILL.md named " + Name + " beside a " + marker
-
-// ours reports whether dir is a skill this command installed, and the version
-// its marker names ("" when the marker is empty). It takes both halves (#16):
-// SKILL.md naming this skill, and the marker. The marker alone is one file
-// with a generic name, which any repository can commit — and a link followed
-// on its word alone replaced whatever held one.
-func ours(dir string) (bool, string, error) {
-	stamp, err := os.ReadFile(filepath.Join(dir, marker))
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return false, "", nil
-	case err != nil:
-		// A marker that cannot be read is not the same as no marker,
-		// and calling it "somebody else's directory" would hide why.
-		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, marker), err)
-	}
-	skill, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return false, "", nil
-	case err != nil:
-		// The same rule as the marker's: unreadable is not absent, and a
-		// real install that cannot be read must not be replaced as
-		// somebody else's directory.
-		return false, "", fmt.Errorf("cannot read %s: %w", filepath.Join(dir, "SKILL.md"), err)
-	case !namesThisSkill(skill):
-		return false, "", nil
-	}
-	return true, strings.TrimSpace(string(stamp)), nil
-}
-
-// namesThisSkill reports whether a SKILL.md's frontmatter says `name:
-// tracepad`, the line every install writes.
-func namesThisSkill(skill []byte) bool {
-	lines := strings.Split(string(skill), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return false
-	}
-	for _, line := range lines[1:] {
-		line = strings.TrimRight(line, "\r")
-		if line == "---" {
-			return false
-		}
-		if value, found := strings.CutPrefix(line, "name:"); found {
-			return strings.Trim(strings.TrimSpace(value), `"'`) == Name
-		}
-	}
-	return false
-}
 
 // noLinkBelow refuses a project path that goes through a link between the
 // working tree and dir: `.claude` or `.claude/skills` committed as a symlink

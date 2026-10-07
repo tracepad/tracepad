@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/tracepad/tracepad/agent/skills/skillmark"
 )
 
 const docsUpgrading = "https://tracepad.github.io/tracepad/latest/install/#upgrading"
@@ -427,6 +430,43 @@ func (r *runner) firstOnPath(b Binary) string {
 	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
+// skillAhead is the plan's line on the skill's copies when they are newer
+// than a server or container of the person's (spec 054 #64): the skill then
+// names what that server does not have. A fact, sorted into nothing: a copy
+// by the skill's own rule (spec 037 #16, skillmark), never a marker alone.
+func (r *runner) skillAhead(f Findings) string {
+	var newest string
+	var at []string
+	for _, c := range r.skillCopies() {
+		dir := filepath.Dir(c.marker)
+		ok, v, err := skillmark.Read(dir)
+		switch {
+		// The project's copy is the user's when the command runs in the home
+		// directory: one copy, said once.
+		case slices.Contains(at, dir) || err != nil || !ok || !IsRelease(v) || behindTo(newest, v):
+		case newest == "" || behindTo(v, newest):
+			newest, at = v, []string{dir}
+		default:
+			at = append(at, dir)
+		}
+	}
+	var behind []string
+	for _, s := range f.Servers {
+		if !s.Ours && behindTo(newest, s.Version) {
+			behind = append(behind, fmt.Sprintf("server pid %d runs %s", s.Proc.PID, s.Version))
+		}
+	}
+	for _, c := range f.Containers {
+		if !c.Ours && behindTo(newest, c.Version) {
+			behind = append(behind, fmt.Sprintf("container %s runs %s", c.Name, c.Version))
+		}
+	}
+	if len(behind) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the skill's copies at %s are %s; %s", strings.Join(at, ", "), newest, strings.Join(behind, "; "))
+}
+
 // binaryTodo is the plan's table of the binary at the install path: by its
 // kind (installedBinary), what the person is told to do, or "" for nothing —
 // the command's own, which a run replaces, or one that needs nothing — and a
@@ -567,6 +607,11 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Person = append(rep.Person, p.installed)
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
+	if r.flags.plan {
+		if note := r.skillAhead(p.f); note != "" {
+			rep.Notes = append(rep.Notes, note)
+		}
+	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {

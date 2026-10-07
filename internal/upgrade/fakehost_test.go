@@ -53,6 +53,10 @@ type fakeHost struct {
 	// its own time.
 	foreign map[int]bool
 	clock   int64
+	// tr is the one way to this host's servers, for the command and the
+	// test alike: a transport per request left a kept-alive pipe each
+	// (spec 054 #64); its idle ones are closed when the test ends.
+	tr *http.Transport
 }
 
 // plant puts a process that is not a server at pid — a reused PID: the same
@@ -99,7 +103,8 @@ type fakeServer struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}, unreadable: map[int]bool{}, foreign: map[int]bool{}}
+	h := &fakeHost{t: t, next: 70000, procs: map[int]*fakeServer{}, broken: map[string]bool{}, uncounted: map[string]bool{}, elsewhere: map[string]string{}, held: map[string]bool{}, unreadable: map[int]bool{}, foreign: map[int]bool{}, tr: memTransport()}
+	t.Cleanup(h.tr.CloseIdleConnections)
 	t.Cleanup(func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -426,7 +431,7 @@ func TestMain(m *testing.M) {
 func (w *fakeWorld) url() string { return "http://" + w.listen }
 
 func (w *fakeWorld) answers() string {
-	v, _ := health(context.Background(), &http.Client{Transport: memTransport()}, w.url())
+	v, _ := health(context.Background(), &http.Client{Transport: w.host.tr}, w.url())
 	return v
 }
 
@@ -457,7 +462,7 @@ func (w *fakeWorld) addTrace() {
 func (w *fakeWorld) deps() Deps {
 	return Deps{
 		Sys:        w.host,
-		HTTP:       &http.Client{Transport: memTransport(), Timeout: 2 * time.Second},
+		HTTP:       &http.Client{Transport: w.host.tr, Timeout: 2 * time.Second},
 		Releases:   fakeReleases(w.t, w.mirror),
 		InstallDir: filepath.Dir(w.install),
 		Backups:    filepath.Join(w.home, "tracepad-backups"),

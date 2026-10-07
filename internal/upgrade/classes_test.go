@@ -661,7 +661,7 @@ func TestANamedServerThatDoesNotAnswerIsNotCurrent(t *testing.T) {
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
 	w.host.setSlow(time.Second)
-	deps.HTTP = &http.Client{Transport: memTransport(), Timeout: 50 * time.Millisecond}
+	deps.HTTP = &http.Client{Transport: deps.HTTP.Transport, Timeout: 50 * time.Millisecond}
 	rep, code := runIn(t, context.Background(), deps, "--plan", "--to", fNew, "--data-dir", w.data)
 	w.host.setSlow(0)
 	if code != exitRefused || !strings.Contains(rep.Summary, "does not answer") && !strings.Contains(rep.Summary, "does not say its version") {
@@ -1154,7 +1154,7 @@ func TestCountsNotComparedAreSaidOnceWithWhy(t *testing.T) {
 			deps.HealthWait = 300 * time.Millisecond
 			// Not answering is a request past the client's deadline,
 			// kept short: the wait is the test's whole length.
-			deps.HTTP = &http.Client{Transport: memTransport(), Timeout: 500 * time.Millisecond}
+			deps.HTTP = &http.Client{Transport: deps.HTTP.Transport, Timeout: 500 * time.Millisecond}
 			deps.Fault = func(point string) error {
 				if c.slow && point == stepStarted {
 					w.host.setSlow(2 * time.Second)
