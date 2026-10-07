@@ -469,7 +469,7 @@ func theFaultMatrix(t *testing.T) {
 		}
 	}
 	slowDeps := func(deps *Deps) {
-		deps.HTTP = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: slowWait}
+		deps.HTTP = &http.Client{Transport: memTransport(), Timeout: slowWait}
 		deps.HealthWait = slowWait
 	}
 	for _, kind := range faultKinds {

@@ -173,13 +173,21 @@ func TestTheSkillAssignsNoNameZshKeeps(t *testing.T) {
 	}
 }
 
+// releaseTemp is the rule every release since 0.1.0 tells the bridge's
+// directory by (internal/upgrade's mktempName): a binary run from it plans
+// for the installed one, never for itself. Frozen: the releases out there
+// keep it whatever this tree says.
+var releaseTemp = regexp.MustCompile(`^tmp\.[A-Za-z0-9]{6,}$`)
+
 // The bridge of upgrade.md passes `--to` only when a version was named, as
-// two words, in every shell.
+// two words, in every shell; each run fetches into a directory of its own
+// (the live run of 0.1.1: one shared directory let a session's rm take the
+// binary another had fetched), which the releases out there know.
 func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 	t.Parallel()
 	var line string
 	for _, b := range shellBlocks(t) {
-		if b.file == "references/upgrade.md" && strings.Contains(b.text, "tracepad/tmp.release") {
+		if b.file == "references/upgrade.md" && strings.Contains(b.text, "mktemp -d") {
 			line = strings.TrimSpace(b.text)
 		}
 	}
@@ -194,20 +202,38 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sh := range shells(t) {
+		home := t.TempDir()
 		for v, want := range map[string]string{"": "upgrade\n--plan\n", "0.2.0": "upgrade\n--plan\n--to\n0.2.0\n"} {
 			args := filepath.Join(t.TempDir(), "args")
 			cmd := exec.Command(sh, "-c", strings.Replace(line, "v=;", "v="+v+";", 1))
-			cmd.Env = []string{"PATH=" + stub + ":/usr/bin:/bin", "ARGS=" + args, "HOME=" + t.TempDir(), "TMPDIR=" + t.TempDir()}
-			if out, err := cmd.CombinedOutput(); err != nil {
+			cmd.Env = []string{"PATH=" + stub + ":/usr/bin:/bin", "ARGS=" + args, "HOME=" + home, "TMPDIR=" + t.TempDir()}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
 				t.Fatalf("%s, v=%q: %v %s", sh, v, err, out)
+			}
+			// The path, said: the agent's next shell does not have $dir.
+			if !regexp.MustCompile(`BRIDGE: \S+/\.cache/tracepad/tmp\.\w+\n`).Match(out) {
+				t.Errorf("%s, v=%q: the bridge does not name its directory: %s", sh, v, out)
 			}
 			if got, _ := os.ReadFile(args); string(got) != want {
 				t.Errorf("%s, v=%q: the plan was run with %q, want %q", sh, v, got, want)
 			}
 		}
-		// A download that fails runs no bridge an earlier run left (the
-		// review of #228): curl fails, sh reads nothing and exits 0.
-		home := t.TempDir()
+		// Two runs, two directories, each one a release tells.
+		dirs, err := os.ReadDir(filepath.Join(home, ".cache", "tracepad"))
+		if err != nil || len(dirs) != 2 {
+			t.Fatalf("%s: two runs made %d directories (%v), want one each", sh, len(dirs), err)
+		}
+		for _, d := range dirs {
+			if !releaseTemp.MatchString(d.Name()) {
+				t.Errorf("%s: the bridge's directory %s is not one a release tells for a temporary one", sh, d.Name())
+			}
+		}
+		// A download that fails stops, runs no binary where a bridge of a
+		// shared directory would find one (the review of #228), and leaves
+		// no directory of its own behind (the review of #231): curl fails,
+		// sh reads nothing and exits 0.
+		home = t.TempDir()
 		stale := filepath.Join(home, ".cache", "tracepad", "tmp.release", "tracepad")
 		ran := filepath.Join(t.TempDir(), "ran")
 		if err := os.MkdirAll(filepath.Dir(stale), 0o700); err != nil {
@@ -226,8 +252,64 @@ func TestTheUpgradeBridgeNamesTheVersionInEveryShell(t *testing.T) {
 			t.Errorf("%s: a failed download: %v %s", sh, err, out)
 		}
 		if _, err := os.Stat(ran); err == nil {
-			t.Errorf("%s: a failed download ran the bridge an earlier run left", sh)
+			t.Errorf("%s: a failed download ran the binary an earlier bridge left", sh)
 		}
+		if left, _ := os.ReadDir(filepath.Join(home, ".cache", "tracepad")); len(left) != 1 || left[0].Name() != "tmp.release" {
+			t.Errorf("%s: a failed download left %v", sh, left)
+		}
+		// No directory to make is a STOP of its own, never curl's.
+		cmd = exec.Command(sh, "-c", line)
+		cmd.Env = []string{"PATH=" + failing + ":/usr/bin:/bin", "HOME=" + filepath.Join(stale, "home")}
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "STOP: no directory for the bridge") || strings.Contains(string(out), "curl") {
+			t.Errorf("%s: no directory: %v %s", sh, err, out)
+		}
+	}
+}
+
+// A STOP after the skill has started something stops it first (the live run
+// of 0.1.1): a server left running, or a container on the volume it made,
+// meets the next try as "a container named … is there already". A block
+// that defines stop() starts something; from its first start on, every exit
+// that fails comes right after stop. One that succeeds leaves the server on
+// purpose: the earlier install the human chose to start, whose key is theirs.
+func TestEveryExitAfterAStartStopsWhatStarted(t *testing.T) {
+	t.Parallel()
+	start := regexp.MustCompile(`docker run |[^&]&\s*$`)
+	// A failing end: an exit but `exit 0`, false, or a return but `return 0`.
+	exit := regexp.MustCompile(`(\S+)\s*;?\s*\b(?:exit|false|return)\b(\s+0\b)?`)
+	unstopped := func(text string) []string {
+		var bad []string
+		started := false
+		for _, l := range strings.Split(text, "\n") {
+			started = started || start.MatchString(l)
+			for _, m := range exit.FindAllStringSubmatch(l, -1) {
+				if started && m[2] == "" && m[1] != "stop;" && m[1] != "stop" {
+					bad = append(bad, strings.TrimSpace(l))
+				}
+			}
+		}
+		return bad
+	}
+	for _, c := range []string{`exit 1; }`, `false; }`, `exit "$?"; }`, `exit; }`, `return 1; }`} {
+		if unstopped("stop() { :; }\ndocker run -d x || { stop; exit 1; }\n[ -n \"$sk\" ] || { echo \"STOP: no key\"; "+c) == nil {
+			t.Errorf("the check does not see %q after a start that does not stop it", c)
+		}
+	}
+	if unstopped("stop() { :; }\ndocker run -d x || { stop; exit 1; }\n[ -n \"$sk\" ] || { echo \"KEY: theirs\"; exit 0; }") != nil {
+		t.Error("the check takes a deliberate exit 0 for a failing one")
+	}
+	n := 0
+	for _, b := range shellBlocks(t) {
+		if !strings.Contains(b.text, "stop()") {
+			continue
+		}
+		n++
+		for _, l := range unstopped(b.text) {
+			t.Errorf("%s:%d exits after a start without stopping it: %s", b.file, b.line, l)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no block defines stop(); the check would pass anything")
 	}
 }
 

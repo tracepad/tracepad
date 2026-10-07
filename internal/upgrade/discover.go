@@ -51,6 +51,7 @@ const (
 	binOdd                          // not a file
 	binPackaged                     // a package manager's: a file or a link in its tree
 	binLinked                       // a link of the person's
+	binDevLink                      // a link of the person's to a development build, in a directory this user can write
 	binSilent                       // a file that does not say its version
 	binDev                          // a file that says a version no release has
 	binUnwritable                   // a file, or a development build's link, in a directory this user cannot write
@@ -348,6 +349,9 @@ func (r *runner) discover(ctx context.Context) Findings {
 		f.Notes = append(f.Notes, fmt.Sprintf("%d process(es) named tracepad could not be read", unread))
 	}
 	wg.Wait()
+	if note := r.firstOnPath(f.Binary); note != "" {
+		f.Notes = append(f.Notes, note)
+	}
 	for _, p := range procs {
 		if s, ok := classifyServer(p, f.Binary.Path); ok {
 			f.Servers = append(f.Servers, s)
@@ -402,15 +406,7 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	// never replaced with a file (the final review).
 	st, err := os.Lstat(b.Path)
 	link := err == nil && st.Mode()&os.ModeSymlink != 0
-	// Whose it is, asked once: of where it is, and for a link of where it
-	// leads too — a link from ~/.local/bin into Homebrew's Cellar is
-	// Homebrew's binary (the seventh review of #228).
-	pm := packageManager(canonicalPath(b.Path))
-	if pm == "" && link {
-		if real, rerr := filepath.EvalSymlinks(b.Path); rerr == nil {
-			pm = packageManager(real)
-		}
-	}
+	pm := managedBy(b.Path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		b.Kind, b.Reason = binNone, "no binary is installed at "+b.Path
@@ -435,10 +431,15 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		b.Link = target
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a link is the person's either way
 		b.Kind, b.Reason = binLinked, b.Path+" is a symbolic link to "+target+": its owner's to replace"
-		if b.Version != "" && !IsRelease(b.Version) && !writableDir(filepath.Dir(b.Path)) {
+		switch {
+		case b.Version == "" || IsRelease(b.Version):
+		case !writableDir(filepath.Dir(b.Path)):
 			// The install script's line, which replaces the link, could
 			// not write there (the ninth review of #228).
 			b.Kind, b.Reason = binUnwritable, b.Reason+"; "+filepath.Dir(b.Path)+" is not writable by this user"
+		default:
+			// A build linked from its checkout (the review of #228).
+			b.Kind = binDevLink
 		}
 	case !st.Mode().IsRegular():
 		b.Kind, b.Reason = binOdd, b.Path+" is not a regular file"
@@ -517,6 +518,21 @@ func (r *runner) attribute(p Probe, f Findings) Probe {
 func listensOnDefault(listen string) bool {
 	_, port, err := net.SplitHostPort(listen)
 	return err == nil && port == "4318"
+}
+
+// managedBy says whose a file at path is when a package manager put it
+// there: of where it is, and for a link of where it leads too — a link from
+// ~/.local/bin into Homebrew's Cellar is Homebrew's binary (the seventh
+// review of #228). One answer for the binary at the install path and the one
+// first on PATH (spec 054 #63).
+func managedBy(path string) string {
+	if pm := packageManager(canonicalPath(path)); pm != "" {
+		return pm
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return packageManager(real)
+	}
+	return ""
 }
 
 // packageManager says whose a binary at path is when a package manager

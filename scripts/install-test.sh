@@ -84,6 +84,9 @@ case "\$1" in
 version) echo "$says" ;;
 __arch) echo "$os/$arch" ;;
 upgrade)
+	# The release the script says it fetched, which alone spares the plan
+	# its look-up (spec 054 #63).
+	printf '%s %s\n' "\$*" "\${TRACEPAD_RELEASE_FETCHED-unset}" >"\$HOME/plan-fetched"
 	# The plan (spec 054): from the case's environment; a binary from before
 	# the command does not know the word.
 	[ -n "\${FAKE_PLAN:-}" ] || { echo "tracepad: unknown command" >&2; exit 2; }
@@ -191,6 +194,7 @@ run upgrade 0 FAKE_PLAN="server pid 41000 runs 0.2.0" FAKE_PLAN_EXIT=10
 has "$out" "updated tracepad 0.2.0 → 0.3.0 at $bin" upgrade
 has "$out" "Still running an older version:" upgrade
 has "$out" "  upgrade --plan --to 0.3.0: server pid 41000 runs 0.2.0" upgrade
+has "$home/plan-fetched" "upgrade --plan --to 0.3.0 0.3.0" upgrade
 ends_with_upgrade_line upgrade 0.3.0
 
 # --- Run again, the output lost: what runs older is still named, and the
@@ -215,6 +219,9 @@ run no-downgrade 0
 has "$out" "tracepad 0.4.0-rc.1 is installed at $bin, newer than the newest stable release, 0.3.0: nothing changed" no-downgrade
 has "$out" "| TRACEPAD_VERSION=0.3.0 sh" no-downgrade
 [ "$("$bin" version)" = 0.4.0-rc.1 ] || fail "no-downgrade: the binary was replaced"
+# The binary kept is planned for, and the release fetched is not its own:
+# its plan looks its version up.
+has "$home/plan-fetched" "upgrade --plan --to 0.4.0-rc.1 0.3.0" no-downgrade
 
 # --- Pinned, it may, and says what that means. What runs the newer version
 # is left running, with no advice to restart it onto the older one, and the

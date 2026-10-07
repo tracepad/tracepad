@@ -329,19 +329,26 @@ func extractBinary(archive, path string) error {
 	}
 }
 
-// binaryVersion runs `path version`, for ten seconds at most.
+// binaryVersion runs `path version`, for ten seconds at most. A failure
+// carries the first line the binary wrote to stderr, which says why
+// (*unknown command*), where the exit status alone does not (spec 054 #63).
 func binaryVersion(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var out bytes.Buffer
+	var out, errOut bytes.Buffer
 	err := retryBusy(func() error {
 		out.Reset()
+		errOut.Reset()
 		cmd := child(ctx, path, "version")
 		cmd.Env = []string{}
 		cmd.Stdout = &out
+		cmd.Stderr = &errOut
 		return cmd.Run()
 	})
 	if err != nil {
+		if why := firstLine(strings.TrimSpace(errOut.String())); why != "" {
+			return "", fmt.Errorf("%w: %s", err, why)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil

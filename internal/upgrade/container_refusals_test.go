@@ -548,27 +548,25 @@ func testAFailedReplacementSaysOneThing(t *testing.T) {
 
 // A way back checks the archive's database on this machine, in the run's
 // directory: no room there refuses it before its first act (the review of
-// #226). freeBytes is a package seam: this test runs alone.
+// #226).
 func TestAContainersWayBackAsksRoomForItsCheck(t *testing.T) {
 	inProcess(t)
-	saved := freeBytes
-	t.Cleanup(func() { freeBytes = saved })
 	c := newContainerCell(t)
 	rep, code := c.cmd(c.deps, "--to", "0.2.0")
 	if code != exitOK {
 		t.Fatalf("%d %s", code, rep.Summary)
 	}
-	freeBytes = func(dir string) (int64, error) {
+	low := c.deps
+	low.FreeBytes = func(dir string) (int64, error) {
 		if dir == rep.Run.Dir {
 			return mib100, nil
 		}
-		return saved(dir)
+		return statFree(dir)
 	}
-	back, code := c.cmd(c.deps, "--back", rep.Run.ID)
+	back, code := c.cmd(low, "--back", rep.Run.ID)
 	if code == exitOK || !strings.Contains(back.Summary, "no room in "+rep.Run.Dir+" for the check") || !strings.Contains(back.Summary, "nothing was touched") {
 		t.Errorf("%d %s", code, back.Summary)
 	}
-	freeBytes = saved
 	if !c.backUntil(rep.Run.ID, 1) {
 		t.Error("--back did not reach 0 with room")
 	}

@@ -222,7 +222,7 @@ skill_into() {
 # nothing does, 2 from a binary from before the command; anything else — a
 # refusal, the watchdog — is "could not check", never "runs older".
 plan() {
-	"$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
+	TRACEPAD_RELEASE_FETCHED="$fetched" "$bin" upgrade --plan --to "$version" >"$tmp/plan" 2>/dev/null &
 	planner=$!
 	(sleep 15 && kill "$planner") >/dev/null 2>&1 &
 	watchdog=$!
@@ -276,6 +276,10 @@ main() {
 	trap 'exit 1' INT TERM HUP
 
 	resolve_version
+	# The release whose checksums.txt this run fetched: the plan below skips
+	# looking it up only for the version named here (spec 054 #63), never for
+	# a binary kept because it is newer.
+	fetched="$version"
 
 	# change is what this run did to $bin: none, installed (nothing was
 	# there), updated or downgraded (a file was there, whatever it answers).
@@ -347,8 +351,8 @@ main() {
 	# until it is restarted: the binary's plan names each, whose it is, and
 	# what to do. After a downgrade, what runs is newer, and the plan says to
 	# leave it. Not after a first install: nothing of this binary's runs yet
-	# (the agent's bridge removes its binary first, so it is always one, and
-	# runs its own plan next).
+	# (the agent's bridge fetches into a new directory, so it is always one,
+	# and runs its own plan next).
 	plan_status=none
 	if [ "$change" != installed ]; then
 		plan

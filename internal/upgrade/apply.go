@@ -43,9 +43,14 @@ type job struct {
 	held map[string]func()
 }
 
-// freeBytes is the room on a directory's file system: a seam, so a test can
-// give the command one that cannot say.
-var freeBytes = statFree
+// freeBytes is the room on a directory's file system: Deps.FreeBytes when a
+// test gives the command one that cannot say, else statFree.
+func (r *runner) freeBytes(dir string) (int64, error) {
+	if r.deps.FreeBytes != nil {
+		return r.deps.FreeBytes(dir)
+	}
+	return statFree(dir)
+}
 
 // tryLock and locked are the store's lock protocol (spec 054 #28): seams, so
 // a test can give the command a file system that cannot lock (#39).
@@ -428,7 +433,7 @@ func (r *runner) prepare(ctx context.Context, p *plan, rep *Report) (*job, strin
 		}
 	}
 	if st.Kind != kindBinary {
-		free, err := freeBytes(dir)
+		free, err := r.freeBytes(dir)
 		if err != nil {
 			return nil, "could not tell the room in " + dir + ": " + err.Error()
 		}
