@@ -47,14 +47,8 @@ git check-ignore -q .env || echo "NOT IGNORED"
 ```
 
 - `NOT FRESH` (for Docker: `docker volume inspect tracepad-<project>`
-  succeeds): an earlier install. Ask whether to start that one, whose key is
-  the human's to give, or to give this project a new data directory. That one
-  starts with no key made or read (Docker: `docker start tracepad-<project>`):
-  ```sh
-  port=4318; url="http://localhost:$port"; data="${TRACEPAD_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tracepad}"; export PATH="$HOME/.local/bin:$PATH"
-  TRACEPAD_URL="$url" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 & echo $! >"$data/server.pid"
-  for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" 2>/dev/null && break; done && { grep -v '^TRACEPAD_URL=' .env 2>/dev/null; echo "TRACEPAD_URL=$url"; } >.env.new && mv .env.new .env && echo "KEY: the human's to give" || { echo "STOP: it does not answer; its log says why:"; tail -n 5 "$data/server.log"; }
-  ```
+  succeeds): an earlier install. Ask the human: start that one (they start it
+  and give its URL and key), or give this project a new data directory.
 - `TRACKED`: write no key into `.env`; ask where it should go.
 - `NOT IGNORED`: add `.env` to `.gitignore`, creating it if missing, before
   writing `.env`, and say so in the report. (Outside a git repository it prints too.)

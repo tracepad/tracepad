@@ -3,7 +3,6 @@ package upgrade
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -86,11 +85,11 @@ func (r *runner) makePlan(ctx context.Context, rep *Report) (*plan, string) {
 	case !IsRelease(to):
 		return nil, fmt.Sprintf("%q is not a release's version (X.Y.Z, or X.Y.Z-rc.N)", to)
 	case r.flags.plan && to == r.version && r.deps.Getenv(fetchedEnv) == to && sameFile(r.deps.Self, filepath.Join(r.deps.InstallDir, "tracepad")):
-		// The binary the install script just fetched and put in place,
-		// planning for its own version: the script found that release, so
-		// it is not looked up again, since a new binary's first connection
-		// may wait on a firewall past the script's fifteen seconds (the live
-		// run of 0.1.0). Only the script says so (spec 054 #63): a build
+		// The binary at the install path, planning for the version the
+		// install script just fetched, put there or found there already:
+		// the script found that release, so it is not looked up again,
+		// since a new binary's first connection may wait on a firewall past
+		// the script's fifteen seconds (the live run of 0.1.0). Only the script says so (spec 054 #63): a build
 		// stamped with a release's version that no release has is looked
 		// up, and refused, as its run would be — the plan and the run never
 		// part. A run, another version, or a binary run from elsewhere than
@@ -428,37 +427,6 @@ func (r *runner) firstOnPath(b Binary) string {
 	return fmt.Sprintf("another tracepad comes first on PATH: %s (%s), not the one this command looks after, %s; what upgrades it is %s", b.First, v, b.Path, upgrades)
 }
 
-// skillAhead is the plan's note on a copy of the skill newer than a server
-// or container of the person's (the live run of 0.1.1: a Compose server
-// behind a skill one release ahead). A fact read from the copies' .version
-// markers, never what a run will do: a run refused, or one that installs no
-// skill, changes nothing it said (spec 054 #63). After an upgrade that put
-// the skill ahead, the skill plans again and reads it so.
-func (r *runner) skillAhead(f Findings) string {
-	var newest, at string
-	for _, c := range r.skillCopies() {
-		b, err := os.ReadFile(c.marker)
-		if v := strings.TrimSpace(string(b)); err == nil && IsRelease(v) && (newest == "" || behindTo(v, newest)) {
-			newest, at = v, filepath.Dir(c.marker)
-		}
-	}
-	var behind []string
-	for _, s := range f.Servers {
-		if !s.Ours && behindTo(newest, s.Version) {
-			behind = append(behind, fmt.Sprintf("server pid %d runs %s", s.Proc.PID, s.Version))
-		}
-	}
-	for _, c := range f.Containers {
-		if !c.Ours && behindTo(newest, c.Version) {
-			behind = append(behind, fmt.Sprintf("container %s runs %s", c.Name, c.Version))
-		}
-	}
-	if len(behind) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("the skill at %s is %s, and what is yours is older (%s): the skill may name what that does not have until you upgrade it", at, newest, strings.Join(behind, "; "))
-}
-
 // binaryTodo is the plan's table of the binary at the install path: by its
 // kind (installedBinary), what the person is told to do, or "" for nothing —
 // the command's own, which a run replaces, or one that needs nothing — and a
@@ -599,11 +567,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Person = append(rep.Person, p.installed)
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
-	if r.flags.plan {
-		if note := r.skillAhead(p.f); note != "" {
-			rep.Notes = append(rep.Notes, note)
-		}
-	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {

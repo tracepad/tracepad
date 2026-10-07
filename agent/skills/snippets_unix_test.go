@@ -13,23 +13,20 @@ import (
 	"time"
 )
 
-// setup.md's starts, run with a stand-in tracepad that serves until it is
-// killed and prints no key, as a server on data that was there (the reviews
-// of #231). The first start, on fresh data: no key is a STOP that stops the
-// server, and a key an earlier start left in the log is never taken for this
-// one's. The earlier install's start makes and reads no key: the server runs,
-// .env gets its URL, and the key is the human's.
-func TestTheSetupsStartsStopOnlyWhatTheyMade(t *testing.T) {
+// setup.md's start, run with a stand-in tracepad that serves until it is
+// killed and prints no key (the reviews of #231): no key is a STOP that
+// stops the server it started, and a key an earlier start left in the log
+// is never taken for this one's; a key declared reaches .env.
+func TestTheSetupsStartStopsWhatItStarted(t *testing.T) {
 	t.Parallel()
-	blocks := map[string]string{}
+	var first string
 	for _, b := range shellBlocks(t) {
-		if b.file == "references/setup.md" && strings.HasPrefix(b.text, "port=4318; ") {
-			blocks[strings.Fields(b.text)[1]] = b.text
+		if b.file == "references/setup.md" && strings.HasPrefix(b.text, "port=4318; declare=yes;") {
+			first = b.text
 		}
 	}
-	first, earlier := blocks["declare=yes;"], blocks["url=\"http://localhost:$port\";"]
-	if first == "" || earlier == "" {
-		t.Fatalf("setup.md's two starts not found: %q", blocks)
+	if first == "" {
+		t.Fatal("no start block in setup.md")
 	}
 	bin := t.TempDir()
 	stub := "#!/bin/sh\ncase \"$1\" in\nversion) echo 0.1.1 ;;\nhealth) echo '{\"ok\":true}' ;;\nserve) echo $$ > \"$PIDS\"; echo 'listening addr=localhost:4318'; exec sleep 30 ;;\nesac\n"
@@ -48,7 +45,6 @@ func TestTheSetupsStartsStopOnlyWhatTheyMade(t *testing.T) {
 		{"fresh, no key printed", strings.Replace(first, "declare=yes;", "declare=no;", 1), "", "STOP: no key", false, "", false},
 		{"fresh, an earlier start's key in the log", strings.Replace(first, "declare=yes;", "declare=no;", 1), oldKey, "STOP: no key", false, "", false},
 		{"fresh, a key declared", first, "", "", true, "TRACEPAD_API_KEY=tp-sk-", true},
-		{"the earlier install", earlier, oldKey, "KEY: ", true, "TRACEPAD_URL=http://localhost:4318", false},
 	} {
 		home, data, dir, pids := t.TempDir(), t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "pid")
 		_ = os.WriteFile(filepath.Join(data, "server.log"), []byte(c.log), 0o600)

@@ -25,9 +25,10 @@ tracepad upgrade --plan
 
 `--to 0.2.0` for a version the human named. *unknown command "upgrade"*: the
 binary predates the command; plan and upgrade with a release's, fetched into a
-new directory of its own, `BRIDGE:`, to `rm -r` once the upgrade is done or
-refused; `v` the version named. It plans for the installed binary, and leaves
-one that is not a release's with the line that replaces it:
+new directory of its own, `BRIDGE:`; `v` the version named. `rm -r` it once no
+command you give the human names it (after a refusal, give them with the
+installed binary's path when there is one). It plans for the installed binary,
+and leaves one that is not a release's with the line that replaces it:
 
 ```sh
 v=; if dir="$(mkdir -p "$HOME/.cache/tracepad" && mktemp -d "$HOME/.cache/tracepad/tmp.XXXXXX")"; then echo "BRIDGE: $dir"; else echo "STOP: no directory for the bridge (mkdir or mktemp said why above)"; false; fi && { curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION="$v" TRACEPAD_INSTALL_DIR="$dir" TRACEPAD_NO_SKILL=1 sh >/dev/null && [ -x "$dir/tracepad" ] || { rm -rf "$dir"; echo "STOP: the release did not download (curl said why above)"; false; }; } && if [ -n "$v" ]; then "$dir/tracepad" upgrade --plan --to "$v"; else "$dir/tracepad" upgrade --plan; fi

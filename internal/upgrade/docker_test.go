@@ -760,40 +760,6 @@ func TestAContainerGetsTheCommandsThatUpgradeIt(t *testing.T) {
 	}
 }
 
-// A copy of the skill newer than a container of the person's is said in the
-// plan, as a fact of the copies' .version markers (spec 054 #63): never a
-// forecast of the run, which may be refused or install no skill, and never
-// without a copy there.
-func TestASkillAheadOfTheServerIsSaid(t *testing.T) {
-	t.Parallel()
-	const note = "the skill at "
-	d := newFakeDocker(t)
-	d.run(t, "--name", "myapp", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=myapp,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0", "serve")
-	plan := func(skill string, args ...string) []string {
-		deps := containerDeps(t, d, "0.2.0")
-		if skill != "" {
-			dir := filepath.Join(deps.Home, ".claude", "skills", "tracepad")
-			_ = os.MkdirAll(dir, 0o700)
-			_ = os.WriteFile(filepath.Join(dir, ".version"), []byte(skill+"\n"), 0o600)
-		}
-		rep, _ := runReport(t, deps, args...)
-		return rep.Notes
-	}
-	got := strings.Join(plan("0.2.0", "--plan"), "\n")
-	if !strings.Contains(got, ".claude/skills/tracepad is 0.2.0, and what is yours is older (container myapp runs 0.1.0)") {
-		t.Errorf("a copy at 0.2.0, a container at 0.1.0: %s", got)
-	}
-	for name, notes := range map[string][]string{
-		"no copy of the skill":      plan("", "--plan"),
-		"a copy at the container's": plan("0.1.0", "--plan"),
-		"a run, not a plan":         plan("0.2.0"),
-	} {
-		if got := strings.Join(notes, "\n"); strings.Contains(got, note) {
-			t.Errorf("%s: %s", name, got)
-		}
-	}
-}
-
 // A Compose container's commands are whole, run from anywhere (the live run
 // of 0.1.0): the service stopped through its project and file, the volume
 // Compose really named archived — `<project>_<volume>`, never docker.md's
