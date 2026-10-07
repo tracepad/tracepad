@@ -242,10 +242,7 @@ func (r *runner) pickTarget(p *plan) error {
 	// Only what runs older than the target is a choice: two servers already
 	// at it would otherwise keep a plan pending that the upgrade refuses (the
 	// review of #1). A flag still names any of the command's.
-	behind := func(v string) bool {
-		order, ok := Compare(p.to, v)
-		return ok && order > 0
-	}
+	behind := func(v string) bool { return behindTo(p.to, v) }
 	// Behind a raised target, a server is the person's to take there by
 	// naming it: neither picked nor a choice.
 	if p.raised {
@@ -326,10 +323,17 @@ func canonicalDir(dir string) string {
 	return filepath.Clean(dir)
 }
 
-// needsNothing is what `nothing_to_do` means (spec 054 #55): a release at the
-// target or past it. A version that is not a release's — a development build,
-// one not said — may need anything, the binary's install line among them, so
-// it is never marked.
+// behindTo and needsNothing are the two answers of the one comparison with
+// the target (the seventh review of #228): behind, a release older than to;
+// needing nothing — what `nothing_to_do` means (spec 054 #55) — a release at
+// to or past it. A version that is not a release's — a development build,
+// one not said — is neither: it may need anything, the binary's install line
+// among them, so it is never marked, and is never called behind.
+func behindTo(to, v string) bool {
+	order, ok := Compare(to, v)
+	return ok && order > 0
+}
+
 func needsNothing(to, v string) bool {
 	order, ok := Compare(to, v)
 	return ok && order <= 0
@@ -338,10 +342,6 @@ func needsNothing(to, v string) bool {
 // othersBehind lists what runs older than the target version and this run
 // does not upgrade: the command's own (for a later run) and the person's.
 func (r *runner) othersBehind(p *plan) {
-	older := func(v string) bool {
-		order, ok := Compare(p.to, v)
-		return ok && order > 0
-	}
 	for i := range p.f.Servers {
 		s := &p.f.Servers[i]
 		switch {
@@ -353,7 +353,7 @@ func (r *runner) othersBehind(p *plan) {
 		case s.Version == "":
 			// Unknown is never current (the audit of #223): it may be behind.
 			p.person = append(p.person, fmt.Sprintf("server pid %d does not say its version, so whether it is behind %s cannot be told; %s. %s", s.Proc.PID, p.to, s.Reason, serverAdvice(*s)))
-		case !older(s.Version):
+		case !behindTo(p.to, s.Version):
 		case s.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("server pid %d runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a server to a candidate only when it is named: %s --to %s --data-dir %s",
 				s.Proc.PID, s.Version, p.to, p.latest, r.self(), p.to, shq(s.DataDir)))
@@ -376,7 +376,7 @@ func (r *runner) othersBehind(p *plan) {
 			p.notes = append(p.notes, fmt.Sprintf("container %s was not checked: %s. Whether it is behind %s is yours to look at: docker exec %s /tracepad version", c.Name, c.Unchecked, p.to, shq(c.Name)))
 		case c.Version == "":
 			p.person = append(p.person, fmt.Sprintf("container %s does not say its version on this machine, so whether it is behind %s cannot be told; %s. %s", c.Name, p.to, c.Reason, containerAdvice(c, p.to)))
-		case !older(c.Version):
+		case !behindTo(p.to, c.Version):
 		case c.Ours && p.raised:
 			p.held = append(p.held, fmt.Sprintf("container %s runs %s, behind the installed %s, a release candidate past the latest stable release %s; the command takes a container to a candidate only when it is named: %s --to %s --container %s",
 				c.Name, c.Version, p.to, p.latest, r.self(), p.to, shq(c.Name)))
@@ -442,14 +442,9 @@ func (r *runner) binaryTodo(b Binary, to string) (todo, note string) {
 }
 
 // firstBehind is whether the tracepad first on PATH, another than the
-// installed one, is behind to or does not say: the one place that decides
-// it, for the line in the person's list and for nothing_to_do alike.
+// installed one, is behind to or does not say.
 func firstBehind(b Binary, to string) bool {
-	if b.First == "" {
-		return false
-	}
-	order, ok := Compare(to, b.FirstVersion)
-	return b.FirstErr != nil || (ok && order > 0)
+	return b.First != "" && (b.FirstErr != nil || behindTo(to, b.FirstVersion))
 }
 
 // installLine is the install script's command that puts version to into
@@ -554,7 +549,9 @@ func (r *runner) describe(p *plan, rep *Report) {
 		c.Idle = !c.Target && needsNothing(p.to, c.Version)
 	}
 	if rep.Binary != nil {
-		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version) && !firstBehind(p.f.Binary, p.to)
+		// Its own version alone: a tracepad first on PATH is another file,
+		// with a line of its own (the seventh review of #228).
+		rep.Binary.Idle = needsNothing(p.to, rep.Binary.Version)
 	}
 	rep.Person = append(append(rep.Person, p.held...), p.person...)
 	if p.installed != "" {

@@ -401,6 +401,16 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 	// Lstat: a link there is someone else's install (a package manager's),
 	// never replaced with a file (the final review).
 	st, err := os.Lstat(b.Path)
+	link := err == nil && st.Mode()&os.ModeSymlink != 0
+	// Whose it is, asked once: of where it is, and for a link of where it
+	// leads too — a link from ~/.local/bin into Homebrew's Cellar is
+	// Homebrew's binary (the seventh review of #228).
+	pm := packageManager(canonicalPath(b.Path))
+	if pm == "" && link {
+		if real, rerr := filepath.EvalSymlinks(b.Path); rerr == nil {
+			pm = packageManager(real)
+		}
+	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		b.Kind, b.Reason = binNone, "no binary is installed at "+b.Path
@@ -408,13 +418,14 @@ func (r *runner) installedBinary(ctx context.Context) Binary {
 		// Not checked, and said so, as anything else the plan could not
 		// look at: no step of the person's (the sixth review of #228).
 		b.Kind, b.Reason = binUnread, err.Error()
-	case packageManager(canonicalPath(b.Path)) != "":
+	case pm != "" && (link || st.Mode().IsRegular()):
 		// A package manager's, a link into its tree or a file: replaced
 		// under it, the manager's record and the binary part (the ninth
-		// review), whatever version it says.
+		// review), whatever version it says. Anything else there is not a
+		// file, below.
 		b.Version, _ = r.deps.Version(ctx, b.Path) // ignored: a package manager's binary is the person's either way
-		b.Kind, b.Reason = binPackaged, b.Path+" is "+packageManager(canonicalPath(b.Path))
-	case st.Mode()&os.ModeSymlink != 0:
+		b.Kind, b.Reason = binPackaged, b.Path+" is "+pm
+	case link:
 		target, _ := os.Readlink(b.Path) // ignored: the message's; a link is the person's either way
 		if target != "" && !filepath.IsAbs(target) {
 			// Named from the link's directory, which the reader is not in

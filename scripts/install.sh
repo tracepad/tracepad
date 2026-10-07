@@ -287,7 +287,10 @@ main() {
 		# database the newer binary ran on may be migrated past this one.
 		headline="tracepad $before is installed at $bin, newer than the newest stable release, $version: nothing changed"
 		verified="unchanged"
-		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | TRACEPAD_VERSION=$version sh"
+		# Into the directory it speaks of, quoted (the seventh review of #228).
+		over="TRACEPAD_VERSION=$version"
+		[ -z "${TRACEPAD_INSTALL_DIR:-}" ] || over="$over TRACEPAD_INSTALL_DIR=$(q "$dir")"
+		warning="To install $version over it anyway: curl -fsSL $SCRIPT_URL | $over sh"
 		version="$before"
 	else
 		existed=no

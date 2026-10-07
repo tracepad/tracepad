@@ -2094,7 +2094,8 @@ func TestThePlanOfItsOwnVersionLooksNothingUp(t *testing.T) {
 // development build is the person's to replace, exit 4, never 0; a package
 // manager's is its manager's, whatever it says, never the install script's
 // line over its link (the fifth review of #228). A tracepad first on PATH
-// that is behind is named and not counted.
+// that is behind is named and not counted, and leaves the installed one's
+// nothing_to_do to its own version (the seventh review).
 func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 	t.Parallel()
 	type want struct {
@@ -2177,12 +2178,25 @@ func TestEveryKindOfBinaryIsSortedOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, want{kind: binPackaged, code: exitDecide, line: "is Homebrew's: brew upgrade tracepad", never: "install.sh"}},
+		// A link from outside into a package manager's tree is that
+		// manager's binary: a build of its HEAD there is not given the
+		// install script's line (the seventh review of #228).
+		"a link into Homebrew's Cellar, a build of its HEAD": {func(t *testing.T, deps *Deps) {
+			target := filepath.Join(t.TempDir(), "Cellar", "tracepad", "HEAD", "bin", "tracepad")
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			scriptBinary(t, target, "dev")
+			if err := os.Symlink(target, bin(deps)); err != nil {
+				t.Fatal(err)
+			}
+		}, want{kind: binPackaged, code: exitDecide, line: "is Homebrew's: brew upgrade tracepad", never: "install.sh"}},
+		"a directory in Homebrew's tree": {func(t *testing.T, deps *Deps) { _ = os.Mkdir(cellar(t, deps), 0o700) },
+			want{kind: binOdd, code: exitDecide, line: "is not a regular file"}},
 		"current, and one behind first on PATH": {func(t *testing.T, deps *Deps) {
 			linked(t, bin(deps), "0.2.0")
 			first := filepath.Join(t.TempDir(), "tracepad")
 			scriptBinary(t, first, "0.1.0")
 			deps.LookPath = func(string) string { return first }
-		}, want{kind: binLinked, code: exitOK, line: ", first on PATH, is 0.1.0: "}},
+		}, want{kind: binLinked, code: exitOK, idle: true, line: ", first on PATH, is 0.1.0: "}},
 	}
 	for kind := binNone; kind <= binOurs; kind++ {
 		if !slices.ContainsFunc(slices.Collect(maps.Values(cases)), func(c cell) bool { return c.want.kind == kind }) {
