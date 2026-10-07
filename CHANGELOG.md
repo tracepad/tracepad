@@ -11,6 +11,8 @@ their own headings.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-07
+
 ### Fixed
 
 - The links to the documentation that the install script, `tracepad upgrade` and
@@ -154,5 +156,6 @@ one.
 - The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
   Markdown beside its HTML, on the documentation site.
 
-[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/tracepad/tracepad/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tracepad/tracepad/releases/tag/v0.1.0
