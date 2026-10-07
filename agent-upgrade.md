@@ -58,10 +58,19 @@ package moves to the same version, and you report.
   setting its `docker run` would not carry. The plan names each, with its
   reason and the commands for it — for a container: stop it, back its volume
   up, pull the release, and the `docker run` it was created with, read from
-  `docker inspect`, its variables passed in a file and never printed.
+  `docker inspect`, its variables passed in a file and never printed; for
+  Compose's, the same through its project and its file, the volume under the
+  name Compose gave it. A development build where the binary is installed is
+  the person's too: the plan gives the install script's line that replaces it.
 - A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.
 - Free space for the backup, when there is not enough.
+- An application firewall's question (LuLu, Little Snitch): a step that reaches
+  the network and seems to hang — the plan's look at the releases, a
+  download — is often a new binary's first connection, held until someone
+  answers the firewall's window. The firewall asks once per path, which is why
+  the skill keeps the release it fetches in one place,
+  `~/.cache/tracepad/tmp.release/`.
 - Deleting the backups, and whatever a way back set aside.
 
 ## The backup, said plainly

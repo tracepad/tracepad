@@ -1084,8 +1084,9 @@ release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
-command runs from (`~/.local/bin` when it runs from a temporary directory, as
-the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
+command runs from (`~/.local/bin` when it runs from a temporary directory, or
+from `~/.cache/tracepad/tmp.release/` as the agent's bridge does;
+`TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a
 server only at the server's own address. It does not run on Windows in this
@@ -1095,8 +1096,15 @@ release: it refuses there before it looks at anything. The design is spec 054.
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
   another binary, a Compose project), and what the upgrade would do, step by
-  step. More than one of the command's behind: name one with `--data-dir` or
-  `--container`.
+  step. What is yours and needs nothing — a release at the version or past it — is
+  listed apart, under *Yours, nothing to do* (`nothing_to_do` in `--json`,
+  which marks the command's too); a development build is never that. A development build at the
+  install path is left as it is, with the install script's line that
+  replaces it — a link there included, which the line replaces with the
+  release, as it says. Every value in a command the plan prints that the
+  command did not choose — a name, a path, a label, a version a server
+  answered — is quoted for the shell, or is not printed. More than one of the command's
+  behind: name one with `--data-dir` or `--container`.
 - **A container** is the command's when it is named `tracepad-<project>`, as
   the setup names one, or with `--container NAME`, and a recreate of it is the
   same container: no Compose, Swarm or Kubernetes label; running; a local named
@@ -1122,9 +1130,17 @@ release: it refuses there before it looks at anything. The design is spec 054.
   of the image is yours, and the plan gives the commands that upgrade it —
   the same `docker run`, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
-  ([docker.md](docker.md#upgrading-and-backing-up-first)) — or Compose's
-  `docker compose up -d`. One whose address cannot be told is said to be not
-  checked, not called behind.
+  ([docker.md](docker.md#upgrading-and-backing-up-first)). A container that
+  has something a `docker run` cannot carry — a variable whose value holds a
+  line break, or whose name has a space, a mount of another type — gets no
+  run written: the steps before it, and `docker inspect` to read. A Compose
+  project's are run through its project, env files and file, as Compose
+  labelled the container (`docker compose -p NAME --env-file ENV -f FILE`),
+  from any directory: the
+  service stopped, the volume it really has archived — Compose names it
+  `<project>_<volume>` — the image set in the file, with a digest pinned to
+  it taken off, and `up -d`. One whose address cannot be told is said to be
+  not checked, not called behind.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -1168,7 +1184,7 @@ release: it refuses there before it looks at anything. The design is spec 054.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
-  compared). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
+  compared, and the plan and the check say so). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit `4`).
@@ -1198,11 +1214,11 @@ The exit status, by mode — one table, which the skill reads too:
 
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
-| `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `0` | nothing runs older (a `tracepad` first on `PATH` is named in the notes, with what upgrades it, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
 | `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
-| `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `4` | only what is yours is behind: servers or containers of yours, or the binary at the install path when it is yours to replace (a development build, a package manager's, a link) | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
 | `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
 | `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
 
@@ -1213,7 +1229,12 @@ report says what runs and what is where, whatever the status. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
 `back_check` (the way back's check of the old version), `plan`, `done`,
-`set_aside`, `person`, `next` and `notes`.
+`set_aside`, `person`, `next` and `notes`. In `binary`, `servers` and
+`containers`, `whose` is `command` or `person`, with the `reason` of the
+person's, and `nothing_to_do` marks one that needs nothing — a release at
+the target or past it — whoever's it is. `binary` has `first_on_path` and
+`first_on_path_version` when another `tracepad` comes first on `PATH`: a fact,
+marked neither way.
 
 ## Version skew
 
