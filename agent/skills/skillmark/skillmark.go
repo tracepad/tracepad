@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // Name is the skill's name, which its SKILL.md says and it is installed as.
@@ -28,7 +29,9 @@ const File = ".version"
 func Read(dir string) (bool, string, error) {
 	stamp, err := os.ReadFile(filepath.Join(dir, File))
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	// A file where a directory of the path would be — a `.claude` file —
+	// holds no copy either.
+	case errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
 		return false, "", nil
 	case err != nil:
 		// A marker that cannot be read is not the same as no marker,

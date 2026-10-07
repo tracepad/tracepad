@@ -770,18 +770,11 @@ func TestTheSkillsCopiesAheadOfAServerAreSaid(t *testing.T) {
 	d.run(t, "--name", "myapp", "-p", "127.0.0.1:4318:4318", "--mount", "type=volume,src=myapp,dst=/data", "ghcr.io/tracepad/tracepad:0.1.0", "serve")
 	plan := func(version, skillMD string) (string, int, string) {
 		deps := containerDeps(t, d, "0.2.0")
-		dir := filepath.Join(deps.Home, ".claude", "skills", "tracepad")
-		if version != "" {
-			_ = os.MkdirAll(dir, 0o700)
-			_ = os.WriteFile(filepath.Join(dir, ".version"), []byte(version+"\n"), 0o600)
-		}
-		if skillMD != "" {
-			_ = os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillMD), 0o600)
-		}
+		dir := skillFilesAt(t, deps.Home, version, skillMD)
 		rep, code := runReport(t, deps, "--plan")
 		return strings.Join(rep.Notes, "\n"), code, dir
 	}
-	const ours, theirs = "---\nname: tracepad\n---\n", "---\nname: other\n---\n"
+	const ours, theirs = ourSkillMD, "---\nname: other\n---\n"
 	notes, code, dir := plan("0.2.0", ours)
 	if want := "the skill's copies at " + dir + " are 0.2.0; container myapp runs 0.1.0"; !strings.Contains(notes, want) {
 		t.Errorf("a copy at 0.2.0, a container at 0.1.0: no %q in %s", want, notes)

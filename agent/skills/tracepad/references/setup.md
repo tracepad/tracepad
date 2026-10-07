@@ -78,7 +78,7 @@ if [ "$how" = docker ]; then
 else
   made=; [ -e "$data/tracepad.db" ] || made=yes; TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
   echo $! >"$data/server.pid.new"; logs() { tail -n "+$((n + 1))" "$data/server.log"; }
-  alive() { kill -0 "$(cat "$data/server.pid.new")" && logs | grep -q 'listening addr'; }; stop() { pid="$(cat "$data/server.pid.new")"; kill "$pid" 2>/dev/null; wait "$pid"; rm "$data/server.pid.new"; [ -n "$made" ] && [ "$(cat "$data/tracepad.db.lock" 2>/dev/null)" = "$pid" ] && rm -f "$data/tracepad.db" "$data/tracepad.db-wal" "$data/tracepad.db-shm" "$data/tracepad.db.lock"; }
+  alive() { kill -0 "$(cat "$data/server.pid.new")" && logs | grep -q 'listening addr'; }; stop() { pid="$(cat "$data/server.pid.new")"; kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm "$data/server.pid.new"; if [ -n "$made" ] && [ "$(cat "$data/tracepad.db.lock" 2>/dev/null)" = "$pid" ]; then rm -f "$data/tracepad.db" "$data/tracepad.db-wal" "$data/tracepad.db-shm" "$data/tracepad.db.lock"; fi; }
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
 alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }

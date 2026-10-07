@@ -541,6 +541,7 @@ func (r *runner) planMode(ctx context.Context) *Report {
 		return rep
 	}
 	r.describe(p, rep)
+	rep.Notes = append(rep.Notes, r.skillAhead(p.f)...)
 	rep.ExitCode, rep.Summary = verdictOf(p)
 	return rep
 }
@@ -608,9 +609,6 @@ func (r *runner) describe(p *plan, rep *Report) {
 		rep.Person = append(rep.Person, p.installed)
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
-	if r.flags.plan {
-		rep.Notes = append(rep.Notes, r.skillAhead(p.f)...)
-	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))
 		for _, c := range p.choose {

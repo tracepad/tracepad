@@ -15,8 +15,9 @@ import (
 
 // setup.md's start, run with a stand-in tracepad that serves until it is
 // killed and prints no key (the reviews of #231): no key is a STOP that
-// stops the server it started, and a key an earlier start left in the log
-// is never taken for this one's; a key declared reaches .env. A STOP takes
+// stops the server it started, with no word from the shell about the kill,
+// and a key an earlier start left in the log is never taken for this one's;
+// a key declared reaches .env. A STOP takes
 // with it the database the start's server made, its pid in the lock, so the
 // next try finds the data fresh, and leaves one that was there before or
 // that another server holds (spec 037 #21).
@@ -79,7 +80,7 @@ func TestTheSetupsStartStopsWhatItStarted(t *testing.T) {
 					t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGTERM) })
 				}
 				env, _ := os.ReadFile(filepath.Join(dir, ".env"))
-				if alive := running(pid, c.alive); alive != c.alive || !strings.Contains(string(out), c.says) ||
+				if alive := running(pid, c.alive); alive != c.alive || !strings.Contains(string(out), c.says) || strings.Contains(string(out), "Terminated") ||
 					!strings.Contains(string(env), c.env) || c.key != strings.Contains(string(env), "TRACEPAD_API_KEY=") {
 					t.Errorf("the server alive %v, .env %q: %s", alive, env, out)
 				}

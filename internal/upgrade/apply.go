@@ -1140,24 +1140,23 @@ type skillCopy struct {
 
 // skillCopies are the skill's copies a run installs again and the plan
 // reads (spec 054 #64): one list for both. The project's copy is the
-// user's when the command runs in the home directory: one copy, listed once.
+// user's when the command runs in the home directory, however either is
+// spelled (sameFile): one copy, listed once.
 func (r *runner) skillCopies() []skillCopy {
 	var copies []skillCopy
+	claude, agents := filepath.Join(r.deps.Home, ".claude", "skills"), filepath.Join(r.deps.Home, ".agents", "skills")
 	for _, at := range []struct {
 		skills string
 		args   []string
 	}{
-		{filepath.Join(r.deps.Home, ".claude", "skills"), nil},
-		{filepath.Join(r.deps.Home, ".agents", "skills"), nil},
+		{claude, []string{"--dir", claude}},
+		{agents, []string{"--dir", agents}},
 		{filepath.Join(r.deps.Cwd, ".claude", "skills"), []string{"--project"}},
 	} {
 		dir := filepath.Join(at.skills, skillmark.Name)
 		ok, v, err := skillmark.Read(dir)
-		if (err == nil && !ok) || slices.ContainsFunc(copies, func(c skillCopy) bool { return c.dir == dir }) {
+		if (err == nil && !ok) || slices.ContainsFunc(copies, func(c skillCopy) bool { return sameFile(c.dir, dir) }) {
 			continue
-		}
-		if at.args == nil {
-			at.args = []string{"--dir", at.skills}
 		}
 		copies = append(copies, skillCopy{dir, v, err, at.args})
 	}
@@ -1165,10 +1164,11 @@ func (r *runner) skillCopies() []skillCopy {
 }
 
 // reinstallSkill installs the skill again, with the binary at bin when it is
-// version to, wherever a copy carries its marker (Decision 12).
+// version to, at each of its copies (Decision 12; skillCopies, by spec 037
+// #16's rule: a marker alone is no copy).
 //
 // It answers whether that is done, so the run records it: a binary that does
-// not say its version, a marker that cannot be looked at, or an install that
+// not say its version, a copy that cannot be read, or an install that
 // failed is a note, and is not done (the audit of #223). A binary that is not
 // version to has nothing to install.
 func (r *runner) reinstallSkill(ctx context.Context, rep *Report, bin, to string) bool {
