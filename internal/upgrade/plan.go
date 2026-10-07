@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/tracepad/tracepad/agent/skills/skillmark"
 )
 
 const docsUpgrading = "https://tracepad.github.io/tracepad/latest/install/#upgrading"
@@ -433,24 +431,27 @@ func (r *runner) firstOnPath(b Binary) string {
 // skillAhead is the plan's line on the skill's copies when they are newer
 // than a server or container of the person's (spec 054 #64): the skill then
 // names what that server does not have. A fact, sorted into nothing: a copy
-// by the skill's own rule (spec 037 #16, skillmark), never a marker alone.
-func (r *runner) skillAhead(f Findings) string {
+// by the skill's own rule (spec 037 #16, skillmark), never a marker alone,
+// and one that could not be read said so, since unreadable is not absent.
+// With no such server or container, no copy is read.
+func (r *runner) skillAhead(f Findings) []string {
+	if !slices.ContainsFunc(f.Servers, func(s Server) bool { return !s.Ours }) &&
+		!slices.ContainsFunc(f.Containers, func(c Container) bool { return !c.Ours }) {
+		return nil
+	}
+	var notes, at, behind []string
 	var newest string
-	var at []string
 	for _, c := range r.skillCopies() {
-		dir := filepath.Dir(c.marker)
-		ok, v, err := skillmark.Read(dir)
 		switch {
-		// The project's copy is the user's when the command runs in the home
-		// directory: one copy, said once.
-		case slices.Contains(at, dir) || err != nil || !ok || !IsRelease(v) || behindTo(newest, v):
-		case newest == "" || behindTo(v, newest):
-			newest, at = v, []string{dir}
+		case c.err != nil:
+			notes = append(notes, fmt.Sprintf("the skill at %s was not looked at: %v", c.dir, c.err))
+		case !IsRelease(c.version) || behindTo(newest, c.version):
+		case newest == "" || behindTo(c.version, newest):
+			newest, at = c.version, []string{c.dir}
 		default:
-			at = append(at, dir)
+			at = append(at, c.dir)
 		}
 	}
-	var behind []string
 	for _, s := range f.Servers {
 		if !s.Ours && behindTo(newest, s.Version) {
 			behind = append(behind, fmt.Sprintf("server pid %d runs %s", s.Proc.PID, s.Version))
@@ -461,10 +462,10 @@ func (r *runner) skillAhead(f Findings) string {
 			behind = append(behind, fmt.Sprintf("container %s runs %s", c.Name, c.Version))
 		}
 	}
-	if len(behind) == 0 {
-		return ""
+	if len(behind) > 0 {
+		notes = append(notes, fmt.Sprintf("the skill's copies at %s are %s; %s", strings.Join(at, ", "), newest, strings.Join(behind, "; ")))
 	}
-	return fmt.Sprintf("the skill's copies at %s are %s; %s", strings.Join(at, ", "), newest, strings.Join(behind, "; "))
+	return notes
 }
 
 // binaryTodo is the plan's table of the binary at the install path: by its
@@ -608,9 +609,7 @@ func (r *runner) describe(p *plan, rep *Report) {
 	}
 	rep.Notes = append(rep.Notes, p.notes...)
 	if r.flags.plan {
-		if note := r.skillAhead(p.f); note != "" {
-			rep.Notes = append(rep.Notes, note)
-		}
+		rep.Notes = append(rep.Notes, r.skillAhead(p.f)...)
 	}
 	if len(p.choose) > 0 {
 		rep.Plan = append(rep.Plan, "more than one is the command's; one run upgrades one of them: "+strings.Join(p.choose, ", or "))

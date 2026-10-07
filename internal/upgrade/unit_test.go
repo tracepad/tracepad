@@ -833,15 +833,27 @@ func TestAWrongVersionIsNotHealthyAtOnce(t *testing.T) {
 	}
 }
 
+// skillCopyAt puts a copy of the skill at version in home's
+// ~/.claude/skills, by the skill's own rule (spec 037 #16): a .version beside
+// a SKILL.md that names it. It answers the copy's directory.
+func skillCopyAt(t *testing.T, home, version string) string {
+	t.Helper()
+	dir := filepath.Join(home, ".claude", "skills", "tracepad")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, ".version"), []byte(version+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: tracepad\n---\n"), 0o600)
+	return dir
+}
+
 // The skill is recorded as installed only when it was (the twelfth review):
 // a binary that is not the run's version any more installs nothing, says
 // so, and leaves the step for a later check.
 func TestASkillIsDoneOnlyWhenInstalled(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	marker := filepath.Join(home, ".claude", "skills", "tracepad", ".version")
-	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
-	_ = os.WriteFile(marker, []byte("0.5.0\n"), 0o600)
+	skillCopyAt(t, home, "0.5.0")
 	installs := 0
 	r := &runner{deps: Deps{Home: home, Cwd: home,
 		Version: func(context.Context, string) (string, error) { return "0.4.0", nil },

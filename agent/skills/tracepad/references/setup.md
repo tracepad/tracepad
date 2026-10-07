@@ -78,7 +78,7 @@ if [ "$how" = docker ]; then
 else
   made=; [ -e "$data/tracepad.db" ] || made=yes; TRACEPAD_URL="$url" TRACEPAD_PROJECTS="$decl" nohup tracepad serve --listen "localhost:$port" --data-dir "$data" >>"$data/server.log" 2>&1 &
   echo $! >"$data/server.pid.new"; logs() { tail -n "+$((n + 1))" "$data/server.log"; }
-  alive() { kill -0 "$(cat "$data/server.pid.new")" && logs | grep -q 'listening addr'; }; stop() { pid="$(cat "$data/server.pid.new")"; kill "$pid"; rm "$data/server.pid.new"; [ -z "$made" ] || { for i in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null && sleep 1; done; rm -f "$data/tracepad.db" "$data/tracepad.db-wal" "$data/tracepad.db-shm" "$data/tracepad.db.lock"; }; }
+  alive() { kill -0 "$(cat "$data/server.pid.new")" && logs | grep -q 'listening addr'; }; stop() { pid="$(cat "$data/server.pid.new")"; kill "$pid" 2>/dev/null; wait "$pid"; rm "$data/server.pid.new"; [ -n "$made" ] && [ "$(cat "$data/tracepad.db.lock" 2>/dev/null)" = "$pid" ] && rm -f "$data/tracepad.db" "$data/tracepad.db-wal" "$data/tracepad.db-shm" "$data/tracepad.db.lock"; }
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; tracepad health --url "$url" >/dev/null 2>&1 && break; done
 alive && tracepad health --url "$url" || { logs | tail -n 5; stop; exit 1; }
@@ -91,8 +91,8 @@ put TRACEPAD_URL "$url"; put TRACEPAD_API_KEY "$sk"; [ "$via" != langfuse ] || p
 Healthy: `{"version":"…","ok":true}`. Otherwise its log's last lines say why
 (*address already in use*: another port; Docker says its own). Then, as on
 any `STOP` after the start, the server is stopped — a container that failed is removed, with the volume it made, so the
-next try takes the same name; a server's database it made is removed, so the
-next try finds the data fresh — and `.env` untouched. The project is named after the repository.
+next try takes the same name; a database made by the server it started (that pid
+in `tracepad.db.lock`) is removed, so the next try finds the data fresh — and `.env` untouched. The project is named after the repository.
 
 Then the lines of `via`, from `.env`. On a server you did not start, the human
 puts `TRACEPAD_URL`, the key and, for Langfuse, `LANGFUSE_PUBLIC_KEY` there:

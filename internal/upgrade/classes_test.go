@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -861,15 +862,49 @@ func TestAServerOfUnknownBinaryIsCounted(t *testing.T) {
 	}
 }
 
+// The plan's line on the skill's copies names a server of the person's by
+// its pid (spec 054 #64), as it names a container
+// (TestTheSkillsCopiesAheadOfAServerAreSaid); a copy it cannot read is said,
+// not taken for none.
+func TestTheSkillsCopiesAheadOfAPersonsServerAreSaid(t *testing.T) {
+	t.Parallel()
+	w := newBareWorld(t)
+	if err := os.WriteFile(filepath.Join(w.data, dataDBName), templateDB(t, 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Run from another binary: someone else's.
+	elsewhere := filepath.Join(t.TempDir(), "tracepad")
+	scriptBinary(t, elsewhere, fOld)
+	argv := []string{"tracepad", "serve", "--listen", w.listen, "--data-dir", w.data}
+	started, err := w.host.Start(StartSpec{Path: elsewhere, Argv: argv, Dir: w.home, Log: filepath.Join(w.data, "server.log")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.waitVersion(fOld)
+	dir := skillCopyAt(t, w.home, fNew)
+	rep, _ := runIn(t, context.Background(), w.deps(), "--plan", "--to", fNew)
+	want := fmt.Sprintf("the skill's copies at %s are %s; server pid %d runs %s", dir, fNew, started.PID(), fOld)
+	if !slices.Contains(rep.Notes, want) {
+		t.Errorf("no %q in %q", want, rep.Notes)
+	}
+	if os.Getuid() == 0 {
+		return // root reads it whatever its mode
+	}
+	_ = os.Chmod(filepath.Join(dir, "SKILL.md"), 0)
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "SKILL.md"), 0o600) })
+	rep, _ = runIn(t, context.Background(), w.deps(), "--plan", "--to", fNew)
+	if notes := strings.Join(rep.Notes, "\n"); !strings.Contains(notes, "the skill at "+dir+" was not looked at") {
+		t.Errorf("an unreadable copy: %s", notes)
+	}
+}
+
 // A skill that was not installed again is a note, and its step is not
 // written: the next --check tries again (17).
 func TestASkillNotInstalledIsNotRecorded(t *testing.T) {
 	t.Parallel()
 	w := newFakeWorld(t, 2)
 	deps := w.deps()
-	marker := filepath.Join(w.home, ".claude", "skills", "tracepad", ".version")
-	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
-	_ = os.WriteFile(marker, []byte(fOld), 0o600)
+	skillCopyAt(t, w.home, fOld)
 	deps.Skills = func(context.Context, string, string, ...string) (string, error) {
 		return "no room", errors.New("exit 1")
 	}
