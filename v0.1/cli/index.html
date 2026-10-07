@@ -3148,8 +3148,9 @@ release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (<code>--to 0.2.0-rc.1 --data-dir DIR</code>, or <code>--container NAME</code>), and exits <code>4</code>. The installed binary is the <code>tracepad</code> in the directory the
-command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, as
-the agent's bridge does; <code>TRACEPAD_INSTALL_DIR</code> names another). One a package
+command runs from (<code>~/.local/bin</code> when it runs from a temporary directory, or
+from <code>~/.cache/tracepad/tmp.release/</code> as the agent's bridge does;
+<code>TRACEPAD_INSTALL_DIR</code> names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, <code>/usr/bin</code> — is
 yours, and the plan names the manager's command. It is local, like <code>skills</code>: it reads this machine's processes and containers and asks a
 server only at the server's own address. It does not run on Windows in this
@@ -3159,8 +3160,15 @@ release: it refuses there before it looks at anything. The design is spec 054.</
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
   another binary, a Compose project), and what the upgrade would do, step by
-  step. More than one of the command's behind: name one with <code>--data-dir</code> or
-  <code>--container</code>.</li>
+  step. What is yours and needs nothing — a release at the version or past it — is
+  listed apart, under <em>Yours, nothing to do</em> (<code>nothing_to_do</code> in <code>--json</code>,
+  which marks the command's too); a development build is never that. A development build at the
+  install path is left as it is, with the install script's line that
+  replaces it — a link there included, which the line replaces with the
+  release, as it says. Every value in a command the plan prints that the
+  command did not choose — a name, a path, a label, a version a server
+  answered — is quoted for the shell, or is not printed. More than one of the command's
+  behind: name one with <code>--data-dir</code> or <code>--container</code>.</li>
 <li><strong>A container</strong> is the command's when it is named <code>tracepad-&lt;project&gt;</code>, as
   the setup names one, or with <code>--container NAME</code>, and a recreate of it is the
   same container: no Compose, Swarm or Kubernetes label; running; a local named
@@ -3186,9 +3194,17 @@ release: it refuses there before it looks at anything. The design is spec 054.</
   of the image is yours, and the plan gives the commands that upgrade it —
   the same <code>docker run</code>, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
-  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>) — or Compose's
-  <code>docker compose up -d</code>. One whose address cannot be told is said to be not
-  checked, not called behind.</li>
+  (<a href="../docker/#upgrading-and-backing-up-first">docker.md</a>). A container that
+  has something a <code>docker run</code> cannot carry — a variable whose value holds a
+  line break, or whose name has a space, a mount of another type — gets no
+  run written: the steps before it, and <code>docker inspect</code> to read. A Compose
+  project's are run through its project, env files and file, as Compose
+  labelled the container (<code>docker compose -p NAME --env-file ENV -f FILE</code>),
+  from any directory: the
+  service stopped, the volume it really has archived — Compose names it
+  <code>&lt;project&gt;_&lt;volume&gt;</code> — the image set in the file, with a digest pinned to
+  it taken off, and <code>up -d</code>. One whose address cannot be told is said to be
+  not checked, not called behind.</li>
 <li>Without it, the command does it. A <strong>server</strong> is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -3232,7 +3248,7 @@ release: it refuses there before it looks at anything. The design is spec 054.</
 <li><strong>The check</strong> asks the server's <code>/health</code> at its own address, and compares
   the trace count of <code>/api/v1/system</code> before and after, with the key in
   <code>TRACEPAD_API_KEY</code> (from the environment only; without one the counts are not
-  compared). A new version that exits, or answers as another version, goes back at once (exit <code>3</code>). One that runs
+  compared, and the plan and the check say so). A new version that exits, or answers as another version, goes back at once (exit <code>3</code>). One that runs
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit <code>4</code>).</li>
@@ -3271,7 +3287,7 @@ gives the commands to remove each. The command never deletes any of it.</p>
 <tbody>
 <tr>
 <td><code>0</code></td>
-<td>nothing runs older (an older <code>tracepad</code> elsewhere is named, and runs nothing)</td>
+<td>nothing runs older (a <code>tracepad</code> first on <code>PATH</code> is named in the notes, with what upgrades it, and runs nothing)</td>
 <td>upgraded, healthy; or nothing to do anywhere</td>
 <td>healthy</td>
 <td>went back; the old version runs, healthy</td>
@@ -3299,7 +3315,7 @@ gives the commands to remove each. The command never deletes any of it.</p>
 </tr>
 <tr>
 <td><code>4</code></td>
-<td>only servers or containers of yours run older</td>
+<td>only what is yours is behind: servers or containers of yours, or the binary at the install path when it is yours to replace (a development build, a package manager's, a link)</td>
 <td>with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind</td>
 <td>the new version is not healthy, or is yours to decide</td>
 <td>—</td>
@@ -3327,7 +3343,12 @@ report says what runs and what is where, whatever the status. <code>--json</code
 prints the report as one object: <code>mode</code>, <code>status</code>, <code>exit_code</code>, <code>summary</code>,
 <code>from</code>, <code>to</code>, <code>run</code>, <code>binary</code>, <code>servers</code>, <code>containers</code>, <code>probe</code>, <code>check</code>,
 <code>back_check</code> (the way back's check of the old version), <code>plan</code>, <code>done</code>,
-<code>set_aside</code>, <code>person</code>, <code>next</code> and <code>notes</code>.</p>
+<code>set_aside</code>, <code>person</code>, <code>next</code> and <code>notes</code>. In <code>binary</code>, <code>servers</code> and
+<code>containers</code>, <code>whose</code> is <code>command</code> or <code>person</code>, with the <code>reason</code> of the
+person's, and <code>nothing_to_do</code> marks one that needs nothing — a release at
+the target or past it — whoever's it is. <code>binary</code> has <code>first_on_path</code> and
+<code>first_on_path_version</code> when another <code>tracepad</code> comes first on <code>PATH</code>: a fact,
+marked neither way.</p>
 <h2 id="version-skew">Version skew</h2>
 <p>Every API response carries the server's build. When it differs from the CLI's,
 the first command of a session prints a warning to stderr and carries on — a

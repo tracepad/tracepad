@@ -591,6 +591,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-reaches-the-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What reaches the network
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sending-from-any-opentelemetry-sdk" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1567,6 +1578,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-reaches-the-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What reaches the network
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sending-from-any-opentelemetry-sdk" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1841,6 +1863,51 @@ does not warn about one left exported.</p>
 </tbody>
 </table>
 <p>See <a href="../install/#with-the-install-script">install.md</a>.</p>
+<h2 id="what-reaches-the-network">What reaches the network</h2>
+<p><strong>The server reaches nothing.</strong> It sends no telemetry, checks for no update and
+asks no other host anything: it answers the requests it is sent, and that is
+all. Its web interface loads nothing from anywhere else either — its content
+security policy allows its own address only — and its links to these pages
+open GitHub when you follow one, not before.</p>
+<p>What does go out, and where:</p>
+<table>
+<thead>
+<tr>
+<th>Who</th>
+<th>Where to</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The CLI and <code>tracepad mcp</code></td>
+<td>your server, at <code>TRACEPAD_URL</code> (or <code>--url</code>)</td>
+<td>every command</td>
+</tr>
+<tr>
+<td>The Python, Node and Go packages</td>
+<td>your server, at <code>TRACEPAD_URL</code></td>
+<td>when they export</td>
+</tr>
+<tr>
+<td><code>tracepad export</code></td>
+<td>the address you give it, and only that one</td>
+<td>when you run it</td>
+</tr>
+<tr>
+<td><code>tracepad upgrade</code></td>
+<td>GitHub's releases (or <code>TRACEPAD_DOWNLOAD_URL</code>), for the release list and the archive; <code>gh attestation verify</code> asks GitHub too, when <code>gh</code> is logged in; a container's upgrade has Docker pull the image from its registry</td>
+<td>when you run it; <code>--plan</code> reads the release list only — and nothing when the binary at the install path runs it with <code>--to</code> its own version, as the install script does</td>
+</tr>
+<tr>
+<td>The install script</td>
+<td>GitHub's releases (or <code>TRACEPAD_DOWNLOAD_URL</code>)</td>
+<td>when you run it</td>
+</tr>
+</tbody>
+</table>
+<p><code>tracepad upgrade</code> also asks servers and containers on this machine for their
+version, at their own addresses; nothing it reads there leaves the machine.</p>
 <h2 id="sending-from-any-opentelemetry-sdk">Sending from any OpenTelemetry SDK</h2>
 <p>These are the OpenTelemetry SDK's, not Tracepad's, and this is what to set:</p>
 <table>

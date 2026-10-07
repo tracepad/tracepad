@@ -25,7 +25,8 @@ it beside the tools that cover the same ground.
 - [Installing the binary](install.md): download, verify, run as a service,
   upgrade, back up.
 - [Docker](docker.md): the image, its volume, TLS in front, upgrades.
-- [Configuration](configuration.md): every environment variable.
+- [Configuration](configuration.md): every environment variable, and
+  [what reaches the network](configuration.md#what-reaches-the-network).
 - [How Tracepad compares](compare.md): what other tools need to run, and
   where they do more.
 
@@ -609,10 +610,19 @@ package moves to the same version, and you report.
   setting its `docker run` would not carry. The plan names each, with its
   reason and the commands for it — for a container: stop it, back its volume
   up, pull the release, and the `docker run` it was created with, read from
-  `docker inspect`, its variables passed in a file and never printed.
+  `docker inspect`, its variables passed in a file and never printed; for
+  Compose's, the same through its project and its file, the volume under the
+  name Compose gave it. A development build where the binary is installed is
+  the person's too: the plan gives the install script's line that replaces it.
 - A trace count that is lower after the upgrade, or cannot be read: keep the
   new version, or go back to the old one, which drops what arrived since.
 - Free space for the backup, when there is not enough.
+- An application firewall's question (LuLu, Little Snitch): a step that reaches
+  the network and seems to hang — the plan's look at the releases, a
+  download — is often a new binary's first connection, held until someone
+  answers the firewall's window. The firewall asks once per path, which is why
+  the skill keeps the release it fetches in one place,
+  `~/.cache/tracepad/tmp.release/`.
 - Deleting the backups, and whatever a way back set aside.
 
 ## The backup, said plainly
@@ -685,6 +695,10 @@ for the release `0.1.0` that follows it:
 | npm | semver, under a dist-tag | `0.1.0-rc.1`, dist-tag `next` | `0.1.0`, dist-tag `latest` |
 | Go module | tag of the nested module | `sdk/go/v0.1.0-rc.1` | `sdk/go/v0.1.0` |
 | `tracepad version`, the first line of the server's log | semver, without the `v` | `0.1.0-rc.1` | `0.1.0` |
+
+`tracepad version` prints the version alone, which is what scripts compare;
+`tracepad version --json` adds the commit the build was made from, as the log's
+first line has it (`{"version":"0.1.0","commit":"ef3e349"}`).
 
 Python's spelling is the only one that differs from the tag's, and it is derived
 from it (`-rc.N` is `rcN`, `-beta.N` is `bN`, `-alpha.N` is `aN`). A candidate
@@ -955,6 +969,17 @@ is rolled back at once, one that runs but stays silent is left for you to
 decide, and `tracepad upgrade --back <run>` takes the way back later. Nothing is
 deleted on the way: what a way back replaces is set aside as
 `<data>.after-<run>`. The whole of it is [cli.md](cli.md#upgrade).
+
+A development build in the install directory — one you built and copied or
+linked there, whose `tracepad version` says `dev` or a commit — is yours: the
+command does not replace it, and the plan gives the install script's line
+that puts the release in its place (in place of a link, the link itself; the
+build it points to stays) (`curl -fsSL https://tracepad.github.io/tracepad/install.sh | TRACEPAD_VERSION=X.Y.Z sh`).
+
+A step that reaches the network and seems to hang — the install script's
+download, the plan's look at the releases — is often an application
+firewall (LuLu, Little Snitch) holding a new binary's first connection until
+its window is answered: look for the window.
 
 **A backup is personal data with no expiry.** A run directory, like any copy
 you take, holds every prompt and completion and the server's environment,
@@ -1670,8 +1695,13 @@ says why, and gives the steps below with its name, its volume and the release
 filled in, and the `docker run` it was created with — its ports, mounts,
 restart policy, labels and command, read from `docker inspect` — the variables
 it was given passed in a file read from Docker, named and never printed. A
-Compose project takes the new tag in its Compose file and `docker compose up
--d`, after the same backup.
+Compose project gets the same backup with its own names — the service stopped
+through its project and file (`docker compose -p <project> -f <file> stop
+<service>`, with `--env-file` for each env file the project was started
+with), the volume Compose made archived — then the new tag in its
+Compose file (a `@sha256:` digest after the old tag taken off: Docker runs the
+digest whatever the tag says) and `docker compose -p <project> -f <file> up -d
+<service>`.
 
 Back the volume up by tarring it from a throwaway container, then run the new
 release with the old one's options — as one command, each step only once the
@@ -1679,8 +1709,11 @@ one before it worked, so a backup that is refused stops everything after it:
 
 ```sh
 docker stop tracepad &&
-docker run --rm -v tracepad:/data -v "$PWD:/backup" busybox \
-  sh -c 'umask 077 && set -C && tar czf - -C /data . > /backup/tracepad-$(date +%F).tar.gz' &&
+(umask 077 && set -C && f="tracepad-$(date +%F).tar.gz" &&
+  if [ -e "$f" ]; then echo "$f is there already" >&2; exit 1; fi &&
+  rm -f "$f.part" &&
+  docker run --rm -v tracepad:/data:ro busybox tar czf - -C /data . > "$f.part" &&
+  mv "$f.part" "$f" || { rm -f "$f.part"; exit 1; }) &&
 docker pull ghcr.io/tracepad/tracepad:X.Y.Z &&
 docker rename tracepad tracepad-old &&
 (umask 077 && set -C && docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' tracepad-old \
@@ -1689,6 +1722,21 @@ docker run -d --name tracepad --env-file tracepad.upgrade.env -p 127.0.0.1:4318:
   -v tracepad:/data ghcr.io/tracepad/tracepad:X.Y.Z serve &&
 rm tracepad.upgrade.env
 ```
+
+**Under Compose the volume is not called `tracepad`.** Compose names it
+`<project>_<volume>` — `tracepad_tracepad_data` for a volume `tracepad_data`
+in a project `tracepad` — and `-v tracepad:/data` copied from here makes a new,
+empty volume called `tracepad` and archives that: a backup that says it worked
+and holds nothing. Read the name before the backup, and put it in place of
+`tracepad` in `-v tracepad:/data`:
+
+```sh
+docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' <container>
+docker volume ls     # every volume, with Compose's names
+```
+
+`tracepad upgrade --plan` prints the steps with the real name, the service and
+the Compose file filled in.
 
 `X.Y.Z` is the release you are moving to; the variables are the ones you gave
 the container, read from Docker into a file that holds its keys and is removed
@@ -1702,10 +1750,15 @@ Stopped after it, put the old one back:
 Stopping first matters: SQLite's write-ahead log is part of the database, and a
 tar of a live one is a copy of a file mid-write. `umask 077` makes the archive
 readable by its owner alone; it is the whole database, and without it the file
-lands in your directory as readable as that directory lets it be. `set -C`
-keeps it from writing over an earlier backup of the same name. Restoring is the
-same command the other way round, `tar xzf - -C /data < /backup/<the file>`,
-into a stopped container's volume mounted without `readonly`.
+lands in your directory as readable as that directory lets it be. An earlier
+backup of the same name stops it rather than being written over. busybox
+writes the archive to its output and your shell writes the file, so no
+directory of yours is mounted into the container; the file is `….part` until
+docker has written it whole, so a backup that fails — docker not answering,
+the image not pulled — leaves no empty archive that looks like one, and the
+same command can simply be run again. Restoring is the same the other way round,
+`docker run --rm -i -v tracepad:/data busybox tar xzf - -C /data < <the file>`,
+into a stopped container's volume.
 
 **One server per volume.** The server holds a lock on `tracepad.db.lock`, beside the
 database, for as long as it runs, and a second one started on the same
@@ -1850,6 +1903,27 @@ does not warn about one left exported.
 | `TRACEPAD_DOWNLOAD_URL` | `https://github.com/tracepad/tracepad/releases` | A mirror with the same layout (`download/v<version>/…`, `latest/download/checksums.txt`), over `https://` or `file://`. |
 
 See [install.md](install.md#with-the-install-script).
+
+## What reaches the network
+
+**The server reaches nothing.** It sends no telemetry, checks for no update and
+asks no other host anything: it answers the requests it is sent, and that is
+all. Its web interface loads nothing from anywhere else either — its content
+security policy allows its own address only — and its links to these pages
+open GitHub when you follow one, not before.
+
+What does go out, and where:
+
+| Who | Where to | When |
+|---|---|---|
+| The CLI and `tracepad mcp` | your server, at `TRACEPAD_URL` (or `--url`) | every command |
+| The Python, Node and Go packages | your server, at `TRACEPAD_URL` | when they export |
+| `tracepad export` | the address you give it, and only that one | when you run it |
+| `tracepad upgrade` | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`), for the release list and the archive; `gh attestation verify` asks GitHub too, when `gh` is logged in; a container's upgrade has Docker pull the image from its registry | when you run it; `--plan` reads the release list only — and nothing when the binary at the install path runs it with `--to` its own version, as the install script does |
+| The install script | GitHub's releases (or `TRACEPAD_DOWNLOAD_URL`) | when you run it |
+
+`tracepad upgrade` also asks servers and containers on this machine for their
+version, at their own addresses; nothing it reads there leaves the machine.
 
 ## Sending from any OpenTelemetry SDK
 
@@ -10732,8 +10806,9 @@ release and the installed binary: a release candidate installed is never gone
 back from, and a server still running an older version from it is yours to
 take there — the plan gives the command, with the candidate named
 (`--to 0.2.0-rc.1 --data-dir DIR`, or `--container NAME`), and exits `4`. The installed binary is the `tracepad` in the directory the
-command runs from (`~/.local/bin` when it runs from a temporary directory, as
-the agent's bridge does; `TRACEPAD_INSTALL_DIR` names another). One a package
+command runs from (`~/.local/bin` when it runs from a temporary directory, or
+from `~/.cache/tracepad/tmp.release/` as the agent's bridge does;
+`TRACEPAD_INSTALL_DIR` names another). One a package
 manager installed — Homebrew's Cellar, the Nix store, a snap, `/usr/bin` — is
 yours, and the plan names the manager's command. It is local, like `skills`: it reads this machine's processes and containers and asks a
 server only at the server's own address. It does not run on Windows in this
@@ -10743,8 +10818,15 @@ release: it refuses there before it looks at anything. The design is spec 054.
   yours and every container of the image, says which the command may upgrade
   and why each other is yours (a service, an address beyond this machine,
   another binary, a Compose project), and what the upgrade would do, step by
-  step. More than one of the command's behind: name one with `--data-dir` or
-  `--container`.
+  step. What is yours and needs nothing — a release at the version or past it — is
+  listed apart, under *Yours, nothing to do* (`nothing_to_do` in `--json`,
+  which marks the command's too); a development build is never that. A development build at the
+  install path is left as it is, with the install script's line that
+  replaces it — a link there included, which the line replaces with the
+  release, as it says. Every value in a command the plan prints that the
+  command did not choose — a name, a path, a label, a version a server
+  answered — is quoted for the shell, or is not printed. More than one of the command's
+  behind: name one with `--data-dir` or `--container`.
 - **A container** is the command's when it is named `tracepad-<project>`, as
   the setup names one, or with `--container NAME`, and a recreate of it is the
   same container: no Compose, Swarm or Kubernetes label; running; a local named
@@ -10770,9 +10852,17 @@ release: it refuses there before it looks at anything. The design is spec 054.
   of the image is yours, and the plan gives the commands that upgrade it —
   the same `docker run`, its variables in a file read from Docker and never
   printed, the old one kept until the new one is healthy
-  ([docker.md](docker.md#upgrading-and-backing-up-first)) — or Compose's
-  `docker compose up -d`. One whose address cannot be told is said to be not
-  checked, not called behind.
+  ([docker.md](docker.md#upgrading-and-backing-up-first)). A container that
+  has something a `docker run` cannot carry — a variable whose value holds a
+  line break, or whose name has a space, a mount of another type — gets no
+  run written: the steps before it, and `docker inspect` to read. A Compose
+  project's are run through its project, env files and file, as Compose
+  labelled the container (`docker compose -p NAME --env-file ENV -f FILE`),
+  from any directory: the
+  service stopped, the volume it really has archived — Compose names it
+  `<project>_<volume>` — the image set in the file, with a digest pinned to
+  it taken off, and `up -d`. One whose address cannot be told is said to be
+  not checked, not called behind.
 - Without it, the command does it. A **server** is the command's when it runs
   the installed binary, its data directory's lock records its pid, it listens
   on this machine only, and it is in no service manager's hands: a server in
@@ -10816,7 +10906,7 @@ release: it refuses there before it looks at anything. The design is spec 054.
 - **The check** asks the server's `/health` at its own address, and compares
   the trace count of `/api/v1/system` before and after, with the key in
   `TRACEPAD_API_KEY` (from the environment only; without one the counts are not
-  compared). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
+  compared, and the plan and the check say so). A new version that exits, or answers as another version, goes back at once (exit `3`). One that runs
   but stays silent through the two-minute wait — a long migration runs before
   the server listens — or answers but counts fewer traces, or cannot count
   them, is left running for you to decide (exit `4`).
@@ -10846,11 +10936,11 @@ The exit status, by mode — one table, which the skill reads too:
 
 | Exit | `--plan` | the upgrade | `--check RUN` | `--back RUN` |
 |------|----------|-------------|---------------|--------------|
-| `0` | nothing runs older (an older `tracepad` elsewhere is named, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
+| `0` | nothing runs older (a `tracepad` first on `PATH` is named in the notes, with what upgrades it, and runs nothing) | upgraded, healthy; or nothing to do anywhere | healthy | went back; the old version runs, healthy |
 | `1` | refused, or interrupted: no verdict (the install script reads it as "could not check") | refused, or interrupted before the stop, with nothing changed | refused | refused, with nothing touched |
 | `2` | a usage error | a usage error | a usage error | a usage error |
 | `3` | — | not upgraded: the way back ran, and the old version runs, healthy | — | — |
-| `4` | only servers or containers of yours run older | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
+| `4` | only what is yours is behind: servers or containers of yours, or the binary at the install path when it is yours to replace (a development build, a package manager's, a link) | with a run: the new version runs and its check is yours to decide; with none: nothing of the command's to do, and only what is yours is behind | the new version is not healthy, or is yours to decide | — |
 | `5` | — | stuck: a step failed and could not be undone, or the old version was started and not seen healthy | stuck: the run could not record its check | stuck: the way back did not finish, or the old version was not seen healthy |
 | `10` | an upgrade is pending | nothing to do for the one named, and another of the command's is behind: the report's `next` upgrades it | — | — |
 
@@ -10861,7 +10951,12 @@ report says what runs and what is where, whatever the status. `--json`
 prints the report as one object: `mode`, `status`, `exit_code`, `summary`,
 `from`, `to`, `run`, `binary`, `servers`, `containers`, `probe`, `check`,
 `back_check` (the way back's check of the old version), `plan`, `done`,
-`set_aside`, `person`, `next` and `notes`.
+`set_aside`, `person`, `next` and `notes`. In `binary`, `servers` and
+`containers`, `whose` is `command` or `person`, with the `reason` of the
+person's, and `nothing_to_do` marks one that needs nothing — a release at
+the target or past it — whoever's it is. `binary` has `first_on_path` and
+`first_on_path_version` when another `tracepad` comes first on `PATH`: a fact,
+marked neither way.
 
 ## Version skew
 
