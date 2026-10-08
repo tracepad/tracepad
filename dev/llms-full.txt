@@ -5535,7 +5535,7 @@ cards and leads here.
 
 The filter bar is the dashboard's: the time window (`?from=&to=`, the one this
 browser [remembers](#the-remembered-window) or the last 30 days), the
-environment box, and the hourly/daily choice (`?group_by=`).
+environment box, and the minutely/hourly/daily choice (`?group_by=`).
 
 **Quality** (`/quality`) is a card per score name in the window, over one
 request. A card is the name, its data type, how many scores it holds, and a
@@ -5671,20 +5671,29 @@ write among them. Cache read is on the chart, where it explains a bill that is
 smaller than the tokens suggest, and out of the column, where it would count
 the same tokens twice for the providers that report cached tokens inside the
 input. The
-bucket switcher is hourly/daily and defaults to hours for windows up to 48
-hours, days above. In the release table, the traces that named none are one
+bucket switcher is minutely/hourly/daily and defaults to minutes for windows
+up to two hours that end within the last day, hours up to 48 hours, days
+above — *Last hour* is sixty
+points, *Last 24 hours* twenty-four. Minutes are offered for windows of 24
+hours or less that end within the last day; past that the button is
+disabled, the reason is written beside it, and a link that asks for minutes
+reads as if it asked for nothing. The **Quality** block stays hourly
+under a minute timeline: scores are rolled up by the hour. In the release table, the traces that named none are one
 row called *(no release)* rather than a row that is missing.
 
 A bucket the server did not return is drawn as a **gap**, never as a zero,
 and a bucket that reported no cost has no cost point — nor a token point when
 none of its calls reported usage, and a table row without one shows `—`: the
-API refuses to fabricate rows and so does the screen. An empty window says so
+API refuses to fabricate rows and so does the screen. A value with a gap on
+both sides is drawn as a **point**, so a burst in one hour of a week shows
+where it is rather than leaving the chart blank. An empty window says so
 rather than drawing an empty frame. A project with traces but none in the
 window shows dashes, empty axes and the true last-trace time: not the
 instructions.
 
 The numbers behind the charts come from an hourly rollup for closed hours and
-from the live rows for the hour in progress, which is why a month reads as
+from the live rows for the hour in progress (a minute timeline reads the live
+rows alone), which is why a month reads as
 fast as a day and why the charts keep answering about data retention has
 since deleted. The latency percentiles are histogram-based, accurate to a few
 percent — see [api.md](api.md#where-the-numbers-come-from).
@@ -9171,9 +9180,9 @@ curl … "http://localhost:4318/api/v1/stats?group_by=day&from=2026-09-01T00:00:
 }
 ```
 
-`group_by` is `hour`, `day`, `model`, `environment`, `release` or `total`
-(default `day`), and `unit` says what a bucket counts. Grouping by hour,
-day, environment, release or total counts **traces**; grouping by model
+`group_by` is `minute`, `hour`, `day`, `model`, `environment`, `release` or
+`total` (default `day`), and `unit` says what a bucket counts. Grouping by
+minute, hour, day, environment, release or total counts **traces**; grouping by model
 counts **observations**, because a trace has no model. The two counts are
 not comparable, which is why the response says which one you are looking at.
 
@@ -9194,9 +9203,22 @@ requests and a subtraction the caller does — there is no `compare`.
 curl … "http://localhost:4318/api/v1/stats?group_by=total&from=2026-09-08T00:00:00Z"
 ```
 
+Grouped by `minute`, the keys are `2026-09-08T14:05:00Z` and the window is
+**at most 24 hours**: `from` is required, and a window longer than a day —
+with five minutes of grace, for the request in flight and a client clock
+behind the server's — is a `400` that says to group by hour or day. A window
+with no `to` is scanned to that bound, not to the end of time. Minutes are read from
+the traces themselves, not from the hourly rollup, so they are exact and
+live, and they exist only for as long as the traces do: past `retention_days`
+a minute timeline is empty where an hourly one still answers.
+
+```sh
+curl … "http://localhost:4318/api/v1/stats?group_by=minute&from=2026-09-08T14:00:00Z"
+```
+
 `user_id` restricts every bucket to one end user. The shape, the groupings and
-`unit` do not change; with `group_by=hour`, `group_by=day` or
-`group_by=total` each bucket additionally carries `sessions` — how many of
+`unit` do not change; with `group_by=minute`, `group_by=hour`, `group_by=day`
+or `group_by=total` each bucket additionally carries `sessions` — how many of
 that user's sessions *began* in it, so a sum over any range is exact. Without
 the filter the key is absent rather than zero, because the statistics rollup
 holds no such number. The per-user answer trails the raw data by the same lag
@@ -9273,8 +9295,8 @@ gone, and it keeps the classes it had — none of the new ones — for ever.
 ### Where the numbers come from
 
 Closed hours are rolled up in the background and answered from that rollup;
-the hour in progress is always answered live. Three consequences worth
-knowing:
+the hour in progress is always answered live, and so is every `minute`
+timeline. Three consequences worth knowing:
 
 - The statistics **trail the raw data by up to twice the rollup interval**
   (`TRACEPAD_ROLLUP_INTERVAL`, five minutes by default, so ten in the worst
@@ -10240,6 +10262,7 @@ tracepad stats --group-by model
 tracepad stats --group-by release
 tracepad stats --group-by day --user user-4821
 tracepad stats --group-by total --since 168h
+tracepad stats --group-by minute --since 1h
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
@@ -10247,10 +10270,14 @@ There is no day unit — `7d` is a usage error, not a week. `--until` closes the
 other end, in the same two spellings, so a duration there is also counted back
 from now: `--since 48h --until 24h` is the day before yesterday.
 
-The table's second column names what is being counted: grouping by hour, day,
-environment, release or total counts **traces**, grouping by model counts
+The table's second column names what is being counted: grouping by minute,
+hour, day, environment, release or total counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
+
+`--group-by minute` needs `--since` no further back than 24 hours: minutes are
+read from the traces rather than from the hourly rollup, and the server
+refuses a longer window rather than scan it.
 
 `--group-by total` is the whole window as one row, with an empty key: the
 counts summed and the percentiles merged over every hour in it, which is not
@@ -11179,7 +11206,8 @@ The rows they return carry `release`, `version` and `ttft_ms`; the tree from
 `completion_start_time`, its own `ttft_ms`, the `prompt` it ran and the sizes
 of its payloads — the last of these whether or not `expand` inlined them, so
 "is this worth fetching" is answerable without fetching it. `get_stats` takes
-`release` in `group_by`, and `total` — the whole window as one bucket, whose
+`release` in `group_by`, `minute` for a window of at most a day (`from`
+required) — the last hour, one run — and `total` — the whole window as one bucket, whose
 p95 is merged over every hour rather than averaged, which is the answer to
 "how much did it cost this week" in one call; last week beside this week is
 the tool called twice ([api.md](api.md#statistics)).

@@ -2696,15 +2696,19 @@ outright. Traces that ran the prompt keep the name and version they recorded.</p
 <a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>release
 <a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>day<span class="w"> </span>--user<span class="w"> </span>user-4821
 <a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>total<span class="w"> </span>--since<span class="w"> </span>168h
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>tracepad<span class="w"> </span>stats<span class="w"> </span>--group-by<span class="w"> </span>minute<span class="w"> </span>--since<span class="w"> </span>1h
 </code></pre></div>
 <p><code>--since</code> takes Go durations (<code>1h</code>, <code>30m</code>, <code>168h</code>) or an RFC 3339 instant.
 There is no day unit — <code>7d</code> is a usage error, not a week. <code>--until</code> closes the
 other end, in the same two spellings, so a duration there is also counted back
 from now: <code>--since 48h --until 24h</code> is the day before yesterday.</p>
-<p>The table's second column names what is being counted: grouping by hour, day,
-environment, release or total counts <strong>traces</strong>, grouping by model counts
+<p>The table's second column names what is being counted: grouping by minute,
+hour, day, environment, release or total counts <strong>traces</strong>, grouping by model counts
 <strong>observations</strong>, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.</p>
+<p><code>--group-by minute</code> needs <code>--since</code> no further back than 24 hours: minutes are
+read from the traces rather than from the hourly rollup, and the server
+refuses a longer window rather than scan it.</p>
 <p><code>--group-by total</code> is the whole window as one row, with an empty key: the
 counts summed and the percentiles merged over every hour in it, which is not
 the same as the p95 of the daily p95s. Last week beside this week is the

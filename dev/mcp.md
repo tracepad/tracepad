@@ -203,7 +203,8 @@ The rows they return carry `release`, `version` and `ttft_ms`; the tree from
 `completion_start_time`, its own `ttft_ms`, the `prompt` it ran and the sizes
 of its payloads — the last of these whether or not `expand` inlined them, so
 "is this worth fetching" is answerable without fetching it. `get_stats` takes
-`release` in `group_by`, and `total` — the whole window as one bucket, whose
+`release` in `group_by`, `minute` for a window of at most a day (`from`
+required) — the last hour, one run — and `total` — the whole window as one bucket, whose
 p95 is merged over every hour rather than averaged, which is the answer to
 "how much did it cost this week" in one call; last week beside this week is
 the tool called twice ([api.md](api.md#statistics)).

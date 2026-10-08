@@ -1894,7 +1894,8 @@ wire already carries:</p>
 <code>completion_start_time</code>, its own <code>ttft_ms</code>, the <code>prompt</code> it ran and the sizes
 of its payloads — the last of these whether or not <code>expand</code> inlined them, so
 "is this worth fetching" is answerable without fetching it. <code>get_stats</code> takes
-<code>release</code> in <code>group_by</code>, and <code>total</code> — the whole window as one bucket, whose
+<code>release</code> in <code>group_by</code>, <code>minute</code> for a window of at most a day (<code>from</code>
+required) — the last hour, one run — and <code>total</code> — the whole window as one bucket, whose
 p95 is merged over every hour rather than averaged, which is the answer to
 "how much did it cost this week" in one call; last week beside this week is
 the tool called twice (<a href="../api/#statistics">api.md</a>).</p>

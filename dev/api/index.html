@@ -3294,9 +3294,9 @@ it, and adds <code>latency_ms</code> to the row shape above.</p>
 <a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="w">  </span><span class="p">]</span>
 <a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="p">}</span>
 </code></pre></div>
-<p><code>group_by</code> is <code>hour</code>, <code>day</code>, <code>model</code>, <code>environment</code>, <code>release</code> or <code>total</code>
-(default <code>day</code>), and <code>unit</code> says what a bucket counts. Grouping by hour,
-day, environment, release or total counts <strong>traces</strong>; grouping by model
+<p><code>group_by</code> is <code>minute</code>, <code>hour</code>, <code>day</code>, <code>model</code>, <code>environment</code>, <code>release</code> or
+<code>total</code> (default <code>day</code>), and <code>unit</code> says what a bucket counts. Grouping by
+minute, hour, day, environment, release or total counts <strong>traces</strong>; grouping by model
 counts <strong>observations</strong>, because a trace has no model. The two counts are
 not comparable, which is why the response says which one you are looking at.</p>
 <p>Grouped by release, the traces that named none fall in the bucket whose <code>key</code>
@@ -3312,14 +3312,24 @@ dashboard's summary row shows; the change against the previous window is two
 requests and a subtraction the caller does — there is no <code>compare</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=total&amp;from=2026-09-08T00:00:00Z"</span>
 </code></pre></div>
+<p>Grouped by <code>minute</code>, the keys are <code>2026-09-08T14:05:00Z</code> and the window is
+<strong>at most 24 hours</strong>: <code>from</code> is required, and a window longer than a day —
+with five minutes of grace, for the request in flight and a client clock
+behind the server's — is a <code>400</code> that says to group by hour or day. A window
+with no <code>to</code> is scanned to that bound, not to the end of time. Minutes are read from
+the traces themselves, not from the hourly rollup, so they are exact and
+live, and they exist only for as long as the traces do: past <code>retention_days</code>
+a minute timeline is empty where an hourly one still answers.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=minute&amp;from=2026-09-08T14:00:00Z"</span>
+</code></pre></div>
 <p><code>user_id</code> restricts every bucket to one end user. The shape, the groupings and
-<code>unit</code> do not change; with <code>group_by=hour</code>, <code>group_by=day</code> or
-<code>group_by=total</code> each bucket additionally carries <code>sessions</code> — how many of
+<code>unit</code> do not change; with <code>group_by=minute</code>, <code>group_by=hour</code>, <code>group_by=day</code>
+or <code>group_by=total</code> each bucket additionally carries <code>sessions</code> — how many of
 that user's sessions <em>began</em> in it, so a sum over any range is exact. Without
 the filter the key is absent rather than zero, because the statistics rollup
 holds no such number. The per-user answer trails the raw data by the same lag
 as the rest.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=day&amp;user_id=user-4821"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats?group_by=day&amp;user_id=user-4821"</span>
 </code></pre></div>
 <p>Latency percentiles are <strong>histogram-based</strong>: accurate to a few percent, and
 stable across the expiry of the rows they came from. <code>total_cost</code> is summed
@@ -3335,7 +3345,7 @@ what the one headline number is are the same everywhere a row carries
 <code>tokens</code> — see <a href="#tokens">Tokens</a>.</p>
 <h3 id="tokens">Tokens</h3>
 <p>Traces, sessions, users and statistics buckets carry a <code>tokens</code> object:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1200</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">340</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span><span class="w"> </span><span class="nt">"reasoning"</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_write"</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="nt">"tokens"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"input"</span><span class="p">:</span><span class="w"> </span><span class="mi">1200</span><span class="p">,</span><span class="w"> </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="mi">340</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_read"</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span><span class="w"> </span><span class="nt">"reasoning"</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="nt">"cache_write"</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="p">}</span>
 </code></pre></div>
 <p>There are five classes, each read off an observation's <code>usage</code> under the first
 spelling present of a short list, so the OpenAI, Anthropic, Langfuse and
@@ -3399,8 +3409,8 @@ hour past the project's <code>retention_days</code> is frozen: its observations 
 gone, and it keeps the classes it had — none of the new ones — for ever.</p>
 <h3 id="where-the-numbers-come-from">Where the numbers come from</h3>
 <p>Closed hours are rolled up in the background and answered from that rollup;
-the hour in progress is always answered live. Three consequences worth
-knowing:</p>
+the hour in progress is always answered live, and so is every <code>minute</code>
+timeline. Three consequences worth knowing:</p>
 <ul>
 <li>The statistics <strong>trail the raw data by up to twice the rollup interval</strong>
   (<code>TRACEPAD_ROLLUP_INTERVAL</code>, five minutes by default, so ten in the worst
@@ -3417,29 +3427,29 @@ knowing:</p>
   <a href="../retention/#what-outlives-what">retention.md</a>.</li>
 </ul>
 <h2 id="score-trends">Score trends</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?group_by=day&amp;from=2026-09-01T00:00:00Z"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?group_by=day&amp;from=2026-09-01T00:00:00Z"</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="p">{</span>
-<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">  </span><span class="nt">"group_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span>
-<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">  </span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="s2">"any"</span><span class="p">,</span>
-<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a><span class="w">  </span><span class="nt">"series"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hallucination"</span><span class="p">,</span>
-<a id="__codelineno-38-8" name="__codelineno-38-8" href="#__codelineno-38-8"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span>
-<a id="__codelineno-38-9" name="__codelineno-38-9" href="#__codelineno-38-9"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-38-10" name="__codelineno-38-10" href="#__codelineno-38-10"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.18</span><span class="p">,</span><span class="w"> </span><span class="nt">"min"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"max"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.9</span><span class="p">}</span>
-<a id="__codelineno-38-11" name="__codelineno-38-11" href="#__codelineno-38-11"></a><span class="w">      </span><span class="p">]</span>
-<a id="__codelineno-38-12" name="__codelineno-38-12" href="#__codelineno-38-12"></a><span class="w">    </span><span class="p">},</span>
-<a id="__codelineno-38-13" name="__codelineno-38-13" href="#__codelineno-38-13"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-38-14" name="__codelineno-38-14" href="#__codelineno-38-14"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"verdict"</span><span class="p">,</span>
-<a id="__codelineno-38-15" name="__codelineno-38-15" href="#__codelineno-38-15"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"categorical"</span><span class="p">,</span>
-<a id="__codelineno-38-16" name="__codelineno-38-16" href="#__codelineno-38-16"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-38-17" name="__codelineno-38-17" href="#__codelineno-38-17"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"categories"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pass"</span><span class="p">:</span><span class="w"> </span><span class="mi">380</span><span class="p">,</span><span class="w"> </span><span class="nt">"fail"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">}}</span>
-<a id="__codelineno-38-18" name="__codelineno-38-18" href="#__codelineno-38-18"></a><span class="w">      </span><span class="p">]</span>
-<a id="__codelineno-38-19" name="__codelineno-38-19" href="#__codelineno-38-19"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-38-20" name="__codelineno-38-20" href="#__codelineno-38-20"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-38-21" name="__codelineno-38-21" href="#__codelineno-38-21"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="p">{</span>
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="w">  </span><span class="nt">"group_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span>
+<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="w">  </span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="s2">"any"</span><span class="p">,</span>
+<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a><span class="w">  </span><span class="nt">"series"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hallucination"</span><span class="p">,</span>
+<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numeric"</span><span class="p">,</span>
+<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"mean"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.18</span><span class="p">,</span><span class="w"> </span><span class="nt">"min"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"max"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.9</span><span class="p">}</span>
+<a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-39-14" name="__codelineno-39-14" href="#__codelineno-39-14"></a><span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"verdict"</span><span class="p">,</span>
+<a id="__codelineno-39-15" name="__codelineno-39-15" href="#__codelineno-39-15"></a><span class="w">      </span><span class="nt">"data_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"categorical"</span><span class="p">,</span>
+<a id="__codelineno-39-16" name="__codelineno-39-16" href="#__codelineno-39-16"></a><span class="w">      </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a><span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span><span class="w"> </span><span class="nt">"categories"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pass"</span><span class="p">:</span><span class="w"> </span><span class="mi">380</span><span class="p">,</span><span class="w"> </span><span class="nt">"fail"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">}}</span>
+<a id="__codelineno-39-18" name="__codelineno-39-18" href="#__codelineno-39-18"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-39-19" name="__codelineno-39-19" href="#__codelineno-39-19"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-39-20" name="__codelineno-39-20" href="#__codelineno-39-20"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-39-21" name="__codelineno-39-21" href="#__codelineno-39-21"></a><span class="p">}</span>
 </code></pre></div>
 <p>The quality curve beside the traffic one. A score is counted in the hour of the
 <strong>trace it names</strong> — not in the hour it was graded — and takes that trace's
@@ -3449,7 +3459,7 @@ all: <a href="../quality/#what-is-counted-and-what-is-not">quality.md</a> says w
 <p><code>from</code>, <code>to</code> and <code>environment</code> are the statistics' own filters, and <code>group_by</code>
 is <code>hour</code>, <code>day</code>, <code>environment</code>, <code>release</code> or <code>model</code> (default <code>day</code>).
 Without <code>name</code> every score name in the range is a series; with it, one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?name=hallucination&amp;group_by=release"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/stats/scores?name=hallucination&amp;group_by=release"</span>
 </code></pre></div>
 <p>What a bucket carries depends on the series' <code>data_type</code>: a <code>numeric</code> name
 reports <code>mean</code>, <code>min</code> and <code>max</code>, a <code>boolean</code> name the <code>rate</code> of true values
@@ -3476,20 +3486,20 @@ than never. Deleting a score, or moving one onto another trace, corrects the
 hour it leaves in the same transaction as the write itself. See
 <a href="../quality/#the-lag">quality.md</a>.</p>
 <h2 id="filter-values">Filter values</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/facets?from=2026-09-01T00:00:00Z"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/facets?from=2026-09-01T00:00:00Z"</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="p">{</span>
-<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T00:00:00Z"</span><span class="p">,</span>
-<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-09T12:00:00Z"</span><span class="p">,</span>
-<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"production"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">4656</span><span class="p">},</span>
-<a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"staging"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">218</span><span class="p">},</span>
-<a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prod"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span>
-<a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-41-9" name="__codelineno-41-9" href="#__codelineno-41-9"></a><span class="w">  </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026.9.1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">3120</span><span class="p">}],</span>
-<a id="__codelineno-41-10" name="__codelineno-41-10" href="#__codelineno-41-10"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">2984</span><span class="p">}],</span>
-<a id="__codelineno-41-11" name="__codelineno-41-11" href="#__codelineno-41-11"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
-<a id="__codelineno-41-12" name="__codelineno-41-12" href="#__codelineno-41-12"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="p">{</span>
+<a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T00:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-09T12:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-42-4" name="__codelineno-42-4" href="#__codelineno-42-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-42-5" name="__codelineno-42-5" href="#__codelineno-42-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"production"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">4656</span><span class="p">},</span>
+<a id="__codelineno-42-6" name="__codelineno-42-6" href="#__codelineno-42-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"staging"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">218</span><span class="p">},</span>
+<a id="__codelineno-42-7" name="__codelineno-42-7" href="#__codelineno-42-7"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prod"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">}</span>
+<a id="__codelineno-42-8" name="__codelineno-42-8" href="#__codelineno-42-8"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-42-9" name="__codelineno-42-9" href="#__codelineno-42-9"></a><span class="w">  </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026.9.1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">3120</span><span class="p">}],</span>
+<a id="__codelineno-42-10" name="__codelineno-42-10" href="#__codelineno-42-10"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support-chat"</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">2984</span><span class="p">}],</span>
+<a id="__codelineno-42-11" name="__codelineno-42-11" href="#__codelineno-42-11"></a><span class="w">  </span><span class="nt">"omitted"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"release"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+<a id="__codelineno-42-12" name="__codelineno-42-12" href="#__codelineno-42-12"></a><span class="p">}</span>
 </code></pre></div>
 <p>What the three many-valued filters can be set to: the distinct values of
 <code>environment</code>, <code>release</code> and <code>name</code> among the traces of a range, each with the
@@ -3537,14 +3547,14 @@ the gap between the two answers the full environment and release lists beside a
 name list that starts where the traces do. Everything ingested after the
 upgrade has all three.</p>
 <h2 id="prompt-version-diff">Prompt version diff</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/prompts/support/diff?from=1&amp;to=3"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/prompts/support/diff?from=1&amp;to=3"</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="p">{</span>
-<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support"</span><span class="p">,</span>
-<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
-<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a><span class="w">  </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- prompt (version 1)\n+++ prompt (version 3)\n@@ -1 +1 @@\n-\"Be brief.\"\n+\"Be brief and cite the source.\"\n"</span>
-<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="p">{</span>
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"support"</span><span class="p">,</span>
+<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">  </span><span class="nt">"from"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-44-4" name="__codelineno-44-4" href="#__codelineno-44-4"></a><span class="w">  </span><span class="nt">"to"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-44-5" name="__codelineno-44-5" href="#__codelineno-44-5"></a><span class="w">  </span><span class="nt">"diff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"--- prompt (version 1)\n+++ prompt (version 3)\n@@ -1 +1 @@\n-\"Be brief.\"\n+\"Be brief and cite the source.\"\n"</span>
+<a id="__codelineno-44-6" name="__codelineno-44-6" href="#__codelineno-44-6"></a><span class="p">}</span>
 </code></pre></div>
 <p>A unified patch over the pretty-printed <code>prompt</code> <strong>and</strong> <code>config</code> of the two
 versions — a run can change because the text changed or because the parameters
@@ -3555,8 +3565,8 @@ the one word that says what calling it takes — its <code>policy</code>: <code>
 <code>ingest</code>, <code>member</code>, <code>editor</code>, <code>owner</code>, <code>session</code> or <code>diagnostic</code>
 (<a href="../accounts/#who-may-do-what">accounts.md</a>) — and the <code>scope</code> it asks of a
 project key: <code>any</code>, <code>ingest</code>, <code>read</code>, <code>write</code> or <code>none</code> (<a href="#scopes">Scopes</a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="p">{</span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GET"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/queues/{name}/next"</span><span class="p">,</span><span class="w"> </span><span class="nt">"policy"</span><span class="p">:</span><span class="w"> </span><span class="s2">"member"</span><span class="p">,</span>
-<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"write"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The next item to annotate, claimed for ten minutes"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a><span class="p">{</span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GET"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/v1/queues/{name}/next"</span><span class="p">,</span><span class="w"> </span><span class="nt">"policy"</span><span class="p">:</span><span class="w"> </span><span class="s2">"member"</span><span class="p">,</span>
+<a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"write"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The next item to annotate, claimed for ten minutes"</span><span class="p">}</span>
 </code></pre></div>
 <p><code>GET /api/v1/openapi.json</code>
 returns a hand-authored OpenAPI 3.1 document — the contract itself, not a
@@ -3564,7 +3574,7 @@ rendering of the code, kept honest by a test that fails when the document and
 the router disagree in either direction; each operation carries its scope as
 <code>x-tracepad-scope</code>, held to the router the same way. Neither needs a key.</p>
 <h2 id="system">System</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/system"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>curl<span class="w"> </span>…<span class="w"> </span><span class="s2">"http://localhost:4318/api/v1/system"</span>
 </code></pre></div>
 <p>Version, uptime, and two halves, each for the caller it belongs to:</p>
 <ul>
@@ -3583,7 +3593,7 @@ owner's session both — or the deployment view alone when it sends no
 <code>X-Tracepad-Project</code>, as on a fresh install with no project to name. A member's
 session must name its project. The route's policy word is <code>diagnostic</code>, which
 is this endpoint's alone. <code>view</code> says which halves the body holds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="nt">"view"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"project"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4e5f6"</span><span class="p">,</span><span class="w"> </span><span class="nt">"deployment"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">"view"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"project"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4e5f6"</span><span class="p">,</span><span class="w"> </span><span class="nt">"deployment"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
 </code></pre></div>
 <p>A field of a half you were not given is <strong>absent</strong> — not <code>0</code>, not <code>null</code>. A
 <code>"waiting": 0</code> in the writer queue says writes are keeping up, and from a key
@@ -3642,14 +3652,14 @@ payloads cost, beside the setting that decides whether they are kept:
 project's traces and raw batches point at, and their decoded size.</p>
 <p><code>raw</code> is the archive of export bodies — what an export can carry out, and what
 it cannot:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
-<a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
-<a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
-<a id="__codelineno-47-6" name="__codelineno-47-6" href="#__codelineno-47-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
-<a id="__codelineno-47-7" name="__codelineno-47-7" href="#__codelineno-47-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
-<a id="__codelineno-47-8" name="__codelineno-47-8" href="#__codelineno-47-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nt">"raw"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a><span class="w">  </span><span class="nt">"batches"</span><span class="p">:</span><span class="w"> </span><span class="mi">12400</span><span class="p">,</span>
+<a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a><span class="w">  </span><span class="nt">"bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">3328599654</span><span class="p">,</span>
+<a id="__codelineno-48-5" name="__codelineno-48-5" href="#__codelineno-48-5"></a><span class="w">  </span><span class="nt">"oldest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-08-06T04:12:19Z"</span><span class="p">,</span>
+<a id="__codelineno-48-6" name="__codelineno-48-6" href="#__codelineno-48-6"></a><span class="w">  </span><span class="nt">"newest_received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-05T09:44:02Z"</span><span class="p">,</span>
+<a id="__codelineno-48-7" name="__codelineno-48-7" href="#__codelineno-48-7"></a><span class="w">  </span><span class="nt">"traces_before_window"</span><span class="p">:</span><span class="w"> </span><span class="mi">214</span>
+<a id="__codelineno-48-8" name="__codelineno-48-8" href="#__codelineno-48-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>Unlike the counters below it, these are on disk rather than since start.
 <code>enabled</code> is <code>TRACEPAD_STORE_RAW</code>; <code>bytes</code> is what the archive occupies
@@ -3670,7 +3680,7 @@ count of how many tenants share this process. Both grow when somebody else
 ingests or makes a project, which is why a key does not see them.</p>
 <p><code>compaction</code> (deployment view) names nobody, but its <code>requested_at</code> is the
 moment the latest deletion asked for one, whoever made it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T09:00:00Z"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="nt">"compaction"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"requested_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T10:02:11Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"completed_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-26T09:00:00Z"</span><span class="p">}</span>
 </code></pre></div>
 <p>An erasure, a trace deletion or a project's purge asks the next sweeper pass to
 overwrite what it unlinked — merge the search index, drain the free pages,
@@ -3783,12 +3793,12 @@ works through take a slot and run under the deadline, and answer the same two
 slot.</p>
 <h2 id="errors">Errors</h2>
 <p>One shape everywhere:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unknown query parameter \"trace\" (accepted: from, to, environment, …)"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unknown query parameter \"trace\" (accepted: from, to, environment, …)"</span><span class="p">}</span>
 </code></pre></div>
 <p>A refusal a client has to <em>act</em> on carries what it needs beside the sentence —
 a prompt append refused by <code>expect_version</code> says which version the name is
 actually at (<a href="../prompts/#appending-to-the-version-you-meant">prompts.md</a>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt \"summarize\" is at version 9, not 7: it changed while this one was being written"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"prompt \"summarize\" is at version 9, not 7: it changed while this one was being written"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>
