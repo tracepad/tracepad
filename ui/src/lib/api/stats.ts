@@ -226,11 +226,13 @@ export type SummaryFigure = {
 	label: string;
 	/** The figure, or a dash when the window carried none. */
 	value: string;
+	/** The Errors tile only: its figure reads above zero, so its glyph is coloured. */
+	alert?: true;
 	/** The previous window's figure, for the tooltip; null when there is none. */
 	previous: string | null;
 	/**
 	 * The change against the previous window: a signed percentage, signed
-	 * points, or a signed duration; `new` when the previous figure is absent,
+	 * points, or a signed duration; `NEW` when the previous figure is absent,
 	 * or is zero where the change would divide by it (traces and cost —
 	 * Decision 13); null when this window's figure is absent.
 	 */
@@ -244,8 +246,8 @@ export type SummaryFigure = {
 	tone: 'better' | 'worse' | null;
 };
 
-/** The one word a change against nothing reads as. */
-export const NEW = 'new';
+/** What a change against nothing reads as: there is no earlier figure to compare with. */
+export const NEW = 'no earlier data';
 
 /**
  * The four figures of the summary row with their movement against the
@@ -256,10 +258,14 @@ export function summarize(bucket: StatsBucket | null, previous: StatsBucket | nu
 	const rate = (b: StatsBucket | null) =>
 		b && b.count > 0 ? (b.error_count / b.count) * 100 : null;
 	const p95 = (b: StatsBucket | null) => b?.latency_ms?.p95 ?? null;
+	const errors = figure('errors', 'Errors', rate(bucket), rate(previous), percentage, points, 'worse');
+	// Judged by what the tile reads: a rate that rounds to 0% is not an alarm.
+	const shown = rate(bucket);
+	if (shown !== null && parseFloat(percentage(shown)) > 0) errors.alert = true;
 	return [
 		figure('traces', 'Traces', bucket?.count ?? null, previous?.count ?? null, count, percent, null),
 		figure('cost', 'Cost', bucket?.total_cost ?? null, previous?.total_cost ?? null, cost, percent, 'worse'),
-		figure('errors', 'Errors', rate(bucket), rate(previous), percentage, points, 'worse'),
+		errors,
 		figure('latency', 'Latency', p95(bucket), p95(previous), duration, delta, 'worse')
 	];
 }

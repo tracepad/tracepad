@@ -3,6 +3,7 @@
 	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import Minus from '@lucide/svelte/icons/minus';
 	import type { SummaryFigure } from '$lib/api/stats';
+	import BlockIcon from './BlockIcon.svelte';
 
 	// One tile of the summary row (spec 034 #2): the label, the figure large
 	// in tabular numerals, and the change under it with its glyph and colour.
@@ -23,7 +24,10 @@
 	class="border-border bg-surface min-w-0 rounded-lg border px-3 py-2"
 	title={figure.previous === null ? undefined : `Previous window: ${figure.previous}`}
 >
-	<p class="text-subtle text-xs font-medium">{figure.label}</p>
+	<p class="text-subtle flex items-center gap-1.5 text-xs font-medium">
+		<BlockIcon id={figure.id} alert={!loading && figure.alert} />
+		{figure.label}
+	</p>
 	{#if loading}
 		<p class="text-subtle text-2xl leading-tight font-semibold tabular-nums" aria-busy="true">…</p>
 		<p class="text-subtle h-5 text-xs">&nbsp;</p>
@@ -33,7 +37,7 @@
 			{#if figure.change !== null}
 				{#if figure.direction}<Glyph class="size-3.5" aria-hidden="true" />{/if}
 				{figure.change}
-				<span class="sr-only">against the previous window</span>
+				{#if figure.direction}<span class="sr-only">against the previous window</span>{/if}
 			{/if}
 		</p>
 	{/if}

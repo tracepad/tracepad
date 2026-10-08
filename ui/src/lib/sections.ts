@@ -25,7 +25,7 @@ export type Item = {
 export type Group = { label: string; children: Item[] };
 
 /** Each screen's icon: a screen added to `SCREENS` without one does not compile. */
-const ICONS: Record<(typeof SCREENS)[number]['href'], Item['icon']> = {
+export const ICONS: Record<(typeof SCREENS)[number]['href'], Item['icon']> = {
 	'/dashboard': LayoutDashboard,
 	'/traces': SquareChartGantt,
 	'/sessions': MessagesSquare,

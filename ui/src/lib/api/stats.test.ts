@@ -229,6 +229,18 @@ describe('summarize', () => {
 		expect(summarize(fast, slow)[3].change).toBe('−0.4 ms');
 	});
 
+	it('alerts on an error rate that reads above zero, for the tile that colours its glyph', () => {
+		const [, , errors] = summarize(bucket('', { count: 10, error_count: 2 }), null);
+		expect(errors.alert).toBe(true);
+		const [, , clean] = summarize(bucket('', { count: 10, error_count: 0 }), null);
+		expect(clean.alert).toBeUndefined();
+		// One failure in a hundred thousand reads 0%, and is not an alarm.
+		const [, , tiny] = summarize(bucket('', { count: 100000, error_count: 1 }), null);
+		expect(tiny.value).toBe('0%');
+		expect(tiny.alert).toBeUndefined();
+		expect(summarize(null, null)[2].alert).toBeUndefined();
+	});
+
 	it('reads new against a zero or absent previous', () => {
 		const [traces, cost, errors, latency] = summarize(now, null);
 		for (const figure of [traces, cost, errors, latency]) {
