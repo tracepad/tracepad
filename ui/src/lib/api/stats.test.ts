@@ -229,6 +229,14 @@ describe('summarize', () => {
 		expect(summarize(fast, slow)[3].change).toBe('−0.4 ms');
 	});
 
+	it('says whether a figure is above zero, for the tile that colours its glyph', () => {
+		const [, , errors] = summarize(bucket('', { count: 10, error_count: 2 }), null);
+		expect(errors.positive).toBe(true);
+		const [, , clean] = summarize(bucket('', { count: 10, error_count: 0 }), null);
+		expect(clean.positive).toBe(false);
+		expect(summarize(null, null)[2].positive).toBe(false);
+	});
+
 	it('reads new against a zero or absent previous', () => {
 		const [traces, cost, errors, latency] = summarize(now, null);
 		for (const figure of [traces, cost, errors, latency]) {

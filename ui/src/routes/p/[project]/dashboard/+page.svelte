@@ -39,6 +39,7 @@
 	import BreakdownTable from '$lib/components/BreakdownTable.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Chart from '$lib/components/Chart.svelte';
+	import BlockIcon from '$lib/components/dashboard/BlockIcon.svelte';
 	import DashboardBlock from '$lib/components/dashboard/DashboardBlock.svelte';
 	import OnboardingCard from '$lib/components/dashboard/OnboardingCard.svelte';
 	import SummaryTile from '$lib/components/dashboard/SummaryTile.svelte';
@@ -440,6 +441,7 @@
 						{:else if id === 'traces'}
 							<Chart
 								title="Traces"
+								icon="traces"
 								x={series.x}
 								lines={[{ label: 'Traces', values: series.count, token: 'accent' }]}
 								format={(value) => count(value)}
@@ -448,6 +450,7 @@
 						{:else if id === 'cost'}
 							<Chart
 								title="Cost"
+								icon="cost"
 								x={series.x}
 								lines={[{ label: 'Cost', values: series.cost, token: 'ok' }]}
 								format={(value) => cost(value)}
@@ -456,6 +459,7 @@
 						{:else if id === 'tokens'}
 							<Chart
 								title="Tokens"
+								icon="tokens"
 								x={series.x}
 								lines={[
 									{ label: 'Input', values: series.input, token: 'accent' },
@@ -472,6 +476,7 @@
 						{:else if id === 'latency'}
 							<Chart
 								title="Latency"
+								icon="latency"
 								x={series.x}
 								lines={[
 									{ label: 'p50', values: series.p50, token: 'accent' },
@@ -483,6 +488,8 @@
 						{:else if id === 'errors'}
 							<Chart
 								title="Errors"
+								icon="errors"
+								alert={sum(series.errors) > 0}
 								x={series.x}
 								lines={[{ label: 'Errors', values: series.errors, token: 'danger' }]}
 								format={(value) => count(value)}
@@ -492,6 +499,7 @@
 							<BreakdownTable
 								tokens
 								title="By model"
+								icon="models"
 								label="Model"
 								unit={models?.unit ?? 'observation'}
 								rows={breakdown((models?.buckets ?? []) as StatsBucket[])}
@@ -500,6 +508,7 @@
 							<BreakdownTable
 								tokens
 								title="By environment"
+								icon="environments"
 								label="Environment"
 								unit={environments?.unit ?? 'trace'}
 								rows={breakdown((environments?.buckets ?? []) as StatsBucket[])}
@@ -508,13 +517,17 @@
 							<BreakdownTable
 								tokens
 								title="By release"
+								icon="releases"
 								label="Release"
 								unit={releases?.unit ?? 'trace'}
 								rows={breakdown((releases?.buckets ?? []) as StatsBucket[], '(no release)')}
 							/>
 						{:else if id === 'quality'}
 							<section class="border-border bg-surface min-w-0 rounded-lg border p-2">
-								<h2 class="text-subtle px-1 py-0.5 text-xs font-medium">Quality</h2>
+								<h2 class="text-subtle flex items-center gap-1.5 px-1 py-0.5 text-xs font-medium">
+									<BlockIcon id="quality" />
+									Quality
+								</h2>
 								{#if cards.length > 0}
 									<QualityCards
 										series={cards}

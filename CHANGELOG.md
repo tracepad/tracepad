@@ -20,6 +20,11 @@ their own headings.
   traces, with `from` required and a window of at most a day;
   `tracepad stats --group-by minute` and MCP `get_stats` take the value too.
 
+- The dashboard's tiles, charts and tables carry a small icon before their
+  label — one per idea, the same on a tile and its chart — and the Errors one
+  turns red when there are errors. A tile with nothing to compare against says
+  *no earlier data* instead of *new*.
+
 ### Fixed
 
 - A chart with a value between two gaps draws it as a point. A week read by

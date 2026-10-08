@@ -28,8 +28,11 @@ test('all five charts render over the corpus', async ({ page }) => {
 	const summary = page.getByLabel('Summary');
 	await expect(summary.getByText('Traces')).toBeVisible();
 	await expect(summary.getByText('21', { exact: true })).toBeVisible();
-	// And a window whose previous window predates the corpus reads *new*.
-	await expect(summary.getByText('new').first()).toBeVisible();
+	// Each tile and each chart wears its decorative glyph (spec 034 #16).
+	await expect(summary.locator('span[aria-hidden="true"] > svg')).toHaveCount(4);
+	await expect(page.locator('figure span[aria-hidden="true"] > svg')).toHaveCount(5);
+	// And a window whose previous window predates the corpus reads *no earlier data*.
+	await expect(summary.getByText('no earlier data').first()).toBeVisible();
 	// The last-trace line reads the listing with no window (spec 034 #4).
 	await expect(page.getByText(/^Last trace /)).toBeVisible();
 });

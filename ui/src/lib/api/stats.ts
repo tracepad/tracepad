@@ -226,6 +226,8 @@ export type SummaryFigure = {
 	label: string;
 	/** The figure, or a dash when the window carried none. */
 	value: string;
+	/** The figure is above zero (an error rate worth colouring). */
+	positive: boolean;
 	/** The previous window's figure, for the tooltip; null when there is none. */
 	previous: string | null;
 	/**
@@ -244,8 +246,8 @@ export type SummaryFigure = {
 	tone: 'better' | 'worse' | null;
 };
 
-/** The one word a change against nothing reads as. */
-export const NEW = 'new';
+/** What a change against nothing reads as: there is no earlier figure to compare with. */
+export const NEW = 'no earlier data';
 
 /**
  * The four figures of the summary row with their movement against the
@@ -277,7 +279,7 @@ function figure(
 	increase: 'worse' | null
 ): SummaryFigure {
 	if (value === null) {
-		return { id, label, value: ABSENT, previous: null, change: null, direction: null, tone: null };
+		return { id, label, value: ABSENT, positive: false, previous: null, change: null, direction: null, tone: null };
 	}
 	const rendered = render(value);
 	const before = previous === null ? null : render(previous);
@@ -286,12 +288,12 @@ function figure(
 	// — points, a duration — has an answer against zero, and gives it
 	// (Decision 13): no errors last week and 3% this week is `+3 pt`, worse.
 	if (previous === null || (previous === 0 && RATIOS.has(change))) {
-		return { id, label, value: rendered, previous: before, change: NEW, direction: null, tone: null };
+		return { id, label, value: rendered, positive: value > 0, previous: before, change: NEW, direction: null, tone: null };
 	}
 	const direction = value > previous ? 'up' : value < previous ? 'down' : 'flat';
 	const tone =
 		increase === null || direction === 'flat' ? null : direction === 'up' ? 'worse' : 'better';
-	return { id, label, value: rendered, previous: before, change: change(value, previous), direction, tone };
+	return { id, label, value: rendered, positive: value > 0, previous: before, change: change(value, previous), direction, tone };
 }
 
 /** An error rate as the tile shows it. */

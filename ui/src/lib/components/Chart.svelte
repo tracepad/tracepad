@@ -2,6 +2,8 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 	import { hasData, drawn, lonely, type Line } from '$lib/chart';
+	import BlockIcon from '$lib/components/dashboard/BlockIcon.svelte';
+	import type { BlockId } from '$lib/dashboard';
 	import { theme } from '$lib/theme.svelte';
 
 	// The one chart component (spec 007 #6). uPlot draws the four time series —
@@ -18,6 +20,8 @@
 
 	let {
 		title,
+		icon,
+		alert = false,
 		x,
 		lines,
 		format,
@@ -27,6 +31,9 @@
 		sync = 'tracepad-stats'
 	}: {
 		title: string;
+		/** The dashboard's glyph before the title (spec 034 #16); `alert` colours it danger. */
+		icon?: Exclude<BlockId, 'summary'>;
+		alert?: boolean;
 		/** Bucket starts, seconds since the epoch. */
 		x: number[];
 		lines: Line[];
@@ -192,15 +199,22 @@
 	}
 </script>
 
-<figure class="border-border bg-surface min-w-0 rounded-lg border p-2">
+<figure class="border-border bg-surface relative min-w-0 rounded-lg border p-2">
+	{#if icon}
+		<!-- uPlot draws the title as its own DOM, so the glyph sits over the
+		     indent `.chart.icon` leaves for it, on the title's one line. -->
+		<span class="pointer-events-none absolute top-2 left-3 flex h-4 items-center">
+			<BlockIcon id={icon} {alert} />
+		</span>
+	{/if}
 	{#if populated}
 		<!-- The canvas is decoration to a screen reader; the sentence below it
 		     is the chart. The breakdown tables carry the same numbers per
 		     category, which is the tabular alternative for the rest. -->
-		<div class="chart w-full" aria-hidden="true" {@attach draw}></div>
+		<div class={["chart w-full", icon && "icon"]} aria-hidden="true" {@attach draw}></div>
 		<figcaption class="sr-only">{title}. {summary}</figcaption>
 	{:else}
-		<figcaption class="text-subtle px-1 py-0.5 text-xs font-medium">{title}</figcaption>
+		<figcaption class={['text-subtle px-1 py-0.5 text-xs font-medium', icon && 'pl-5']}>{title}</figcaption>
 		<p class="text-subtle flex items-center justify-center px-2 text-sm" style:height="{height}px">
 			Nothing in this window
 		</p>
@@ -216,6 +230,10 @@
 		color: var(--color-subtle);
 		text-align: left;
 		padding-left: 4px;
+		line-height: 1rem;
+	}
+	.chart.icon :global(.u-title) {
+		padding-left: 20px;
 	}
 	.chart :global(.u-legend) {
 		font-size: var(--text-xs);

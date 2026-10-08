@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { BreakdownRow } from '$lib/api/stats';
+	import type { BlockId } from '$lib/dashboard';
 	import { Fold } from '$lib/fold.svelte';
 	import { cost, count, counted } from '$lib/format';
+	import BlockIcon from './dashboard/BlockIcon.svelte';
 	import Folded from './Folded.svelte';
 
 	// The categorical half of Stats (spec 007 #6): a table with proportion
@@ -16,12 +18,15 @@
 
 	let {
 		title,
+		icon,
 		unit,
 		rows,
 		label,
 		tokens = false
 	}: {
 		title: string;
+		/** The dashboard's glyph before the title (spec 034 #16). */
+		icon?: Exclude<BlockId, 'summary'>;
 		/** What `count` counts. The API says so, and so does the header. */
 		unit: string;
 		rows: BreakdownRow[];
@@ -63,7 +68,10 @@
 </script>
 
 <section class="border-border bg-surface min-w-0 rounded-lg border">
-	<h2 class="text-subtle border-border border-b px-3 py-2 text-xs font-medium">{title}</h2>
+	<h2 class="text-subtle border-border flex items-center gap-1.5 border-b px-3 py-2 text-xs font-medium">
+		{#if icon}<BlockIcon id={icon} />{/if}
+		{title}
+	</h2>
 	{#if rows.length === 0}
 		<p class="text-subtle px-3 py-6 text-center text-sm">Nothing in this window</p>
 	{:else}
