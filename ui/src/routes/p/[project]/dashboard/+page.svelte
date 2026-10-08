@@ -376,20 +376,25 @@
 		/>
 		<div class="flex items-center gap-1" role="group" aria-label="Bucket size">
 			{#each TIMELINES as size (size)}
-				<!-- Minutes are a day at most (spec 034 #15): past that the
-				     button stays, disabled, and says why. -->
+				<!-- Past spec 034 #15's bound the button stays, disabled, and the
+				     reason is words beside it, not a tooltip a touch never shows. -->
 				{@const fits = size !== 'minute' || minutesFit(range, clock)}
 				<Button
 					variant={bucket === size ? 'primary' : 'default'}
 					aria-pressed={bucket === size}
 					disabled={!fits}
-					title={fits ? undefined : 'By the minute for a window of 24 hours or less'}
+					aria-describedby={fits ? undefined : 'minutely-reason'}
 					onclick={() => navigate({ group_by: size })}
 				>
 					{SIZE_LABELS[size]}
 				</Button>
 			{/each}
 		</div>
+		{#if !minutesFit(range, clock)}
+			<span id="minutely-reason" class="text-subtle text-xs whitespace-nowrap">
+				Minutes: 24 hours at most, within the last day
+			</span>
+		{/if}
 	</div>
 </div>
 

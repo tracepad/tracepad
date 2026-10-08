@@ -100,9 +100,14 @@ export const MINUTELY_LIMIT_MS = 2 * 3_600_000;
  */
 export const MINUTE_WINDOW_MS = 24 * 3_600_000 + PRESET_TOLERANCE_MS;
 
-/** Whether a window is short enough to be read by the minute. */
+/**
+ * Whether a window may be read by the minute, chosen or not: a day at most, and
+ * ending within the last day — the shortest retention, so an older window may
+ * have lost the traces minutes are read from while its hours still answer.
+ */
 export function minutesFit(range: Range, now: Date): boolean {
-	return spanMs(range, now) <= MINUTE_WINDOW_MS;
+	const end = range.to ? Date.parse(range.to) : now.getTime();
+	return now.getTime() - end <= 86_400_000 && spanMs(range, now) <= MINUTE_WINDOW_MS;
 }
 
 /** The dashboard's size: the URL's when the window takes it, else the automatic one. */
@@ -112,13 +117,8 @@ export function readTimeline(params: URLSearchParams, range: Range, now: Date): 
 	return BUCKETS.includes(asked as Bucket) ? (asked as Bucket) : automatic(range, now);
 }
 
-/**
- * Minutes only for a short window ending within the last day — the shortest
- * retention: an older one may have lost the traces minutes are read from.
- */
 function automatic(range: Range, now: Date): Timeline {
-	const recent = now.getTime() - (range.to ? Date.parse(range.to) : now.getTime()) <= 86_400_000;
-	return recent && spanMs(range, now) <= MINUTELY_LIMIT_MS ? 'minute' : defaultBucket(range, now);
+	return minutesFit(range, now) && spanMs(range, now) <= MINUTELY_LIMIT_MS ? 'minute' : defaultBucket(range, now);
 }
 
 /** How long a window is, in milliseconds. An open start is unbounded. */

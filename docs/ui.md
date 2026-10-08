@@ -670,8 +670,9 @@ bucket switcher is minutely/hourly/daily and defaults to minutes for windows
 up to two hours that end within the last day, hours up to 48 hours, days
 above — *Last hour* is sixty
 points, *Last 24 hours* twenty-four. Minutes are offered for windows of 24
-hours or less; past that the button is disabled and a link that asks for
-minutes reads as if it asked for nothing. The **Quality** block stays hourly
+hours or less that end within the last day; past that the button is
+disabled, the reason is written beside it, and a link that asks for minutes
+reads as if it asked for nothing. The **Quality** block stays hourly
 under a minute timeline: scores are rolled up by the hour. In the release table, the traces that named none are one
 row called *(no release)* rather than a row that is missing.
 

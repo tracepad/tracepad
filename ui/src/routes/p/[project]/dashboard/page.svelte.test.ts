@@ -198,7 +198,7 @@ describe('the timeline size', () => {
 		expect(timeline()).toEqual(['day']);
 		const minutely = screen.getByRole('button', { name: 'Minutely' });
 		expect(minutely).toBeDisabled();
-		expect(minutely).toHaveAttribute('title', expect.stringContaining('24 hours or less'));
+		expect(minutely).toHaveAccessibleDescription('Minutes: 24 hours at most, within the last day');
 	});
 });
 

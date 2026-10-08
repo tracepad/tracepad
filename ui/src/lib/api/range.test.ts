@@ -118,7 +118,7 @@ describe('the dashboard timeline', () => {
 		expect(readTimeline(new URLSearchParams(), presetRange('7d', NOW), NOW)).toBe('day');
 	});
 
-	it('keeps an hour of the distant past on hours unless minutes are asked for', () => {
+	it('keeps an hour of the distant past on hours, chosen or not', () => {
 		// Two days ago: retention may have swept the traces minutes are read from.
 		const old = { from: '2026-08-30T10:00:00Z', to: '2026-08-30T11:00:00Z' };
 		const lastNight = {
@@ -126,7 +126,10 @@ describe('the dashboard timeline', () => {
 			to: new Date(NOW.getTime() - 19 * 3_600_000).toISOString()
 		};
 		expect(readTimeline(new URLSearchParams(), old, NOW)).toBe('hour');
-		expect(readTimeline(asked('minute'), old, NOW)).toBe('minute');
+		// One rule for both paths: the link's minutes read as unchosen.
+		expect(readTimeline(asked('minute'), old, NOW)).toBe('hour');
+		expect(minutesFit(old, NOW)).toBe(false);
+		expect(readTimeline(asked('minute'), lastNight, NOW)).toBe('minute');
 		expect(readTimeline(new URLSearchParams(), lastNight, NOW)).toBe('minute');
 	});
 

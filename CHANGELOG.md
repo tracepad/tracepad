@@ -16,7 +16,7 @@ their own headings.
 - The dashboard reads a short window **by the minute**: *Minutely* beside
   *Hourly* and *Daily*, chosen on its own for a window of up to two hours in the last day, so
   *Last hour* is sixty points instead of one. It is offered for windows of 24
-  hours or less. `GET /api/v1/stats?group_by=minute` answers it from the
+  hours or less that end within the last day. `GET /api/v1/stats?group_by=minute` answers it from the
   traces, with `from` required and a window of at most a day;
   `tracepad stats --group-by minute` and MCP `get_stats` take the value too.
 
