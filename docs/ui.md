@@ -638,7 +638,7 @@ colour an increase as worse, traces neither, because more traffic is the
 denominator and not a verdict. The previous figure is in the tile's tooltip.
 A tile whose figure is absent — nothing priced, nothing timed, no traces —
 shows a dash and no change. A change against an absent previous figure reads
-*new* — a window whose previous window predates the project, or predates
+*no earlier data* — a window whose previous window predates the project, or predates
 what the rollup still keeps — and so do traces and cost against a previous of
 zero, which no percentage can be taken against; the error rate and the p95
 are differences and read the difference, so errors appearing where there were

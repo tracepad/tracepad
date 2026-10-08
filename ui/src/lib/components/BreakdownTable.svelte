@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { BreakdownRow } from '$lib/api/stats';
-	import type { BlockId } from '$lib/dashboard';
+	import type { IconBlockId } from '$lib/dashboard-icons';
 	import { Fold } from '$lib/fold.svelte';
 	import { cost, count, counted } from '$lib/format';
 	import BlockIcon from './dashboard/BlockIcon.svelte';
@@ -26,7 +26,7 @@
 	}: {
 		title: string;
 		/** The dashboard's glyph before the title (spec 034 #16). */
-		icon?: Exclude<BlockId, 'summary'>;
+		icon?: IconBlockId;
 		/** What `count` counts. The API says so, and so does the header. */
 		unit: string;
 		rows: BreakdownRow[];

@@ -15,7 +15,10 @@ import { ICONS } from '$lib/sections';
  * Quality are the sidebar's own, so a screen and its figure agree. Tokens are
  * letters, not coins — coins read as Cost.
  */
-export const BLOCK_ICONS: Record<Exclude<BlockId, 'summary'>, Component<{ class?: string }>> = {
+/** A block that has an icon: every one but the summary row, which is four tiles. */
+export type IconBlockId = Exclude<BlockId, 'summary'>;
+
+export const BLOCK_ICONS: Record<IconBlockId, Component<{ class?: string }>> = {
 	traces: ICONS['/traces'],
 	cost: CircleDollarSign,
 	tokens: TextInitial,

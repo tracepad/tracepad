@@ -3,7 +3,7 @@
 	import 'uplot/dist/uPlot.min.css';
 	import { hasData, drawn, lonely, type Line } from '$lib/chart';
 	import BlockIcon from '$lib/components/dashboard/BlockIcon.svelte';
-	import type { BlockId } from '$lib/dashboard';
+	import type { IconBlockId } from '$lib/dashboard-icons';
 	import { theme } from '$lib/theme.svelte';
 
 	// The one chart component (spec 007 #6). uPlot draws the four time series —
@@ -32,7 +32,7 @@
 	}: {
 		title: string;
 		/** The dashboard's glyph before the title (spec 034 #16); `alert` colours it danger. */
-		icon?: Exclude<BlockId, 'summary'>;
+		icon?: IconBlockId;
 		alert?: boolean;
 		/** Bucket starts, seconds since the epoch. */
 		x: number[];
@@ -214,7 +214,7 @@
 		<div class={["chart w-full", icon && "icon"]} aria-hidden="true" {@attach draw}></div>
 		<figcaption class="sr-only">{title}. {summary}</figcaption>
 	{:else}
-		<figcaption class={['text-subtle px-1 py-0.5 text-xs font-medium', icon && 'pl-5']}>{title}</figcaption>
+		<figcaption class={['text-subtle px-1 text-xs font-medium', icon ? 'py-0 pl-5' : 'py-0.5']}>{title}</figcaption>
 		<p class="text-subtle flex items-center justify-center px-2 text-sm" style:height="{height}px">
 			Nothing in this window
 		</p>
@@ -230,10 +230,10 @@
 		color: var(--color-subtle);
 		text-align: left;
 		padding-left: 4px;
-		line-height: 1rem;
 	}
 	.chart.icon :global(.u-title) {
 		padding-left: 20px;
+		line-height: 1rem;
 	}
 	.chart :global(.u-legend) {
 		font-size: var(--text-xs);

@@ -25,7 +25,7 @@
 	title={figure.previous === null ? undefined : `Previous window: ${figure.previous}`}
 >
 	<p class="text-subtle flex items-center gap-1.5 text-xs font-medium">
-		<BlockIcon id={figure.id} alert={figure.id === 'errors' && figure.positive} />
+		<BlockIcon id={figure.id} alert={!loading && figure.alert} />
 		{figure.label}
 	</p>
 	{#if loading}

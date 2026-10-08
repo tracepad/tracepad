@@ -226,13 +226,13 @@ export type SummaryFigure = {
 	label: string;
 	/** The figure, or a dash when the window carried none. */
 	value: string;
-	/** The figure is above zero (an error rate worth colouring). */
-	positive: boolean;
+	/** The Errors tile only: its figure reads above zero, so its glyph is coloured. */
+	alert?: true;
 	/** The previous window's figure, for the tooltip; null when there is none. */
 	previous: string | null;
 	/**
 	 * The change against the previous window: a signed percentage, signed
-	 * points, or a signed duration; `new` when the previous figure is absent,
+	 * points, or a signed duration; `NEW` when the previous figure is absent,
 	 * or is zero where the change would divide by it (traces and cost —
 	 * Decision 13); null when this window's figure is absent.
 	 */
@@ -258,10 +258,14 @@ export function summarize(bucket: StatsBucket | null, previous: StatsBucket | nu
 	const rate = (b: StatsBucket | null) =>
 		b && b.count > 0 ? (b.error_count / b.count) * 100 : null;
 	const p95 = (b: StatsBucket | null) => b?.latency_ms?.p95 ?? null;
+	const errors = figure('errors', 'Errors', rate(bucket), rate(previous), percentage, points, 'worse');
+	// Judged by what the tile reads: a rate that rounds to 0% is not an alarm.
+	const shown = rate(bucket);
+	if (shown !== null && parseFloat(percentage(shown)) > 0) errors.alert = true;
 	return [
 		figure('traces', 'Traces', bucket?.count ?? null, previous?.count ?? null, count, percent, null),
 		figure('cost', 'Cost', bucket?.total_cost ?? null, previous?.total_cost ?? null, cost, percent, 'worse'),
-		figure('errors', 'Errors', rate(bucket), rate(previous), percentage, points, 'worse'),
+		errors,
 		figure('latency', 'Latency', p95(bucket), p95(previous), duration, delta, 'worse')
 	];
 }
@@ -279,7 +283,7 @@ function figure(
 	increase: 'worse' | null
 ): SummaryFigure {
 	if (value === null) {
-		return { id, label, value: ABSENT, positive: false, previous: null, change: null, direction: null, tone: null };
+		return { id, label, value: ABSENT, previous: null, change: null, direction: null, tone: null };
 	}
 	const rendered = render(value);
 	const before = previous === null ? null : render(previous);
@@ -288,12 +292,12 @@ function figure(
 	// — points, a duration — has an answer against zero, and gives it
 	// (Decision 13): no errors last week and 3% this week is `+3 pt`, worse.
 	if (previous === null || (previous === 0 && RATIOS.has(change))) {
-		return { id, label, value: rendered, positive: value > 0, previous: before, change: NEW, direction: null, tone: null };
+		return { id, label, value: rendered, previous: before, change: NEW, direction: null, tone: null };
 	}
 	const direction = value > previous ? 'up' : value < previous ? 'down' : 'flat';
 	const tone =
 		increase === null || direction === 'flat' ? null : direction === 'up' ? 'worse' : 'better';
-	return { id, label, value: rendered, positive: value > 0, previous: before, change: change(value, previous), direction, tone };
+	return { id, label, value: rendered, previous: before, change: change(value, previous), direction, tone };
 }
 
 /** An error rate as the tile shows it. */
