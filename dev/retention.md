@@ -150,7 +150,7 @@ measured against the **previous window** of the same length
 ([ui.md](ui.md#dashboard)): with `stats_retention_days` shorter than twice
 the window on screen, the previous window is partly or wholly swept, the
 change is against what remains, and a previous window with nothing left
-reads *new* rather than a number.
+reads *no earlier data* rather than a number.
 
 **Freezing is asked of each of the four separately**, because what a freeze
 protects is the rows that already stand. An hour past the window whose rows a
