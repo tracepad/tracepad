@@ -127,6 +127,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// An open window ends now for the check and at the bound for the
+		// scan: a trace stamped in the future by a skewed clock is still
+		// counted, and the scan is still a day's, not the rest of the table.
+		if filter.To == nil {
+			if end := *filter.From + int64(minuteWindowLimit+minuteWindowGrace); end > *filter.From {
+				filter.To = &end
+			}
+		}
 	}
 
 	buckets := map[string]*bucket{}
@@ -190,8 +198,10 @@ const minuteWindowLimit = 24 * time.Hour
 
 // minuteWindowGrace is how far past the limit a window may reach: a client
 // that resolved "the last 24 hours" a moment ago sends a window that is, by
-// the time it is read here, 24 hours and the time the request took.
-const minuteWindowGrace = time.Minute
+// the time it is read here, 24 hours and the time the request took — measured
+// against this clock, which need not agree with the client's. The interface
+// stops offering minutes a minute past the day, so four are left for both.
+const minuteWindowGrace = 5 * time.Minute
 
 // minuteWindow refuses a minute timeline whose window has no start or is
 // longer than a day, with what to ask instead.

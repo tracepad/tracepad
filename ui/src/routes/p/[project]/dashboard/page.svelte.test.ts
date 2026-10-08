@@ -170,6 +170,26 @@ describe('the timeline size', () => {
 		expect(screen.getByRole('button', { name: 'Minutely' })).toHaveAttribute('aria-pressed', 'true');
 	});
 
+	it('reads a grown window against the clock of the next request', async () => {
+		url.current = new URL(
+			`http://tracepad.test/p/${PROJECT}/dashboard?from=2026-09-14T12:00:00Z&group_by=minute`
+		);
+		render(Page);
+		await settled();
+		await waitFor(() => expect(timeline()).toEqual(['minute']));
+
+		// Two minutes on, the open day is a day and two minutes: the next
+		// request — any of them, here one a hidden block makes — must not
+		// ask for minutes.
+		vi.setSystemTime(new Date(NOW.getTime() + 2 * 60_000));
+		await userEvent.click(screen.getByRole('button', { name: /Customize/ }));
+		await userEvent.click(screen.getByRole('button', { name: 'Hide Tokens' }));
+
+		await waitFor(() => expect(timeline()).toEqual(['minute', 'hour']));
+		expect(screen.getByRole('button', { name: 'Minutely' })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Hourly' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
 	it('offers no minutes over a week, whatever the link says', async () => {
 		url.current = new URL(`${AT}&group_by=minute`);
 		render(Page);

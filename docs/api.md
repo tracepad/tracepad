@@ -936,8 +936,9 @@ curl … "http://localhost:4318/api/v1/stats?group_by=total&from=2026-09-08T00:0
 
 Grouped by `minute`, the keys are `2026-09-08T14:05:00Z` and the window is
 **at most 24 hours**: `from` is required, and a window longer than a day —
-with a minute of grace for an open one that ended *now* when the request was
-sent — is a `400` that says to group by hour or day. Minutes are read from
+with five minutes of grace, for the request in flight and a client clock
+behind the server's — is a `400` that says to group by hour or day. A window
+with no `to` is scanned to that bound, not to the end of time. Minutes are read from
 the traces themselves, not from the hourly rollup, so they are exact and
 live, and they exist only for as long as the traces do: past `retention_days`
 a minute timeline is empty where an hourly one still answers.

@@ -118,7 +118,19 @@ describe('the dashboard timeline', () => {
 		expect(readTimeline(new URLSearchParams(), presetRange('7d', NOW), NOW)).toBe('day');
 	});
 
-	it('takes minutes asked for over a day, with the server\'s minute of grace', () => {
+	it('keeps an hour of the distant past on hours unless minutes are asked for', () => {
+		// Two days ago: retention may have swept the traces minutes are read from.
+		const old = { from: '2026-08-30T10:00:00Z', to: '2026-08-30T11:00:00Z' };
+		const lastNight = {
+			from: new Date(NOW.getTime() - 20 * 3_600_000).toISOString(),
+			to: new Date(NOW.getTime() - 19 * 3_600_000).toISOString()
+		};
+		expect(readTimeline(new URLSearchParams(), old, NOW)).toBe('hour');
+		expect(readTimeline(asked('minute'), old, NOW)).toBe('minute');
+		expect(readTimeline(new URLSearchParams(), lastNight, NOW)).toBe('minute');
+	});
+
+	it('takes minutes asked for over a day, with a preset\'s minute of age', () => {
 		expect(readTimeline(asked('minute'), presetRange('24h', NOW), NOW)).toBe('minute');
 		expect(minutesFit(at(86_400_000 + 60_000), NOW)).toBe(true);
 		expect(minutesFit(at(86_400_000 + 60_001), NOW)).toBe(false);

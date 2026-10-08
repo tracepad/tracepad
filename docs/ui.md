@@ -667,7 +667,8 @@ smaller than the tokens suggest, and out of the column, where it would count
 the same tokens twice for the providers that report cached tokens inside the
 input. The
 bucket switcher is minutely/hourly/daily and defaults to minutes for windows
-up to two hours, hours up to 48 hours, days above — *Last hour* is sixty
+up to two hours that end within the last day, hours up to 48 hours, days
+above — *Last hour* is sixty
 points, *Last 24 hours* twenty-four. Minutes are offered for windows of 24
 hours or less; past that the button is disabled and a link that asks for
 minutes reads as if it asked for nothing. The **Quality** block stays hourly

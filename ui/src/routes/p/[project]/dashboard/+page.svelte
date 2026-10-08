@@ -106,13 +106,14 @@
 	let generation = $state(0);
 
 	/**
-	 * The timeline's size, read again on *Refresh*: an open window grows while
-	 * the page stays open, and a day read by the minute stops being one.
+	 * The instant the screen last asked. An open window grows while the page
+	 * stays open, and a day read by the minute stops being one: the size, the
+	 * *Minutely* button and the request are all read against this one clock,
+	 * set each time the statistics are asked for, so none of them can go on
+	 * believing a window still fits that the server would refuse.
 	 */
-	const bucket = $derived.by(() => {
-		generation;
-		return readTimeline(page.url.searchParams, range, new Date());
-	});
+	let clock = $state(new Date());
+	const bucket = $derived(readTimeline(page.url.searchParams, range, clock));
 	/**
 	 * The quality cards' size. The score rollup has no minutes, so a minute
 	 * dashboard draws its cards by the hour (spec 034 #15).
@@ -135,8 +136,10 @@
 		// of has to be a dependency of this effect, and a read after the first
 		// `await` would not be one.
 		const query = { ...range, environment: environment || undefined };
-		const group = bucket;
-		const scoreGroup = scoreBucket;
+		const now = new Date();
+		clock = now;
+		const group = readTimeline(page.url.searchParams, range, now);
+		const scoreGroup = group === 'minute' ? 'hour' : group;
 		const wanted = showing.split(',') as BlockId[];
 		generation;
 		const controller = new AbortController();
@@ -375,7 +378,7 @@
 			{#each TIMELINES as size (size)}
 				<!-- Minutes are a day at most (spec 034 #15): past that the
 				     button stays, disabled, and says why. -->
-				{@const fits = size !== 'minute' || minutesFit(range, new Date())}
+				{@const fits = size !== 'minute' || minutesFit(range, clock)}
 				<Button
 					variant={bucket === size ? 'primary' : 'default'}
 					aria-pressed={bucket === size}

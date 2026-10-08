@@ -116,6 +116,12 @@
 		theme.value;
 		systemDark;
 		const colours = palette(node, ['muted', 'border', ...lines.map((line) => line.token)]);
+		// Once per build: the values are this chart's for its lifetime, and
+		// uPlot asks again on every redraw — a resize, a legend click.
+		const alone = lines.map((line) => {
+			const indices = lonely(line.values);
+			return indices.length > 0 ? indices : null;
+		});
 
 		const chart = new uPlot(
 			{
@@ -154,7 +160,7 @@
 				],
 				series: [
 					{ label: 'Time' },
-					...lines.map((line) => ({
+					...lines.map((line, index) => ({
 						label: line.label,
 						show: drawn(lines, chosen, line),
 						stroke: colours[line.token],
@@ -165,11 +171,7 @@
 						// (spec 034 #14).
 						points: {
 							show: x.length < 40,
-							filter: (_: uPlot, __: number, show: boolean) => {
-								if (show) return null;
-								const alone = lonely(line.values);
-								return alone.length > 0 ? alone : null;
-							}
+							filter: (_: uPlot, __: number, show: boolean) => (show ? null : alone[index])
 						},
 						// A bucket the server did not return is a gap, never a
 						// zero: uPlot leaves a null alone, and so do we.

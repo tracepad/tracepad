@@ -83,12 +83,14 @@ func TestStatsMinuteTakesADayAtMost(t *testing.T) {
 	expectError(t, h.get(t, "/api/v1/stats?group_by=minute&from=1700-01-01T00:00:00Z&to=2200-01-01T00:00:00Z"),
 		http.StatusBadRequest, "at most 24 hours")
 
-	// An open window ends now: the last day passes, with the moment the
-	// request took to arrive; the last two do not.
+	// An open window ends now: the last day passes, with a few minutes for
+	// the request in flight and a client clock behind this one; the last
+	// two days do not.
 	since := func(ago time.Duration) string {
 		return "/api/v1/stats?group_by=minute&from=" + time.Now().Add(-ago).UTC().Format(time.RFC3339Nano)
 	}
-	expectStatus(t, h.get(t, since(24*time.Hour+5*time.Second)), http.StatusOK)
+	expectStatus(t, h.get(t, since(24*time.Hour+4*time.Minute)), http.StatusOK)
+	expectError(t, h.get(t, since(24*time.Hour+6*time.Minute)), http.StatusBadRequest, "at most 24 hours")
 	expectError(t, h.get(t, since(48*time.Hour)), http.StatusBadRequest, "group by hour or day")
 
 	// The limit is the minute grouping's alone.
@@ -110,5 +112,24 @@ func TestStatsMinuteByUserCarriesSessions(t *testing.T) {
 	want := map[string]string{"2026-08-26T10:00:00Z": "3/2", "2026-08-26T10:02:00Z": "1/1"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("alice by minute (traces/sessions) = %v, want %v", got, want)
+	}
+}
+
+// An open window is scanned to its bound, not to the end of time: a trace a
+// skewed clock stamped an hour ahead is counted, one a week ahead is not.
+func TestStatsMinuteScansAnOpenWindowToItsBound(t *testing.T) {
+	h := newHarness(t, nil, store.WriterOptions{})
+	now := time.Now().Unix()
+	h.seedAt(t, 1, now-statsHour-30*60, "production")
+	h.seedAt(t, 2, now-statsHour+3600, "production")
+	h.seedAt(t, 3, now-statsHour+7*24*3600, "production")
+
+	from := time.Unix(now-3600, 0).UTC().Format(time.RFC3339)
+	total := 0
+	for _, b := range h.statsBuckets(t, "/api/v1/stats?group_by=minute&from="+from) {
+		total += b.Count
+	}
+	if total != 2 {
+		t.Errorf("an open minute window counted %d traces, want 2: the week-ahead one is past its bound", total)
 	}
 }
