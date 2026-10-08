@@ -26,11 +26,14 @@
 	import { busiest } from '$lib/api/quality';
 	import {
 		DEFAULT_PRESET,
+		TIMELINES,
+		minutesFit,
 		presetRange,
 		previousRange,
-		readBucket,
 		readRange,
-		type Range
+		readTimeline,
+		type Range,
+		type Timeline
 	} from '$lib/api/range';
 	import { breakdown, buildSeries, summarize, type StatsBucket } from '$lib/api/stats';
 	import BreakdownTable from '$lib/components/BreakdownTable.svelte';
@@ -72,7 +75,6 @@
 
 	const range = $derived(readRange(page.url.searchParams));
 	const environment = $derived(page.url.searchParams.get('environment')?.trim() ?? '');
-	const bucket = $derived(readBucket(page.url.searchParams, range, new Date()));
 	/** Whether the bucket in the URL was chosen rather than derived. */
 	const chosen = $derived(page.url.searchParams.get('group_by'));
 
@@ -103,6 +105,22 @@
 	let failure = $state<string | null>(null);
 	let generation = $state(0);
 
+	/**
+	 * The instant the screen last asked. An open window grows while the page
+	 * stays open, and a day read by the minute stops being one: the size, the
+	 * *Minutely* button and the request are all read against this one clock,
+	 * set each time the statistics are asked for, so none of them can go on
+	 * believing a window still fits that the server would refuse.
+	 */
+	let clock = $state(new Date());
+	const bucket = $derived(readTimeline(page.url.searchParams, range, clock));
+	/**
+	 * The quality cards' size. The score rollup has no minutes, so a minute
+	 * dashboard draws its cards by the hour (spec 034 #15).
+	 */
+	const scoreBucket = $derived(bucket === 'minute' ? 'hour' : bucket);
+	const SIZE_LABELS: Record<Timeline, string> = { minute: 'Minutely', hour: 'Hourly', day: 'Daily' };
+
 	$effect(() => {
 		// The window is part of the link, so a screen opened without one is
 		// given one before it asks for anything (spec 007 #7): the window this
@@ -118,17 +136,21 @@
 		// of has to be a dependency of this effect, and a read after the first
 		// `await` would not be one.
 		const query = { ...range, environment: environment || undefined };
-		const group = bucket;
+		const now = new Date();
+		clock = now;
+		const group = readTimeline(page.url.searchParams, range, now);
+		const scoreGroup = group === 'minute' ? 'hour' : group;
 		const wanted = showing.split(',') as BlockId[];
 		generation;
 		const controller = new AbortController();
-		load(query, group, wanted, controller.signal);
+		load(query, group, scoreGroup, wanted, controller.signal);
 		return () => controller.abort();
 	});
 
 	async function load(
 		query: { from?: string; to?: string; environment?: string },
 		group: string,
+		scoreGroup: string,
 		wanted: BlockId[],
 		signal: AbortSignal
 	) {
@@ -154,7 +176,7 @@
 					wants('models') ? api.getStats({ ...query, group_by: 'model' }, signal) : skip,
 					wants('environments') ? api.getStats({ ...query, group_by: 'environment' }, signal) : skip,
 					wants('releases') ? api.getStats({ ...query, group_by: 'release' }, signal) : skip,
-					wants('quality') ? api.getScoreTrends({ ...query, group_by: group }, signal) : skip
+					wants('quality') ? api.getScoreTrends({ ...query, group_by: scoreGroup }, signal) : skip
 				]);
 			if (signal.aborted) return;
 			lastTrace = newest.traces[0] ?? null;
@@ -353,16 +375,26 @@
 			class="border-border bg-canvas placeholder:text-subtle w-40 rounded-md border px-2 py-1 text-sm"
 		/>
 		<div class="flex items-center gap-1" role="group" aria-label="Bucket size">
-			{#each ['hour', 'day'] as const as size (size)}
+			{#each TIMELINES as size (size)}
+				<!-- Past spec 034 #15's bound the button stays, disabled, and the
+				     reason is words beside it, not a tooltip a touch never shows. -->
+				{@const fits = size !== 'minute' || minutesFit(range, clock)}
 				<Button
 					variant={bucket === size ? 'primary' : 'default'}
 					aria-pressed={bucket === size}
+					disabled={!fits}
+					aria-describedby={fits ? undefined : 'minutely-reason'}
 					onclick={() => navigate({ group_by: size })}
 				>
-					{size === 'hour' ? 'Hourly' : 'Daily'}
+					{SIZE_LABELS[size]}
 				</Button>
 			{/each}
 		</div>
+		{#if !minutesFit(range, clock)}
+			<span id="minutely-reason" class="text-subtle text-xs whitespace-nowrap">
+				Minutes: 24 hours at most, within the last day
+			</span>
+		{/if}
 	</div>
 </div>
 
@@ -487,7 +519,7 @@
 									<QualityCards
 										series={cards}
 										{configs}
-										window={{ from: range.from, to: range.to, bucket, now: new Date() }}
+										window={{ from: range.from, to: range.to, bucket: scoreBucket, now: new Date() }}
 										more={scores.length - cards.length + scoresOmitted}
 									/>
 								{:else}

@@ -155,6 +155,53 @@ describe('the blocks', () => {
 	});
 });
 
+describe('the timeline size', () => {
+	const timeline = () =>
+		getStats.mock.calls.map(([query]) => query.group_by).filter((group) => ['minute', 'hour', 'day'].includes(group));
+
+	it('reads the last hour by the minute, and the quality cards by the hour', async () => {
+		url.current = new URL(`http://tracepad.test/p/${PROJECT}/dashboard?from=2026-09-15T11:00:00Z`);
+		render(Page);
+		await settled();
+		await waitFor(() => expect(getScoreTrends).toHaveBeenCalled());
+
+		expect(timeline()).toEqual(['minute']);
+		expect(getScoreTrends.mock.calls[0][0]).toMatchObject({ group_by: 'hour' });
+		expect(screen.getByRole('button', { name: 'Minutely' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('reads a grown window against the clock of the next request', async () => {
+		url.current = new URL(
+			`http://tracepad.test/p/${PROJECT}/dashboard?from=2026-09-14T12:00:00Z&group_by=minute`
+		);
+		render(Page);
+		await settled();
+		await waitFor(() => expect(timeline()).toEqual(['minute']));
+
+		// Two minutes on, the open day is a day and two minutes: the next
+		// request — any of them, here one a hidden block makes — must not
+		// ask for minutes.
+		vi.setSystemTime(new Date(NOW.getTime() + 2 * 60_000));
+		await userEvent.click(screen.getByRole('button', { name: /Customize/ }));
+		await userEvent.click(screen.getByRole('button', { name: 'Hide Tokens' }));
+
+		await waitFor(() => expect(timeline()).toEqual(['minute', 'hour']));
+		expect(screen.getByRole('button', { name: 'Minutely' })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Hourly' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('offers no minutes over a week, whatever the link says', async () => {
+		url.current = new URL(`${AT}&group_by=minute`);
+		render(Page);
+		await settled();
+
+		expect(timeline()).toEqual(['day']);
+		const minutely = screen.getByRole('button', { name: 'Minutely' });
+		expect(minutely).toBeDisabled();
+		expect(minutely).toHaveAccessibleDescription('Minutes: 24 hours at most, within the last day');
+	});
+});
+
 describe('the last-trace line', () => {
 	it('says when the newest trace arrived, with the instant in the tooltip', async () => {
 		render(Page);

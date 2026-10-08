@@ -22,3 +22,17 @@ export function drawn(lines: readonly Line[], chosen: ReadonlyMap<string, boolea
 	if (!lines.some((one) => wanted(one) && hasData(one))) return true;
 	return wanted(line);
 }
+
+/**
+ * The indices of `values` that no line reaches: a value whose neighbours on
+ * both sides are gaps, or the end of the series (spec 034 #14). uPlot joins
+ * two adjacent values and nothing else, so a lone value surrounded by gaps is
+ * drawn as nothing at all unless it is drawn as a point — and a week of hours
+ * with one busy hour in it is exactly that.
+ */
+export function lonely(values: readonly (number | null)[]): number[] {
+	const gap = (index: number) => index < 0 || index >= values.length || values[index] === null;
+	return values.flatMap((value, index) =>
+		value !== null && gap(index - 1) && gap(index + 1) ? [index] : []
+	);
+}

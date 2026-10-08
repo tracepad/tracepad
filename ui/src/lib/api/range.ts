@@ -87,6 +87,40 @@ export function readBucket(params: URLSearchParams, range: Range, now: Date): Bu
 	return BUCKETS.includes(asked as Bucket) ? (asked as Bucket) : defaultBucket(range, now);
 }
 
+/** The dashboard's sizes (spec 034 #15); Quality and the user page stay on `BUCKETS`. */
+export const TIMELINES = ['minute', ...BUCKETS] as const;
+export type Timeline = (typeof TIMELINES)[number];
+
+/** Where the automatic size turns to minutes: `HOURLY_LIMIT_MS`'s rule one size down. */
+export const MINUTELY_LIMIT_MS = 2 * 3_600_000;
+
+/**
+ * A day and a preset's minute of age. The server allows five past the day, so
+ * four are left for the request in flight and a browser clock behind its own.
+ */
+export const MINUTE_WINDOW_MS = 24 * 3_600_000 + PRESET_TOLERANCE_MS;
+
+/**
+ * Whether a window may be read by the minute, chosen or not: a day at most, and
+ * ending within the last day — the shortest retention, so an older window may
+ * have lost the traces minutes are read from while its hours still answer.
+ */
+export function minutesFit(range: Range, now: Date): boolean {
+	const end = range.to ? Date.parse(range.to) : now.getTime();
+	return now.getTime() - end <= 86_400_000 && spanMs(range, now) <= MINUTE_WINDOW_MS;
+}
+
+/** The dashboard's size: the URL's when the window takes it, else the automatic one. */
+export function readTimeline(params: URLSearchParams, range: Range, now: Date): Timeline {
+	const asked = params.get('group_by');
+	if (asked === 'minute') return minutesFit(range, now) ? 'minute' : automatic(range, now);
+	return BUCKETS.includes(asked as Bucket) ? (asked as Bucket) : automatic(range, now);
+}
+
+function automatic(range: Range, now: Date): Timeline {
+	return minutesFit(range, now) && spanMs(range, now) <= MINUTELY_LIMIT_MS ? 'minute' : defaultBucket(range, now);
+}
+
 /** How long a window is, in milliseconds. An open start is unbounded. */
 export function spanMs(range: Range, now: Date): number {
 	if (!range.from) return Number.POSITIVE_INFINITY;

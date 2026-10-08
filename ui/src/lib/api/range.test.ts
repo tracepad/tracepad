@@ -3,13 +3,17 @@ import {
 	BUCKETS,
 	DEFAULT_PRESET,
 	HOURLY_LIMIT_MS,
+	MINUTELY_LIMIT_MS,
 	PRESETS,
+	TIMELINES,
 	defaultBucket,
 	matchPreset,
 	presetRange,
 	previousRange,
 	readBucket,
 	readRange,
+	readTimeline,
+	minutesFit,
 	spanMs
 } from './range';
 
@@ -98,6 +102,59 @@ describe('the bucket', () => {
 		// `model` and `environment` are categories, not a timeline: they are
 		// the breakdown tables, not the switcher (spec 007 #6).
 		expect([...BUCKETS]).toEqual(['hour', 'day']);
+	});
+});
+
+describe('the dashboard timeline', () => {
+	const at = (ms: number) => ({ from: new Date(NOW.getTime() - ms).toISOString(), to: NOW.toISOString() });
+	const asked = (size: string) => new URLSearchParams(`group_by=${size}`);
+
+	it('turns to minutes for two hours and less', () => {
+		expect(readTimeline(new URLSearchParams(), at(MINUTELY_LIMIT_MS), NOW)).toBe('minute');
+		expect(readTimeline(new URLSearchParams(), at(MINUTELY_LIMIT_MS + 1), NOW)).toBe('hour');
+		// The two presets either side of it.
+		expect(readTimeline(new URLSearchParams(), presetRange('1h', NOW), NOW)).toBe('minute');
+		expect(readTimeline(new URLSearchParams(), presetRange('24h', NOW), NOW)).toBe('hour');
+		expect(readTimeline(new URLSearchParams(), presetRange('7d', NOW), NOW)).toBe('day');
+	});
+
+	it('keeps an hour of the distant past on hours, chosen or not', () => {
+		// Two days ago: retention may have swept the traces minutes are read from.
+		const old = { from: '2026-08-30T10:00:00Z', to: '2026-08-30T11:00:00Z' };
+		const lastNight = {
+			from: new Date(NOW.getTime() - 20 * 3_600_000).toISOString(),
+			to: new Date(NOW.getTime() - 19 * 3_600_000).toISOString()
+		};
+		expect(readTimeline(new URLSearchParams(), old, NOW)).toBe('hour');
+		// One rule for both paths: the link's minutes read as unchosen.
+		expect(readTimeline(asked('minute'), old, NOW)).toBe('hour');
+		expect(minutesFit(old, NOW)).toBe(false);
+		expect(readTimeline(asked('minute'), lastNight, NOW)).toBe('minute');
+		expect(readTimeline(new URLSearchParams(), lastNight, NOW)).toBe('minute');
+	});
+
+	it('takes minutes asked for over a day, with a preset\'s minute of age', () => {
+		expect(readTimeline(asked('minute'), presetRange('24h', NOW), NOW)).toBe('minute');
+		expect(minutesFit(at(86_400_000 + 60_000), NOW)).toBe(true);
+		expect(minutesFit(at(86_400_000 + 60_001), NOW)).toBe(false);
+		expect(minutesFit({}, NOW)).toBe(false);
+	});
+
+	it('reads minutes asked for over a longer window as unchosen', () => {
+		expect(readTimeline(asked('minute'), presetRange('7d', NOW), NOW)).toBe('day');
+		expect(readTimeline(asked('minute'), at(30 * 3_600_000), NOW)).toBe('hour');
+		expect(readTimeline(asked('minute'), {}, NOW)).toBe('day');
+	});
+
+	it('keeps an hour or a day asked for, and offers the minute first', () => {
+		expect(readTimeline(asked('hour'), presetRange('1h', NOW), NOW)).toBe('hour');
+		expect(readTimeline(asked('day'), presetRange('1h', NOW), NOW)).toBe('day');
+		expect([...TIMELINES]).toEqual(['minute', 'hour', 'day']);
+	});
+
+	it('leaves the screens without minutes alone', () => {
+		// Quality and the user page read `readBucket`, which never says minute.
+		expect(readBucket(asked('minute'), presetRange('1h', NOW), NOW)).toBe('hour');
 	});
 });
 

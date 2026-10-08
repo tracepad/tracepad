@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -31,9 +32,9 @@ const defaultGroupBy = store.GroupByDay
 // statsGroupings is every value `group_by` accepts, in the order the error
 // message and `openapi.json` list them. One list, so a grouping the store
 // knows and the API rejects cannot happen (spec 012 #4 added `release`,
-// spec 034 #3 `total`).
+// spec 034 #3 `total`, spec 034 #15 `minute`).
 var statsGroupings = []string{
-	store.GroupByHour, store.GroupByDay, store.GroupByModel,
+	store.GroupByMinute, store.GroupByHour, store.GroupByDay, store.GroupByModel,
 	store.GroupByEnvironment, store.GroupByRelease, store.GroupByTotal,
 }
 
@@ -47,7 +48,7 @@ func carriesSessions(filter store.StatsFilter) bool {
 		return false
 	}
 	switch filter.GroupBy {
-	case store.GroupByHour, store.GroupByDay, store.GroupByTotal:
+	case store.GroupByMinute, store.GroupByHour, store.GroupByDay, store.GroupByTotal:
 		return true
 	}
 	return false
@@ -121,6 +122,20 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 		*bound.target = &instant
 	}
+	if filter.GroupBy == store.GroupByMinute {
+		if err := minuteWindow(filter, time.Now()); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// An open window ends now for the check and at the bound for the
+		// scan: a trace stamped in the future by a skewed clock is still
+		// counted, and the scan is still a day's, not the rest of the table.
+		if filter.To == nil {
+			if end := *filter.From + int64(minuteWindowLimit+minuteWindowGrace); end > *filter.From {
+				filter.To = &end
+			}
+		}
+	}
 
 	buckets := map[string]*bucket{}
 	at := func(key string) *bucket {
@@ -176,6 +191,40 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		put("buckets", rows))
 }
 
+// minuteWindowLimit is the longest window `group_by=minute` answers (spec 034
+// #15): 1,440 points, and a scan of a day of the traces table rather than of
+// all of it — minutes are read from the raw rows, never from the rollup.
+const minuteWindowLimit = 24 * time.Hour
+
+// minuteWindowGrace is how far past the limit a window may reach: a client
+// that resolved "the last 24 hours" a moment ago sends a window that is, by
+// the time it is read here, 24 hours and the time the request took — measured
+// against this clock, which need not agree with the client's. The interface
+// stops offering minutes a minute past the day, so four are left for both.
+const minuteWindowGrace = 5 * time.Minute
+
+// minuteWindow refuses a minute timeline whose window has no start or is
+// longer than a day, with what to ask instead.
+func minuteWindow(filter store.StatsFilter, now time.Time) error {
+	if filter.From == nil {
+		return errors.New("group_by=minute needs from: it answers a window of at most 24 hours")
+	}
+	to := now.UnixNano()
+	if filter.To != nil {
+		to = *filter.To
+	}
+	if to <= *filter.From {
+		return nil // an empty window: nothing to scan
+	}
+	// The bounds reach either end of int64, so their difference can wrap
+	// negative and pass for a short window; a wrapped one is the longest.
+	span := to - *filter.From
+	if span < 0 || time.Duration(span) > minuteWindowLimit+minuteWindowGrace {
+		return errors.New("group_by=minute answers a window of at most 24 hours; group by hour or day")
+	}
+	return nil
+}
+
 // readStats fills the buckets from both sides of the watermark: the rolled
 // hours fully inside the asked range, and the live scan for everything else —
 // the tail past the watermark, and the partial hours at either edge that no
@@ -185,17 +234,22 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // live scan and the first pass is the backfill.
 func (s *Server) readStats(ctx context.Context, project *store.Project, filter store.StatsFilter, at func(string) *bucket) error {
 	projectID := project.ID
-	state, err := s.store.RollupState(ctx, projectID)
-	if err != nil {
-		return err
-	}
-
 	from, to := unbounded, int64(math.MaxInt64)
 	if filter.From != nil {
 		from = *filter.From
 	}
 	if filter.To != nil {
 		to = *filter.To
+	}
+	// The rollup has no minutes: a minute timeline is the live scan of its
+	// window, which the handler has bounded to a day.
+	if filter.GroupBy == store.GroupByMinute {
+		return s.liveStats(ctx, projectID, filter, from, to, at)
+	}
+
+	state, err := s.store.RollupState(ctx, projectID)
+	if err != nil {
+		return err
 	}
 
 	// Only whole hours can come from the rollup, only hours the aggregator
@@ -362,7 +416,13 @@ func (s *Server) liveSessions(ctx context.Context, projectID string, filter stor
 	}
 	return s.store.UserSessionStarts(ctx, projectID, filter.UserID, filter.Environment, from, to,
 		func(start int64) {
-			at(rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})).sessions++
+			key := rollupKey(filter.GroupBy, store.StatsRow{Hour: store.HourOf(start)})
+			if filter.GroupBy == store.GroupByMinute {
+				// The one grouping finer than a rolled row, spelled as
+				// the scan spells it.
+				key = time.Unix(0, start).UTC().Format("2006-01-02T15:04:00Z")
+			}
+			at(key).sessions++
 		})
 }
 

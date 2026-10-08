@@ -514,6 +514,7 @@ tracepad stats --group-by model
 tracepad stats --group-by release
 tracepad stats --group-by day --user user-4821
 tracepad stats --group-by total --since 168h
+tracepad stats --group-by minute --since 1h
 ```
 
 `--since` takes Go durations (`1h`, `30m`, `168h`) or an RFC 3339 instant.
@@ -521,10 +522,14 @@ There is no day unit — `7d` is a usage error, not a week. `--until` closes the
 other end, in the same two spellings, so a duration there is also counted back
 from now: `--since 48h --until 24h` is the day before yesterday.
 
-The table's second column names what is being counted: grouping by hour, day,
-environment, release or total counts **traces**, grouping by model counts
+The table's second column names what is being counted: grouping by minute,
+hour, day, environment, release or total counts **traces**, grouping by model counts
 **observations**, because a trace has no model. Grouped by release, the traces
 that named none share one bucket with an empty key.
+
+`--group-by minute` needs `--since` no further back than 24 hours: minutes are
+read from the traces rather than from the hourly rollup, and the server
+refuses a longer window rather than scan it.
 
 `--group-by total` is the whole window as one row, with an empty key: the
 counts summed and the percentiles merged over every hour in it, which is not

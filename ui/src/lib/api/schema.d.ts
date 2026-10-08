@@ -508,7 +508,7 @@ export interface paths {
         };
         /**
          * Counts, errors, cost and latency percentiles per bucket
-         * @description `unit` says what a bucket counts: grouping by hour, day, environment, release or total counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. Grouped by `total`, the whole window is one bucket under the empty key — the same shape as a day bucket, with percentiles merged over every hour in the window — and it takes every filter the other groupings take. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.
+         * @description `unit` says what a bucket counts: grouping by minute, hour, day, environment, release or total counts traces, and grouping by model counts observations, because a trace has no model. Grouped by release, a trace that named none falls in the bucket with the empty key. Grouped by `total`, the whole window is one bucket under the empty key — the same shape as a day bucket, with percentiles merged over every hour in the window — and it takes every filter the other groupings take. Grouped by `minute`, the window must have a `from` and span at most 24 hours (five minutes of grace for the request in flight and the client's clock), or the answer is `400`: minutes are read from the traces themselves rather than from the hourly rollup, so they exist only while the traces do. An empty range answers with no buckets rather than with fabricated zero rows. Latency percentiles are histogram-based: accurate to a few percent, and stable across the expiry of the raw rows.
          */
         get: operations["stats"];
         put?: never;
@@ -4065,9 +4065,9 @@ export interface operations {
                 to?: components["parameters"]["To"];
                 /** @description The environment a trace ran in. A comma-separated list matches **any** of them: `?environment=production,staging`. Items are trimmed and duplicates collapse; an empty item (`a,,b`, `a,`) is a 400, as an empty value is, and so is repeating the parameter — one list, one parameter. At most 100 items; beyond that, a 400. An environment whose name contains a comma is not expressible here. `GET /api/v1/facets` lists the values in a range with their counts */
                 environment?: components["parameters"]["Environment"];
-                /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `hour` or `day` timeline, and the `total` bucket, additionally carry `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest */
+                /** @description Restricts every bucket to one end user. The shape, the groupings and `unit` are unchanged; a `minute`, `hour` or `day` timeline, and the `total` bucket, additionally carry `sessions` per bucket. Statistics for one user trail the raw data by the same rollup lag as the rest, except by the minute, which is read live */
                 user_id?: string;
-                group_by?: "hour" | "day" | "model" | "environment" | "release" | "total";
+                group_by?: "minute" | "hour" | "day" | "model" | "environment" | "release" | "total";
             };
             header?: never;
             path?: never;
@@ -4083,7 +4083,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        group_by: "hour" | "day" | "model" | "environment" | "release" | "total";
+                        group_by: "minute" | "hour" | "day" | "model" | "environment" | "release" | "total";
                         /** @enum {string} */
                         unit: "trace" | "observation";
                         buckets: {
@@ -4094,7 +4094,7 @@ export interface operations {
                             total_cost?: number;
                             /** @description Token sums over the observations in the bucket that name a model, on every grouping and both units, with `user_id` too */
                             tokens?: components["schemas"]["Tokens"];
-                            /** @description Present only with `user_id` and an `hour`, `day` or `total` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
+                            /** @description Present only with `user_id` and a `minute`, `hour`, `day` or `total` grouping: how many of that user's sessions began in this bucket. A session is counted where it starts, so a sum over any range is exact */
                             sessions?: number;
                             latency_ms: {
                                 p50?: number | null;

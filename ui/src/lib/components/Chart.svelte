@@ -1,7 +1,7 @@
 <script lang="ts">
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
-	import { hasData, drawn, type Line } from '$lib/chart';
+	import { hasData, drawn, lonely, type Line } from '$lib/chart';
 	import { theme } from '$lib/theme.svelte';
 
 	// The one chart component (spec 007 #6). uPlot draws the four time series —
@@ -116,6 +116,12 @@
 		theme.value;
 		systemDark;
 		const colours = palette(node, ['muted', 'border', ...lines.map((line) => line.token)]);
+		// Once per build: the values are this chart's for its lifetime, and
+		// uPlot asks again on every redraw — a resize, a legend click.
+		const alone = lines.map((line) => {
+			const indices = lonely(line.values);
+			return indices.length > 0 ? indices : null;
+		});
 
 		const chart = new uPlot(
 			{
@@ -154,12 +160,19 @@
 				],
 				series: [
 					{ label: 'Time' },
-					...lines.map((line) => ({
+					...lines.map((line, index) => ({
 						label: line.label,
 						show: drawn(lines, chosen, line),
 						stroke: colours[line.token],
 						width: 1.5,
-						points: { show: x.length < 40 },
+						// Every point while there are few enough to read; past
+						// that, only the ones no line reaches — a value with a
+						// gap on both sides is otherwise not drawn at all
+						// (spec 034 #14).
+						points: {
+							show: x.length < 40,
+							filter: (_: uPlot, __: number, show: boolean) => (show ? null : alone[index])
+						},
 						// A bucket the server did not return is a gap, never a
 						// zero: uPlot leaves a null alone, and so do we.
 						value: (_: uPlot, value: number | null) => format(value)

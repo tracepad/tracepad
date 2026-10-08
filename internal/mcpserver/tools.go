@@ -482,9 +482,11 @@ func register(server *mcp.Server, api API) {
 		Description: "Aggregate traffic, failures, cost and latency — the user asks how many runs there were, how much they cost, how slow they are, " +
 			"or how any of that changed over time or differs per model. " +
 			"Returns buckets with count, error_count, total_cost, tokens and exact p50/p95 latency. " +
-			"Read the `unit` field before comparing counts: grouping by hour, day, environment, release or total " +
+			"Read the `unit` field before comparing counts: grouping by minute, hour, day, environment, release or total " +
 			"counts traces, grouping by model counts observations, because a trace has no model. " +
 			"Group by release when the user asks whether a deployment moved cost or latency. " +
+			"Group by minute for a window of at most 24 hours (from is then required) — the last hour, one run — " +
+			"which an hourly timeline would draw as a point or two. " +
 			"Group by total for the whole window as one bucket — the figure for \"how much did it cost this week\" — " +
 			"whose p95 is merged over every hour rather than averaged; for last week beside this week, call it twice. " +
 			"Pass user_id when the question is about one end user — the same buckets, restricted to them, " +
@@ -492,19 +494,19 @@ func register(server *mcp.Server, api API) {
 			"Does NOT return individual traces — use list_traces for those.",
 		InputSchema: object(map[string]*jsonschema.Schema{
 			"group_by": oneOf("What each bucket collects. Default \"day\".",
-				"hour", "day", "model", "environment", "release", "total"),
+				"minute", "hour", "day", "model", "environment", "release", "total"),
 			"from":        timestamp("Only traces at or after this RFC 3339 instant."),
 			"to":          timestamp("Only traces strictly before this RFC 3339 instant."),
 			"environment": text("Only traces from this environment, or from any of a comma-separated list of them."),
-			"user_id": text("Only traces attributed to this end user. With an \"hour\", \"day\" or \"total\" grouping, " +
+			"user_id": text("Only traces attributed to this end user. With a \"minute\", \"hour\", \"day\" or \"total\" grouping, " +
 				"each bucket also carries `sessions`: how many of that user's sessions began in it."),
 		}),
 		OutputSchema: object(map[string]*jsonschema.Schema{
-			"group_by": oneOf("What each bucket collects.", "hour", "day", "model", "environment", "release", "total"),
+			"group_by": oneOf("What each bucket collects.", "minute", "hour", "day", "model", "environment", "release", "total"),
 			"unit": oneOf("What `count` counts. Counts of different units are not comparable.",
 				"trace", "observation"),
 			"buckets": list(object(map[string]*jsonschema.Schema{
-				"key": text("The hour, day, model, environment or release this bucket is. " +
+				"key": text("The minute, hour, day, model, environment or release this bucket is. " +
 					"Empty when grouping by release and the traces named none, and always empty for total."),
 				"count":       integer("How many of `unit` fell in this bucket."),
 				"error_count": integer("How many of those failed."),
