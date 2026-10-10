@@ -33,7 +33,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
@@ -44,8 +44,8 @@
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.13",
     "@internationalized/date": "^3.12.4",
-    "@lezer/highlight": "1.2.4",
-    "@lucide/svelte": "^1.49.0",
+    "@lezer/highlight": "1.2.5",
+    "@lucide/svelte": "^1.50.0",
     "bits-ui": "^2.19.4",
     "svelte-dnd-action": "^0.9.79",
     "uplot": "^1.6.32"
