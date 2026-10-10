@@ -44,7 +44,7 @@ Changelog = "https://github.com/tracepad/tracepad/blob/main/CHANGELOG.md"
 # new rule landing on a release day is a broken build nobody changed anything
 # for. `pytest` is not — a test runner that moved is a test that fails.
 [dependency-groups]
-dev = ["pytest>=8", "ruff==0.16.9"]
+dev = ["pytest>=8", "ruff==0.16.10"]
 
 # What a release builds and tests with is `uv.lock`, not a fresh resolution
 # (spec 017 #20): the suite runs on `uv sync --locked`. The build backend, which
