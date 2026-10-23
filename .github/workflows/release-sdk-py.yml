@@ -29,7 +29,7 @@ permissions: {}
 # The same uv CI tests the package with. Dependabot does not move it; spec 020
 # #19 lists the pins moved by hand.
 env:
-  UV_VERSION: "0.11.12"
+  UV_VERSION: "0.13.5"
 
 jobs:
   build:

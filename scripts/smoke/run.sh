@@ -20,7 +20,7 @@
 # ingest alone — what a production application should hold (spec 045 #16) —
 # and only the check reads back with the first one.
 #
-# Set SMOKE_PYTHON to an interpreter that already has requirements.txt
+# Set SMOKE_PYTHON to an interpreter that already has requirements.lock
 # installed to skip the environment setup (that is what CI does).
 set -euo pipefail
 
@@ -44,11 +44,14 @@ if [ -z "$python_bin" ]; then
     if command -v uv >/dev/null 2>&1; then
         uv venv "$work/venv" >/dev/null
         uv pip install --quiet --python "$work/venv/bin/python" \
-            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
+            -r "$smoke_dir/requirements.lock" -e "$repo_root/sdk/python"
     else
+        # pip checks every hash once one is present, and an editable install
+        # has none: the lock first, then the package with nothing of its own.
         python3 -m venv "$work/venv"
-        "$work/venv/bin/pip" install --quiet \
-            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
+        "$work/venv/bin/pip" install --quiet --require-hashes \
+            -r "$smoke_dir/requirements.lock"
+        "$work/venv/bin/pip" install --quiet --no-deps -e "$repo_root/sdk/python"
     fi
     python_bin="$work/venv/bin/python"
 fi

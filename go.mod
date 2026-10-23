@@ -1,6 +1,6 @@
 module github.com/tracepad/tracepad
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/google/jsonschema-go v0.4.3

@@ -6,6 +6,14 @@
 # Our own package is not here: `run.sh` installs it from `sdk/python` in this
 # checkout (`pip install -e`), because the drift it detects is between the
 # package and the mapper of the same commit (spec 017 #12).
+#
+# What is installed is `requirements.lock`: these pins and everything under
+# them, by hash. Any edit here is followed, in the same commit, by
+#
+#   uv pip compile requirements.txt --universal --python-version 3.10 \
+#       --generate-hashes -o requirements.lock
+#
+# run in this directory; CI fails when a pin here is missing from the lock.
 opentelemetry-sdk==1.45.0
 opentelemetry-exporter-otlp-proto-http==1.45.0
 langfuse==4.14.5

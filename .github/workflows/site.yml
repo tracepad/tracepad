@@ -61,7 +61,7 @@ concurrency:
 
 # The uv CI tests with; Dependabot does not move it (spec 020 #19).
 env:
-  UV_VERSION: "0.11.12"
+  UV_VERSION: "0.13.5"
 
 jobs:
   build:

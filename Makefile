@@ -96,7 +96,7 @@ smoke: ## Export from real SDKs into a real binary and assert the rows
 # the goldens move, which is what a Go-only checkout wants anyway.
 fixtures: ## Regenerate testdata/otlp bodies and their golden files
 	@if command -v uv >/dev/null 2>&1; then \
-		uv run --quiet --isolated --with-requirements scripts/smoke/requirements.txt \
+		uv run --quiet --isolated --with-requirements scripts/smoke/requirements.lock \
 			--with-editable sdk/python python scripts/fixtures/tracepad_sdk.py; \
 	else \
 		echo "uv is missing: keeping testdata/otlp/010-tracepad-sdk.pb as committed"; \

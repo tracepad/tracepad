@@ -11,6 +11,15 @@ their own headings.
 
 ## [Unreleased]
 
+### Security
+
+- The Docker image moves its runtime base to `distroless/static-debian13`.
+  Its CA roots are the ones the server trusts for outgoing TLS (`tracepad
+  upgrade`, the CLI and MCP against a remote server). They no longer include
+  the emSign and Sectigo `AAA Certificate Services` roots that the October 2026
+  eMudhra intermediate-key compromise made unsafe; the previous image still
+  trusted them. The binaries are built with Go 1.27.3.
+
 ## [0.1.3] - 2026-10-08
 
 ### Added

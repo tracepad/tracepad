@@ -30,7 +30,7 @@ permissions:
 # The uv the Python package is tested with, the same one its release builds
 # with. Dependabot does not move it; spec 020 #19 lists the pins moved by hand.
 env:
-  UV_VERSION: "0.11.12"
+  UV_VERSION: "0.13.5"
 
 jobs:
   gate:
@@ -49,6 +49,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ui/package.json
+          check-latest: true
           cache: npm
           cache-dependency-path: ui/package-lock.json
       # `py-lint` runs the ruff the Python package pins through `uvx`, and the
@@ -113,6 +114,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ui/package.json
+          check-latest: true
           cache: npm
           cache-dependency-path: ui/package-lock.json
       # The Node against `engines` before the install, which would fail
@@ -390,6 +392,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ui/package.json
+          check-latest: true
           package-manager-cache: false
       - if: steps.scope.outputs.run == 'true'
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -428,9 +431,28 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          check-latest: true
           cache: npm
           cache-dependency-path: sdk/js/package-lock.json
-      - run: pip install -r scripts/smoke/requirements.txt -e ./sdk/python
+      # Every byte installed here is checked against a hash in this tree. The
+      # runner's pip comes first: a pip older than 26.2.2 trusts a CA bundle
+      # with the compromised emSign intermediates, so the one that replaces it
+      # is fetched by URL and hash. Then the lock, which pins every transitive
+      # dependency, and the build backend by the same hashes a release builds
+      # with; the package itself from this checkout with no dependencies of
+      # its own (`pip check` proves the lock already holds them). Not editable:
+      # hatchling's editable build needs a package no lock here covers.
+      - run: >-
+          python -m pip install
+          "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+      - name: requirements.lock carries every pin requirements.txt names
+        run: |
+          grep -E '^[a-z]' scripts/smoke/requirements.txt | while read -r pin; do
+            grep -qxF "$pin \\" scripts/smoke/requirements.lock ||
+              { echo "::error::$pin is not in scripts/smoke/requirements.lock: regenerate it (see requirements.txt)"; exit 1; }
+          done
+      - run: pip install --require-hashes -r scripts/smoke/requirements.lock -r sdk/python/build-constraints.txt
+      - run: pip install --no-deps --no-build-isolation ./sdk/python && pip check
       - run: SMOKE_PYTHON="$(which python)" scripts/smoke/run.sh
 
   # The Python package (spec 017 #12): its unit suite on both ends of the
@@ -516,6 +538,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
+          check-latest: true
           go-version-file: ${{ matrix.go-version-file }}
           cache-dependency-path: sdk/go/go.sum
       - run: TRACEPAD_BINARY=/tmp/tracepad scripts/sdk-go-test.sh
@@ -543,6 +566,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+          check-latest: true
           cache: npm
           cache-dependency-path: sdk/js/package-lock.json
       # Before the install, for the reason the e2e job checks first.
