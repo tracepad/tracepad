@@ -79,10 +79,9 @@ RUN mkdir -p /out/data
 #
 # Distroless static: no shell, no package manager, `nonroot` (65532) as the
 # user, and the two things a static Go program still reads from an OS — zone
-# data and CA roots (#2). Debian 13, not 12: the CA roots are the server's
-# whole trust store for outgoing TLS, and 12's image still trusted the emSign
-# roots the 2026-10 eMudhra key compromise revoked when 13's had dropped them
-# (#37).
+# data and CA roots (#2). Debian 13, not 12: 12's roots still include the two
+# the compromised emSign intermediates chain to, 13's do not. Go 1.27.3's
+# verifier is what rejects those chains; this is the layer under it (#37).
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
 
 ARG VERSION
