@@ -43,15 +43,20 @@ if [ -z "$python_bin" ]; then
     echo "==> preparing python environment"
     if command -v uv >/dev/null 2>&1; then
         uv venv "$work/venv" >/dev/null
+        uv pip install --quiet --python "$work/venv/bin/python" --require-hashes \
+            -r "$smoke_dir/requirements.lock" -r "$repo_root/sdk/python/build-constraints.txt"
         uv pip install --quiet --python "$work/venv/bin/python" \
-            -r "$smoke_dir/requirements.lock" -e "$repo_root/sdk/python"
+            --no-deps --no-build-isolation "$repo_root/sdk/python"
+        uv pip check --quiet --python "$work/venv/bin/python"
     else
-        # pip checks every hash once one is present, and an editable install
-        # has none: the lock first, then the package with nothing of its own.
+        # What CI does: the lock and the build backend by hash, then the
+        # package from this checkout with nothing of its own, built with that
+        # backend. Not editable — the venv lives for one run anyway.
         python3 -m venv "$work/venv"
         "$work/venv/bin/pip" install --quiet --require-hashes \
-            -r "$smoke_dir/requirements.lock"
-        "$work/venv/bin/pip" install --quiet --no-deps -e "$repo_root/sdk/python"
+            -r "$smoke_dir/requirements.lock" -r "$repo_root/sdk/python/build-constraints.txt"
+        "$work/venv/bin/pip" install --quiet --no-deps --no-build-isolation "$repo_root/sdk/python"
+        "$work/venv/bin/pip" check >/dev/null
     fi
     python_bin="$work/venv/bin/python"
 fi
@@ -142,7 +147,7 @@ recipe_lines() {
 env_only_python="$(dirname "$python_bin")"
 if ! PATH="$env_only_python:$PATH" command -v opentelemetry-instrument >/dev/null 2>&1; then
     echo "opentelemetry-instrument is not next to $python_bin: SMOKE_PYTHON's environment predates" \
-        "scripts/smoke/requirements.txt (opentelemetry-distro); install it again" >&2
+        "scripts/smoke/requirements.txt (opentelemetry-distro); install requirements.lock into it again" >&2
     exit 1
 fi
 for doc in README.md docs/quickstart.md; do

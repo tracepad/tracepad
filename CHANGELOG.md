@@ -21,6 +21,11 @@ their own headings.
   longer include `emSign ECC Root CA - G3` or Sectigo's `AAA Certificate
   Services`, the two roots those intermediates chain to.
 
+### Changed
+
+- Node package: `@opentelemetry/exporter-trace-otlp-proto` moves to `^0.223.0`
+  (from `^0.222.0`).
+
 ## [0.1.3] - 2026-10-08
 
 ### Added

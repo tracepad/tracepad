@@ -3,8 +3,8 @@
 # a bump here is a deliberate act with a visible diff, not a surprise on a
 # random CI run.
 #
-# Our own package is not here: `run.sh` installs it from `sdk/python` in this
-# checkout (`pip install -e`), because the drift it detects is between the
+# Our own package is not here: `run.sh` and CI build it from `sdk/python` in
+# this checkout (with `--no-deps`: the lock below holds what it needs), because the drift it detects is between the
 # package and the mapper of the same commit (spec 017 #12).
 #
 # What is installed is `requirements.lock`: these pins and everything under
