@@ -434,37 +434,13 @@ jobs:
           check-latest: true
           cache: npm
           cache-dependency-path: sdk/js/package-lock.json
-      # Every byte installed here is checked against a hash in this tree, and
-      # the hashes are the guard: pip verifies TLS through the system's roots
-      # (truststore), so which pip runs does not change what it trusts. pip
-      # itself moves to 26.2.2, the release Python's advisory on the emSign
-      # compromise names, fetched by URL and hash. Then the lock, which pins
-      # every transitive dependency, and the build backend by the same hashes
-      # a release builds with; the package itself from this checkout with no
-      # dependencies of its own (`pip check` proves the lock already holds
-      # them). Not editable: hatchling's editable build needs a package no lock
-      # here covers.
-      - run: >-
-          python -m pip install
-          "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+      # run.sh builds the environment itself, the one recipe for CI and for a
+      # checkout (spec 020 #37(f)): uv installs the lock and the build backend
+      # by hash, then the package from this checkout with nothing of its own.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
-      # Recompiled with the command in requirements.txt's header, which keeps
-      # the versions the lock already holds: any difference is a lock that was
-      # not regenerated after an edit to requirements.txt.
-      - name: requirements.lock is what requirements.txt compiles to
-        run: |
-          work="$RUNNER_TEMP/smoke-lock"
-          mkdir -p "$work"
-          cp scripts/smoke/requirements.txt scripts/smoke/requirements.lock "$work/"
-          (cd "$work" && uv pip compile --quiet requirements.txt --universal --python-version 3.10 \
-            --generate-hashes -o requirements.lock)
-          diff -u scripts/smoke/requirements.lock "$work/requirements.lock" ||
-            { echo "::error::scripts/smoke/requirements.lock is stale: regenerate it (see requirements.txt)"; exit 1; }
-      - run: pip install --require-hashes -r scripts/smoke/requirements.lock -r sdk/python/build-constraints.txt
-      - run: pip install --no-deps --no-build-isolation ./sdk/python && pip check
-      - run: SMOKE_PYTHON="$(which python)" scripts/smoke/run.sh
+      - run: scripts/smoke/run.sh
 
   # The Python package (spec 017 #12): its unit suite on both ends of the
   # supported range — 3.10 is the floor and the newest is where the OTel SDK

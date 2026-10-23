@@ -3,17 +3,20 @@
 # a bump here is a deliberate act with a visible diff, not a surprise on a
 # random CI run.
 #
-# Our own package is not here: `run.sh` and CI build it from `sdk/python` in
-# this checkout (with `--no-deps`: the lock below holds what it needs), because the drift it detects is between the
-# package and the mapper of the same commit (spec 017 #12).
+# Our own package is not here: `run.sh` builds it from `sdk/python` in this
+# checkout, because the drift it detects is between the package and the
+# mapper of the same commit (spec 017 #12). It is installed with `--no-deps`:
+# its dependencies are in requirements.lock with everything else.
 #
-# What is installed is `requirements.lock`: these pins and everything under
-# them, by hash. Any edit here is followed, in the same commit, by
+# What is installed is requirements.lock, a separate file beside this one:
+# these pins, sdk/python's dependencies and everything under them, by hash.
+# Any edit here is followed, in the same commit, by
 #
-#   uv pip compile requirements.txt --universal --python-version 3.10 \
-#       --generate-hashes -o requirements.lock
+#   uv pip compile requirements.txt ../../sdk/python/pyproject.toml \
+#       --universal --python-version 3.10 --generate-hashes -o requirements.lock
 #
-# run in this directory; CI fails when a pin here is missing from the lock.
+# run in this directory. `lock-check.py`, which run.sh runs first, fails when a
+# pin here is missing from the lock.
 opentelemetry-sdk==1.45.0
 opentelemetry-exporter-otlp-proto-http==1.45.0
 langfuse==4.14.5

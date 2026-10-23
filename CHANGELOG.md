@@ -19,7 +19,9 @@ their own headings.
   upgrade`, the CLI and MCP against a remote server). The Docker image also
   moves its runtime base to `distroless/static-debian13`, whose CA roots no
   longer include `emSign ECC Root CA - G3` or Sectigo's `AAA Certificate
-  Services`, the two roots those intermediates chain to.
+  Services`, the two roots those intermediates chain to. Debian 13's zone data
+  has no `posix/` tree: set `TZ=Europe/Berlin` rather than
+  `TZ=posix/Europe/Berlin`; every zone name without the prefix is still there.
 
 ### Changed
 
