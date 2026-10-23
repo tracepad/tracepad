@@ -11,6 +11,13 @@ their own headings.
 
 ## [Unreleased]
 
+### Changed
+
+- Node package: `@opentelemetry/exporter-trace-otlp-proto` moves to `^0.223.0`
+  (from `^0.222.0`).
+
+## [0.1.4] - 2026-10-23
+
 ### Security
 
 - The server and CLI are built with Go 1.27.3, whose certificate verification
@@ -22,11 +29,6 @@ their own headings.
   Services`, the two roots those intermediates chain to. Debian 13's zone data
   has no `posix/` tree: set `TZ=Europe/Berlin` rather than
   `TZ=posix/Europe/Berlin`; every zone name without the prefix is still there.
-
-### Changed
-
-- Node package: `@opentelemetry/exporter-trace-otlp-proto` moves to `^0.223.0`
-  (from `^0.222.0`).
 
 ## [0.1.3] - 2026-10-08
 
@@ -227,7 +229,8 @@ one.
 - The documentation for agents: `llms.txt`, `llms-full.txt`, and every page as
   Markdown beside its HTML, on the documentation site.
 
-[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/tracepad/tracepad/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/tracepad/tracepad/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tracepad/tracepad/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tracepad/tracepad/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tracepad/tracepad/compare/v0.1.0...v0.1.1
