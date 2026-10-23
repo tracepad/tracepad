@@ -24,7 +24,7 @@ ARG REVISION=
 # platform doing the building: under `--platform linux/amd64,linux/arm64` it
 # then runs once instead of once per architecture, and never under emulation
 # (#10).
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS ui
 
 WORKDIR /src/ui
 # The manifest and the lock file first, on their own layer: editing a component
@@ -40,7 +40,7 @@ RUN npm run build
 # `CGO_ENABLED=0` makes that exact — the SQLite driver is modernc's, pure Go
 # (.goreleaser.yaml:17) — and it is the difference between a Go build that takes
 # a minute and an emulated arm64 one that takes fifteen (#10).
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -79,8 +79,10 @@ RUN mkdir -p /out/data
 #
 # Distroless static: no shell, no package manager, `nonroot` (65532) as the
 # user, and the two things a static Go program still reads from an OS — zone
-# data and CA roots (#2).
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+# data and CA roots (#2). Debian 13, not 12: 12's roots still include the two
+# the compromised emSign intermediates chain to, 13's do not. Go 1.27.3's
+# verifier is what rejects those chains; this is the layer under it (#37).
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
 
 ARG VERSION
 ARG REVISION

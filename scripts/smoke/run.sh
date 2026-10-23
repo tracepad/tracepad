@@ -20,8 +20,9 @@
 # ingest alone — what a production application should hold (spec 045 #16) —
 # and only the check reads back with the first one.
 #
-# Set SMOKE_PYTHON to an interpreter that already has requirements.txt
-# installed to skip the environment setup (that is what CI does).
+# Set SMOKE_PYTHON to an interpreter that already has requirements.lock and
+# the package installed to skip the environment setup. CI does not: it runs
+# the setup below, with uv.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -38,17 +39,28 @@ cleanup() {
     rm -rf "$work"
 }
 
+python3 "$smoke_dir/lock-check.py"
+
 python_bin="${SMOKE_PYTHON:-}"
 if [ -z "$python_bin" ]; then
     echo "==> preparing python environment"
+    # The lock and the build backend by hash, then the package from this
+    # checkout with nothing of its own, built with that backend, then a check
+    # that the lock held everything it needs. Not editable: the venv lives for
+    # one run. CI takes the uv branch (spec 020 #37(f)).
     if command -v uv >/dev/null 2>&1; then
         uv venv "$work/venv" >/dev/null
+        uv pip install --quiet --python "$work/venv/bin/python" --require-hashes \
+            -r "$smoke_dir/requirements.lock" -r "$repo_root/sdk/python/build-constraints.txt"
         uv pip install --quiet --python "$work/venv/bin/python" \
-            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
+            --no-deps --no-build-isolation "$repo_root/sdk/python"
+        uv pip check --python "$work/venv/bin/python"
     else
         python3 -m venv "$work/venv"
-        "$work/venv/bin/pip" install --quiet \
-            -r "$smoke_dir/requirements.txt" -e "$repo_root/sdk/python"
+        "$work/venv/bin/pip" install --quiet --require-hashes \
+            -r "$smoke_dir/requirements.lock" -r "$repo_root/sdk/python/build-constraints.txt"
+        "$work/venv/bin/pip" install --quiet --no-deps --no-build-isolation "$repo_root/sdk/python"
+        "$work/venv/bin/pip" check
     fi
     python_bin="$work/venv/bin/python"
 fi
@@ -139,7 +151,7 @@ recipe_lines() {
 env_only_python="$(dirname "$python_bin")"
 if ! PATH="$env_only_python:$PATH" command -v opentelemetry-instrument >/dev/null 2>&1; then
     echo "opentelemetry-instrument is not next to $python_bin: SMOKE_PYTHON's environment predates" \
-        "scripts/smoke/requirements.txt (opentelemetry-distro); install it again" >&2
+        "scripts/smoke/requirements.txt (opentelemetry-distro); install requirements.lock into it again" >&2
     exit 1
 fi
 for doc in README.md docs/quickstart.md; do
