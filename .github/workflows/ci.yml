@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       # `py-lint` runs the ruff the Python package pins through `uvx`, and the
       # runner image has no uv (spec 020 #23).
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
       # The skill's shell runs in an agent's tool, which is zsh on a Mac: its
@@ -395,7 +395,7 @@ jobs:
           check-latest: true
           package-manager-cache: false
       - if: steps.scope.outputs.run == 'true'
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: ${{ steps.scope.outputs.goreleaser }}
@@ -423,7 +423,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       # The fifth exporter is the Node package, built from this checkout
@@ -437,7 +437,7 @@ jobs:
       # run.sh builds the environment itself, the one recipe for CI and for a
       # checkout (spec 020 #37(f)): uv installs the lock and the build backend
       # by hash, then the package from this checkout with nothing of its own.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
       - run: scripts/smoke/run.sh
@@ -469,7 +469,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ matrix.python-version }}
