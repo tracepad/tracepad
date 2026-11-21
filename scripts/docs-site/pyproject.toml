@@ -12,7 +12,7 @@ description = "Toolchain that builds the Tracepad documentation site"
 requires-python = ">=3.12"
 dependencies = [
     "mkdocs==1.6.1",
-    "mkdocs-material==9.7.7",
+    "mkdocs-material==9.8.1",
     "mike==2.2.0",
     "pymdown-extensions==12.1",
 ]
